@@ -1,0 +1,21 @@
+data:
+  rm1st: true
+  nTraj: 100
+  nSteps: 1000
+  delay: 2
+  auto: false
+
+scaling:
+  mode: "01"
+
+weak_form:
+  enabled: true
+  parameters: [10, 2, 3, 2, 0.5]  # example values; adjust as needed
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 32
+  model_type: "LSTM"   # Options: "NN", "LSTM", "GNN"
+  seq_length: 3
