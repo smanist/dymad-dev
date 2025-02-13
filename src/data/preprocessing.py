@@ -1,18 +1,18 @@
 import numpy as np
-from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict
+from typing import Optional
 
-@dataclass
-class DatasetMetadata:
-    """
-    Holds metadata about the dataset.
+from dataclasses import dataclass
+# @dataclass
+# class DatasetMetadata:
+#     """
+#     Holds metadata about the dataset.
     
-    Attributes:
-        name (Optional[str]): Optional name of the dataset.
-        dt (Optional[float]): The time step (delta time) for the dataset.
-        # TODO: add more fields as needed.
-    """
-    name: Optional[str] = None
+#     Attributes:
+#         name (Optional[str]): Optional name of the dataset.
+#         dt (Optional[float]): The time step (delta time) for the dataset.
+#         # TODO: add more fields as needed.
+#     """
+#     name: Optional[str] = None
 
 
 class Scaler:
@@ -23,17 +23,15 @@ class Scaler:
     scaling transformations to the data.
     """
 
-    def __init__(self, mode: str = "01", metadata: dict = {}, prev: Optional[str] = None):
+    def __init__(self, mode: str = "01", prev: Optional[str] = None):
         """
         Initialize the Scaler with a specified scaling mode.
 
         Args:
             mode (str): Scaling mode ('01', '-11', 'std', or 'none').
             prev (str): Path prefix to load previously computed scaling parameters.
-            metadata (DatasetMetadata): Optional dataset metadata.
         """
         self._mode = mode.lower()
-        self.metadata = metadata 
 
         if prev:
             self._off, self._scl = np.load(f"{prev}_scl.npy", allow_pickle=True)
