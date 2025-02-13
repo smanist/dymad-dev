@@ -1,6 +1,6 @@
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 @dataclass
 class DatasetMetadata:
@@ -13,7 +13,6 @@ class DatasetMetadata:
         # TODO: add more fields as needed.
     """
     name: Optional[str] = None
-    dt: Optional[float] = None
 
 
 class Scaler:
@@ -24,7 +23,7 @@ class Scaler:
     scaling transformations to the data.
     """
 
-    def __init__(self, mode="01", prev=None, metadata: DatasetMetadata = None):
+    def __init__(self, mode: str = "01", metadata: dict = {}, prev: Optional[str] = None):
         """
         Initialize the Scaler with a specified scaling mode.
 
@@ -34,8 +33,7 @@ class Scaler:
             metadata (DatasetMetadata): Optional dataset metadata.
         """
         self._mode = mode.lower()
-        self.metadata = metadata or DatasetMetadata()
-        # TODO: update self.metadata with additional information if needed.
+        self.metadata = metadata 
 
         if prev:
             self._off, self._scl = np.load(f"{prev}_scl.npy", allow_pickle=True)
@@ -43,7 +41,7 @@ class Scaler:
             self._off = None
             self._scl = None
 
-    def fit(self, X):
+    def fit(self, X: np.ndarray) -> None:
         """
         Compute scaling parameters based on the provided data.
         
@@ -77,7 +75,7 @@ class Scaler:
         else:
             raise ValueError(f"Unknown scaling mode: {self._mode}")
 
-    def transform(self, X):
+    def transform(self, X: np.ndarray) -> np.ndarray:
         """
         Apply scaling to the data.
 
@@ -92,7 +90,7 @@ class Scaler:
 
         return (X - self._off) / self._scl
 
-    def inverse_transform(self, X):
+    def inverse_transform(self, X: np.ndarray) -> np.ndarray:
         """
         Revert scaled data back to the original scale.
 
@@ -107,7 +105,7 @@ class Scaler:
 
         return X * self._scl + self._off
 
-    def save(self, pref):
+    def save(self, pref: str) -> None:
         """
         Save the scaling parameters to a file.
 
@@ -116,7 +114,7 @@ class Scaler:
         """
         np.save(f"{pref}_scl.npy", [self._off, self._scl], allow_pickle=False)
 
-    def load(self, pref):
+    def load(self, pref: str) -> None:
         """
         Load scaling parameters from a file.
 
@@ -144,26 +142,24 @@ class DelayEmbedder:
         (num_sequences, seq_length - delay, features * (delay + 1)).
     """
 
-    def __init__(self, delay: int = 1, metadata: DatasetMetadata = None):
+    def __init__(self, delay: int = 1):
         """
         Initialize the DelayEmbedder.
 
         Args:
             delay (int): Number of subsequent time steps to include in the embedding.
-            metadata (DatasetMetadata): Optional dataset metadata.
         """
         self.delay = delay
-        self.metadata = metadata or DatasetMetadata()
 
-    def _delay(self, sequence: np.ndarray):
+    def _delay(self, sequence: np.ndarray) -> np.ndarray:
         """
         Perform delay embedding on a single sequence.
 
         Args:
-            sequence (numpy.ndarray): A single sequence of shape (seq_length, features).
+            sequence (np.ndarray): A single sequence of shape (seq_length, features).
 
         Returns:
-            numpy.ndarray: A delay-embedded sequence of shape 
+            np.ndarray: A delay-embedded sequence of shape 
                            (seq_length - delay, features * (delay + 1)).
         """
         seq_length, _ = sequence.shape
@@ -184,15 +180,15 @@ class DelayEmbedder:
 
         return embedded
 
-    def transform(self, X: np.ndarray):
+    def transform(self, X: np.ndarray) -> np.ndarray:
         """
         Apply delay embedding to the input data.
 
         Args:
-            X (numpy.ndarray): Input array of shape (num_sequences, seq_length, features).
+            X (np.ndarray): Input array of shape (num_sequences, seq_length, features).
             
         Returns:
-            numpy.ndarray: Delay-embedded array of shape 
+            np.ndarray: Delay-embedded array of shape 
                            (num_sequences, seq_length - delay, features * (delay + 1)).
         """
         if X.ndim != 3:

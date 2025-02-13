@@ -8,9 +8,6 @@ from typing import Optional, Callable, Union, Tuple
 
 # Import the Scaler and DelayEmbedder from preprocessing.py
 from .preprocessing import Scaler, DelayEmbedder
-
-# Import the generate_weak_weights function from your weak module.
-# Adjust the import path as needed (e.g., if your package structure is different).
 from src.models.weak import generate_weak_weights
 
 
@@ -48,9 +45,9 @@ class TrajectoryManager:
         self.delay_embedder: Optional[DelayEmbedder] = None
         self.weak_dyn_param: Optional[dict] = None
 
-        self.solutions: Optional[np.ndarray] = None
-        self.inputs: Optional[np.ndarray] = None
-        self.time_vector: Optional[np.ndarray] = None
+        self.x: Optional[list[np.ndarray]] = None
+        self.u: Optional[list[np.ndarray]] = None
+        self.t: Optional[np.ndarray] = None
         self.off: Optional[np.ndarray] = None
         self.scl: Optional[np.ndarray] = None
 
@@ -62,61 +59,94 @@ class TrajectoryManager:
         Load raw data from a binary file.
         
         The file is assumed to store (in order):
-            - solutions: numpy.ndarray of shape (num_sequences, seq_length, features)
-            - inputs: numpy.ndarray of shape (num_sequences, seq_length, inputs)
-            - time_vector: numpy.ndarray of shape (seq_length,)
-            - scaling parameters: (off, scl)
+            x: array-like or list of array-like, shape (n_samples, n_input_features)
+            Training data. If training data contains multiple trajectories,
+            x should be a list containing data for each trajectory. Individual
+            trajectories may contain different numbers of samples.
+
+            t: float, numpy array of shape (n_samples,), or list of numpy arrays
+            If t is a float, it specifies the timestep between each sample.
+            If array-like, it specifies the time at which each sample was
+            collected.
+            In this case the values in t must be strictly increasing.
+            In the case of multi-trajectory training data, t may also be a list
+            of arrays containing the collection times for each individual
+            trajectory.
+
+            u: array-like or list of array-like, shape (n_samples, n_control_features), optional (default None)
+            Control variables/inputs. 
+            If training data contains multiple trajectories (i.e. if x is a list of
+            array-like), then u should be a list containing control variable data
+            for each trajectory. Individual trajectories may contain different
+            numbers of samples.
         
         Args:
             path (str): Path to the data file.
         """
-        with open(path, "rb") as f:
-            self.solutions = np.load(f)
-            self.inputs = np.load(f)
-            self.time_vector = np.load(f)
-            off_scl = np.load(f, allow_pickle=True)
-            self.off, self.scl = off_scl
+        # Load the binary data from the file.
+        with open(path, 'rb') as f:
+            data = np.load(f, allow_pickle=True)
 
-    def preprocess_data(self) -> None:
+        # Extract x, t, and u from the loaded data.
+        self.x = data['x']
+        self.t = data['t']
+        self.u = data.get('u', None)
+
+        # Ensure x and t are lists if they are not already.
+        if not isinstance(self.x, list):
+            self.x = [self.x]
+        if not isinstance(self.t, list):
+            self.t = [self.t]
+
+        # If u is not provided, create a list of None values with the same length as x.
+        if self.u is None:
+            self.u = [None] * len(self.x)
+        elif not isinstance(self.u, list):
+            self.u = [self.u]
+
+        # Ensure that the lengths of x, t, and u match.
+        if len(self.x) != len(self.t) or len(self.x) != len(self.u):
+            raise ValueError("The lengths of x, t, and u must match.")
+
+        # Convert t to numpy arrays if they are not already.
+        self.t = [np.array(ti) if not isinstance(ti, np.ndarray) else ti for ti in self.t]
+
+        # Ensure that the time values in t are strictly increasing.
+        for ti in self.t:
+            if not np.all(np.diff(ti) > 0):
+                raise ValueError("Time values in t must be strictly increasing.")
+
+    def data_truncation(self) -> None:
         """
-        Preprocess the loaded data according to the configuration.
+        Truncate the loaded data according to the configuration.
         
         This includes:
-          - Optionally removing the first time step.
-          - Subsetting the number of trajectories and timesteps.
+          - Subsetting the number of trajectories and horizon (n_steps).
           - Populating basic metadata (dt, tf, shapes, etc.).
         """
         cfg = self.config.get("data", {})
-        rm1st: bool = cfg.get("rm1st", True)
-        nTraj: Optional[int] = cfg.get("nTraj", None)
-        nSteps: Optional[int] = cfg.get("nSteps", None)
+        n_samples: Optional[int] = cfg.get("n_samples", None)
+        n_steps: Optional[int] = cfg.get("n_steps", None)
         delay: int = cfg.get("delay", 0)
 
-        if self.solutions is None or self.inputs is None or self.time_vector is None:
+        if self.x is None or self.u is None or self.t is None:
             raise ValueError("Data not loaded. Call load_data() first.")
 
-        if rm1st:
-            self.solutions = self.solutions[:, 1:]
-            self.inputs = self.inputs[:, 1:]
-            self.time_vector = self.time_vector[:-1]
-
-        if nTraj is not None:
-            if nSteps is not None:
-                self.solutions = self.solutions[:nTraj, :nSteps]
-                self.inputs = self.inputs[:nTraj, :nSteps]
-                self.time_vector = self.time_vector[:nSteps]
+        if n_samples is not None:
+            if n_steps is not None:
+                self.x = [traj[:n_steps] for traj in self.x[:n_samples]]
+                self.u = [inp[:n_steps] for inp in self.u[:n_samples]]
+                self.t = self.t[:n_steps]
             else:
-                self.solutions = self.solutions[:nTraj]
-                self.inputs = self.inputs[:nTraj]
+                self.x = self.x[:n_samples]
+                self.u = self.u[:n_samples]
 
         # Update metadata.
-        self.metadata["dt"] = float(self.time_vector[1] - self.time_vector[0])
-        self.metadata["tf"] = float(self.time_vector[-1])
-        self.metadata["nTraj"] = int(self.solutions.shape[0])
-        self.metadata["nTimesteps"] = int(self.solutions.shape[1])
-        self.metadata["nStates"] = int(self.solutions.shape[-1])
-        self.metadata["nInputs"] = int(self.inputs.shape[-1]) if self.inputs.ndim > 1 else 0
-        self.metadata["time_vector"] = torch.tensor(self.time_vector, dtype=torch.double, device=self.device)
+        self.metadata["t"] = torch.tensor(self.t, dtype=torch.double, device=self.device)
+        self.metadata["n_samples"] = len(self.x)
+        self.metadata["n_steps"] = [len(traj) for traj in self.x]
+        self.metadata["n_input_features"] = int(self.x[0].shape[-1])
+        self.metadata["n_control_features"] = int(self.u[0].shape[-1]) if self.u[0].ndim > 1 else 0
         self.metadata["delay"] = delay
         self.metadata["off"] = self.off
         self.metadata["scl"] = self.scl
@@ -132,11 +162,10 @@ class TrajectoryManager:
 
         # Create and fit a Scaler instance.
         self.scaler = Scaler(mode=mode)
-        self.scaler.fit(self.solutions)
+        self.scaler.fit(self.x)
 
-        # Transform the data.
-        self.solutions = self.scaler.transform(self.solutions)
-        self.inputs = self.scaler.transform(self.inputs)
+        # Transform the trajectories.
+        self.x = self.scaler.transform(self.x)
 
     def apply_delay_embedding(self) -> None:
         """
@@ -150,9 +179,9 @@ class TrajectoryManager:
             # Create a DelayEmbedder instance.
             self.delay_embedder = DelayEmbedder(delay=delay)
             # Delay-embed the solutions.
-            self.solutions = self.delay_embedder.transform(self.solutions)
+            self.x = self.delay_embedder.transform(self.x)
             # For inputs, we simply remove the first `delay` time steps.
-            self.inputs = self.inputs[:, delay:]
+            self.u = [inp[delay:] for inp in self.u]
         # If delay==0, nothing is changed.
 
     def generate_weak_form_params(self) -> None:
@@ -181,9 +210,9 @@ class TrajectoryManager:
 
         # Call the generate_weak_weights function to get C, D, and K.
         C, D, K = generate_weak_weights(
-            tf=self.metadata["tf"],
-            num_time_points=self.metadata["nTimesteps"],
-            num_integration_points=N,
+            tf=self.metadata["tf"],  # TODO: non-uniform tf?
+            n_steps=self.metadata["n_steps"],
+            n_integration_points=N,
             integration_stride=dN,
             poly_order=ordpol,
             int_rule_order=ordint,
@@ -203,27 +232,22 @@ class TrajectoryManager:
         }
         self.metadata["weakDynParam"] = self.weak_dyn_param
 
-    def create_dataset(self) -> torch.Tensor:
+    def create_dataset(self) -> torch.Tensor: # TODO: this needs to be looked at again, as only some of the projects use this data structure
         """
-        Create a dataset by concatenating the solutions and inputs.
-        
-        If the "auto" flag is enabled in the configuration, only the solutions
-        (states) are used.
-        
+        Create a dataset by concatenating the trajectories and control inputs.
+               
         Returns:
             A torch.Tensor representing the dataset.
         """
-        data_cfg = self.config.get("data", {})
-        auto: bool = data_cfg.get("auto", False)
-        if auto:
-            dataset = self.solutions
-            self.metadata["nInputs"] = 0
+        
+        if self.metadata["n_control_features"] == 0: # autonomous
+            dataset = self.x
         else:
             # Concatenate along the feature dimension.
-            dataset = np.concatenate([self.solutions, self.inputs], axis=-1)
+            dataset = [np.concatenate([traj, inp], axis=-1) for traj, inp in zip(self.x, self.u)]
         # Convert to torch.Tensor.
         self.dataset = torch.tensor(dataset, dtype=torch.double, device=self.device)
-        self.metadata["nFeatures"] = self.dataset.shape[-1]
+        self.metadata["n_features"] = self.dataset.shape[-1]
         return self.dataset
 
     def split_dataset(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -243,9 +267,9 @@ class TrajectoryManager:
         n_val = remaining // 2
         n_test = remaining - n_val
 
-        self.metadata["nTrn"] = n_train
-        self.metadata["nVal"] = n_val
-        self.metadata["nTst"] = n_test
+        self.metadata["n_train"] = n_train
+        self.metadata["n_val"] = n_val
+        self.metadata["n_test"] = n_test
 
         train_set = self.dataset[:n_train]
         valid_set = self.dataset[n_train:n_train+n_val]
@@ -253,7 +277,7 @@ class TrajectoryManager:
         return train_set, valid_set, test_set
 
     def _create_graph(self,
-        traj: torch.Tensor,
+        features: torch.Tensor,
         adj: Optional[Union[torch.Tensor, np.ndarray]] = None,
         custom_fn: Optional[Callable[[torch.Tensor, Optional[torch.Tensor]], PyGData]] = None
     ) -> PyGData:
@@ -265,56 +289,44 @@ class TrajectoryManager:
         the default behavior.
         
         Args:
-            traj (torch.Tensor): Node feature matrix of shape (T, num_features) where T is the number of nodes.
-            adj (torch.Tensor or np.ndarray, optional): A square adjacency matrix of shape (T, T). 
+            features (torch.Tensor): Node feature matrix of shape (n_nodes, n_features) where n_nodes is the number of nodes.
+            adj (torch.Tensor or np.ndarray, optional): A square adjacency matrix of shape (n_nodes, n_nodes). 
                 Nonzero entries indicate edges. Their values are used as edge attributes.
             custom_fn (callable, optional): A custom function that takes (traj, adj) and returns a PyGData object.
                 If provided, this function overrides the default graph construction.
         
         Returns:
             PyGData: A PyTorch Geometric Data object containing:
-                - x: node features (same as traj)
-                - edge_index: tensor of shape (2, num_edges) listing edge connections
-                - edge_attr: tensor of shape (num_edges, 1) containing edge attributes (if adj is provided)
+                - x: node n_features (same as traj)
+                - edge_index: tensor of shape (2, n_edges) listing edge connections
+                - edge_attr: tensor of shape (n_edges, 1) containing edge attributes (if adj is provided)
         """
         # Use custom function if provided.
         if custom_fn is not None:
-            return custom_fn(traj, adj)
+            return custom_fn(features, adj)
         
         # If an adjacency matrix is provided, use it to build edge_index and edge_attr.
         if adj is not None:
             # If provided as a numpy array, convert it to a torch tensor.
             if isinstance(adj, np.ndarray):
-                adj = torch.tensor(adj, dtype=torch.double, device=traj.device)
+                adj = torch.tensor(adj, dtype=torch.double, device=features.device)
             else:
                 # Ensure the adjacency matrix is on the same device as traj.
-                adj = adj.to(traj.device)
+                adj = adj.to(features.device)
             
             # Verify that the adjacency matrix is square and matches the number of nodes.
-            T = traj.size(0)
-            if adj.size(0) != T or adj.size(1) != T:
-                raise ValueError(f"Adjacency matrix shape {adj.shape} does not match the number of nodes {T}.")
+            n_nodes = features.size(0)
+            if adj.size(0) != n_nodes or adj.size(1) != n_nodes:
+                raise ValueError(f"Adjacency matrix shape {adj.shape} does not match the number of nodes {n_nodes}.")
 
             # Find nonzero entries to build edge_index.
-            edge_index = (adj != 0).nonzero(as_tuple=False).t().contiguous()  # shape: (2, num_edges)
+            edge_index = (adj != 0).nonzero(as_tuple=False).t().contiguous()  # shape: (2, n_edges)
             # Use the nonzero values as edge attributes.
-            nonzero_vals = adj[adj != 0].view(-1, 1)  # shape: (num_edges, 1)
-            return PyGData(x=traj, edge_index=edge_index, edge_attr=nonzero_vals)
+            nonzero_vals = adj[adj != 0].view(-1, 1)  # shape: (n_edges, 1)
+            return PyGData(x=features, edge_index=edge_index, edge_attr=nonzero_vals)
         
-        # Fallback: Create a chain graph (default behavior) if no adjacency matrix is provided.
-        T = traj.size(0)
-        if T > 1:
-            # Connect consecutive nodes.
-            edge_index = torch.tensor(
-                [list(range(T - 1)), list(range(1, T))],
-                dtype=torch.long,
-                device=traj.device,
-            )
-            # For undirected graphs, add reverse edges.
-            edge_index = torch.cat([edge_index, edge_index[[1, 0]]], dim=1)
         else:
-            edge_index = torch.empty((2, 0), dtype=torch.long, device=traj.device)
-        return PyGData(x=traj, edge_index=edge_index)
+            return PyGData(x=features)
 
     def create_dataloaders(
         self, train_set: torch.Tensor, valid_set: torch.Tensor, test_set: torch.Tensor
@@ -340,10 +352,10 @@ class TrajectoryManager:
 
         elif model_type == "LSTM":
             from torch.utils.data import TensorDataset
-            seq_length: int = dl_cfg.get("seq_length", 1)
-            X_train, y_train = self._create_sequences(train_set, seq_length)
-            X_valid, y_valid = self._create_sequences(valid_set, seq_length)
-            X_test, y_test = self._create_sequences(test_set, seq_length)
+            n_steps: int = dl_cfg.get("n_steps", 1)
+            X_train, y_train = self._create_sequences(train_set, n_steps)
+            X_valid, y_valid = self._create_sequences(valid_set, n_steps)
+            X_test, y_test = self._create_sequences(test_set, n_steps)
 
             train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
             valid_loader = DataLoader(TensorDataset(X_valid, y_valid), batch_size=batch_size, shuffle=False)
@@ -377,34 +389,34 @@ class TrajectoryManager:
 
 
     def _create_sequences(
-        self, data: torch.Tensor, seq_length: int
+        self, data: torch.Tensor, n_steps: int
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Create sliding window sequences for LSTM models.
         
-        For each trajectory (assumed to be of shape (T, features)), this
-        method creates sequences of length `seq_length` (X) with the subsequent
+        For each trajectory (assumed to be of shape (T, n_features)), this
+        method creates sequences of length `n_steps` (X) with the subsequent
         time step as the target (y).
         
         Args:
-            data (torch.Tensor): Tensor of shape (nTraj, T, features).
-            seq_length (int): Length of the input sequence.
+            data (torch.Tensor): Tensor of shape (n_samples, T, n_features).
+            n_steps (int): Length of the input sequence.
         
         Returns:
             A tuple (X, y) where:
-              - X is of shape (num_sequences, seq_length, features)
-              - y is of shape (num_sequences, features)
+              - X is of shape (n_samples, n_steps, n_features)
+              - y is of shape (n_samples, n_features)
         """
         X_list = []
         y_list = []
         # Loop over each trajectory.
         for traj in data:
             T = traj.shape[0]
-            if T < seq_length + 1:
+            if T < n_steps + 1:
                 continue
-            for i in range(T - seq_length):
-                X_list.append(traj[i:i + seq_length])
-                y_list.append(traj[i + seq_length])
+            for i in range(T - n_steps):
+                X_list.append(traj[i:i + n_steps])
+                y_list.append(traj[i + n_steps])
         X_tensor = torch.stack(X_list)
         y_tensor = torch.stack(y_list)
         return X_tensor, y_tensor
@@ -431,7 +443,7 @@ class TrajectoryManager:
               - A metadata dictionary.
         """
         self.load_data(path)
-        self.preprocess_data()
+        self.data_truncation()
         self.apply_scaling()
         self.apply_delay_embedding()
         self.generate_weak_form_params()
