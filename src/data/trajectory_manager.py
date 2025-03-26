@@ -167,8 +167,6 @@ class TrajectoryManager:
         self.metadata["n_input_features"] = int(self.x[0].shape[-1])
         self.metadata["n_control_features"] = int(self.u[0].shape[-1]) if self.u[0].ndim > 1 else 0
         self.metadata["delay"] = delay
-        self.metadata["off"] = self.off
-        self.metadata["scl"] = self.scl
         self.metadata['autonomous'] = (self.u is None)
 
     def apply_scaling(self) -> None:
@@ -205,6 +203,8 @@ class TrajectoryManager:
 
         # Transform the trajectories.
         self.x = self.scaler.transform(self.x)
+        self.metadata['off'] = self.off
+        self.metadata['scl'] = self.scl
 
     def apply_delay_embedding(self) -> None:
         """
@@ -397,7 +397,7 @@ class TrajectoryManager:
             loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
         elif model_type == "LSTM":
-            X, y = self._create_sequences(dataset, self.metadata['n_features'])
+            X, y = self._create_sequences(dataset)
             loader = DataLoader(TensorDataset(X, y), batch_size=batch_size, shuffle=shuffle)
 
         elif model_type == "GNN":
@@ -415,34 +415,31 @@ class TrajectoryManager:
 
 
     def _create_sequences(
-        self, data: torch.Tensor, n_steps: int
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Create sliding window sequences for LSTM models.
-        
-        For each trajectory (assumed to be of shape (T, n_features)), this
-        method creates sequences of length `n_steps` (X) with the subsequent
-        time step as the target (y).
-        
-        Args:
-            data (torch.Tensor): Tensor of shape (n_samples, T, n_features).
-            n_steps (int): Length of the input sequence.
-        
-        Returns:
-            A tuple (X, y) where:
-              - X is of shape (n_samples, n_steps, n_features)
-              - y is of shape (n_samples, n_features)
-        """
+        self, dataset: list[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Create sliding window sequences for LSTM models.
+        # For each trajectory (assumed to be of shape (T, n_input_features + n_control_features))
+        # where T can vary, this method creates sequences of length `seq_length` (X) with the subsequent
+        # time step as the target (y).
+        #
+        # Args:
+        #   dataset (list[torch.Tensor]): List of tensors, each of shape (T, n_input_features + n_control_features)
+        #   seq_length (int): Length of the input sequence.
+        #
+        # Returns:
+        #   A tuple (X, y) where:
+        #     - X is of shape (N, seq_length, n_input_features + n_control_features)
+        #     - y is of shape (N, n_input_features)
+        seq_length = self.metadata['delay'] + 1
         X_list = []
         y_list = []
         # Loop over each trajectory.
-        for traj in data:
+        for traj in dataset:
             T = traj.shape[0]
-            if T < n_steps + 1:
+            if T < seq_length + 1:
                 continue
-            for i in range(T - n_steps):
-                X_list.append(traj[i:i + n_steps])
-                y_list.append(traj[i + n_steps])
+            for i in range(T - seq_length):
+                X_list.append(traj[i:i + seq_length])
+                y_list.append(traj[i + seq_length, :self.metadata['n_input_features']])
         X_tensor = torch.stack(X_list)
         y_tensor = torch.stack(y_list)
         return X_tensor, y_tensor
@@ -471,7 +468,8 @@ class TrajectoryManager:
         self.load_data(self.data_path)
         self.data_truncation()
         self.apply_scaling()
-        self.apply_delay_embedding()
+        if self.config['dataloader']['model_type'] != 'LSTM':
+            self.apply_delay_embedding()
         if self.config['weak_form']['enabled']:
             self.generate_weak_form_params()
         self.create_dataset()

@@ -2,7 +2,7 @@ data:
   path: './dataset/dp_no_damping_long.npz'
   n_samples: 100
   n_steps: 1000
-  delay: 3
+  delay: 10
 
 scaling:
   mode: "01"
@@ -17,5 +17,4 @@ split:
 
 dataloader:
   batch_size: 32
-  model_type: "NN"   # Options: "NN", "LSTM", "GNN"
-  seq_length: 3
+  model_type: "LSTM"   # Options: "NN", "LSTM", "GNN"
