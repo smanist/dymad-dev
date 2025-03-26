@@ -1,4 +1,4 @@
-from .data import DataManager, Scaler
+from .data import TrajectoryManager, Scaler
 
 from .losses.multi_step import make_multi_step_loss
 from .losses.weak_form import make_wf_jaco_loss, make_wf_smpl_loss

@@ -1,20 +1,6 @@
 import numpy as np
 from typing import Optional
 
-from dataclasses import dataclass
-# @dataclass
-# class DatasetMetadata:
-#     """
-#     Holds metadata about the dataset.
-    
-#     Attributes:
-#         name (Optional[str]): Optional name of the dataset.
-#         dt (Optional[float]): The time step (delta time) for the dataset.
-#         # TODO: add more fields as needed.
-#     """
-#     name: Optional[str] = None
-
-
 class Scaler:
     """
     A class for handling data normalization and scaling.
@@ -23,104 +9,89 @@ class Scaler:
     scaling transformations to the data.
     """
 
-    def __init__(self, mode: str = "01", prev: Optional[str] = None):
+    def __init__(self, mode: str = "01", scl: Optional[float] = None, off: Optional[float] = None):
         """
-        Initialize the Scaler with a specified scaling mode.
+        Initialize the Scaler with a scaling mode.
 
         Args:
             mode (str): Scaling mode ('01', '-11', 'std', or 'none').
-            prev (str): Path prefix to load previously computed scaling parameters.
+            scl (Optional[float]): Scaling factor for inference datasets (if provided).
+            off (Optional[float]): Offset value for inference datasets (if provided).
         """
         self._mode = mode.lower()
+        self._off = scl
+        self._scl = off
 
-        if prev:
-            self._off, self._scl = np.load(f"{prev}_scl.npy", allow_pickle=True)
-        else:
-            self._off = None
-            self._scl = None
-
-    def fit(self, X: np.ndarray) -> None:
+    def fit(self, X) -> None:
         """
         Compute scaling parameters based on the provided data.
         
         Args:
-            X (numpy.ndarray): Input data with one of the following shapes:
-                - (num_sequences, seq_length, features)
-                - (seq_length, features)
-                - (seq_length,)
+            X: array-like or list of array-like, shape (n_samples, n_input_features)
+               Training data. If training data contains multiple trajectories, X should be 
+               a list containing data for each trajectory. Individual trajectories may contain 
+               different numbers of samples.
         """
-        features = X.shape[-1]
-        if X.ndim < 1 or X.ndim > 3:
-            raise ValueError("Input data must be 1D, 2D, or 3D.")
-    
-        if X.ndim == 1:     # Convert 1D array (seq_length,) to (seq_length, 1)
-            X_reshaped = X.reshape(-1, 1)
-        else:               # For 2D or 3D arrays, reshape to (-1, features)
-            X_reshaped = X.reshape(-1, X.shape[-1])
+        
+        # Process each trajectory: ensure they are 2D arrays.
+        processed = []
+        for traj in X:
+            traj = np.asarray(traj)
+            if traj.ndim == 1:  # convert 1D array to 2D
+                traj = traj.reshape(-1, 1)
+            elif traj.ndim != 2:
+                raise ValueError("Each trajectory must be 1D or 2D array-like.")
+            processed.append(traj)
+
+        # Combine all trajectories along the sample axis.
+        X_combined = np.vstack(processed)
+        features = X_combined.shape[-1]
 
         if self._mode == "01":
-            self._off = np.min(X_reshaped, axis=0)
-            self._scl = np.max(X_reshaped, axis=0) - self._off
+            self._off = np.min(X_combined, axis=0)
+            self._scl = np.max(X_combined, axis=0) - self._off
         elif self._mode == "-11":
             self._off = np.zeros(features)
-            self._scl = np.max(np.abs(X_reshaped), axis=0)
+            self._scl = np.max(np.abs(X_combined), axis=0)
         elif self._mode == "std":
-            self._off = np.mean(X_reshaped, axis=0)
-            self._scl = np.std(X_reshaped, axis=0)
+            self._off = np.mean(X_combined, axis=0)
+            self._scl = np.std(X_combined, axis=0)
         elif self._mode == "none":
             self._off = np.zeros(features)
             self._scl = np.ones(features)
         else:
             raise ValueError(f"Unknown scaling mode: {self._mode}")
 
-    def transform(self, X: np.ndarray) -> np.ndarray:
+    def transform(self, X) -> list:
         """
-        Apply scaling to the data.
+        Apply scaling to a list of trajectories.
 
         Args:
-            X (numpy.ndarray): Input data.
+            X: List of array-like objects, each of shape (n_samples, n_input_features).
 
         Returns:
-            numpy.ndarray: Scaled data with the same shape as input.
+            List of numpy.ndarray: Scaled data with the same shapes as the input trajectories.
         """
         if self._off is None or self._scl is None:
             raise ValueError("Scaler parameters are not initialized. Call `fit` first.")
 
-        return (X - self._off) / self._scl
+        return [(trajectory - self._off) / self._scl for trajectory in X]
 
-    def inverse_transform(self, X: np.ndarray) -> np.ndarray:
+    def inverse_transform(self, X) -> list:
         """
-        Revert scaled data back to the original scale.
+        Revert scaled data back to the original scale for a list of trajectories.
 
         Args:
-            X (numpy.ndarray): Scaled data.
+            X: List of array-like objects representing scaled data.
+               Each element should have the same shape as the corresponding original trajectory.
 
         Returns:
-            numpy.ndarray: Data in the original scale with the same shape as input.
+            List of numpy.ndarray: Data in the original scale with the same shapes as the input trajectories.
         """
         if self._off is None or self._scl is None:
             raise ValueError("Scaler parameters are not initialized. Call `fit` first.")
 
-        return X * self._scl + self._off
-
-    def save(self, pref: str) -> None:
-        """
-        Save the scaling parameters to a file.
-
-        Args:
-            pref (str): File prefix for saving scaling parameters.
-        """
-        np.save(f"{pref}_scl.npy", [self._off, self._scl], allow_pickle=False)
-
-    def load(self, pref: str) -> None:
-        """
-        Load scaling parameters from a file.
-
-        Args:
-            pref (str): File prefix for loading scaling parameters.
-        """
-        self._off, self._scl = np.load(f"{pref}_scl.npy", allow_pickle=True)
-
+        return [trajectory * self._scl + self._off for trajectory in X]
 
 class DelayEmbedder:
     """
@@ -168,7 +139,7 @@ class DelayEmbedder:
 
         # Number of valid rows after applying delay embedding.
         M = seq_length - self.delay
-
+        
         # Create concatenated sub-sequences for each shift in [0 .. delay].
         embedded = np.hstack([
             sequence[j: M + j]  # Each slice has shape (M, features)
@@ -178,27 +149,21 @@ class DelayEmbedder:
 
         return embedded
 
-    def transform(self, X: np.ndarray) -> np.ndarray:
+    def transform(self, X: list[np.ndarray]) -> list[np.ndarray]:
         """
         Apply delay embedding to the input data.
 
         Args:
-            X (np.ndarray): Input array of shape (num_sequences, seq_length, features).
-            
+            X (list[np.ndarray]): List of input arrays, each of shape (seq_length, features).
+
         Returns:
-            np.ndarray: Delay-embedded array of shape 
-                           (num_sequences, seq_length - delay, features * (delay + 1)).
+            list[np.ndarray]: List of delay-embedded arrays, each of shape 
+                              (seq_length - delay, features * (delay + 1)).
         """
-        if X.ndim != 3:
-            raise ValueError("Input must be a 3D array of shape (num_sequences, seq_length, features).")
-
-        num_sequences, seq_length, _ = X.shape
-        if seq_length <= self.delay:
-            raise ValueError(
-                f"Sequence length ({seq_length}) must be greater than delay ({self.delay})."
-            )
-
-        # Process each sequence individually.
-        delayed_sequences = [self._delay(single_seq) for single_seq in X]
+        delayed_sequences = []
+        for sequence in X:
+            if sequence.ndim != 2:
+                raise ValueError("Each sequence must be a 2D array of shape (seq_length, features).")
+            delayed_sequences.append(self._delay(sequence))
         
-        return np.array(delayed_sequences)
+        return delayed_sequences

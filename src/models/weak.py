@@ -93,11 +93,13 @@ def compute_newton_cotes_weights(num_points: int, dx: float, order: int) -> np.n
 # ------------------------------------------------------------------------------------
 # Weak Formulation Weight Generation
 # ------------------------------------------------------------------------------------
-
+'''
+TODO this implementation needs to be updated to work with trajectories with different length (a list of n_steps)
+'''
 def generate_weak_weights(
     tf: float,
-    num_time_points: int,
-    num_integration_points: int,
+    n_steps: int,
+    n_integration_points: int,
     integration_stride: int,
     poly_order: int = 4,
     int_rule_order: int = 4,
@@ -112,7 +114,7 @@ def generate_weak_weights(
     2. (Optionally) remove the last `delay` steps.
     3. Compute a length scale L = (t_{N-1} - t_0) / 2.
     4. Generate Jacobi polynomial basis (P0) and its derivative (P1), each 
-       with alpha=1, beta=1, on a grid of size num_integration_points in [-1,1].
+       with alpha=1, beta=1, on a grid of size n_integration_points in [-1,1].
     5. Construct weighting arrays w0=1-h^2 and w1=-2*h / L for the integrals.
     6. Compute Newton-Cotes integration weights on that grid.
     7. Combine everything to form:
@@ -122,8 +124,8 @@ def generate_weak_weights(
 
     Args:
         tf (float): Final time in the interval [0, tf].
-        num_time_points (int): Number of time points (Nt).
-        num_integration_points (int): Number of integration points (N) in [-1, 1].
+        n_steps (int): Number of time points (Nt).
+        n_integration_points (int): Number of integration points (N) in [-1, 1].
         integration_stride (int): Sub-sampling or stride in the time domain (dN).
         poly_order (int): Order of the Jacobi polynomial basis.
         int_rule_order (int): Order of Newton-Cotes integration rule (1..4).
@@ -131,23 +133,22 @@ def generate_weak_weights(
 
     Returns:
         (C, D, K) where
-          - C: np.ndarray of shape (poly_order, num_integration_points),
-          - D: np.ndarray of shape (poly_order, num_integration_points),
+          - C: np.ndarray of shape (poly_order, n_integration_points),
+          - D: np.ndarray of shape (poly_order, n_integration_points),
           - K: int, number of intervals in time after sub-sampling.
     """
     # Build time array, optionally remove last 'delay' points
     if delay > 0:
-        time_array = np.linspace(0, tf, num_time_points)[:-delay]
+        time_array = np.linspace(0, tf, n_steps)[:-delay]
     else:
-        time_array = np.linspace(0, tf, num_time_points)
+        time_array = np.linspace(0, tf, n_steps)
 
     dt = time_array[1] - time_array[0]
-
     # L = half the (useful) interval length in the time domain
-    L = (time_array[num_integration_points - 1] - time_array[0]) / 2.0
+    L = (time_array[n_integration_points - 1] - time_array[0]) / 2.0
 
     # Grid in [-1, 1] for the polynomials
-    h = np.linspace(-1.0, 1.0, num_integration_points)
+    h = np.linspace(-1.0, 1.0, n_integration_points)
 
     # Evaluate Jacobi polynomials
     P0 = jacobi_polynomial(poly_order, h)  # (poly_order, N)
@@ -158,7 +159,7 @@ def generate_weak_weights(
     w1 = -2.0 * h / L
 
     # Newton-Cotes weights on that grid
-    w = compute_newton_cotes_weights(num_integration_points, dt, int_rule_order)
+    w = compute_newton_cotes_weights(n_integration_points, dt, int_rule_order)
 
     # Construct final C and D terms
     # We are broadcasting here:
@@ -168,6 +169,6 @@ def generate_weak_weights(
     D = P0 * w0 * w               # shape: (poly_order, N)
 
     # Number of "windows" or segments
-    K = (len(time_array) - (num_integration_points - integration_stride)) // integration_stride
+    K = (len(time_array) - (n_integration_points - integration_stride)) // integration_stride
 
     return C, D, K
