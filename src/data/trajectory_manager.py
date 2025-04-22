@@ -281,7 +281,9 @@ class TrajectoryManager:
         Returns:
             A torch.Tensor representing the dataset.
         """
-        
+        # TODO: actually need to make this not a concatenated tensor, but keep X and U separate at this stage.
+
+
         if self.metadata["n_control_features"] == 0: # autonomous
             self.dataset = self.x
         else:
@@ -477,3 +479,26 @@ class TrajectoryManager:
         shuffle = [True, False, False]
         loaders = [self.create_dataloader(ds, sh) for ds, sh in zip(splited_datasets, shuffle)]
         return loaders, splited_datasets, self.metadata
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        """
+        Retrieve the dataset item at the specified index.
+        
+        Args:
+            index (int): Index of the dataset item.
+        
+        Returns:
+            torch.Tensor: The dataset entry corresponding to the index.
+        """
+        if self.dataset is None:
+            raise ValueError("Dataset not created. Please call create_dataset() first.")
+        return self.dataset[index]
+
+    def __len__(self) -> int:
+        """
+        Return the total number of dataset entries.
+        
+        Returns:
+            int: The number of dataset entries.
+        """
+        return 0 if self.dataset is None else len(self.dataset)
