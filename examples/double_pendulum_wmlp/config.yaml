@@ -5,12 +5,13 @@ data:
   delay: 0 # 0 for no delay
 
 scaling:
-  mode: "01"
-  load_from_checkpoint: None
+  mode: "none"
+  file: "./checkpoints/scaler.npz"
+  reload: false
 
 weak_form:
-  enabled: True
-  parameters: [11, 2, 3, 2, 0.5]  # example values; adjust as needed
+  enabled: true
+  parameters: [13, 2, 2, 2]  # example values; adjust as needed
 
 split:
   train_frac: 0.75
@@ -20,8 +21,14 @@ dataloader:
   
 
 model:
-  model_type: "NN"   # Options: "NN", "LSTM", "GNN"
+  name: 'double_pendulum_wmlp'
+  type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   processor_layers: 1
   decoder_layers: 1
   latent_dimension: 32
+
+training:
+  n_epochs: 3000
+  save_interval: 100
+  load_checkpoint: false

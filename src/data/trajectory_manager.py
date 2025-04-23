@@ -40,7 +40,7 @@ class TrajectoryManager:
         if self.config['data']['delay'] < 0:
             raise ValueError("Delay must be non-negative.")
         
-        self.model_type = self.config['model']['model_type']
+        self.model_type = self.config['model']['type']
         self.enable_weak_form = self.config['weak_form']['enabled']
         self.device = device
         self.data_path = self.config['data']['path']
@@ -186,7 +186,7 @@ class TrajectoryManager:
         scale_cfg = self.config.get("scaling", {})
         mode = scale_cfg.get("mode", "none")
         ckpt_path = scale_cfg.get("load_from_checkpoint", None)
-        if ckpt_path not in (None, "None"):
+        if ckpt_path not in (None, "None") and os.path.exists(ckpt_path):
             logging.info(f"Loading scaling parameters from checkpoint: {ckpt_path}.")
             # Load the checkpoint and extract scaler parameters.
             checkpoint = torch.load(ckpt_path, map_location="cpu")
@@ -207,10 +207,35 @@ class TrajectoryManager:
             self.off = self.scaler._off
             self.scl = self.scaler._scl
 
+        scale_cfg = self.config.get("scaling", {})
+        mode = scale_cfg.get("mode", "none")
+        file_path = scale_cfg.get("file", None)
+        if file_path is None:
+            raise ValueError("Scaler file path must be specified to save/load the scaler.")
+        reload_flag = scale_cfg.get("reload", False)
+        if reload_flag and os.path.exists(file_path):
+            logging.info(f"Loading scaling parameters from file: {file_path}.")
+            scaler_dict = np.load(file_path, allow_pickle=True)
+            self.off = scaler_dict["offset"]
+            self.scl = scaler_dict["scale"]
+            if self.off is None or self.scl is None:
+                raise ValueError("Invalid scaler parameters in file.")
+            self.scaler = Scaler(mode=mode, scl=self.scl, off=self.off)
+        else:
+            logging.info(f"Applying scaling with mode: {mode}.")
+            self.scaler = Scaler(mode=mode)
+            self.scaler.fit(self.x)
+            self.off = self.scaler._off
+            self.scl = self.scaler._scl
+            dir_name = os.path.dirname(file_path)
+            os.makedirs(dir_name, exist_ok=True)
+            np.savez(file_path, offset=self.off, scale=self.scl)
+
         # Transform the trajectories.
         self.x = self.scaler.transform(self.x)
         self.metadata['off'] = self.off
         self.metadata['scl'] = self.scl
+        
 
     def apply_delay_embedding(self) -> None:
         """
