@@ -61,6 +61,8 @@ def main():
         config = yaml.safe_load(f)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logging.info(f"Using device: {device}")
+    logging.info(f"Double precision: {config['data']['double_precision']}")
     # Initialize the TrajectoryManager
     tm = TrajectoryManager(config, device=device)
 
@@ -70,7 +72,10 @@ def main():
 
     # Initialize model
     model_name = config['model']['name']
-    model = weakFormMLP(config['model'], data_meta).double().to(device)
+    model = weakFormMLP(config['model'], data_meta)
+    if config['data']['double_precision']:
+        model = model.double()
+    model = model.to(device)
     opt = torch.optim.Adam(model.parameters(),lr=1e-3)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(opt,gamma=0.999)
     criterion = torch.nn.MSELoss(reduction='mean')

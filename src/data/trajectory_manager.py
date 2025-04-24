@@ -36,7 +36,7 @@ class TrajectoryManager:
             device (torch.device): Torch device to use.
         """
         self.config = config
-
+        self.dtype = torch.double if config['data'].get('double_precision', False) else torch.float
         if self.config['data']['delay'] < 0:
             raise ValueError("Delay must be non-negative.")
         
@@ -96,9 +96,6 @@ class TrajectoryManager:
         self.u = data.get('u', None)
 
         logging.info("Raw data loaded.")
-        logging.info(f"Trajectories: {len(self.x)}")
-        logging.info(f"Time steps: {len(self.t)}")
-        logging.info(f"Control inputs: {len(self.u) if self.u is not None else 0}")
 
         # Process x
         if isinstance(self.x, np.ndarray):
@@ -173,8 +170,10 @@ class TrajectoryManager:
         self.metadata["n_state_features"] = int(self.x[0].shape[-1])
         self.metadata["n_control_features"] = int(self.u[0].shape[-1]) if self.u[0].ndim > 1 else 0
         self.metadata["delay"] = delay
-        self.metadata['autonomous'] = (self.u is None)
-
+        logging.info(f"Number of samples: {self.metadata['n_samples']}")
+        logging.info(f"Number of state features: {self.metadata['n_state_features']}")
+        logging.info(f"Number of control features: {self.metadata['n_control_features']}")
+        logging.info(f"Delay embedding size: {self.metadata['delay']}")
     def apply_scaling(self) -> None:
         """
         Apply scaling to the solutions and inputs using the Scaler class.
@@ -293,8 +292,8 @@ class TrajectoryManager:
 
         # Convert weights to torch tensors and store in the weak_dyn_param dictionary.
         self.weak_dyn_param = {
-            "C": torch.tensor(C, dtype=torch.double, device=self.device),
-            "D": torch.tensor(D, dtype=torch.double, device=self.device),
+            "C": torch.tensor(C, dtype=self.dtype, device=self.device),
+            "D": torch.tensor(D, dtype=self.dtype, device=self.device),
             "K": K,
             "N": N,
             "dN": dN,
@@ -321,7 +320,7 @@ class TrajectoryManager:
             # Concatenate along the feature dimension.
             self.dataset = [np.concatenate([traj, inp], axis=-1) for traj, inp in zip(self.x, self.u)]
         # Convert to torch.Tensor.
-        self.dataset = [torch.tensor(entry, dtype=torch.double, device=self.device) for entry in self.dataset]
+        self.dataset = [torch.tensor(entry, dtype=self.dtype, device=self.device) for entry in self.dataset]
         self.metadata["n_total_features"] = self.dataset[0].shape[-1] # This is observables and control inputs combined
         
     def split_dataset(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -387,7 +386,7 @@ class TrajectoryManager:
         if adj is not None:
             # If provided as a numpy array, convert it to a torch tensor.
             if isinstance(adj, np.ndarray):
-                adj = torch.tensor(adj, dtype=torch.double, device=features.device)
+                adj = torch.tensor(adj, dtype=self.dtype, device=features.device)
             else:
                 # Ensure the adjacency matrix is on the same device as traj.
                 adj = adj.to(features.device)
@@ -510,6 +509,7 @@ class TrajectoryManager:
         splited_datasets = self.split_dataset()
         shuffle = [True, False, False]
         loaders = [self.create_dataloader(ds, sh) for ds, sh in zip(splited_datasets, shuffle)]
+        logging.info(f"Data processing complete. Train/Validation/Test sizes: {len(splited_datasets[0])}, {len(splited_datasets[1])}, {len(splited_datasets[2])}.")
         return loaders, splited_datasets, self.metadata
 
     def __getitem__(self, index: int) -> torch.Tensor:
