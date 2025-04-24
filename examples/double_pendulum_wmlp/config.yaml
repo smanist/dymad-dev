@@ -28,5 +28,5 @@ model:
 
 training:
   n_epochs: 5000
-  save_interval: 1
-  load_checkpoint: true
+  save_interval: 100
+  load_checkpoint: false

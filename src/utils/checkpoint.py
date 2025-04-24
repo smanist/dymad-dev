@@ -30,9 +30,8 @@ def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_chec
     if not inference_mode:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        hist = checkpoint["hist"]
     
-    return checkpoint["epoch"], checkpoint["best_loss"], hist, checkpoint["metadata"]
+    return checkpoint["epoch"], checkpoint["best_loss"], checkpoint["hist"], checkpoint["metadata"]
 
 def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, metadata, checkpoint_path):
     """
