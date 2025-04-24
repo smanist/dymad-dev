@@ -3,6 +3,8 @@ import torch
 from ..utils.plot import plot_trajectory
 
 def _loss(truth,pred,weakDynParam,lossFn):
+    # TODO : check this for various trajectory lengths
+    
     # Compute weak form loss and decoder loss
     # For one complete trajectory
     # xTrue should have (nSteps,nStates)
@@ -30,10 +32,11 @@ def weak_form_loss(batch,predBatch,dataMeta,criterion):
                              for _xTrue,_w,_wDot,_xHat in 
                              zip(batch[...,:dataMeta['n_state_features']],_wBatch,_wDotBatch,_xHatBatch)]).mean()
 
+# TODO : this can move to a base loss.py as this is a common function, and add kwargs
 def prediction_rmse(model,truth,ts,data_meta,method='dopri5',plot=False):
     x_truth = truth[:, :data_meta['n_state_features']].detach().cpu().numpy()
     x0, u0 = truth[0, :data_meta['n_state_features']], truth[0,-data_meta['n_control_features']:]
-    x_pred = model.predict(x0, u0, ts).detach().cpu().numpy()
+    x_pred = model.predict(x0, u0, ts, method=method).detach().cpu().numpy()
     rmse = np.sqrt(np.mean((x_pred - x_truth)**2))
     if plot:
         plot_trajectory(np.array([x_pred, x_truth]), ts)

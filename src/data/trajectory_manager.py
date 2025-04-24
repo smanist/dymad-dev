@@ -444,6 +444,7 @@ class TrajectoryManager:
 
     def process_all(self) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
         """
+        # TODO: change this to allow user-defined processing steps
         Run the full processing pipeline:
           1. Load raw data.
           2. Preprocess and subset.
