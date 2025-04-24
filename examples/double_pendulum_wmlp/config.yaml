@@ -7,8 +7,6 @@ data:
 
 scaling:
   mode: "none"
-  file: "./checkpoints/scaler.npz"
-  reload: false
 
 weak_form:
   enabled: true
@@ -20,7 +18,6 @@ split:
 dataloader:
   batch_size: 32
   
-
 model:
   name: 'double_pendulum_wmlp'
   type: "NN"   # Options: "NN", "LSTM", "GNN"
@@ -31,5 +28,5 @@ model:
 
 training:
   n_epochs: 5000
-  save_interval: 100
-  load_checkpoint: false
+  save_interval: 1
+  load_checkpoint: true

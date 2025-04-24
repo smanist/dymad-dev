@@ -21,7 +21,7 @@ def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_chec
 
     if not os.path.exists(checkpoint_path) or not load_from_checkpoint:
         logging.info(f"No checkpoint found at {checkpoint_path}. Starting from scratch.")
-        return 0, float("inf"), []
+        return 0, float("inf"), [], None
 
     logging.info(f"Loading checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path)
@@ -31,10 +31,10 @@ def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_chec
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         hist = checkpoint["hist"]
+    
+    return checkpoint["epoch"], checkpoint["best_loss"], hist, checkpoint["metadata"]
 
-    return checkpoint["epoch"], checkpoint["best_loss"], hist
-
-def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, checkpoint_path):
+def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, metadata, checkpoint_path):
     """
     Save the model, optimizer, and scheduler states to a checkpoint file.
     
@@ -44,6 +44,8 @@ def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, checkpo
         scheduler: The scheduler to save.
         epoch (int): The current epoch number.
         best_loss (float): The best loss recorded so far.
+        hist (list): The history of losses.
+        metadata (dict): Metadata about the data.
         checkpoint_path (str): Path to save the checkpoint file.
     """
     torch.save({
@@ -53,4 +55,5 @@ def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, checkpo
         "scheduler_state_dict": scheduler.state_dict(),
         "best_loss": best_loss,
         "hist": hist,
+        "metadata": metadata,
     }, checkpoint_path)

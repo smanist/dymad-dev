@@ -19,8 +19,8 @@ class Scaler:
             off (Optional[float]): Offset value for inference datasets (if provided).
         """
         self._mode = mode.lower()
-        self._off = scl
-        self._scl = off
+        self._off = off
+        self._scl = scl
 
     def fit(self, X) -> None:
         """
@@ -74,7 +74,7 @@ class Scaler:
         """
         if self._off is None or self._scl is None:
             raise ValueError("Scaler parameters are not initialized. Call `fit` first.")
-
+        
         return [(trajectory - self._off) / self._scl for trajectory in X]
 
     def inverse_transform(self, X) -> list:
