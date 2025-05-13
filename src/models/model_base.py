@@ -49,6 +49,19 @@ class ModelBase(nn.Module, ABC):
     def predict(self, x0: torch.Tensor, us: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError("This is the base class.")
     
+    @staticmethod
+    def build_mlp(input_dimension: int, latent_dimension: int, output_dimension: int, num_layers: int) -> nn.Sequential:
+        if num_layers == 1:
+            return nn.Sequential(
+                nn.Linear(input_dimension, output_dimension),
+                nn.PReLU()
+            )
+        layers = [nn.Linear(input_dimension, latent_dimension), nn.PReLU()]
+        for _ in range(num_layers - 2):
+            layers.extend([nn.Linear(latent_dimension, latent_dimension), nn.PReLU()])
+        layers.append(nn.Linear(latent_dimension, output_dimension))
+        layers.append(nn.PReLU())
+        return nn.Sequential(*layers)    
 
 class weakKBFBase(ModelBase):
     def __init__(self, model_config: Dict, data_meta: Dict):

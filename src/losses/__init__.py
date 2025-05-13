@@ -1,1 +1,2 @@
-from .weak_form import weak_form_loss, prediction_rmse
+from .weak_form import weak_form_loss
+from .evaluation import prediction_rmse

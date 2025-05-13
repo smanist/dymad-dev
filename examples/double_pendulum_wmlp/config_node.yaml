@@ -9,9 +9,8 @@ scaling:
   mode: "none"
 
 weak_form:
-  enabled: true
-  parameters: [13, 2, 2, 2]  # example values; adjust as needed
-
+  enabled: false
+  
 split:
   train_frac: 0.75
 
@@ -19,7 +18,7 @@ dataloader:
   batch_size: 32
   
 model:
-  name: 'double_pendulum_wmlp'
+  name: 'double_pendulum_node'
   type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   processor_layers: 1

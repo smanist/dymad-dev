@@ -16,43 +16,26 @@ class weakFormMLP(ModelBase):
         dec_depth = model_config.get('decoder_layers', 2)
         
         # Build network components
-        self.encoder_net = self._build_mlp(
+        self.encoder_net = self.build_mlp(
             input_dimension=self.n_total_features,
             latent_dimension=self.latent_dimension,
             output_dimension=self.latent_dimension,
             num_layers=enc_depth
         )
         
-        self.dynamics_net = self._build_mlp(
+        self.dynamics_net = self.build_mlp(
             input_dimension=self.latent_dimension,
             latent_dimension=self.latent_dimension,
             output_dimension=self.latent_dimension,
             num_layers=proc_depth
         )
         
-        self.decoder_net = self._build_mlp(
+        self.decoder_net = self.build_mlp(
             input_dimension=self.latent_dimension,
             latent_dimension=self.latent_dimension,
             output_dimension=self.n_state_features,
             num_layers=dec_depth
         )
-
-    def _build_mlp(self, input_dimension: int, latent_dimension: int, output_dimension: int, num_layers: int) -> nn.Sequential:
-        if num_layers == 1:
-            return nn.Sequential(
-                nn.Linear(input_dimension, output_dimension),
-                nn.PReLU()
-            )
-        
-        layers = [nn.Linear(input_dimension, latent_dimension), nn.PReLU()]
-        
-        for _ in range(num_layers - 2):
-            layers.extend([nn.Linear(latent_dimension, latent_dimension), nn.PReLU()])
-        
-        layers.append(nn.Linear(latent_dimension, output_dimension))
-        layers.append(nn.PReLU())       
-
-        return nn.Sequential(*layers)
     
     def init_params(self):
         """Initialize model parameters with Xavier uniform initialization."""

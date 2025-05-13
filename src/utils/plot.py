@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-def plot_trajectory(traj,ts,nRowsCols=None):
+def plot_trajectory(traj,ts,model_name,nRowsCols=None):
     _nTraj,_,_nStates = traj.shape
     assert _nTraj == 2
     _rmse = np.linalg.norm(traj[0]-traj[1])/(traj.shape[1]-1)**0.5
@@ -22,7 +22,7 @@ def plot_trajectory(traj,ts,nRowsCols=None):
         ax[_n].legend(loc='upper right')
     ax[0].set_title(f'Prediction RMSE {_rmse:1.3f}')
     ax[-1].set_xlabel('Time steps')
-    plt.savefig(f'prediction.png',dpi=200,bbox_inches='tight',facecolor='white')
+    plt.savefig(f'./{model_name}_prediction.png',dpi=200,bbox_inches='tight',facecolor='white')
     plt.close()
 
 def plot_hist(hist,epoch,model_name):
