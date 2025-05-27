@@ -3,7 +3,7 @@ import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 from torch_geometric.data import Data as PyGData
 from torch_geometric.loader import DataLoader as GeoDataLoader
-from typing import Optional, Callable, Union, Tuple, Dict
+from typing import Optional, Callable, Union, Tuple, Dict, List
 
 # Import the Scaler and DelayEmbedder from preprocessing.py
 from .preprocessing import Scaler, DelayEmbedder
@@ -27,13 +27,15 @@ class TrajectoryManager:
     The class is configured via a YAML configuration file.
     """
 
-    def __init__(self, metadata: Dict, device: torch.device = torch.device("cpu")):
+    def __init__(self, metadata: Dict, device: torch.device = torch.device("cpu"), adj: Optional[Union[torch.Tensor, np.ndarray]] = None):
         """
         Initialize the TrajectoryManager by loading the YAML config.
         
         Args:
             metadata (dict): Configuration dictionary.
             device (torch.device): Torch device to use.
+            adj (torch.Tensor or np.ndarray, optional): Adjacency matrix for GNN models.
+                If not provided, will try to get from config.
         """
         self.metadata = metadata
         self.dtype = torch.double if self.metadata['config']['data'].get('double_precision', False) else torch.float
@@ -44,6 +46,8 @@ class TrajectoryManager:
         self.enable_weak_form = self.metadata['config']['weak_form']['enabled']
         self.device = device
         self.data_path = self.metadata['config']['data']['path']
+        self.adj = adj  # Store the adjacency matrix
+        self.n_nodes = self.metadata['config']['data'].get('n_nodes', None)
         
     def load_data(self, path: str) -> None:
         """
@@ -81,7 +85,6 @@ class TrajectoryManager:
         self.x = data['x']
         self.t = data['t']
         self.u = data.get('u', None)
-
         logging.info("Raw data loaded.")
 
         # Process x
@@ -106,23 +109,27 @@ class TrajectoryManager:
 
         # Process t
         if isinstance(self.t, (float, int)):
-            self.dt = float(self.t) 
+            # Case 1: t is a float/int specifying timestep between samples
+            self.dt = float(self.t)
             self.t = [np.arange(traj.shape[0]) * self.dt for traj in self.x]
             self.dt = [self.dt for _ in self.t]
+        elif isinstance(self.t, list):
+            # Case 2: t is a list of arrays for multiple trajectories
+            self.t = [np.array(ti) for ti in self.t]  # Ensure each element is a numpy array
+            self.dt = [ti[1] - ti[0] for ti in self.t]
         elif isinstance(self.t, np.ndarray):
-            if self.t.ndim == 2:
-                # Single trajectory provided as a 2D array.
+            if self.t.ndim == 1:
+                # Case 3: t is a 1D array of shape (n_samples,)
                 self.dt = [self.t[1] - self.t[0]]
                 self.t = [self.t]
-            elif self.t.ndim == 3:
-                self.t = [ti.squeeze() for ti in self.t]
+            elif self.t.ndim == 2:
+                # Case 4: t is a 2D array of shape (n_trajectories, n_samples)
+                self.t = [ti for ti in self.t]  # Split into list of 1D arrays
                 self.dt = [ti[1] - ti[0] for ti in self.t]
             else:
-                # Unsupported dimensions for t.
                 raise ValueError(f"Unsupported array dimension for t: {self.t.ndim}")
-        # Ensure that the lengths of x, t, and u match.
-        if len(self.x) != len(self.t) or len(self.x) != len(self.u):
-            raise ValueError("The lengths of x, t, and u must match.")
+        else:
+            raise TypeError("t must be a float, numpy array, or list of numpy arrays")
 
     def data_truncation(self) -> None:
         """
@@ -294,9 +301,7 @@ class TrajectoryManager:
         
         The training fraction is specified in the YAML config (default 0.75).
         The split is performed by shuffling whole trajectories.
-        
-        Returns:
-            train_set, valid_set, test_set.
+
         """
         split_cfg = self.metadata['config'].get("split", {})
         train_frac: float = split_cfg.get("train_frac", 0.75)
@@ -313,106 +318,134 @@ class TrajectoryManager:
         self.metadata["n_val"] = n_val
         self.metadata["n_test"] = n_test
 
-        train_set = dataset_rand[:n_train]
-        valid_set = dataset_rand[n_train:n_train+n_val]
-        test_set = dataset_rand[n_train+n_val:]
-        return train_set, valid_set, test_set
-
-    def _create_graph(self,
-        features: torch.Tensor,
-        adj: Optional[Union[torch.Tensor, np.ndarray]] = None,
-        custom_fn: Optional[Callable[[torch.Tensor, Optional[torch.Tensor]], PyGData]] = None
-    ) -> PyGData:
+        self.train_set = dataset_rand[:n_train]
+        self.valid_set = dataset_rand[n_train:n_train+n_val]
+        self.test_set = dataset_rand[n_train+n_val:]
+        
+    def create_dataloaders(self) -> None:
         """
-        Create a graph from a trajectory using an optional adjacency matrix.
-        
-        This function converts an adjacency matrix (if provided) into a PyTorch Geometric 
-        edge_index and edge_attr. It also allows a custom graph construction function to override
-        the default behavior.
-        
-        Args:
-            features (torch.Tensor): Node feature matrix of shape (n_nodes, n_total_features) where n_nodes is the number of nodes.
-            adj (torch.Tensor or np.ndarray, optional): A square adjacency matrix of shape (n_nodes, n_nodes). 
-                Nonzero entries indicate edges. Their values are used as edge attributes.
-            custom_fn (callable, optional): A custom function that takes (traj, adj) and returns a PyGData object.
-                If provided, this function overrides the default graph construction.
-        
-        Returns:
-            PyGData: A PyTorch Geometric Data object containing:
-                - x: node n_total_features (same as traj)
-                - edge_index: tensor of shape (2, n_edges) listing edge connections
-                - edge_attr: tensor of shape (n_edges, 1) containing edge attributes (if adj is provided)
-        """
-        # Use custom function if provided.
-        if custom_fn is not None:
-            return custom_fn(features, adj)
-        
-        # If an adjacency matrix is provided, use it to build edge_index and edge_attr.
-        if adj is not None:
-            # If provided as a numpy array, convert it to a torch tensor.
-            if isinstance(adj, np.ndarray):
-                adj = torch.tensor(adj, dtype=self.dtype, device=features.device)
-            else:
-                # Ensure the adjacency matrix is on the same device as traj.
-                adj = adj.to(features.device)
-            
-            # Verify that the adjacency matrix is square and matches the number of nodes.
-            n_nodes = features.size(0)
-            if adj.size(0) != n_nodes or adj.size(1) != n_nodes:
-                raise ValueError(f"Adjacency matrix shape {adj.shape} does not match the number of nodes {n_nodes}.")
-
-            # Find nonzero entries to build edge_index.
-            edge_index = (adj != 0).nonzero(as_tuple=False).t().contiguous()  # shape: (2, n_edges)
-            # Use the nonzero values as edge attributes.
-            nonzero_vals = adj[adj != 0].view(-1, 1)  # shape: (n_edges, 1)
-            return PyGData(x=features, edge_index=edge_index, edge_attr=nonzero_vals)
-        
-        else:
-            return PyGData(x=features)
-
-    def create_dataloader(
-        self, dataset: torch.Tensor, shuffle: bool = True
-    ) -> DataLoader:
-        """
-        Create a dataloader for a single dataset based on the model type.
+        Create dataloaders for train, validation, and test sets based on the model type.
         
         The model type is specified in the YAML config under "dataloader/model_type"
         and can be one of "NN", "LSTM", or "GNN".
         
-        Args:
-            dataset (torch.Tensor): The dataset to load.
-            shuffle (bool): Whether to shuffle the dataset.
-        
-        Returns:
-            DataLoader: The dataloader for the dataset.
+        This method creates and stores three dataloaders as class attributes:
+        - self.train_loader
+        - self.valid_loader
+        - self.test_loader
         """
         dl_cfg = self.metadata['config'].get("dataloader", {})
         batch_size: int = dl_cfg.get("batch_size", 1)
 
         if self.model_type == "NN":
-            logging.info(f"Creating dataloader for NN model with batch size {batch_size}.")
-            loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+            logging.info(f"Creating dataloaders for NN model with batch size {batch_size}.")
+            self.train_loader = DataLoader(self.train_set, batch_size=batch_size, shuffle=True)
+            self.valid_loader = DataLoader(self.valid_set, batch_size=batch_size, shuffle=False)
+            self.test_loader = DataLoader(self.test_set, batch_size=batch_size, shuffle=False)
 
         elif self.model_type == "LSTM":
-            logging.info(f"Creating dataloader for LSTM model with batch size {batch_size}.")
-            X, y = self._create_sequences(dataset)
-            loader = DataLoader(TensorDataset(X, y), batch_size=batch_size, shuffle=shuffle)
+            logging.info(f"Creating dataloaders for LSTM model with batch size {batch_size}.")
+            # Create sequences for each set
+            self.train_set = TensorDataset(self._create_lstm_sequences(self.train_set))
+            self.valid_set = TensorDataset(self._create_lstm_sequences(self.valid_set))
+            self.test_set = TensorDataset(self._create_lstm_sequences(self.test_set))
+            
+            # Create dataloaders
+            self.train_loader = DataLoader(self.train_set, batch_size=batch_size, shuffle=True)
+            self.valid_loader = DataLoader(self.valid_set, batch_size=batch_size, shuffle=False)
+            self.test_loader = DataLoader(self.test_set, batch_size=batch_size, shuffle=False)
 
         elif self.model_type == "GNN":
-            logging.info(f"Creating dataloader for GNN model with batch size {batch_size}.")
+            logging.info(f"Creating dataloaders for GNN model with batch size {batch_size}.")
             gnn_cfg = dl_cfg.get("gnn", {})
-            adj = gnn_cfg.get("adjacency", None)
-            custom_fn = gnn_cfg.get("custom_fn", None)
-            # Build graph objects for each trajectory sample.
-            data_list = [self._create_graph(sample, adj=adj, custom_fn=custom_fn) for sample in dataset]
-            loader = GeoDataLoader(data_list, batch_size=batch_size, shuffle=shuffle)
+            # Use provided adj matrix if available, otherwise try to get from config (TODO: does not support dynamic graphs yet)
+            adj = self.adj if self.adj is not None else gnn_cfg.get("adjacency", None)
+            
+            # Build graph objects for each set
+            self.train_set = self._create_gnn_sequences(self.train_set, adj)
+            self.valid_set = self._create_gnn_sequences(self.valid_set, adj)
+            self.test_set = self._create_gnn_sequences(self.test_set, adj)
+            
+            # Create dataloaders
+            # Note: we use a GeoDataLoader for each trajectory in the dataset, with the batch size being the length of the trajectory.
+            # This is because we want to ensure that each trajectory is processed as a whole, and not split into smaller batches.
+            self.train_loader = [GeoDataLoader(_traj, batch_size=len(_traj), shuffle=False) for _traj in self.train_set]
+            self.valid_loader = [GeoDataLoader(_traj, batch_size=len(_traj), shuffle=False) for _traj in self.valid_set]
+            self.test_loader = [GeoDataLoader(_traj, batch_size=len(_traj), shuffle=False) for _traj in self.test_set]
 
         else:
             raise ValueError(f"Unknown model type: {self.model_type}")
 
-        return loader
+    def _create_gnn_sequences(
+        self, dataset: list[torch.Tensor], adj: Optional[Union[torch.Tensor, np.ndarray]] = None) -> list[PyGData]:
+        """
+        Create a list of PyTorch Geometric Data objects from a list of tensors.
+        
+        Args:
+            dataset (list[torch.Tensor]): List of tensors, each of shape (T, n_state_features + n_control_features)
+            adj (torch.Tensor or np.ndarray, optional): Adjacency matrix of shape (n_nodes, n_nodes)
+        
+        Returns:
+            list[PyGData]: List of PyTorch Geometric Data objects
+        """
+        seq_length = self.metadata['delay'] + 1
+        n_nodes = self.n_nodes
+        n_features_per_node = self.metadata['n_state_features'] // n_nodes
+        data_list = []
+        
+        for traj in dataset:
+            T = traj.shape[0]
+            seq = []
+            if T <= seq_length:
+                continue  # Skip trajectories that are too short
+            for i in range(T - seq_length):
+                # Get states for the sequence window
+                states = traj[i:i + seq_length, :self.metadata['n_state_features']]  # [seq_length, n_state_features]
+                # Get control at the last step of the sequence
+                controls = traj[i + seq_length - 1, -self.metadata['n_control_features']:]  # [n_control_features]
+                
+                # Reshape states to group features by node
+                # From [seq_length, n_state_features] to [n_nodes, seq_length * n_features_per_node]
+                states = states.reshape(seq_length, n_nodes, n_features_per_node)  # [seq_length, n_nodes, n_features_per_node]
+                states = states.permute(1, 0, 2)  # [n_nodes, seq_length, n_features_per_node]
+                states = states.reshape(n_nodes, -1)  # [n_nodes, seq_length * n_features_per_node]
+                seq.append(self._create_pyg_data(states, controls, adj))
+            data_list.append(seq)
+        return data_list
 
-    def _create_sequences(
+    def _create_pyg_data(self,
+        states: torch.Tensor,
+        controls: torch.Tensor,
+        adj: Optional[Union[torch.Tensor, np.ndarray]] = None,
+    ) -> PyGData: # TODO: this implmentation does not support dynamic graphs yet.
+        """
+        Create a graph from a trajectory using an optional adjacency matrix.
+        
+        Args:
+            states (torch.Tensor): Node feature matrix of shape (n_nodes, n_total_features)
+            controls (torch.Tensor): Control input array of shape (n_control_features, )
+            adj (torch.Tensor or np.ndarray, optional): Adjacency matrix of shape (n_nodes, n_nodes)
+        
+        Returns:
+            PyGData: PyTorch Geometric Data object with node features and optional edge information
+        """
+        
+        # Convert numpy array to torch tensor if needed
+        if isinstance(adj, np.ndarray):
+            adj = torch.tensor(adj, dtype=self.dtype, device=states.device)
+        else:
+            adj = adj.to(states.device)
+        
+        # Verify node count matches
+        if adj.size(0) != self.n_nodes or adj.size(1) != self.n_nodes:
+            raise ValueError(f"Adjacency matrix shape {adj.shape} does not match the number of nodes {self.n_nodes}.")
+        
+        # Convert adjacency matrix to edge_index and edge_attr using PyG
+        from torch_geometric.utils import dense_to_sparse
+        edge_index, edge_attr = dense_to_sparse(adj)
+        return PyGData(x=states, u=controls, edge_index=edge_index, edge_attr=edge_attr)
+
+    def _create_lstm_sequences(
         self, dataset: list[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
         # Create sliding window sequences for LSTM models.
         # For each trajectory (assumed to be of shape (T, n_state_features + n_control_features))
@@ -442,41 +475,61 @@ class TrajectoryManager:
         y_tensor = torch.stack(y_list)
         return X_tensor, y_tensor
 
-    def process_all(self) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
+    def process_all(self, steps: Optional[List[str]] = None) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
         """
-        # TODO: change this to allow user-defined processing steps
-        Run the full processing pipeline:
-          1. Load raw data.
-          2. Preprocess and subset.
-          3. Apply scaling.
-          4. Apply delay embedding.
-          5. (Optionally) generate weak-form parameters.
-          6. Create a dataset.
-          7. Split the dataset.
-          8. Create dataloaders.
+        Run the data processing pipeline with user-defined steps.
         
         Args:
-            path (str): Path to the raw data file.
+            steps (List[str], optional): List of processing steps to execute in order.
+                If None, uses default pipeline. Available steps:
+                - 'load_data': Load raw data from file
+                - 'data_truncation': Truncate data according to config
+                - 'scaling': Apply scaling to data
+                - 'delay_embedding': Apply delay embedding
+                - 'weak_form': Generate weak form parameters
+                - 'create_dataset': Create dataset from processed data
+                - 'split_dataset': Split into train/val/test sets
+                - 'create_dataloaders': Create dataloaders for each split
         
         Returns:
             A tuple containing:
-              - A tuple of (train_loader, valid_loader, test_loader).
-              - A tuple of (train_set, valid_set, test_set) tensors.
-              - A metadata dictionary.
+              - A tuple of (train_loader, valid_loader, test_loader)
+              - A tuple of (train_set, valid_set, test_set) tensors
+              - A metadata dictionary
         """
-        self.load_data(self.data_path)
-        self.data_truncation()
-        self.apply_scaling()
-        if self.model_type != 'LSTM':
-            self.apply_delay_embedding()
-        if self.enable_weak_form:
-            self.generate_weak_form_params()
-        self.create_dataset()
-        splited_datasets = self.split_dataset()
-        shuffle = [True, False, False]
-        loaders = [self.create_dataloader(ds, sh) for ds, sh in zip(splited_datasets, shuffle)]
-        logging.info(f"Data processing complete. Train/Validation/Test sizes: {len(splited_datasets[0])}, {len(splited_datasets[1])}, {len(splited_datasets[2])}.")
-        return loaders, splited_datasets, self.metadata
+        # Define the default pipeline if no steps provided
+        if steps is None:
+            steps = [
+                'load_data',
+                'data_truncation',
+                'scaling',
+                'delay_embedding',
+                'weak_form',
+                'create_dataset',
+                'split_dataset',
+                'create_dataloaders'
+            ]
+        
+        # Define step mapping
+        step_functions = {
+            'load_data': lambda: self.load_data(self.data_path),
+            'data_truncation': self.data_truncation,
+            'scaling': self.apply_scaling,
+            'delay_embedding': lambda: self.apply_delay_embedding() if self.model_type == 'NN' else None,
+            'weak_form': lambda: self.generate_weak_form_params() if self.enable_weak_form else None,
+            'create_dataset': self.create_dataset,
+            'split_dataset': lambda: self.split_dataset(),
+            'create_dataloaders': self.create_dataloaders
+        }
+        
+        # Execute each step in order
+        for step in steps:
+            if step not in step_functions:
+                raise ValueError(f"Unknown processing step: {step}")
+            step_functions[step]()
+        
+        logging.info(f"Data processing complete. Train/Validation/Test sizes: {len(self.train_set)}, {len(self.valid_set)}, {len(self.test_set)}.")
+        return (self.train_loader, self.valid_loader, self.test_loader), (self.train_set, self.valid_set, self.test_set), self.metadata
 
     def __getitem__(self, index: int) -> torch.Tensor:
         """
