@@ -1,4 +1,4 @@
-import torch
+import torch, random
 from typing import Tuple
 
 from .trainer_base import TrainerBase

@@ -1,0 +1,31 @@
+data:
+  path: '../../src/data/dataset/aircraft_dyn_chirp.npz'
+  n_samples: 1000
+  n_steps: 201
+  n_nodes: 24
+  delay: 18 # 0 for no delay
+  double_precision: false
+
+scaling:
+  mode: "none"
+
+weak_form:
+  enabled: true
+  parameters: [13, 2, 2, 2]  # example values; adjust as needed
+
+split:
+  train_frac: 0.75
+  
+model:
+  name: 'aircraft_dyn_wGKBF'
+  type: "GNN"   # Options: "NN", "LSTM", "GNN"
+  encoder_layers: 1
+  processor_layers: 1
+  decoder_layers: 1
+  latent_dimension: 64
+  koopman_dimension: 16
+
+training:
+  n_epochs: 2000
+  save_interval: 50
+  load_checkpoint: false

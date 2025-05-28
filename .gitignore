@@ -3,3 +3,4 @@
 **/*.log
 **/*.png
 **/*.pt
+**/dev.ipynb

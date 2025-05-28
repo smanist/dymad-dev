@@ -276,7 +276,7 @@ class TrajectoryManager:
             "ordInt": ordint,
             "alpha": alpha,
         }
-        self.metadata["weakDynParam"] = self.weak_dyn_param
+        self.metadata["weak_dyn_param"] = self.weak_dyn_param
         logging.info("Weak form parameters generated.")
 
     def create_dataset(self) -> torch.Tensor: # TODO: this needs to be looked at again, as only some of the projects use this data structure
@@ -365,7 +365,8 @@ class TrajectoryManager:
             self.train_set = self._create_gnn_sequences(self.train_set, adj)
             self.valid_set = self._create_gnn_sequences(self.valid_set, adj)
             self.test_set = self._create_gnn_sequences(self.test_set, adj)
-            
+            self.t = [ti[:-(self.metadata['delay']+1)] for ti in self.t]
+            self.t = [self.t[0]] if len(set(map(len, self.t))) == 1 else self.t
             # Create dataloaders
             # Note: we use a GeoDataLoader for each trajectory in the dataset, with the batch size being the length of the trajectory.
             # This is because we want to ensure that each trajectory is processed as a whole, and not split into smaller batches.
@@ -411,6 +412,8 @@ class TrajectoryManager:
                 states = states.reshape(n_nodes, -1)  # [n_nodes, seq_length * n_features_per_node]
                 seq.append(self._create_pyg_data(states, controls, adj))
             data_list.append(seq)
+        # Update metadata
+        self.metadata['n_features_per_node'] = seq_length*n_features_per_node
         return data_list
 
     def _create_pyg_data(self,

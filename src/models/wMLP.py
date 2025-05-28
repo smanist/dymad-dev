@@ -140,19 +140,19 @@ class weakFormMLP(ModelBase):
             u0 = us  # Constant control already provided
             
         # Initial latent state
-        w0 = self.encoder(self.features(x0, u0))
+        z0 = self.encoder(self.features(x0, u0))
         # Projection-based dynamics
         def _func(t_val, w):
             # Decode w to x at every step
             x = self.decoder(w).detach()
             # Combine with control input and get derivative in latent space
-            _, w_dot, _ = self(x, u0)
-            return w_dot.squeeze().detach()
+            _, z_dot, _ = self(x, u0)
+            return z_dot.squeeze().detach()
     
         # Integrate using ODE solver
-        w_traj = odeint(_func, w0.squeeze(), torch.DoubleTensor(ts).to(device), method=method)
+        z_traj = odeint(_func, z0.squeeze(), torch.DoubleTensor(ts).to(device), method=method)
         
         # Decode trajectory
-        x_pred = self.decoder(w_traj)
+        x_pred = self.decoder(z_traj)
         
         return x_pred

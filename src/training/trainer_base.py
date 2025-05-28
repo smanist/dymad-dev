@@ -54,12 +54,16 @@ class TrainerBase:
     
     def _setup_data(self) -> None:
         """Setup data loaders and datasets."""
-        from src.data.trajectory_manager import TrajectoryManager
-        tm = TrajectoryManager(self.metadata, device=self.device)
+        tm = self._create_trajectory_manager()
         self.dataloaders, self.datasets, self.metadata = tm.process_all()
         self.train_loader, self.validation_loader, self.test_loader = self.dataloaders
         self.train_set, self.validation_set, self.test_set = self.datasets
         self.t = torch.tensor(tm.t[0])  # TODO: check trajectory of different lengths
+    def _create_trajectory_manager(self):
+        """Create and return a TrajectoryManager instance.
+        Override this method in subclasses to customize TrajectoryManager creation."""
+        from src.data.trajectory_manager import TrajectoryManager
+        return TrajectoryManager(self.metadata, device=self.device)
     
     def _setup_model(self) -> None:
         """Setup model, optimizer, scheduler and criterion."""
@@ -89,13 +93,7 @@ class TrainerBase:
     
     def evaluate_rmse(self, split: str = 'test', plot: bool = False) -> float:
         """Calculate RMSE on a random trajectory from the specified split."""
-        from src.losses.evaluation import prediction_rmse
-        dataset = getattr(self, f"{split}_set")
-        trajectory = random.choice(dataset)
-        return prediction_rmse(
-            self.model, trajectory, self.t, 
-            self.metadata, self.model_name, plot=plot
-        )
+        raise NotImplementedError("Subclasses must implement evaluate_rmse")
     
     def save_if_best(self, val_loss: float, epoch: int) -> bool:
         """Save model if validation loss improved."""
