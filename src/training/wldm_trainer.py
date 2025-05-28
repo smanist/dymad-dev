@@ -2,15 +2,15 @@ import torch, random
 from typing import Tuple
 
 from .trainer_base import TrainerBase
-from src.models.wMLP import weakFormMLP
+from src.models.wLDM import weakFormLDM
 from src.losses.weak_form import weak_form_loss_batch
 
-class WMLPTrainer(TrainerBase):
+class wLDMTrainer(TrainerBase):
     """Trainer class for weak form MLP models."""
     
     def __init__(self, config_path: str):
         """Initialize wMLP trainer with configuration."""
-        super().__init__(config_path, weakFormMLP)
+        super().__init__(config_path, weakFormLDM)
     
     def train_epoch(self) -> float:
         """Train the model for one epoch."""
