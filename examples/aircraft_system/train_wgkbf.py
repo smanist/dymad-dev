@@ -33,8 +33,8 @@ if __name__ == "__main__":
     edgeIdx = pyg_utils.to_undirected(edgeIdx) # undirected graph
     edgeIdx = pyg_utils.add_self_loops(edgeIdx)[0] # self-connection
 
-    adj = pyg_utils.to_dense_adj(edgeIdx)[0]
+    adj_mat = pyg_utils.to_dense_adj(edgeIdx)[0]
 
     config_path = 'config_wgkbf.yaml'
-    trainer = wGKBFTrainer(config_path, adj)
+    trainer = wGKBFTrainer(config_path, adj_mat=adj_mat)
     trainer.train()

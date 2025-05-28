@@ -7,20 +7,20 @@ from src.models.wKBF import weakGraphKBF
 class wGKBFTrainer(TrainerBase):
     """Trainer class for weak form graph Koopman bilinear form (wGKBF) models."""
     
-    def __init__(self, config_path: str, adj: torch.Tensor):
+    def __init__(self, config_path: str, adj_mat: torch.Tensor):
         """Initialize wGKBF trainer with configuration.
         
         Args:
             config_path: Path to the configuration file
-            adj: Adjacency matrix tensor for the graph structure
+            adj_mat: Adjacency matrix tensor for the graph structure
         """
-        self.adj = adj
+        self.adj_mat = adj_mat
         super().__init__(config_path, weakGraphKBF)
     
     def _create_trajectory_manager(self):
         """Create TrajectoryManager with adjacency matrix for graph-based models."""
         from src.data.trajectory_manager import TrajectoryManager
-        return TrajectoryManager(self.metadata, device=self.device, adj=self.adj)
+        return TrajectoryManager(self.metadata, device=self.device, adj=self.adj_mat)
     
     def train_epoch(self) -> float:
         """Train the model for one epoch."""
