@@ -19,9 +19,8 @@ split:
 model:
   name: 'aircraft_dyn_wGKBF'
   type: "GNN"   # Options: "NN", "LSTM", "GNN"
-  encoder_layers: 1
-  processor_layers: 1
-  decoder_layers: 1
+  encoder_layers: 2
+  decoder_layers: 2
   latent_dimension: 64
   koopman_dimension: 16
 

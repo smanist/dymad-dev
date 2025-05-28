@@ -27,6 +27,8 @@ class weakGraphKBF(ModelBase):
         self.in_out_dimension = data_meta['delay'] + 1
         self.latent_dimension = model_config.get('latent_dimension', 64)
         self.koopman_dimension = model_config.get('koopman_dimension', 16)
+        self.n_encoder_layers = model_config.get('encoder_layers', 2)
+        self.n_decoder_layers = model_config.get('decoder_layers', 2)
         self.system_dimension = self.n_nodes * self.koopman_dimension
 
         # Create KBF operators: first for autonomous dynamics (A) then one per control (B_i)
@@ -35,21 +37,19 @@ class weakGraphKBF(ModelBase):
             for _ in range(self.n_control_features + 1)
         ])
 
-        self.n_gnn_layers = model_config.get('n_gnn_layers', 2)
-
         # Build GNN encoder: maps node features to Koopman space
         self.encoder_layers = self._build_gnn(
             input_dimension=self.in_out_dimension,
             latent_dimension=self.latent_dimension,
             output_dimension=self.koopman_dimension,
-            num_layers=self.n_gnn_layers
+            num_layers=self.n_encoder_layers
         )
         # Build GNN decoder: maps Koopman space back to node features
         self.decoder_layers = self._build_gnn(
             input_dimension=self.koopman_dimension,
             latent_dimension=self.latent_dimension,
             output_dimension=self.in_out_dimension,
-            num_layers=self.n_gnn_layers
+            num_layers=self.n_decoder_layers
         )
 
     def _build_gnn(self, input_dimension: int, latent_dimension: int, output_dimension: int, num_layers: int) -> nn.ModuleList:
