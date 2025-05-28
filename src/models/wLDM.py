@@ -4,9 +4,9 @@ import numpy as np
 from typing import Tuple, Dict, Union
 from .model_base import ModelBase
 
-class weakFormMLP(ModelBase):
+class weakFormLDM(ModelBase):
     def __init__(self, model_config: Dict, data_meta: Dict):
-        super(weakFormMLP, self).__init__()
+        super(weakFormLDM, self).__init__()
         self.n_state_features = data_meta.get('n_state_features')
         self.n_control_features = data_meta.get('n_control_features')
         self.n_total_features = data_meta.get('n_total_features')        

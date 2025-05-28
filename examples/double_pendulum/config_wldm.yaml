@@ -19,7 +19,7 @@ dataloader:
   batch_size: 16
   
 model:
-  name: 'double_pendulum_wmlp'
+  name: 'double_pendulum_wldm'
   type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   processor_layers: 1

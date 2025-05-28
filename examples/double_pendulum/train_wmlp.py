@@ -4,15 +4,15 @@ project_root = Path().resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 logging.basicConfig(
-    filename='train_wmlp.log',  
+    filename='train_wldm.log',  
     filemode='w',  
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )  
 
-from src.training.wmlp_trainer import WMLPTrainer
+from src.training.wldm_trainer import WLDMTrainer
 
 if __name__ == "__main__":
-    config_path = 'config_wmlp.yaml'
-    trainer = WMLPTrainer(config_path)
+    config_path = 'config_wldm.yaml'
+    trainer = WLDMTrainer(config_path)
     trainer.train()
