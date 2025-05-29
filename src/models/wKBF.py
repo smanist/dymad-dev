@@ -8,6 +8,7 @@ from typing import Dict, Union, Tuple
 class weakKBF(ModelBase): 
     # TODO: can remove weak in naming since weak form is only used in loss function
     # TODO: make the interface interchangeable with NODE (can train with NODE trainer and weak form trainer to show difference)
+    # TODO: model.predict() should be a general function, does not need to change with each model, edge_index can ge **kwargs
     def encoder(self, z: torch.Tensor, u: torch.Tensor, **kwargs) -> torch.Tensor:
         # For the vanilla wKBF, use identity mapping (i.e. no transformation).
         return z
