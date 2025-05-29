@@ -88,7 +88,6 @@ class NODE(ModelBase):
             Predicted trajectory tensor (time_steps, batch_size, n_state_features)
         """
         device = x0.device
-        batch_size = x0.shape[0] if x0.dim() > 1 else 1
         
         # Combine initial state with control input
         z0 = self.encoder(x0, us)

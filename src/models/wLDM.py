@@ -150,9 +150,9 @@ class weakFormLDM(ModelBase):
             return z_dot.squeeze().detach()
     
         # Integrate using ODE solver
-        z_traj = odeint(_func, z0.squeeze(), torch.DoubleTensor(ts).to(device), method=method)
+        z_trajectory = odeint(_func, z0.squeeze(), torch.DoubleTensor(ts).to(device), method=method)
         
         # Decode trajectory
-        x_pred = self.decoder(z_traj)
+        x_trajectory = self.decoder(z_trajectory)
         
-        return x_pred
+        return x_trajectory
