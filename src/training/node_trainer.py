@@ -1,4 +1,4 @@
-import torch
+import torch, random
 from typing import Tuple
 
 from .trainer_base import TrainerBase
@@ -56,3 +56,13 @@ class NODETrainer(TrainerBase):
                 total_loss += loss.item()
                 
         return total_loss / len(dataloader)
+    
+    def evaluate_rmse(self, split: str = 'test', plot: bool = False) -> float:
+        """Calculate RMSE on a random trajectory from the specified split."""
+        from src.losses.evaluation import prediction_rmse
+        dataset = getattr(self, f"{split}_set")
+        trajectory = random.choice(dataset)
+        return prediction_rmse(
+            self.model, trajectory, self.t, 
+            self.metadata, self.model_name, plot=plot
+        )

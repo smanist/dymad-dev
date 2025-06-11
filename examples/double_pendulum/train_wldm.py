@@ -10,9 +10,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )  
 
-from src.training.wldm_trainer import WLDMTrainer
+from src.training.wldm_trainer import wLDMTrainer
 
 if __name__ == "__main__":
     config_path = 'config_wldm.yaml'
-    trainer = WLDMTrainer(config_path)
+    trainer = wLDMTrainer(config_path)
     trainer.train()

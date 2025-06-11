@@ -96,8 +96,14 @@ class NODE(ModelBase):
         def ode_func(t, z):
             return self.ode_function(t, z)
         
+        # Handle ts conversion properly to avoid tensor warning
+        if isinstance(ts, torch.Tensor):
+            ts_tensor = ts.clone().detach().to(device)
+        else:
+            ts_tensor = torch.tensor(ts, dtype=torch.float32).to(device)
+        
         # Integrate the ODE
-        z_trajectory = odeint(ode_func, z0, torch.tensor(ts, dtype=torch.float32).to(device), method=method)
+        z_trajectory = odeint(ode_func, z0, ts_tensor, method=method)
         
         # Decode the trajectory to get the predicted states
         x_trajectory = self.decoder(z_trajectory)
