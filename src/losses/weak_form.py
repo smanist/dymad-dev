@@ -50,7 +50,7 @@ def weak_form_loss(truth: torch.Tensor, pred: Tuple[torch.Tensor, torch.Tensor, 
     truth_weak = torch.bmm(C_expanded, z_windows).view(-1, z.shape[1])
     pred_weak = torch.bmm(D_expanded, z_dot_windows).view(-1, z_dot.shape[1])
     weak_loss = criterion(pred_weak, truth_weak)
-    
+
     # Compute reconstruction loss
     recon_loss = criterion(truth, x_hat)
     
@@ -74,7 +74,7 @@ def weak_form_loss_batch(batch: torch.Tensor, pred_batch: Tuple[torch.Tensor, to
         Mean weighted loss across the batch
     """
     z_batch, z_dot_batch, x_hat_batch = pred_batch
-    n_states = metadata['n_state_features']
+    n_states = metadata['n_total_state_features']
     
     # Compute loss for each trajectory in the batch
     losses = [

@@ -223,23 +223,8 @@ class TrajectoryManager:
             self.u = [inp[:n_steps] for inp in self.u]
             self.t = [ti[:n_steps] for ti in self.t]
         
-        # Store dt and n_steps for metadata, but don't modify self.t and self.dt
-        metadata_dt_and_n_steps = []
-        for dt, t in zip(self.dt, self.t):
-            # Use the actual length after any truncation for metadata
-            actual_n_steps = len(t)
-            metadata_dt_and_n_steps.append([dt, actual_n_steps])
-        
-        # Check if uniform dt and n_steps for metadata optimization
-        if len(metadata_dt_and_n_steps) > 0:
-            dts = [item[0] for item in metadata_dt_and_n_steps]
-            nsteps = [item[1] for item in metadata_dt_and_n_steps]
-            if len(set(dts)) == 1 and len(set(nsteps)) == 1:
-                # Only store one entry if both dt and n_steps are uniform
-                self.metadata["dt_and_n_steps"] = [metadata_dt_and_n_steps[0]]
-                logging.info("Uniform dt and n_steps detected across all trajectories. Only saving one entry in metadata.")
-            else:
-                self.metadata["dt_and_n_steps"] = metadata_dt_and_n_steps
+        # Store dt and n_steps metadata
+        self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
 
         # Populate metadata.
         self.metadata['delay'] = self.delay
@@ -255,6 +240,34 @@ class TrajectoryManager:
         logging.info(f"Number of state features: {self.metadata['n_state_features']}")
         logging.info(f"Number of control features: {self.metadata['n_control_features']}")
         logging.info(f"Delay embedding size: {self.metadata['delay']}")
+
+    def _create_dt_n_steps_metadata(self) -> List[List[float]]:
+        """
+        Create metadata for dt and n_steps, optimizing storage if values are uniform.
+        
+        Returns:
+            List of [dt, n_steps] pairs. If all trajectories have the same dt and n_steps,
+            returns only one entry for optimization.
+        """
+        # Store dt and n_steps for metadata, but don't modify self.t and self.dt
+        metadata_dt_and_n_steps = []
+        for dt, t in zip(self.dt, self.t):
+            # Use the actual length after any truncation for metadata
+            actual_n_steps = len(t)
+            metadata_dt_and_n_steps.append([dt, actual_n_steps])
+        
+        # Check if uniform dt and n_steps for metadata optimization
+        if len(metadata_dt_and_n_steps) > 0:
+            dts = [item[0] for item in metadata_dt_and_n_steps]
+            nsteps = [item[1] for item in metadata_dt_and_n_steps]
+            if len(set(dts)) == 1 and len(set(nsteps)) == 1:
+                # Only store one entry if both dt and n_steps are uniform
+                logging.info("Uniform dt and n_steps detected across all trajectories. Only saving one entry in metadata.")
+                return [metadata_dt_and_n_steps[0]]
+            else:
+                return metadata_dt_and_n_steps
+        else:
+            return []
 
     def apply_scaling(self) -> None:
         """
@@ -306,7 +319,8 @@ class TrajectoryManager:
             self.t = [ti[:-delay] for ti in self.t]
             # Update the metadata.
             self.metadata["delay"] = delay
-            self.metadata["dt_and_n_steps"] = [[dt, len(t)] for dt, t in zip(self.dt, self.t)]
+            self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
+            self.metadata
         # If delay==0, nothing is changed.
 
     def generate_weak_form_params(self) -> None:
@@ -336,7 +350,7 @@ class TrajectoryManager:
         else:
             raise ValueError("weakParam must be of length 4 or 5.")
 
-        if len(self.metadata["dt_and_n_steps"]) > 1: # TODO
+        if len(self.metadata["dt_and_n_steps"]) > 1:
             raise ValueError("Weak form generation is not currently supported for trajectories with different lengths.")
         
         # Call the generate_weak_weights function to get C, D, and K.
@@ -377,7 +391,9 @@ class TrajectoryManager:
             self.dataset = [np.concatenate([traj, inp], axis=-1) for traj, inp in zip(self.x, self.u)]
         # Convert to torch.Tensor.
         self.dataset = [torch.tensor(entry, dtype=self.dtype, device=self.device) for entry in self.dataset]
-        self.metadata["n_total_features"] = self.dataset[0].shape[-1] # This is observables and control inputs combined
+        self.metadata['n_total_state_features'] = self.metadata['n_state_features']*(self.metadata['delay']+1)
+        self.metadata['n_total_features'] = self.metadata['n_total_state_features'] + self.metadata['n_control_features']
+        assert self.dataset[0].shape[-1] == self.metadata['n_total_features'], f"Dataset shape {self.dataset[0].shape} does not match n_total_features {self.metadata['n_total_features']}"
         
     def split_dataset(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """

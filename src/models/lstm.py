@@ -18,7 +18,7 @@ class LSTM(ModelBase):
         # Extract configuration parameters
         self.n_state_features = data_meta.get('n_state_features')
         self.n_control_features = data_meta.get('n_control_features')
-        self.n_total_features = self.n_state_features + self.n_control_features
+        self.n_total_features = data_meta.get('n_total_features')
         
         # LSTM specific parameters
         self.hidden_dimension = model_config.get('hidden_dimension', 64)

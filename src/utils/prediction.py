@@ -120,7 +120,7 @@ def predict_continuous(
     # Extract final trajectory
     if is_node_trained:
         # NODE: extract state part from full vector
-        x_traj = z_traj[..., :model.n_state_features]
+        x_traj = z_traj[..., :model.n_total_state_features]
     else:
         # Weak form: decode from latent space
         if is_batch:

@@ -23,17 +23,16 @@ class NODETrainer(TrainerBase):
     def _process_batch(self, batch: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Process a batch and return predictions and ground truth states."""
         batch = batch.to(self.device)
-        states = batch[:, :, :self.metadata['n_state_features']]
+        states = batch[:, :, :self.metadata['n_total_state_features']]
         controls = batch[:, :, -self.metadata['n_control_features']:]
-        init_states = states[:, 0, :]  # (batch_size, n_state_features)
+        init_states = states[:, 0, :]  # (batch_size, n_total_state_features)
         
         # Use the actual time points from trajectory manager
         ts = self.t.to(self.device)
-        
         # Use native batch prediction 
         predictions = self.model.predict(init_states, controls, ts, method=self.ode_method)
-        # predictions shape: (time_steps, batch_size, n_state_features)
-        # We need: (batch_size, time_steps, n_state_features)
+        # predictions shape: (time_steps, batch_size, n_total_state_features)
+        # We need: (batch_size, time_steps, n_total_state_features)
         predictions = predictions.permute(1, 0, 2)
         
         return predictions, states

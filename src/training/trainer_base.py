@@ -26,6 +26,7 @@ class TrainerBase:
         self.metadata = self._init_metadata()
         # Setup data
         self._setup_data()
+
         # Setup model and training components
         self._setup_model()
         # Training history
@@ -71,6 +72,8 @@ class TrainerBase:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-3)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.999)
         self.criterion = torch.nn.MSELoss(reduction='mean')
+        logger.info("Model:")
+        logger.info(self.model)
     
     def _load_checkpoint(self) -> Tuple[int, float, List, Dict]:
         """Load checkpoint if it exists."""

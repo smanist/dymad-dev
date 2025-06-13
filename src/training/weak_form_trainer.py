@@ -29,7 +29,7 @@ class WeakFormTrainer(TrainerBase):
             batch = batch.to(self.device)
             self.optimizer.zero_grad(set_to_none=True)
             # Extract states and controls
-            states = batch[:, :, :self.metadata['n_state_features']]
+            states = batch[:, :, :self.metadata['n_total_state_features']]
             controls = batch[:, :, -self.metadata['n_control_features']:]
             # Forward pass - specific to wMLP
             predictions = self.model(states, controls)
@@ -59,7 +59,7 @@ class WeakFormTrainer(TrainerBase):
             for batch in dataloader:
                 batch = batch.to(self.device)
                 # Extract states and controls
-                states = batch[:, :, :self.metadata['n_state_features']]
+                states = batch[:, :, :self.metadata['n_total_state_features']]
                 controls = batch[:, :, -self.metadata['n_control_features']:]
                 # Forward pass
                 predictions = self.model(states, controls)

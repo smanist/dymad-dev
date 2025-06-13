@@ -28,3 +28,7 @@ training:
   n_epochs: 2000
   save_interval: 50
   load_checkpoint: false
+
+plotting:
+  n_rows: 4
+  n_cols: 6 

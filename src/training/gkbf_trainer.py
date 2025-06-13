@@ -30,6 +30,8 @@ class GKBFTrainer(TrainerBase):
         min_lr = 5e-5
 
         for trajectory in self.train_loader:
+            ## NOTE: KBF type models currently do not support batch training, 
+            # so we need to iterate over the trajectories (i.e. batch_size=1)
             batch = next(iter(trajectory)).to(self.device)
             self.optimizer.zero_grad(set_to_none=True)
             # Extract states and controls

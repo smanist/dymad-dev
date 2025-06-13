@@ -27,8 +27,8 @@ def prediction_rmse(model,
     """
     with torch.no_grad():
         # Extract states and controls
-        x_truth = truth[:, :metadata['n_state_features']].detach().cpu().numpy()
-        x0 = truth[0, :metadata['n_state_features']]
+        x_truth = truth[:, :metadata['n_total_state_features']].detach().cpu().numpy()
+        x0 = truth[0, :metadata['n_total_state_features']]
         us = truth[:, -metadata['n_control_features']:]
         
         # Make prediction
@@ -38,7 +38,7 @@ def prediction_rmse(model,
         rmse = np.sqrt(np.mean((x_pred - x_truth)**2))
         
         if plot:
-            plot_trajectory(np.array([x_pred, x_truth]), ts, model_name)
+            plot_trajectory(np.array([x_pred, x_truth]), ts, model_name, metadata)
             
         return rmse
 

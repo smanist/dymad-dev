@@ -15,10 +15,10 @@ class LDM(ModelBase):
     """
     def __init__(self, model_config: Dict, data_meta: Dict):
         super(LDM, self).__init__()
-        self.n_state_features = data_meta.get('n_state_features')
+        self.n_total_state_features = data_meta.get('n_total_state_features')
         self.n_control_features = data_meta.get('n_control_features')
-        self.n_total_features = self.n_state_features + self.n_control_features
-        self.latent_dimension = model_config.get('latent_dimension', 64)
+        self.n_total_features = data_meta.get('n_total_features')
+        self.latent_dimension = model_config.get('latent_dimension', 64)    
         
         # Track training mode to determine prediction method
         self.training_mode = None  # Will be set by trainer: 'node' or 'weak_form'
@@ -46,7 +46,7 @@ class LDM(ModelBase):
         self.decoder_net = self.build_mlp(
             input_dimension=self.latent_dimension,
             latent_dimension=self.latent_dimension,
-            output_dimension=self.n_state_features,
+            output_dimension=self.n_total_state_features,
             num_layers=dec_depth
         )
 
@@ -63,7 +63,7 @@ class LDM(ModelBase):
         Create features by concatenating state and control.
         
         Args:
-            x: State tensor of shape (batch_size, n_state_features)
+            x: State tensor of shape (batch_size, n_total_state_features)
             u: Control tensor of shape (batch_size, n_control_features)
             
         Returns:
@@ -139,8 +139,8 @@ class LDM(ModelBase):
             Full derivative vector with control derivatives zeroed
         """
         # Split state and control parts
-        x = z[..., :self.n_state_features]  # State part
-        u = z[..., self.n_state_features:]  # Control part
+        x = z[..., :self.n_total_state_features]  # State part
+        u = z[..., self.n_total_state_features:]  # Control part
         
         # Use full forward pass: encoder -> dynamics -> decoder
         w = self.features(x, u)  # Combine state and control
@@ -150,7 +150,7 @@ class LDM(ModelBase):
         
         # Create full derivative vector: state derivatives + zero control derivatives
         full_derivatives = torch.zeros_like(z)
-        full_derivatives[..., :self.n_state_features] = x_dot
+        full_derivatives[..., :self.n_total_state_features] = x_dot
         # Control derivatives remain zero (not making predictions on control)
         
         return full_derivatives
@@ -162,8 +162,8 @@ class LDM(ModelBase):
         
         Args:
             x0: Initial state tensor(s):
-                - Single: (n_state_features,) 
-                - Batch: (batch_size, n_state_features)
+                - Single: (n_total_state_features,) 
+                - Batch: (batch_size, n_total_state_features)
             us: Control inputs:
                 - Single: (time_steps, n_control_features)
                 - Batch: (batch_size, time_steps, n_control_features)
@@ -173,7 +173,7 @@ class LDM(ModelBase):
             
         Returns:
             Predicted trajectory tensor(s):
-            - Single: (time_steps, n_state_features)
-            - Batch: (time_steps, batch_size, n_state_features)
+            - Single: (time_steps, n_total_state_features)
+            - Batch: (time_steps, batch_size, n_total_state_features)
         """
         return predict_continuous(self, x0, us, ts, method=method) 
