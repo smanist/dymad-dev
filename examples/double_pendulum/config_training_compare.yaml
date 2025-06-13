@@ -10,7 +10,7 @@ scaling:
 
 weak_form:
   enabled: false  # Will be overridden by script
-  parameters: [13, 2, 2, 2]
+  parameters: [13, 2, 2, 2] # [N, dN, ordpol, ordint]
 
 split:
   train_frac: 0.75
@@ -27,9 +27,9 @@ model:
   latent_dimension: 32
 
 training:
-  n_epochs: 5000
+  n_epochs: 2000
   save_interval: 10
-  load_checkpoint: false
+  load_checkpoint: true
   learning_rate: 1e-3
   ode_method: 'dopri5'
   rtol: 1e-7

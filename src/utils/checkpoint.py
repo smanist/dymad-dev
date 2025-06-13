@@ -24,7 +24,7 @@ def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_chec
         return 0, float("inf"), [], None
 
     logging.info(f"Loading checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path)
+    checkpoint = torch.load(checkpoint_path, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
 
     if not inference_mode:

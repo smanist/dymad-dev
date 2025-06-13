@@ -43,7 +43,7 @@ class TrainerBase:
         """Initialize metadata from config or checkpoint."""
         if os.path.exists(self.checkpoint_path) and self.config['training']['load_checkpoint']:
             logger.info(f"Checkpoint found at {self.checkpoint_path}, overriding the yaml config.")
-            checkpoint = torch.load(self.checkpoint_path)
+            checkpoint = torch.load(self.checkpoint_path, weights_only=False)
             return checkpoint['metadata']
         else:
             logger.info(f"No checkpoint found at {self.checkpoint_path}, using the yaml config.")
