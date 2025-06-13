@@ -1,13 +1,12 @@
+# Import all models
 from .model_base import ModelBase
-from .wKBF import weakKBF, weakGraphKBF
-from .wLDM import weakFormLDM
-from .node import NODE
+from .ldm import LDM
+from .kbf import GKBF
 from .lstm import LSTM
+
 __all__ = [
     "ModelBase",
-    "weakKBF",
-    "weakGraphKBF",
-    "weakFormLDM",
-    "NODE",
+    "GKBF",
+    "LDM",
     "LSTM"
 ]

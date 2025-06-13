@@ -1,17 +1,25 @@
 import torch, random
-from typing import Tuple
-
+from src.models.ldm import LDM
 from .trainer_base import TrainerBase
-from src.models.wLDM import weakFormLDM
 from src.losses.weak_form import weak_form_loss_batch
-
-class wLDMTrainer(TrainerBase):
-    """Trainer class for weak form MLP models."""
+from src.losses.evaluation import prediction_rmse
+class WeakFormTrainer(TrainerBase):
+    """
+    Trainer for weak form Latent Dynamics Models.
+    Uses the unified LDM model with weak form loss.
+    """
     
     def __init__(self, config_path: str):
-        """Initialize wMLP trainer with configuration."""
-        super().__init__(config_path, weakFormLDM)
-    
+        """Initialize weak form trainer with configuration."""
+        super().__init__(config_path, LDM)
+        
+        # Set training mode on the model for prediction method selection
+        self.model.training_mode = 'weak_form'
+        
+        # Weak form loss weights from config
+        self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
+        self.dynamics_weight = self.config['training'].get('dynamics_weight', 1.0)
+            
     def train_epoch(self) -> float:
         """Train the model for one epoch."""
         self.model.train()
@@ -26,8 +34,12 @@ class wLDMTrainer(TrainerBase):
             controls = batch[:, :, -self.metadata['n_control_features']:]
             # Forward pass - specific to wMLP
             predictions = self.model(states, controls)
-            # Use weak form loss
-            loss = weak_form_loss_batch(states, predictions, self.metadata, self.criterion)
+            # Use weak form loss with weights
+            loss = weak_form_loss_batch(
+                states, predictions, self.metadata, self.criterion,
+                reconstruction_weight=self.recon_weight,
+                dynamics_weight=self.dynamics_weight
+            )
             loss.backward()
             self.optimizer.step()
             total_loss += loss.item()
@@ -52,15 +64,18 @@ class wLDMTrainer(TrainerBase):
                 controls = batch[:, :, -self.metadata['n_control_features']:]
                 # Forward pass
                 predictions = self.model(states, controls)
-                # Use weak form loss
-                loss = weak_form_loss_batch(batch, predictions, self.metadata, self.criterion)
+                # Use weak form loss with weights
+                loss = weak_form_loss_batch(
+                    states, predictions, self.metadata, self.criterion,
+                    reconstruction_weight=self.recon_weight,
+                    dynamics_weight=self.dynamics_weight
+                )
                 total_loss += loss.item()
                 
         return total_loss / len(dataloader)
     
     def evaluate_rmse(self, split: str = 'test', plot: bool = False) -> float:
         """Calculate RMSE on a random trajectory from the specified split."""
-        from src.losses.evaluation import prediction_rmse
         dataset = getattr(self, f"{split}_set")
         trajectory = random.choice(dataset)
         return prediction_rmse(

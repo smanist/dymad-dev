@@ -3,14 +3,27 @@ import torch.nn as nn
 import numpy as np
 from typing import Tuple, Dict, Union
 from .model_base import ModelBase
+from src.utils.prediction import predict_continuous
 
-class weakFormLDM(ModelBase):
+class LDM(ModelBase):
+    """
+    Latent Dynamics Model (LDM) that can be trained with either:
+    - NODE trainer (direct ODE integration)
+    - Weak form trainer (weak form loss)
+    
+    This model combines the functionality of both NODE and weakFormLDM.
+    """
     def __init__(self, model_config: Dict, data_meta: Dict):
-        super(weakFormLDM, self).__init__()
+        super(LDM, self).__init__()
         self.n_state_features = data_meta.get('n_state_features')
         self.n_control_features = data_meta.get('n_control_features')
-        self.n_total_features = data_meta.get('n_total_features')        
+        self.n_total_features = self.n_state_features + self.n_control_features
         self.latent_dimension = model_config.get('latent_dimension', 64)
+        
+        # Track training mode to determine prediction method
+        self.training_mode = None  # Will be set by trainer: 'node' or 'weak_form'
+        
+        # Get layer depths from config
         enc_depth = model_config.get('encoder_layers', 2)
         proc_depth = model_config.get('processor_layers', 2)
         dec_depth = model_config.get('decoder_layers', 2)
@@ -36,7 +49,7 @@ class weakFormLDM(ModelBase):
             output_dimension=self.n_state_features,
             num_layers=dec_depth
         )
-    
+
     def init_params(self):
         """Initialize model parameters with Xavier uniform initialization."""
         for module in self.modules():
@@ -57,20 +70,19 @@ class weakFormLDM(ModelBase):
             Combined feature tensor
         """
         return torch.cat([x, u], dim=-1)
-    
+
     def encoder(self, w: torch.Tensor) -> torch.Tensor:
         """
         Map features to latent space.
         
         Args:
-            w: Raw features
-            (state and control concatenated)
+            w: Raw features (state and control concatenated)
             
         Returns:
             Latent representation
         """
         return self.encoder_net(w)
-    
+
     def decoder(self, z: torch.Tensor) -> torch.Tensor:
         """
         Map from latent space back to state space.
@@ -94,7 +106,7 @@ class weakFormLDM(ModelBase):
             Latent state derivative
         """
         return self.dynamics_net(z)
-    
+
     def forward(self, x: torch.Tensor, u: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through the model.
@@ -112,47 +124,57 @@ class weakFormLDM(ModelBase):
         x_hat = self.decoder(z)
         return z, z_dot, x_hat
     
-    def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor], 
-            method: str = 'dopri5') -> Tuple[torch.Tensor, torch.Tensor]:
+    def ode_function(self, t, z):
         """
-        Predict SINGLE trajectory using continuous-time integration.
+        ODE function for direct integration.
+        For NODE training, this should work like the original NODE implementation:
+        - Take full state+control vector
+        - Use all layers (encoder->dynamics->decoder) 
+        - Return state derivatives with zeroed control derivatives
         
         Args:
-            x0: Initial state tensor (n_state_features)
-            us: Control inputs, either:
-                - Constant control (n_control_features)
-                - Full trajectory (time_steps, n_control_features)
-            ts: Time points for prediction (required).
+            t: Time parameter (required by odeint but unused)
+            z: Combined state+control tensor (n_total_features,)
+            
+        Returns:
+            Full derivative vector with control derivatives zeroed
+        """
+        # Split state and control parts
+        x = z[..., :self.n_state_features]  # State part
+        u = z[..., self.n_state_features:]  # Control part
+        
+        # Use full forward pass: encoder -> dynamics -> decoder
+        w = self.features(x, u)  # Combine state and control
+        z_latent = self.encoder(w)  # Encode to latent space
+        z_dot_latent = self.dynamics(z_latent)  # Latent dynamics
+        x_dot = self.decoder(z_dot_latent)  # Decode to state derivatives
+        
+        # Create full derivative vector: state derivatives + zero control derivatives
+        full_derivatives = torch.zeros_like(z)
+        full_derivatives[..., :self.n_state_features] = x_dot
+        # Control derivatives remain zero (not making predictions on control)
+        
+        return full_derivatives
+    
+    def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor], 
+                method: str = 'dopri5') -> torch.Tensor:
+        """
+        Predict trajectory using continuous-time integration.
+        
+        Args:
+            x0: Initial state tensor(s):
+                - Single: (n_state_features,) 
+                - Batch: (batch_size, n_state_features)
+            us: Control inputs:
+                - Single: (time_steps, n_control_features)
+                - Batch: (batch_size, time_steps, n_control_features)
+                For autonomous systems, use zero-valued controls
+            ts: Time points for prediction
             method: ODE solver method
             
         Returns:
-            Tuple of (predicted_states, true_states if available, else None)
+            Predicted trajectory tensor(s):
+            - Single: (time_steps, n_state_features)
+            - Batch: (time_steps, batch_size, n_state_features)
         """
-        from torchdiffeq import odeint
-        
-        device = x0.device
-        
-        # For this model we assume constant control
-        # TODO: should be able to change this to non-constant control
-        if len(us.shape) == 2:  # Full trajectory provided
-            u0 = us[0]  # Just use the first control
-        else:
-            u0 = us  # Constant control already provided
-            
-        # Initial latent state
-        z0 = self.encoder(self.features(x0, u0))
-        # Projection-based dynamics
-        def _func(t_val, w):
-            # Decode w to x at every step
-            x = self.decoder(w).detach()
-            # Combine with control input and get derivative in latent space
-            _, z_dot, _ = self(x, u0)
-            return z_dot.squeeze().detach()
-    
-        # Integrate using ODE solver
-        z_trajectory = odeint(_func, z0.squeeze(), torch.DoubleTensor(ts).to(device), method=method)
-        
-        # Decode trajectory
-        x_trajectory = self.decoder(z_trajectory)
-        
-        return x_trajectory
+        return predict_continuous(self, x0, us, ts, method=method) 

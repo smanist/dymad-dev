@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import Tuple, Dict, Union, List, Optional
+from typing import Tuple, Dict, Union
 from .model_base import ModelBase
 
 class LSTM(ModelBase):

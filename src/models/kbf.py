@@ -4,22 +4,18 @@ import torch.nn as nn
 import numpy as np
 from torch_geometric.nn import SAGEConv
 from typing import Dict, Union, Tuple
+from src.utils.prediction import predict_graph_continuous
 
-class weakKBF(ModelBase): 
-    # TODO: can remove weak in naming since weak form is only used in loss function
-    # TODO: make the interface interchangeable with NODE (can train with NODE trainer and weak form trainer to show difference)
-    # TODO: model.predict() should be a general function, does not need to change with each model, edge_index can ge **kwargs
-    def encoder(self, z: torch.Tensor, u: torch.Tensor, **kwargs) -> torch.Tensor:
-        # For the vanilla wKBF, use identity mapping (i.e. no transformation).
-        return z
+class KBF(ModelBase): 
+    """
+    TODO: KBF class not implemented yet.
+    This will be a non-graph version of the Koopman Bilinear Form model, trained with weak form.
+    """
+    pass
 
-    def decoder(self, z: torch.Tensor, **kwargs) -> torch.Tensor:
-        # For the vanilla wKBF, use identity mapping.
-        return z
-
-class weakGraphKBF(ModelBase):
+class GKBF(ModelBase):
     def __init__(self, model_config: Dict, data_meta: Dict):
-        super(weakGraphKBF, self).__init__()
+        super(GKBF, self).__init__()
         
         # Initialize base parameters
         self.n_state_features = data_meta.get('n_state_features')
@@ -102,66 +98,22 @@ class weakGraphKBF(ModelBase):
 
     def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor], 
                 edge_index: torch.Tensor, method: str = 'dopri5') -> torch.Tensor:
-        """Predict trajectory using continuous-time integration.
+        """Predict single graph trajectory using continuous-time integration.
         
         Args:
-            x0: Initial state tensor of shape (n_nodes, n_features)
-            us: Control inputs tensor. Can be:
-                - Constant control: shape (n_controls,) or (1, n_controls)
-                - Time-varying control: shape (n_timesteps, n_controls)
-            ts: Time points for prediction. Can be:
-                - numpy array of shape (n_timesteps,)
-                - torch tensor of shape (n_timesteps,)
+            x0: Initial node states (n_nodes, n_features)
+            us: Control trajectory (n_steps, n_controls)
+                For autonomous systems, use zero-valued controls
+            ts: Time points for prediction:
+                - numpy array of shape (n_steps,)
+                - torch tensor of shape (n_steps,)
             edge_index: Graph connectivity tensor of shape (2, n_edges)
             method: ODE solver method (default: 'dopri5')
             
         Returns:
-            Predicted trajectory tensor of shape (n_timesteps, n_nodes, n_features)
+            Predicted trajectory tensor (n_steps, n_nodes, n_features)
         """
-        from torchdiffeq import odeint
-        import scipy.interpolate as sp_inter
-        device = x0.device
-
-        if x0.shape[0] != self.n_nodes:
-            raise ValueError(f"x0 must have {self.n_nodes} nodes, got {x0.shape[0]}")
-
-        # Convert ts to tensor if needed
-        if isinstance(ts, np.ndarray):
-            ts = torch.from_numpy(ts).to(device)
-
-        # Handle control inputs
-        if (us.ndim == 1) or (us.ndim == 2 and us.shape[0] == 1):
-            # Constant control
-            u_func = lambda t: us.to(device)
-        else:
-            # Time-varying control: interpolate
-            u_np = us.cpu().detach().numpy()
-            ts_np = ts.cpu().detach().numpy()
-            u_interp = sp_inter.interp1d(ts_np[:len(u_np)], u_np, axis=0, fill_value='extrapolate')
-            u_func = lambda t: torch.tensor(u_interp(t.cpu().detach().numpy()),
-                                          dtype=us.dtype).to(device)
-        t0 = torch.tensor(0.0).to(device)
-        u0 = u_func(t0)
-        # Encode initial state
-        w0 = self.encoder(x0, u0, edge_index)
-        w0 = w0.T.flatten().detach()
-        
-        def ode_func(t, w):
-            # Reshape latent vector to (n_nodes, latent_dim)
-            w_reshaped = w.reshape(-1, self.n_nodes).T
-            u_t = u_func(t)
-            # Get dynamics
-            w_dot = self.dynamics(w_reshaped, u_t)[1]  # Get w_dot from dynamics
-            return w_dot.squeeze().detach()
-
-        # ODE integration
-        w_traj = odeint(ode_func, w0.squeeze(), ts, method=method)
-
-        # Reshape and decode trajectory
-        w_traj = w_traj.reshape(len(ts), -1, self.n_nodes).permute(0, 2, 1)
-        z_pred = [self.decoder(w, edge_index) for w in w_traj]
-        
-        return torch.stack(z_pred)
+        return predict_graph_continuous(self, x0, us, ts, edge_index, method=method)
 
     def forward(self, x: torch.Tensor, u: torch.Tensor, edge_index: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass for graph-based model.

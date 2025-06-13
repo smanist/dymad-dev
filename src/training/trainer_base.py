@@ -1,10 +1,7 @@
-from pathlib import Path
-import sys, yaml, logging, random, os
-import torch
-from typing import Dict, List, Tuple, Optional, Any, Type
+import yaml, logging, os, torch
+from typing import Dict, List, Tuple, Type
 
-# Configure logging
-logging = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 class TrainerBase:
     """Base trainer class for dynamical system models."""
@@ -34,8 +31,8 @@ class TrainerBase:
         # Training history
         self.start_epoch, self.best_loss, self.hist, _ = self._load_checkpoint()
         
-        logging.info(f"Using device: {self.device}")
-        logging.info(f"Double precision: {self.config['data']['double_precision']}")
+        logger.info(f"Using device: {self.device}")
+        logger.info(f"Double precision: {self.config['data']['double_precision']}")
     
     def _load_config(self, config_path: str) -> Dict:
         """Load configuration from YAML file."""
@@ -45,11 +42,11 @@ class TrainerBase:
     def _init_metadata(self) -> Dict:
         """Initialize metadata from config or checkpoint."""
         if os.path.exists(self.checkpoint_path) and self.config['training']['load_checkpoint']:
-            logging.info(f"Checkpoint found at {self.checkpoint_path}, overriding the yaml config.")
+            logger.info(f"Checkpoint found at {self.checkpoint_path}, overriding the yaml config.")
             checkpoint = torch.load(self.checkpoint_path)
             return checkpoint['metadata']
         else:
-            logging.info(f"No checkpoint found at {self.checkpoint_path}, using the yaml config.")
+            logger.info(f"No checkpoint found at {self.checkpoint_path}, using the yaml config.")
             return {'config': self.config}
     
     def _setup_data(self) -> None:
@@ -105,7 +102,7 @@ class TrainerBase:
                 epoch, self.best_loss, self.hist, self.metadata, 
                 self.best_model_path
             )
-            logging.info(f"Best model saved at epoch {epoch+1} with validation loss {self.best_loss:.4f}")
+            logger.info(f"Best model saved at epoch {epoch+1} with validation loss {self.best_loss:.4e}")
             return True
         return False
     
@@ -135,11 +132,11 @@ class TrainerBase:
             self.hist.append([train_loss, val_loss, test_loss])
             
             # Logging
-            logging.info(
+            logger.info(
                 f"Epoch {epoch+1}/{n_epochs}, "
-                f"Train Loss: {train_loss:.4f}, "
-                f"Validation Loss: {val_loss:.4f}, "
-                f"Test Loss: {test_loss:.4f}"
+                f"Train Loss: {train_loss:.4e}, "
+                f"Validation Loss: {val_loss:.4e}, "
+                f"Test Loss: {test_loss:.4e}"
             )
             
             # Plotting
@@ -157,9 +154,9 @@ class TrainerBase:
                 rmse_val = self.evaluate_rmse('validation', plot=False)
                 rmse_test = self.evaluate_rmse('test', plot=True)
             
-                logging.info(
+                logger.info(
                     f"Prediction RMSE - "
-                    f"Train: {rmse_train:.4f}, "
-                    f"Validation: {rmse_val:.4f}, "
-                    f"Test: {rmse_test:.4f}"
+                    f"Train: {rmse_train:.4e}, "
+                    f"Validation: {rmse_val:.4e}, "
+                    f"Test: {rmse_test:.4e}"
                 )

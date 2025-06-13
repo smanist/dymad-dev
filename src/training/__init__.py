@@ -1,12 +1,13 @@
 from .trainer_base import TrainerBase
 from .node_trainer import NODETrainer
-from .wldm_trainer import wLDMTrainer
-from .wgkbf_trainer import wGKBFTrainer
+from .gkbf_trainer import GKBFTrainer
 from .lstm_trainer import LSTMTrainer
+from .weak_form_trainer import WeakFormTrainer
+
 __all__ = [
     "TrainerBase",
     "NODETrainer",
-    "wLDMTrainer",
-    "wGKBFTrainer",
-    "LSTMTrainer"
+    "GKBFTrainer",
+    "LSTMTrainer",
+    "WeakFormTrainer"
 ]

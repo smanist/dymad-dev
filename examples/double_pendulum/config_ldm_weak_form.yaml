@@ -9,7 +9,8 @@ scaling:
   mode: "none"
 
 weak_form:
-  enabled: false
+  enabled: true
+  parameters: [13, 2, 2, 2]  # [N, dN, ordpol, ordint]
   
 split:
   train_frac: 0.75
@@ -18,7 +19,7 @@ dataloader:
   batch_size: 32
   
 model:
-  name: 'double_pendulum_node'
+  name: 'double_pendulum_ldm_weak_form'
   type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   processor_layers: 1
@@ -26,6 +27,10 @@ model:
   latent_dimension: 32
 
 training:
-  n_epochs: 5000
-  save_interval: 100
+  n_epochs: 1000
+  save_interval: 10
   load_checkpoint: false
+  learning_rate: 1e-3
+  # Weak form specific parameters
+  reconstruction_weight: 1.0
+  dynamics_weight: 1.0 

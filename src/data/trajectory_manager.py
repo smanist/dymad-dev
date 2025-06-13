@@ -3,7 +3,7 @@ import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 from torch_geometric.data import Data as PyGData
 from torch_geometric.loader import DataLoader as GeoDataLoader
-from typing import Optional, Callable, Union, Tuple, Dict, List
+from typing import Optional, Union, Tuple, Dict, List
 
 # Import the Scaler and DelayEmbedder from preprocessing.py
 from .preprocessing import Scaler, DelayEmbedder
@@ -86,49 +86,113 @@ class TrajectoryManager:
         self.t = data['t']
         self.u = data.get('u', None)
         logging.info("Raw data loaded.")
-
+        logging.info(f"x shape: {self.x.shape if isinstance(self.x, np.ndarray) else f'{len(self.x)} list of arrays'}")
+        logging.info(f"t shape: {self.t.shape if isinstance(self.t, np.ndarray) else f'{len(self.t)} list of arrays'}")
+        logging.info(f"u shape: {self.u.shape if isinstance(self.u, np.ndarray) else f'{len(self.u)} list of arrays'}")
         # Process x
         if isinstance(self.x, np.ndarray):
-            if self.x.ndim == 3:  # multiple trajectories provided as a 3D array.
-                self.x = [_x for _x in self.x]
-            else:  # single trajectory provided as a 2D array.
-                self.x = [self.x]
-        elif not isinstance(self.x, list):
-            self.x = [self.x]
+            if self.x.ndim == 3:  # multiple trajectories as (n_traj, n_steps, n_features)
+                logging.info(f"Detected x as 3D np.ndarray (n_traj, n_steps, n_features): {self.x.shape}. Splitting into list of arrays.")
+                self.x = [np.array(_x) for _x in self.x]
+            elif self.x.ndim == 2:  # single trajectory (n_steps, n_features)
+                logging.info(f"Detected x as 2D np.ndarray, treating it as a single trajectory (n_steps, n_features): {self.x.shape}. Wrapping as single-element list.")
+                self.x = [np.array(self.x)]
+            else:
+                logging.error(f"Unsupported x shape: {self.x.shape}")
+                raise ValueError(f"Unsupported x shape: {self.x.shape}")
+        elif isinstance(self.x, list):
+            logging.info(f"Detected x as list of arrays.")
+            self.x = [np.array(_x) for _x in self.x]
+        else:
+            logging.error("x must be a numpy array or list of arrays")
+            raise TypeError("x must be a numpy array or list of arrays")
 
         # Process u
         if self.u is None:
-            self.u = [None] * len(self.x)
+            logging.info("No control input u detected. Creating zero-valued control inputs for autonomous system.")
+            # Create zero control inputs with shape (n_steps, 1) for each trajectory
+            self.u = [np.zeros((x.shape[0], 1)) for x in self.x]
         elif isinstance(self.u, np.ndarray):
-            if self.u.ndim == 3:  # multiple trajectories provided as a 3D array.
-                self.u = [_u for _u in self.u]
-            else:  # single trajectory provided as a 2D array.
-                self.u = [self.u]
-        elif not isinstance(self.u, list):
-            self.u = [self.u]
+            if self.u.ndim == 3:  # (n_traj, n_steps, n_controls)
+                logging.info(f"Detected u as 3D np.ndarray (n_traj, n_steps, n_controls): {self.u.shape}. Splitting into list of arrays.")
+                self.u = [np.array(_u) for _u in self.u]
+            elif self.u.ndim == 2:  # (n_steps, n_controls)
+                if len(self.x) > 1:
+                    logging.info(f"Detected u as 2D np.ndarray (n_steps, n_controls) but x is multi-traj ({len(self.x)}). Broadcasting u to all trajectories.")
+                    self.u = [np.array(self.u) for _ in self.x]
+                else:
+                    logging.info(f"Detected u as 2D np.ndarray (n_steps, n_controls): {self.u.shape}. Wrapping as single-element list.")
+                    self.u = [np.array(self.u)]
+            elif self.u.ndim == 1:  # (n_controls,) - constant control input
+                logging.info(f"Detected u as 1D np.ndarray (n_controls,): {self.u.shape}. Expanding to trajectory for each x and broadcasting to all trajectories.")
+                self.u = [np.tile(self.u, (x.shape[0], 1)) for x in self.x]
+            else:
+                logging.error(f"Unsupported u shape: {self.u.shape}")
+                raise ValueError(f"Unsupported u shape: {self.u.shape}")
+        elif isinstance(self.u, list):
+            if len(self.u) == 1 and len(self.x) > 1:
+                # Single u for multiple x, broadcast
+                u0 = np.array(self.u[0])
+                if u0.ndim == 1:
+                    logging.info(f"Detected u as single 1D array in list for multiple x. Expanding and broadcasting to all trajectories.")
+                    self.u = [np.tile(u0, (x.shape[0], 1)) for x in self.x]
+                elif u0.ndim == 2:
+                    logging.info(f"Detected u as single 2D array in list for multiple x. Broadcasting to all trajectories.")
+                    self.u = [np.array(u0) for _ in self.x]
+                else:
+                    logging.error(f"Unsupported u shape in list: {u0.shape}")
+                    raise ValueError(f"Unsupported u shape in list: {u0.shape}")
+            else:
+                logging.info(f"Detected u as list of arrays. Converting all to np.ndarray.")
+                self.u = [np.array(_u) for _u in self.u]
+        else:
+            logging.error("u must be a numpy array or list of arrays")
+            raise TypeError("u must be a numpy array or list of arrays")
+
+        # Ensure x and u have matching trajectory count and length
+        if len(self.x) != len(self.u):
+            logging.error("x and u must have the same number of trajectories")
+            raise ValueError("x and u must have the same number of trajectories")
+        for xi, ui in zip(self.x, self.u):
+            if xi.shape[0] != ui.shape[0]:
+                logging.error("Each trajectory in x and u must have the same number of time steps")
+                raise ValueError("Each trajectory in x and u must have the same number of time steps")
 
         # Process t
         if isinstance(self.t, (float, int)):
-            # Case 1: t is a float/int specifying timestep between samples
+            logging.info(f"Detected t as scalar ({self.t}). Generating uniform time arrays for each trajectory.")
             self.dt = float(self.t)
             self.t = [np.arange(traj.shape[0]) * self.dt for traj in self.x]
             self.dt = [self.dt for _ in self.t]
-        elif isinstance(self.t, list):
-            # Case 2: t is a list of arrays for multiple trajectories
-            self.t = [np.array(ti) for ti in self.t]  # Ensure each element is a numpy array
-            self.dt = [ti[1] - ti[0] for ti in self.t]
         elif isinstance(self.t, np.ndarray):
             if self.t.ndim == 1:
-                # Case 3: t is a 1D array of shape (n_samples,)
-                self.dt = [self.t[1] - self.t[0]]
-                self.t = [self.t]
+                if len(self.x) > 1:
+                    logging.info(f"Detected t as 1D np.ndarray (n_steps,) but x is multi-traj ({len(self.x)}). Broadcasting t to all trajectories.")
+                    self.t = [np.array(self.t) for _ in self.x]
+                    self.dt = [self.t[0][1] - self.t[0][0] for _ in self.x]
+                else:
+                    logging.info(f"Detected t as 1D np.ndarray (n_steps,): {self.t.shape}. Wrapping as single-element list.")
+                    self.dt = [self.t[1] - self.t[0]]
+                    self.t = [self.t]
             elif self.t.ndim == 2:
-                # Case 4: t is a 2D array of shape (n_trajectories, n_samples)
-                self.t = [ti for ti in self.t]  # Split into list of 1D arrays
+                logging.info(f"Detected t as 2D np.ndarray (n_traj, n_steps): {self.t.shape}. Splitting into list of arrays.")
+                self.t = [ti for ti in self.t]
                 self.dt = [ti[1] - ti[0] for ti in self.t]
             else:
+                logging.error(f"Unsupported array dimension for t: {self.t.ndim}")
                 raise ValueError(f"Unsupported array dimension for t: {self.t.ndim}")
+        elif isinstance(self.t, list):
+            if len(self.t) == 1 and len(self.x) > 1:
+                logging.info(f"Detected t as single array in list for multiple x. Broadcasting t to all trajectories.")
+                t0 = np.array(self.t[0])
+                self.t = [t0 for _ in self.x]
+                self.dt = [t0[1] - t0[0] for _ in self.x]
+            else:
+                logging.info(f"Detected t as list of arrays. Converting all to np.ndarray and computing dt for each.")
+                self.t = [np.array(ti) for ti in self.t]
+                self.dt = [ti[1] - ti[0] for ti in self.t]
         else:
+            logging.error("t must be a float, numpy array, or list of numpy arrays")
             raise TypeError("t must be a float, numpy array, or list of numpy arrays")
 
     def data_truncation(self) -> None:
@@ -155,20 +219,38 @@ class TrajectoryManager:
         # Truncate each trajectory's length if n_steps is provided.
         if n_steps is not None:
             self.x = [traj[:n_steps] for traj in self.x]
-            # Apply truncation only if control inputs exist.
-            self.u = [inp[:n_steps] if inp is not None else None for inp in self.u]
+            # Truncate control inputs to match trajectory length
+            self.u = [inp[:n_steps] for inp in self.u]
             self.t = [ti[:n_steps] for ti in self.t]
         
-        # Check if uniform t and dt, if so, only save one
-        self.dt = [self.dt[0]] if len(set(self.dt)) == 1 else self.dt
-        self.t = [self.t[0]] if len(set(map(len, self.t))) == 1 else self.t
+        # Store dt and n_steps for metadata, but don't modify self.t and self.dt
+        metadata_dt_and_n_steps = []
+        for dt, t in zip(self.dt, self.t):
+            # Use the actual length after any truncation for metadata
+            actual_n_steps = len(t)
+            metadata_dt_and_n_steps.append([dt, actual_n_steps])
+        
+        # Check if uniform dt and n_steps for metadata optimization
+        if len(metadata_dt_and_n_steps) > 0:
+            dts = [item[0] for item in metadata_dt_and_n_steps]
+            nsteps = [item[1] for item in metadata_dt_and_n_steps]
+            if len(set(dts)) == 1 and len(set(nsteps)) == 1:
+                # Only store one entry if both dt and n_steps are uniform
+                self.metadata["dt_and_n_steps"] = [metadata_dt_and_n_steps[0]]
+                logging.info("Uniform dt and n_steps detected across all trajectories. Only saving one entry in metadata.")
+            else:
+                self.metadata["dt_and_n_steps"] = metadata_dt_and_n_steps
 
+        # Populate metadata.
         self.metadata['delay'] = self.delay
         self.metadata["n_samples"] = len(self.x)
-        self.metadata["dt_and_n_steps"] = [[dt, len(t)] for dt, t in zip(self.dt, self.t)]
         self.metadata["n_state_features"] = int(self.x[0].shape[-1])
-        self.metadata["n_control_features"] = int(self.u[0].shape[-1]) if self.u[0].ndim > 1 else 0
-
+        # For autonomous systems, we created zero controls with 1 feature, but logically it's 0 controls
+        n_control_features = int(self.u[0].shape[-1])
+        # Check if this is an autonomous system (all controls are zero)
+        is_autonomous = all(np.allclose(u, 0) for u in self.u)
+        self.metadata["n_control_features"] = 0 if is_autonomous and n_control_features == 1 else n_control_features
+        logging.info("Data loaded and processed.")
         logging.info(f"Number of samples: {self.metadata['n_samples']}")
         logging.info(f"Number of state features: {self.metadata['n_state_features']}")
         logging.info(f"Number of control features: {self.metadata['n_control_features']}")
@@ -233,10 +315,12 @@ class TrajectoryManager:
         
         This method uses the generate_weak_weights function from the weak module.
         """
-        logging.info("Generating weak form parameters.")
         weak_cfg = self.metadata['config'].get("weak_form", {})
         if not weak_cfg.get("enabled", False):
             return
+
+        logging.info("Generating weak form parameters with the following configuration:")
+        logging.info(weak_cfg)
 
         weakParam = weak_cfg.get("parameters", None)
         if weakParam is None:

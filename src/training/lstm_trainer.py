@@ -1,6 +1,4 @@
 import torch, random
-from typing import Tuple
-
 from .trainer_base import TrainerBase
 from src.models.lstm import LSTM
 

@@ -17,7 +17,7 @@ split:
   train_frac: 0.75
   
 model:
-  name: 'aircraft_dyn_wGKBF'
+  name: 'aircraft_dyn_GKBF_weak_form'
   type: "GNN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 2
   decoder_layers: 2

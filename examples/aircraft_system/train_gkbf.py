@@ -12,7 +12,7 @@ logging.basicConfig(
 
 import torch
 from torch_geometric import utils as pyg_utils
-from src.training.wgkbf_trainer import wGKBFTrainer
+from src.training.gkbf_trainer import GKBFTrainer
 
 if __name__ == "__main__":
 
@@ -35,6 +35,6 @@ if __name__ == "__main__":
 
     adj_mat = pyg_utils.to_dense_adj(edgeIdx)[0]
 
-    config_path = 'config_wgkbf.yaml'
-    trainer = wGKBFTrainer(config_path, adj_mat=adj_mat)
+    config_path = 'config_gkbf_weak_form.yaml'
+    trainer = GKBFTrainer(config_path, adj_mat=adj_mat)
     trainer.train()

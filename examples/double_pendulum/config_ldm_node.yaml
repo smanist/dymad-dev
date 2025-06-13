@@ -9,17 +9,16 @@ scaling:
   mode: "none"
 
 weak_form:
-  enabled: true
-  parameters: [13, 2, 2, 2]  # example values; adjust as needed
-
+  enabled: false
+  
 split:
   train_frac: 0.75
 
 dataloader:
-  batch_size: 16
+  batch_size: 32
   
 model:
-  name: 'double_pendulum_wldm'
+  name: 'double_pendulum_ldm_node'
   type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   processor_layers: 1
@@ -27,6 +26,11 @@ model:
   latent_dimension: 32
 
 training:
-  n_epochs: 5000
-  save_interval: 100
+  n_epochs: 1000
+  save_interval: 10
   load_checkpoint: false
+  learning_rate: 1e-3
+  # NODE-specific ODE solver parameters
+  ode_method: 'dopri5'
+  rtol: 1e-7
+  atol: 1e-9 

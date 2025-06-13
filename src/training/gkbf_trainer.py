@@ -1,11 +1,12 @@
 import torch, random
 
+from src.models.kbf import GKBF 
 from .trainer_base import TrainerBase
 from src.losses.weak_form import weak_form_loss
-from src.models.wKBF import weakGraphKBF 
+from src.losses.evaluation import prediction_rmse_graph
 
-class wGKBFTrainer(TrainerBase):
-    """Trainer class for weak form graph Koopman bilinear form (wGKBF) models."""
+class GKBFTrainer(TrainerBase):
+    """Trainer class for graph Koopman bilinear form (GKBF) models."""
     
     def __init__(self, config_path: str, adj_mat: torch.Tensor):
         """Initialize wGKBF trainer with configuration.
@@ -15,7 +16,7 @@ class wGKBFTrainer(TrainerBase):
             adj_mat: Adjacency matrix tensor for the graph structure
         """
         self.adj_mat = adj_mat
-        super().__init__(config_path, weakGraphKBF)
+        super().__init__(config_path, GKBF)
     
     def _create_trajectory_manager(self):
         """Create TrajectoryManager with adjacency matrix for graph-based models."""
@@ -35,7 +36,7 @@ class wGKBFTrainer(TrainerBase):
             states = batch.x
             controls = batch.u
             edge_index = batch.edge_index
-            # Forward pass - specific to wMLP
+            # Forward pass
             predictions = self.model(states, controls, edge_index)
             # Use weak form loss
             loss = weak_form_loss(states, predictions, self.metadata['weak_dyn_param'], self.criterion)
@@ -72,7 +73,6 @@ class wGKBFTrainer(TrainerBase):
     
     def evaluate_rmse(self, split: str = 'test', plot: bool = False) -> float:
         """Calculate RMSE on a random trajectory from the specified split."""
-        from src.losses.evaluation import prediction_rmse_graph
 
         dataset = getattr(self, f"{split}_set")
         trajectory = random.choice(dataset)
