@@ -126,8 +126,7 @@ class LDM(ModelBase):
     
     def ode_function(self, t, z):
         """
-        ODE function for direct integration.
-        For NODE training, this should work like the original NODE implementation:
+        ODE function for direct integration for NODE type training (not needed for weak form training)
         - Take full state+control vector
         - Use all layers (encoder->dynamics->decoder) 
         - Return state derivatives with zeroed control derivatives

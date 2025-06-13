@@ -1,8 +1,7 @@
-import torch, random
+import torch
 from src.models.ldm import LDM
 from typing import Tuple
 from .trainer_base import TrainerBase
-from src.losses.evaluation import prediction_rmse
 class NODETrainer(TrainerBase):
     """
     Trainer for Neural ODE models using direct ODE integration loss.
@@ -73,11 +72,3 @@ class NODETrainer(TrainerBase):
                 
         return total_loss / len(dataloader)
     
-    def evaluate_rmse(self, split: str = 'test', plot: bool = False) -> float:
-        """Calculate RMSE on a random trajectory from the specified split."""
-        dataset = getattr(self, f"{split}_set")
-        trajectory = random.choice(dataset)
-        return prediction_rmse(
-            self.model, trajectory, self.t, 
-            self.metadata, self.model_name, plot=plot
-        )

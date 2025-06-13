@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 from src.training.node_trainer import NODETrainer
 from src.training.weak_form_trainer import WeakFormTrainer
-from src.losses.evaluation import prediction_rmse
 from src.utils.plot import plot_hist
 
 def load_and_modify_config(method_name):
@@ -116,7 +115,7 @@ def train_single_method(trainer_class, method_name, method_key):
                     f"Val: {val_loss:.4e} | "
                     f"Test: {test_loss:.4e} | "
                     f"RMSE: {test_rmse:.4e} | "
-                    f"Epoch Time: {avg_epoch_time:.4e}s"
+                    f"Epoch Time: {avg_epoch_time:.2f}s"
                 )
             
             # Save best model
@@ -135,9 +134,6 @@ def train_single_method(trainer_class, method_name, method_key):
         final_test_loss = trainer.evaluate(trainer.test_loader)
         final_test_rmse = trainer.evaluate_rmse('test', plot=True)  # Final prediction plot
         
-        # Plot training history
-        trainer.plot_hist()
-        
         results = {
             'method': method_name,
             'total_training_time': total_training_time,
@@ -153,8 +149,8 @@ def train_single_method(trainer_class, method_name, method_key):
         }
         
         logger.info(f"\n{method_name} - Final Results:")
-        logger.info(f"  Total training time: {total_training_time:.4e} seconds")
-        logger.info(f"  Average epoch time: {avg_epoch_time:.4e} seconds")
+        logger.info(f"  Total training time: {total_training_time:.2f} seconds")
+        logger.info(f"  Average epoch time: {avg_epoch_time:.2f} seconds")
         logger.info(f"  Final train loss: {final_train_loss:.4e}")
         logger.info(f"  Final validation loss: {final_val_loss:.4e}")
         logger.info(f"  Final test loss: {final_test_loss:.4e}")

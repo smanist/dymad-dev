@@ -88,9 +88,36 @@ class TrainerBase:
         """Evaluate the model on the provided dataloader."""
         raise NotImplementedError("Subclasses must implement evaluate")
     
-    def evaluate_rmse(self, split: str = 'test', plot: bool = False) -> float:
-        """Calculate RMSE on a random trajectory from the specified split."""
-        raise NotImplementedError("Subclasses must implement evaluate_rmse")
+    def evaluate_rmse(self, split: str = 'test', plot: bool = False, evaluate_all: bool = False) -> float:
+        """
+        Calculate RMSE on trajectory(ies) from the specified split.
+        
+        Args:
+            split: Dataset split to use ('train', 'validation', 'test')
+            plot: Whether to plot the results (only works when evaluate_all=False)
+            evaluate_all: If True, evaluate all trajectories and return mean RMSE.
+                         If False, evaluate a single random trajectory.
+        
+        Returns:
+            RMSE value (mean RMSE if evaluate_all=True)
+        """
+        import random
+        from src.losses.evaluation import prediction_rmse
+        
+        full_dataset = getattr(self, f"{split}_set")
+        
+        if evaluate_all:
+            plot = False
+            dataset = full_dataset
+        else:
+            dataset = [random.choice(full_dataset)]
+        
+        rmse_values = [
+            prediction_rmse(self.model, trajectory, self.t, self.metadata, self.model_name, plot=plot)
+            for trajectory in dataset
+        ]
+        
+        return sum(rmse_values) / len(rmse_values)
     
     def save_if_best(self, val_loss: float, epoch: int) -> bool:
         """Save model if validation loss improved."""
