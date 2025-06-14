@@ -12,13 +12,16 @@ class LSTM(ModelBase):
     Unlike NODE or wMLP models which use continuous-time formulations,
     LSTM operates as a discrete-time model using Euler-like rollout prediction.
     """
-    def __init__(self, model_config: Dict, data_meta: Dict):
+    def __init__(self, model_config: Dict, metadata: Dict):
         super(LSTM, self).__init__()
         
         # Extract configuration parameters
-        self.n_state_features = data_meta.get('n_state_features')
-        self.n_control_features = data_meta.get('n_control_features')
-        self.n_total_features = data_meta.get('n_total_features')
+        self.n_state_features = metadata.get('n_state_features')
+        self.n_control_features = metadata.get('n_control_features')
+        ## NOTE: metadata['n_total_features'] = n_state_features*(delay+1) + n_control_features
+        ## This is not what we need for LSTM, as delay embedding is not concatenated to the state features
+        ## So computed from n_state_features and n_control_features
+        self.n_total_features = self.n_state_features + self.n_control_features
         
         # LSTM specific parameters
         self.hidden_dimension = model_config.get('hidden_dimension', 64)
@@ -119,7 +122,7 @@ class LSTM(ModelBase):
         """
         raise NotImplementedError(
             "LSTM uses discrete-time transitions, not continuous dynamics. "
-            "Use predict_next() or predict() instead."
+            "Use predict() instead."
         )
     
     def forward(self, x: torch.Tensor, u: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -138,8 +141,7 @@ class LSTM(ModelBase):
         """
         # Combine states and controls
         features = self.features(x, u)
-        batch_size = features.shape[0]
-        
+        batch_size = features.shape[0]        
         # Initialize hidden state
         hidden = self.init_hidden(batch_size, features.device)
         
@@ -149,7 +151,6 @@ class LSTM(ModelBase):
         # Predict next state using the last LSTM output
         next_state = self.linear(lstm_out[:, -1, :])
         next_state = self.activation(next_state)
-        
         # For compatibility with ModelBase interface
         z = hidden[0][-1]  # Last layer's hidden state as latent
         z_dot = torch.zeros_like(next_state)  # Not used in discrete model
@@ -157,27 +158,7 @@ class LSTM(ModelBase):
         
         return z, z_dot, x_hat
     
-    def predict_next(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        """
-        Predict the next state given the current state and control.
-        
-        Args:
-            x: Current state tensor [batch, state_features]
-            u: Current control input [batch, control_features]
-            
-        Returns:
-            Predicted next state [batch, state_features]
-        """
-        # Add sequence dimension
-        x_seq = x.unsqueeze(1) if x.dim() == 2 else x
-        u_seq = u.unsqueeze(1) if u.dim() == 2 else u
-        
-        # Forward pass
-        _, _, next_state = self.forward(x_seq, u_seq)
-        
-        return next_state
-    
-    def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
+    def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """
         Predict trajectory using discrete-time Euler-like rollout.
         
@@ -188,41 +169,29 @@ class LSTM(ModelBase):
         4. Repeating for all time steps
         
         Args:
-            x0: Initial state tensor [batch, state_features]
-            us: Control inputs for all time steps [batch, time_steps, control_features]
-                or [batch, control_features] for constant control
+            x0: Initial state tensor [seq_length, state_features]
+            us: Control inputs for all time steps [time_steps, control_features]
             ts: Time points (used only to determine the number of steps)
             
         Returns:
             Predicted trajectory [time_steps, batch, state_features]
         """
-        # Ensure proper dimensionality
-        batch_size = x0.shape[0] if x0.dim() > 1 else 1
-        x0 = x0.unsqueeze(0) if x0.dim() == 1 else x0
-        
-        # Handle constant control case
-        if us.dim() == 2:  # [batch, control_features]
-            us = us.unsqueeze(1).expand(-1, len(ts), -1)
+        seq_len = x0.shape[0]
         
         # Store initial state as first prediction
-        predictions = [x0]
+        pred_trajectory = x0
         current_state = x0
-        
         # Perform rollout prediction (Euler-like discrete-time stepping)
-        for t in range(1, len(ts)):
+        for t in range(len(ts)-seq_len):
             # Get control at current time step
-            current_control = us[:, t-1]
-            
+            current_control = us[t:t+seq_len]
             # Predict next state using current state and control
-            next_state = self.predict_next(current_state, current_control)
-            
+            _, _, next_state = self.forward(current_state.unsqueeze(0), current_control.unsqueeze(0))
             # Store prediction
-            predictions.append(next_state)
+            pred_trajectory = torch.cat([pred_trajectory, next_state], dim=0)
             
-            # Update current state for next step
-            current_state = next_state
-            
-        # Stack all predictions and transpose to [time_steps, batch, state_features]
-        trajectory = torch.stack(predictions)
-        
-        return trajectory
+            # Update current state for next step (rollout)
+            current_state[:-1] = current_state[1:]
+            current_state[-1] = next_state.squeeze(0)
+                    
+        return pred_trajectory

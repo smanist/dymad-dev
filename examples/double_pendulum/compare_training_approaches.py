@@ -81,6 +81,8 @@ def train_single_method(trainer_class, method_name, method_key):
         epoch_times = []
         best_val_loss = float('inf')
         convergence_epoch = None
+        rmse_history = []
+        rmse_epochs = []
         
         for epoch in range(trainer.start_epoch, n_epochs):
             epoch_start_time = time.time()
@@ -108,6 +110,10 @@ def train_single_method(trainer_class, method_name, method_key):
             if (epoch + 1) % save_interval == 0:
                 test_rmse = trainer.evaluate_rmse('test', plot=True)  # Use default plotter
                 avg_epoch_time = np.mean(epoch_times[-save_interval:])
+                
+                # Record RMSE history
+                rmse_history.append(test_rmse)
+                rmse_epochs.append(epoch + 1)
                 
                 logger.info(
                     f"{method_name} - Epoch {epoch+1:4d}/{n_epochs} | "
@@ -144,6 +150,8 @@ def train_single_method(trainer_class, method_name, method_key):
             'final_test_rmse': final_test_rmse,
             'best_val_loss': best_val_loss,
             'convergence_epoch': convergence_epoch,
+            'rmse_history': rmse_history,
+            'rmse_epochs': rmse_epochs,
             'trainer': trainer,
             'config': config
         }
@@ -171,8 +179,8 @@ def create_final_comparison_plots(node_results, weak_results):
     node_trainer = node_results['trainer']
     weak_trainer = weak_results['trainer']
     
-    # 1. Training History Comparison
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    # 1. Training History Comparison (now with RMSE)
+    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
     fig.suptitle('Training History Comparison: NODE vs Weak Form', fontsize=14)
     
     node_hist = np.array(node_trainer.hist)
@@ -206,6 +214,17 @@ def create_final_comparison_plots(node_results, weak_results):
     axes[1, 0].legend()
     axes[1, 0].grid(True, alpha=0.3)
     
+    # RMSE History
+    axes[0, 2].semilogy(node_results['rmse_epochs'], node_results['rmse_history'], 'b-', 
+                       label='NODE', linewidth=2, marker='o', markersize=4)
+    axes[0, 2].semilogy(weak_results['rmse_epochs'], weak_results['rmse_history'], 'r-', 
+                       label='Weak Form', linewidth=2, marker='s', markersize=4)
+    axes[0, 2].set_xlabel('Epoch')
+    axes[0, 2].set_ylabel('Test RMSE')
+    axes[0, 2].set_title('Test RMSE History')
+    axes[0, 2].legend()
+    axes[0, 2].grid(True, alpha=0.3)
+    
     # Summary metrics
     axes[1, 1].axis('off')
     summary_text = f"""
@@ -222,9 +241,22 @@ def create_final_comparison_plots(node_results, weak_results):
     • Final Test RMSE: {weak_results['final_test_rmse']:.4e}
     
     Speed Ratio: {weak_results['total_training_time']/node_results['total_training_time']:.2f}x
+    
+    RMSE Improvement:
+    • NODE: {node_results['rmse_history'][0]:.4e} → {node_results['rmse_history'][-1]:.4e}
+    • Weak: {weak_results['rmse_history'][0]:.4e} → {weak_results['rmse_history'][-1]:.4e}
     """
     axes[1, 1].text(0.1, 0.9, summary_text, transform=axes[1, 1].transAxes, 
-                    fontsize=10, verticalalignment='top', fontfamily='monospace')
+                    fontsize=9, verticalalignment='top', fontfamily='monospace')
+    
+    # Additional RMSE comparison plot
+    axes[1, 2].bar(['NODE', 'Weak Form'], 
+                   [node_results['final_test_rmse'], weak_results['final_test_rmse']], 
+                   color=['blue', 'red'], alpha=0.7)
+    axes[1, 2].set_ylabel('Final Test RMSE')
+    axes[1, 2].set_title('Final RMSE Comparison')
+    axes[1, 2].grid(True, alpha=0.3)
+    axes[1, 2].set_yscale('log')
     
     plt.tight_layout()
     plt.savefig('final_training_history_comparison.png', dpi=300, bbox_inches='tight')

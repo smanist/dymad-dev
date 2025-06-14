@@ -73,12 +73,7 @@ class GKBFTrainer(TrainerBase):
                 
         return total_loss / len(dataloader)
     
-    def evaluate_rmse(self, split: str = 'test', plot: bool = False) -> float:
-        """Calculate RMSE on a random trajectory from the specified split."""
-
-        dataset = getattr(self, f"{split}_set")
-        trajectory = random.choice(dataset)
-        return prediction_rmse_graph(
-            self.model, trajectory, self.t, 
-            self.metadata, self.model_name, plot=plot
-        )
+    def get_prediction_rmse_func(self):
+        """Return the graph-specific prediction RMSE function."""
+        from src.losses.evaluation import prediction_rmse_graph
+        return prediction_rmse_graph

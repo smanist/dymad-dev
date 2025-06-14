@@ -27,13 +27,16 @@ def prediction_rmse(model,
     """
     with torch.no_grad():
         # Extract states and controls
-        x_truth = truth[:, :metadata['n_total_state_features']].detach().cpu().numpy()
-        x0 = truth[0, :metadata['n_total_state_features']]
+        # use -metadata['n_control_features'] because we don't delay embed controls
+        x_truth = truth[:, :-metadata['n_control_features']]
+        x0 = truth[0, :-metadata['n_control_features']]
         us = truth[:, -metadata['n_control_features']:]
         
         # Make prediction
-        x_pred = model.predict(x0, us, ts, method=method).detach().cpu().numpy()
+        x_pred = model.predict(x0, us, ts, method=method)
         
+        x_truth = x_truth.detach().cpu().numpy()
+        x_pred = x_pred.detach().cpu().numpy()  
         # Calculate RMSE
         rmse = np.sqrt(np.mean((x_pred - x_truth)**2))
         
@@ -92,6 +95,54 @@ def prediction_rmse_graph(model,
         rmse = np.sqrt(np.mean((z_pred_np - z_truth_np)**2))
         
         if plot: # Delay embedding may exist, so we plot the first state
-            plot_trajectory(np.array([z_pred_np[..., 0], z_truth_np[..., 0]]), ts, model_name)
+            plot_trajectory(np.array([z_pred_np[..., 0], z_truth_np[..., 0]]), ts, model_name, metadata)
+            
+        return rmse
+
+def prediction_rmse_lstm(model, 
+                        truth: torch.Tensor,
+                        ts: Union[np.ndarray, torch.Tensor],
+                        metadata: dict,
+                        model_name: str,
+                        plot: bool = False) -> float:
+    """
+    Calculate RMSE between LSTM model predictions and ground truth
+    The input truth is a single trajectory, not a list of trajectories
+    
+    Args:
+        model: The LSTM model to evaluate
+        truth: Ground truth trajectory tensor [time, state_features + control_features]
+        ts: Time points for the trajectory
+        metadata: Metadata dictionary with n_state_features and n_control_features
+        model_name: Name of the model to save the plot
+        plot: Whether to plot the predicted vs ground truth trajectories
+        
+    Returns:
+        float: Root mean squared error between predictions and ground truth
+    """
+    with torch.no_grad():
+        # Extract configuration
+        n_state_features = metadata['n_state_features']
+        n_control_features = metadata['n_control_features']
+        seq_len = metadata['delay'] + 1
+        
+        # Extract states and controls from truth trajectory
+        states_truth = truth[:, :n_state_features]  # [time, state_features]
+        us = truth[:, -n_control_features:]  # [time, control_features]
+        
+        # Get initial state for rollout prediction (single initial state, not sequence)
+        x0 = states_truth[:seq_len]  # [seq_len, state_features]
+        
+        # Make prediction using LSTM's predict method (rollout from initial state)
+        x_pred = model.predict(x0, us, ts).detach().cpu().numpy()
+        
+        # Convert truth to numpy for comparison
+        x_truth = states_truth.detach().cpu().numpy()
+        
+        # Calculate RMSE
+        rmse = np.sqrt(np.mean((x_pred - x_truth)**2))
+        
+        if plot:
+            plot_trajectory(np.array([x_pred, x_truth]), ts, model_name, metadata)
             
         return rmse

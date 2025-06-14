@@ -1,4 +1,4 @@
-import yaml, logging, os, torch
+import yaml, logging, os, torch, random
 from typing import Dict, List, Tuple, Type
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,26 @@ class TrainerBase:
         """Evaluate the model on the provided dataloader."""
         raise NotImplementedError("Subclasses must implement evaluate")
     
+    def get_prediction_rmse_func(self):
+        """
+        Return the appropriate prediction RMSE function for this trainer.
+        Override in subclasses to use different evaluation functions.
+        """
+        from src.losses.evaluation import prediction_rmse
+        return prediction_rmse
+    
+    def get_evaluation_dataset(self, split: str):
+        """
+        Get the dataset for evaluation. Override in subclasses if needed.
+        
+        Args:
+            split: Dataset split to use ('train', 'validation', 'test')
+            
+        Returns:
+            Dataset for evaluation
+        """
+        return getattr(self, f"{split}_set")
+    
     def evaluate_rmse(self, split: str = 'test', plot: bool = False, evaluate_all: bool = False) -> float:
         """
         Calculate RMSE on trajectory(ies) from the specified split.
@@ -104,10 +124,10 @@ class TrainerBase:
         Returns:
             RMSE value (mean RMSE if evaluate_all=True)
         """
-        import random
-        from src.losses.evaluation import prediction_rmse
         
-        full_dataset = getattr(self, f"{split}_set")
+        # Get the appropriate prediction function and dataset
+        prediction_rmse_func = self.get_prediction_rmse_func()
+        full_dataset = self.get_evaluation_dataset(split)
         
         if evaluate_all:
             plot = False
@@ -116,7 +136,7 @@ class TrainerBase:
             dataset = [random.choice(full_dataset)]
         
         rmse_values = [
-            prediction_rmse(self.model, trajectory, self.t, self.metadata, self.model_name, plot=plot)
+            prediction_rmse_func(self.model, trajectory, self.t, self.metadata, self.model_name, plot=plot)
             for trajectory in dataset
         ]
         

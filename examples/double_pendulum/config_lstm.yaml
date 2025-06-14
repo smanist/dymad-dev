@@ -1,0 +1,30 @@
+data:
+  path: '../../src/data/dataset/dp_long.npz'
+  n_samples: 420
+  n_steps: 1501
+  delay: 10 # 0 for no delay
+  double_precision: false
+
+scaling:
+  mode: "none"  # Standardize data for better LSTM training
+
+weak_form:
+  enabled: false  # LSTM doesn't use weak form training
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 64
+  
+model:
+  name: 'double_pendulum_LSTM'
+  type: "LSTM"   # Options: "NN", "LSTM", "GNN"
+  hidden_dimension: 32
+  num_layers: 2
+
+training:
+  n_epochs: 2000
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 1e-3

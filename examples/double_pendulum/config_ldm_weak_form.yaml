@@ -2,7 +2,7 @@ data:
   path: '../../src/data/dataset/dp_long.npz'
   n_samples: 420
   n_steps: 1501
-  delay: 10 # 0 for no delay
+  delay: 0 # 0 for no delay
   double_precision: false
 
 scaling:

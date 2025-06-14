@@ -42,11 +42,11 @@ class TrajectoryManager:
         if self.metadata['config']['data']['delay'] < 0:
             raise ValueError("Delay must be non-negative.")
         self.delay = self.metadata['config']['data']['delay']        
-        self.model_type = self.metadata['config']['model']['type']
+        self.model_type = self.metadata['config']['model']['type'].upper()
         self.enable_weak_form = self.metadata['config']['weak_form']['enabled']
         self.device = device
         self.data_path = self.metadata['config']['data']['path']
-        self.adj = adj  # Store the adjacency matrix
+        self.adj = adj  # Store the adjacency matrix if provided externally
         self.n_nodes = self.metadata['config']['data'].get('n_nodes', None)
         
     def load_data(self, path: str) -> None:
@@ -194,6 +194,15 @@ class TrajectoryManager:
         else:
             logging.error("t must be a float, numpy array, or list of numpy arrays")
             raise TypeError("t must be a float, numpy array, or list of numpy arrays")
+        
+        # Try to load adjacency matrix from data if not provided externally and model type is GNN
+        if self.adj is None and self.model_type == "GNN":
+            try:
+                self.adj = data['adj_mat']
+                logging.info("Loaded adjacency matrix from data file")
+            except KeyError:
+                logging.error("No adjacency matrix found in data file and none provided externally")
+                raise ValueError("Adjacency matrix is required for GNN model type but none was found")
 
     def data_truncation(self) -> None:
         """
@@ -393,7 +402,6 @@ class TrajectoryManager:
         self.dataset = [torch.tensor(entry, dtype=self.dtype, device=self.device) for entry in self.dataset]
         self.metadata['n_total_state_features'] = self.metadata['n_state_features']*(self.metadata['delay']+1)
         self.metadata['n_total_features'] = self.metadata['n_total_state_features'] + self.metadata['n_control_features']
-        assert self.dataset[0].shape[-1] == self.metadata['n_total_features'], f"Dataset shape {self.dataset[0].shape} does not match n_total_features {self.metadata['n_total_features']}"
         
     def split_dataset(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -446,14 +454,18 @@ class TrajectoryManager:
         elif self.model_type == "LSTM":
             logging.info(f"Creating dataloaders for LSTM model with batch size {batch_size}.")
             # Create sequences for each set
-            self.train_set = TensorDataset(self._create_lstm_sequences(self.train_set))
-            self.valid_set = TensorDataset(self._create_lstm_sequences(self.valid_set))
-            self.test_set = TensorDataset(self._create_lstm_sequences(self.test_set))
+            train_X, train_y = self._create_lstm_sequences(self.train_set)
+            valid_X, valid_y = self._create_lstm_sequences(self.valid_set)
+            test_X, test_y = self._create_lstm_sequences(self.test_set)
+            
+            # self.train_set = TensorDataset(train_X, train_y)
+            # self.valid_set = TensorDataset(valid_X, valid_y)
+            # self.test_set = TensorDataset(test_X, test_y)
             
             # Create dataloaders
-            self.train_loader = DataLoader(self.train_set, batch_size=batch_size, shuffle=True)
-            self.valid_loader = DataLoader(self.valid_set, batch_size=batch_size, shuffle=False)
-            self.test_loader = DataLoader(self.test_set, batch_size=batch_size, shuffle=False)
+            self.train_loader = DataLoader(TensorDataset(train_X, train_y), batch_size=batch_size, shuffle=True)
+            self.valid_loader = DataLoader(TensorDataset(valid_X, valid_y), batch_size=batch_size, shuffle=False)
+            self.test_loader = DataLoader(TensorDataset(test_X, test_y), batch_size=batch_size, shuffle=False)
 
         elif self.model_type == "GNN":
             logging.info(f"Creating dataloaders for GNN model with batch size {batch_size}.")
