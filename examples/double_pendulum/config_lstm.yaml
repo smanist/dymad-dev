@@ -1,9 +1,9 @@
 data:
   path: '../../src/data/dataset/dp_long.npz'
-  n_samples: 420
+  n_samples: 100
   n_steps: 1501
-  delay: 10 # 0 for no delay
-  double_precision: false
+  delay: 0 # 0 for no delay
+  double_precision: true
 
 scaling:
   mode: "none"  # Standardize data for better LSTM training
@@ -15,7 +15,7 @@ split:
   train_frac: 0.75
 
 dataloader:
-  batch_size: 64
+  batch_size: 2
   
 model:
   name: 'double_pendulum_LSTM'

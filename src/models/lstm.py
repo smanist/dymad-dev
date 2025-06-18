@@ -66,10 +66,13 @@ class LSTM(ModelBase):
         """
         if device is None:
             device = next(self.parameters()).device
+        
+        # Get the dtype from model parameters to ensure consistency
+        dtype = next(self.parameters()).dtype
             
         hidden = (
-            torch.zeros(self.num_layers, batch_size, self.hidden_dimension, device=device),
-            torch.zeros(self.num_layers, batch_size, self.hidden_dimension, device=device)
+            torch.zeros(self.num_layers, batch_size, self.hidden_dimension, device=device, dtype=dtype),
+            torch.zeros(self.num_layers, batch_size, self.hidden_dimension, device=device, dtype=dtype)
         )
         return hidden
     
@@ -149,8 +152,7 @@ class LSTM(ModelBase):
         lstm_out, hidden = self.lstm(features, hidden)
         
         # Predict next state using the last LSTM output
-        next_state = self.linear(lstm_out[:, -1, :])
-        next_state = self.activation(next_state)
+        next_state = self.activation(self.linear(lstm_out))[:, -1, :]
         # For compatibility with ModelBase interface
         z = hidden[0][-1]  # Last layer's hidden state as latent
         z_dot = torch.zeros_like(next_state)  # Not used in discrete model
@@ -174,24 +176,31 @@ class LSTM(ModelBase):
             ts: Time points (used only to determine the number of steps)
             
         Returns:
-            Predicted trajectory [time_steps, batch, state_features]
+            Predicted trajectory [time_steps, state_features]
         """
         seq_len = x0.shape[0]
         
-        # Store initial state as first prediction
-        pred_trajectory = x0
-        current_state = x0
+        # Initialize trajectory with initial states
+        pred_trajectory = x0.clone()
+        current_state = x0.clone()  # Make a copy to avoid modifying input
+        
         # Perform rollout prediction (Euler-like discrete-time stepping)
-        for t in range(len(ts)-seq_len):
+        for t in range(len(ts) - seq_len):
             # Get control at current time step
             current_control = us[t:t+seq_len]
+            
             # Predict next state using current state and control
             _, _, next_state = self.forward(current_state.unsqueeze(0), current_control.unsqueeze(0))
-            # Store prediction
-            pred_trajectory = torch.cat([pred_trajectory, next_state], dim=0)
             
-            # Update current state for next step (rollout)
-            current_state[:-1] = current_state[1:]
-            current_state[-1] = next_state.squeeze(0)
+            # next_state has shape [1, state_features], squeeze to get [state_features]
+            next_state_squeezed = next_state.squeeze(0)
+            
+            # Store prediction - concatenate along time dimension
+            pred_trajectory = torch.cat([pred_trajectory, next_state_squeezed.unsqueeze(0)], dim=0)
+            
+            # Update current state for next step (sliding window)
+            current_state = current_state.clone() 
+            current_state[:-1] = current_state[1:].clone()
+            current_state[-1] = next_state_squeezed
                     
         return pred_trajectory
