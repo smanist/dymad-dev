@@ -1,0 +1,36 @@
+data:
+  path: '../../src/data/dataset/dp_long.npz'
+  n_samples: 420
+  n_steps: 1501
+  delay: 0 # 0 for no delay
+  double_precision: false
+
+scaling:
+  mode: "none"
+
+weak_form:
+  enabled: true
+  parameters: [13, 2, 2, 2]  # [N, dN, ordpol, ordint]
+  
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 32
+  
+model:
+  name: 'double_pendulum_ldm_weak_form'
+  type: "NN"   # Options: "NN", "LSTM", "GNN"
+  encoder_layers: 1
+  processor_layers: 1
+  decoder_layers: 1
+  latent_dimension: 32
+
+training:
+  n_epochs: 1000
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 1e-3
+  # Weak form specific parameters
+  reconstruction_weight: 1.0
+  dynamics_weight: 1.0 

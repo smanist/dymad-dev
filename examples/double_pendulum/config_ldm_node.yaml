@@ -1,0 +1,36 @@
+data:
+  path: '../../src/data/dataset/dp_long.npz'
+  n_samples: 420
+  n_steps: 1501
+  delay: 0 # 0 for no delay
+  double_precision: false
+
+scaling:
+  mode: "none"
+
+weak_form:
+  enabled: false
+  
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 16
+  
+model:
+  name: 'double_pendulum_ldm_node'
+  type: "NN"   # Options: "NN", "LSTM", "GNN"
+  encoder_layers: 1
+  processor_layers: 1
+  decoder_layers: 1
+  latent_dimension: 32
+
+training:
+  n_epochs: 5000
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 1e-3
+  # NODE-specific ODE solver parameters
+  ode_method: 'dopri5'
+  rtol: 1e-7
+  atol: 1e-9 
