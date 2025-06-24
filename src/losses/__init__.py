@@ -1,7 +1,7 @@
-from .weak_form import weak_form_loss
 from .evaluation import prediction_rmse
+from .weak_form import weak_form_loss
 
 __all__ = [
-    "weak_form_loss",
-    "prediction_rmse"
+    "prediction_rmse",
+    "weak_form_loss"
 ]
