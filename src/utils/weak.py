@@ -11,7 +11,7 @@ def jacobi_polynomial(order: int, coords: np.ndarray) -> np.ndarray:
     alpha = 1, beta = 1 at the given coordinates.
 
     Args:
-        order (int): The highest polynomial order to evaluate (exclusive). 
+        order (int): The highest polynomial order to evaluate (exclusive).
                      We compute polynomials 0, 1, ..., order-1.
         coords (np.ndarray): 1D array of points at which to evaluate.
 
@@ -25,22 +25,21 @@ def jacobi_polynomial(order: int, coords: np.ndarray) -> np.ndarray:
         polynomials[i] = spc.eval_jacobi(i, 1, 1, coords)
     return polynomials
 
-
 def jacobi_polynomial_derivative(order: int, coords: np.ndarray) -> np.ndarray:
     """
     Evaluate the first derivative of the Jacobi polynomials with alpha=1, beta=1
     for orders 1 to `order-1`, at the given coordinates.
 
-    Note: The returned array has shape (order, len(coords)) for consistency, 
+    Note: The returned array has shape (order, len(coords)) for consistency,
           but the 0-th row remains all zeros (since derivative is not computed for n=0).
-    
+
     Args:
         order (int): The highest polynomial order to evaluate (exclusive).
         coords (np.ndarray): 1D array of points at which to evaluate.
 
     Returns:
-        np.ndarray: A 2D array of shape (order, len(coords)) where row i holds the 
-                    derivative of Jacobi polynomial i at those coordinates. 
+        np.ndarray: A 2D array of shape (order, len(coords)) where row i holds the
+                    derivative of Jacobi polynomial i at those coordinates.
                     Row 0 is zeros by definition here.
     """
     derivatives = np.zeros((order, len(coords)))
@@ -64,7 +63,7 @@ def compute_newton_cotes_weights(num_points: int, dx: float, order: int) -> np.n
     """
     Compute Newton-Cotes integration weights for a set of `num_points` samples.
 
-    This function assumes that (num_points - 1) is divisible by `order`. 
+    This function assumes that (num_points - 1) is divisible by `order`.
     For example, for Simpson's 1/3 rule (order=2), we need (num_points - 1) to be even.
 
     Args:
@@ -105,13 +104,13 @@ def generate_weak_weights(
     int_rule_order: int = 4,
 ):
     """
-    Generate weights for a weak formulation approach, returning arrays (C, D) and 
+    Generate weights for a weak formulation approach, returning arrays (C, D) and
     the number of “windows” K along the time dimension.
 
     Steps:
     1. Build a time array of size num_time_points given dt and n_steps
     2. Compute a length scale L = (t_{N-1} - t_0) / 2.
-    3. Generate Jacobi polynomial basis (P0) and its derivative (P1), each 
+    3. Generate Jacobi polynomial basis (P0) and its derivative (P1), each
        with alpha=1, beta=1, on a grid of size n_integration_points in [-1,1].
     4. Construct weighting arrays w0=1-h^2 and w1=-2*h / L for the integrals.
     5. Compute Newton-Cotes integration weights on that grid.

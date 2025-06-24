@@ -1,15 +1,13 @@
-from .weak import generate_weak_weights
+from .checkpoint import load_checkpoint, save_checkpoint
 from .plot import plot_trajectory, plot_hist
-from .checkpoint import (
-    save_checkpoint,
-    load_checkpoint,
-)
 from .prediction import predict_continuous
+from .weak import generate_weak_weights
+
 __all__ = [
     "generate_weak_weights",
-    "plot_trajectory",
-    "plot_hist",
-    "save_checkpoint",
     "load_checkpoint",
+    "plot_hist",
+    "plot_trajectory",
     "predict_continuous",
+    "save_checkpoint",
 ]

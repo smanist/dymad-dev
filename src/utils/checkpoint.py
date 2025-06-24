@@ -1,17 +1,18 @@
 import torch, os, logging
+
 logging=logging.getLogger(__name__)
 
 def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_checkpoint, inference_mode=False):
     """
     Load a checkpoint from the specified path.
-    
+
     Args:
         model: The model to load the state into.
         optimizer: The optimizer to load the state into.
         scheduler: The scheduler to load the state into.
         checkpoint_path (str): Path to the checkpoint file.
         inference_mode (bool, optional): If True, skip loading optimizer and scheduler.
-        
+
     Returns:
         int: The epoch number from which to continue training.
         float: The best loss recorded in the checkpoint.
@@ -30,13 +31,13 @@ def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_chec
     if not inference_mode:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-    
+
     return checkpoint["epoch"], checkpoint["best_loss"], checkpoint["hist"], checkpoint["metadata"]
 
 def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, metadata, checkpoint_path):
     """
     Save the model, optimizer, and scheduler states to a checkpoint file.
-    
+
     Args:
         model: The model to save.
         optimizer: The optimizer to save.
