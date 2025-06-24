@@ -4,7 +4,7 @@ from typing import Optional
 class Scaler:
     """
     A class for handling data normalization and scaling.
-    
+
     This class computes scaling parameters based on the provided dataset and applies
     scaling transformations to the data.
     """
@@ -25,14 +25,14 @@ class Scaler:
     def fit(self, X) -> None:
         """
         Compute scaling parameters based on the provided data.
-        
+
         Args:
             X: array-like or list of array-like, shape (n_samples, n_input_features)
-               Training data. If training data contains multiple trajectories, X should be 
-               a list containing data for each trajectory. Individual trajectories may contain 
+               Training data. If training data contains multiple trajectories, X should be
+               a list containing data for each trajectory. Individual trajectories may contain
                different numbers of samples.
         """
-        
+
         # Process each trajectory: ensure they are 2D arrays.
         processed = []
         for traj in X:
@@ -74,7 +74,7 @@ class Scaler:
         """
         if self._off is None or self._scl is None:
             raise ValueError("Scaler parameters are not initialized. Call `fit` first.")
-        
+
         return [(trajectory - self._off) / self._scl for trajectory in X]
 
     def inverse_transform(self, X) -> list:
@@ -96,16 +96,16 @@ class Scaler:
 class DelayEmbedder:
     """
     A class to perform delay embedding on sequences of data.
-    
+
     For each individual sequence of shape (seq_length, features), this class creates
     delay-embedded sub-sequences by stacking the current time step with the next
     'delay' time steps.
-    
+
     For example, if a sequence has shape (seq_length=100, features=5) and delay=2, then:
       - Each new row in the output will be:
             [ X[t], X[t+1], X[t+2] ]
       - The output will have shape: (seq_length - delay, features * (delay + 1)).
-      
+
     When applied to a batch of sequences with shape (num_sequences, seq_length, features),
     the output shape will be:
         (num_sequences, seq_length - delay, features * (delay + 1)).
@@ -128,7 +128,7 @@ class DelayEmbedder:
             sequence (np.ndarray): A single sequence of shape (seq_length, features).
 
         Returns:
-            np.ndarray: A delay-embedded sequence of shape 
+            np.ndarray: A delay-embedded sequence of shape
                            (seq_length - delay, features * (delay + 1)).
         """
         seq_length, _ = sequence.shape
@@ -139,7 +139,7 @@ class DelayEmbedder:
 
         # Number of valid rows after applying delay embedding.
         M = seq_length - self.delay
-        
+
         # Create concatenated sub-sequences for each shift in [0 .. delay].
         embedded = np.hstack([
             sequence[j: M + j]  # Each slice has shape (M, features)
@@ -157,7 +157,7 @@ class DelayEmbedder:
             X (list[np.ndarray]): List of input arrays, each of shape (seq_length, features).
 
         Returns:
-            list[np.ndarray]: List of delay-embedded arrays, each of shape 
+            list[np.ndarray]: List of delay-embedded arrays, each of shape
                               (seq_length - delay, features * (delay + 1)).
         """
         delayed_sequences = []
@@ -165,5 +165,5 @@ class DelayEmbedder:
             if sequence.ndim != 2:
                 raise ValueError("Each sequence must be a 2D array of shape (seq_length, features).")
             delayed_sequences.append(self._delay(sequence))
-        
+
         return delayed_sequences

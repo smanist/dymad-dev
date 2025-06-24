@@ -1,4 +1,8 @@
-from .preprocessing import Scaler, DelayEmbedder
+from .preprocessing import DelayEmbedder, Scaler
 from .trajectory_manager import TrajectoryManager
 
-__all__ = ["Scaler", "DelayEmbedder", "TrajectoryManager"]
+__all__ = [
+    "DelayEmbedder",
+    "Scaler",
+    "TrajectoryManager"
+]
