@@ -1,7 +1,7 @@
+from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 from typing import Tuple
-from abc import ABC, abstractmethod
 
 class ModelBase(nn.Module, ABC):
     """
@@ -47,7 +47,7 @@ class ModelBase(nn.Module, ABC):
     @abstractmethod
     def predict(self, x0: torch.Tensor, us: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError("This is the base class.")
-    
+
     @staticmethod
     def build_mlp(input_dimension: int, latent_dimension: int, output_dimension: int, num_layers: int) -> nn.Sequential:
         if num_layers == 1:
@@ -60,4 +60,4 @@ class ModelBase(nn.Module, ABC):
             layers.extend([nn.Linear(latent_dimension, latent_dimension), nn.PReLU()])
         layers.append(nn.Linear(latent_dimension, output_dimension))
         layers.append(nn.PReLU())
-        return nn.Sequential(*layers)    
+        return nn.Sequential(*layers)
