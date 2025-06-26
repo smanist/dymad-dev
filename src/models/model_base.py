@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 from typing import Tuple
 
+from ...src.utils import TakeFirst
+
 class ModelBase(nn.Module, ABC):
     """
     Base class for dynamic models.
@@ -50,7 +52,12 @@ class ModelBase(nn.Module, ABC):
 
     @staticmethod
     def build_mlp(input_dimension: int, latent_dimension: int, output_dimension: int, num_layers: int) -> nn.Sequential:
-        if num_layers == 1:
+        if num_layers == 0:
+            if input_dimension == output_dimension:
+                return nn.Identity()
+            else:
+                return TakeFirst(output_dimension)
+        elif num_layers == 1:
             return nn.Sequential(
                 nn.Linear(input_dimension, output_dimension),
                 nn.PReLU()
