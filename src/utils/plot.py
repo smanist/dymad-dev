@@ -39,12 +39,16 @@ def plot_trajectory(traj, ts, model_name, metadata):
         # Set y-limits based on scaling mode (for normalized data)
         if 'scaler' in metadata:
             mode = metadata['scaler']['mode']
-            if mode == "01" or mode == "none":
+            if mode == "01":
                 ax[i].set_ylim([-0.1, 1.1])  # [0,1] range with small buffer
             elif mode == "-11":
                 ax[i].set_ylim([-1.2, 1.2])  # [-1,1] range with buffer
             elif mode == "std":
                 ax[i].set_ylim([-3, 3])      # ±3 std devs for standardized data
+            else:  # mode=none
+                ymx = np.max(traj[1, :, i])
+                ymn = np.min(traj[1, :, i])
+                ax[i].set_ylim([ymn-0.1*abs(ymn), ymx+0.1*abs(ymx)])  # Use data range with buffer
 
         ax[i].set_ylabel(f'State {i+1}', fontsize=10)
         if i == 0:  # Only show legend on first subplot

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from typing import Callable, Optional, Union
 
 class TakeFirst(nn.Module):
     """
@@ -20,3 +21,177 @@ class TakeFirst(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x[..., :self.m] if x.ndim > 1 else x[:self.m]
+
+_ACT_MAP = {
+    # common aliases -> canonical class
+    "relu"     : nn.ReLU,
+    "leakyrelu": nn.LeakyReLU,
+    "prelu"    : nn.PReLU,
+    "tanh"     : nn.Tanh,
+    "sigmoid"  : nn.Sigmoid,
+    "gelu"     : nn.GELU,
+    "silu"     : nn.SiLU,
+    "swish"    : nn.SiLU,       # swish == SiLU in PyTorch
+    "elu"      : nn.ELU,
+    "selu"     : nn.SELU,
+    "softplus" : nn.Softplus,
+    "mish"     : nn.Mish,
+    "none"     : nn.Identity,
+}
+
+_INIT_MAP_W = {
+    # aliases -> torch.nn.init functions
+    "kaiming_uniform": nn.init.kaiming_uniform_,
+    "kaiming_normal":  nn.init.kaiming_normal_,
+    "xavier_uniform":  nn.init.xavier_uniform_,
+    "xavier_normal":   nn.init.xavier_normal_,
+    "orthogonal":      nn.init.orthogonal_,
+    "normal":          nn.init.normal_,
+    "trunc_normal":    nn.init.trunc_normal_,  # PyTorch ≥1.12
+    "uniform":         nn.init.uniform_,
+}
+
+_INIT_MAP_B = {
+    # aliases -> torch.nn.init functions
+    "zeros": nn.init.zeros_,
+    "ones":  nn.init.ones_,
+}
+
+def _make_activation(spec) -> nn.Module:
+    """
+    Turn a user-supplied activation *specification* into an nn.Module.
+    `spec` can be a string, an activation class, or a constructed module.
+    """
+    # case 1 ─ string
+    if isinstance(spec, str):
+        key = spec.lower()
+        if key not in _ACT_MAP:
+            raise ValueError(f"Unknown activation string '{spec}'. "
+                             f"Valid keys are {sorted(_ACT_MAP.keys())}.")
+        return _ACT_MAP[key]()                     # instantiate
+
+    # case 2 ─ activation *class* (subclass of nn.Module)
+    if isinstance(spec, type) and issubclass(spec, nn.Module):
+        return spec()                              # instantiate
+
+    # case 3 ─ already-constructed module
+    if isinstance(spec, nn.Module):
+        return spec
+
+    raise TypeError("activation must be str, nn.Module subclass, "
+                    f"or nn.Module instance, got {type(spec)}")
+
+def _resolve_init(spec, map: str) -> Callable[[torch.Tensor, float], None]:
+    """Turn <spec> (str | callable) into an init function."""
+    if isinstance(spec, str):
+        key = spec.lower()
+        if key not in map:
+            raise ValueError(f"Unknown init '{spec}'. Valid: {sorted(map)}")
+        return map[key]
+    if callable(spec):
+        return spec
+    raise TypeError("Init function must be str or callable")
+
+class MLP(nn.Module):
+    r"""
+    Fully-connected feed-forward network
+
+    Architecture
+    ------------
+    in_dim -> (Linear -> Act) x n_latent -> Linear -> out_dim
+
+    Parameters
+    ----------
+    input_dim : int
+        Dimension of the input features.
+    latent_dim : int
+        Width of every hidden layer.
+    output_dim : int
+        Dimension of the network output.
+    n_layers : int, default = 2
+        Number of total layers.
+        If 0, same as Identity, or TakeFirst.
+        If 1, same as Linear.
+        If 2, same as `Linear -> activation -> Linear`.
+        Otherwise, latent layers are inserted.
+    activation : nn.Module or Callable[[], nn.Module], default = nn.ReLU
+        Non-linearity to insert after every hidden Linear.
+        Pass either a class (e.g. `nn.Tanh`) or an already-constructed module.
+    weight_init : Callable[[torch.Tensor, float], None], default = nn.init.kaiming_uniform_
+        Function used to initialise each Linear layer's *weight* tensor.
+        Must accept `(tensor, gain)` signature like the functions in
+        `torch.nn.init`.
+    bias_init : Callable[[torch.Tensor], None], default = nn.init.zeros_
+        Function used to initialise each Linear layer's *bias* tensor.
+    gain : Optional[float], default = 1.0
+        In the linear layers, the weights are initialised with the standard
+        `nn.init.calculate_gain(<nonlinearity>)`
+        Gain is multiplied to the calculated gain.  By default gain=1, so no change.
+    end_activation : bool, default = True
+        If ``True``, the last layer is followed by an activation function.
+        Otherwise, the last layer is a plain Linear layer.
+
+    Notes
+    -----
+    * Returns a plain tensor, **not** a tuple.
+    * TorchScript-able: the internal Sequential is scripted automatically.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        latent_dim: int,
+        output_dim: int,
+        *,
+        n_layers: int = 2,
+        activation: Union[str, nn.Module, Callable[[], nn.Module]] = nn.ReLU,
+        weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
+        bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+        gain: Optional[float] = 1.0,
+        end_activation: bool = True,
+    ):
+        super().__init__()
+        
+        _act = _make_activation(activation)
+
+        if n_layers == 0:
+            if input_dim == output_dim:
+                self.net = nn.Identity()
+            else:
+                self.net = TakeFirst(output_dim)
+        elif n_layers == 1:
+            if end_activation:
+                self.net = nn.Sequential(
+                    nn.Linear(input_dim, output_dim),
+                    _act
+                )
+            else:
+                self.net = nn.Linear(input_dim, output_dim)
+        else:
+            layers = [nn.Linear(input_dim, latent_dim), _act]
+            for _ in range(n_layers - 2):
+                layers += [nn.Linear(latent_dim, latent_dim), _act]
+            layers.append(nn.Linear(latent_dim, output_dim))
+            if end_activation:
+                layers.append(_act)
+            self.net = nn.Sequential(*layers)
+
+        # Cache init kwargs for later use in self.apply
+        self._weight_init = _resolve_init(weight_init, _INIT_MAP_W)
+        self._bias_init = _resolve_init(bias_init, _INIT_MAP_B)
+
+        # Compute gain
+        act_name = _act.__class__.__name__.lower()
+        _g = nn.init.calculate_gain(act_name if act_name not in ["gelu", "prelu", "identity"] else "relu")
+        self._gain = gain*_g
+
+        # Initialise weights & biases
+        self.apply(self._init_linear)
+
+    def _init_linear(self, m: nn.Module) -> None:
+        if isinstance(m, nn.Linear):
+            self._weight_init(m.weight, self._gain)
+            self._bias_init(m.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
