@@ -8,7 +8,7 @@ except:
 from typing import Dict, Union, Tuple
 
 from .model_base import ModelBase
-from ...src.utils.prediction import predict_continuous, predict_graph_continuous
+from ...src.utils import MLP, predict_continuous, predict_graph_continuous
 
 class KBF(ModelBase):
     """
@@ -18,55 +18,69 @@ class KBF(ModelBase):
 
     def __init__(self, model_config: Dict, data_meta: Dict):
         super(KBF, self).__init__()
-
-        # Initialize base parameters
         self.n_total_state_features = data_meta.get('n_total_state_features')
         self.n_control_features = data_meta.get('n_control_features')
         self.n_total_features = data_meta.get('n_total_features')
-
         self.latent_dimension = model_config.get('latent_dimension', 64)
         self.koopman_dimension = model_config.get('koopman_dimension', 16)
-        self.n_encoder_layers = model_config.get('encoder_layers', 2)
-        self.n_decoder_layers = model_config.get('decoder_layers', 2)
+        self.const_term = model_config.get('const_term', True)
+
+        # Method for input handling
+        self.input_order = model_config.get('input_order', 'cubic')
+
+        # Get layer depths from config
+        enc_depth = model_config.get('encoder_layers', 2)
+        dec_depth = model_config.get('decoder_layers', 2)
+
+        if self.n_total_state_features != self.koopman_dimension:
+            if enc_depth == 0 or dec_depth == 0:
+                raise ValueError(f"Encoder depth {enc_depth}, decoder depth {dec_depth}: "
+                                 f"but n_total_state_features ({self.n_total_state_features}) "
+                                 f"must match koopman_dimension ({self.koopman_dimension})")
+
+        # Determine other options for MLP layers
+        opts = {
+            'activation'     : model_config.get('activation', 'prelu'),
+            'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
+            'bias_init'      : model_config.get('bias_init', 'zeros'),
+            'gain'           : model_config.get('gain', 1.0),
+            'end_activation' : model_config.get('end_activation', True)
+        }
 
         # Build MLP encoder: maps input features to Koopman space
-        self.encoder_layers = self.build_mlp(
-            input_dimension=self.n_total_state_features,
-            latent_dimension=self.latent_dimension,
-            output_dimension=self.koopman_dimension,
-            num_layers=self.n_encoder_layers
+        self.encoder_net = MLP(
+            input_dim  = self.n_total_state_features,
+            latent_dim = self.latent_dimension,
+            output_dim = self.koopman_dimension,
+            n_layers   = enc_depth,
+            **opts
         )
 
         # Create KBF operators: first for autonomous dynamics (A) then one per control (B_i)
-        self.operators = nn.ModuleList([
+        tmp = [
             nn.Linear(self.koopman_dimension, self.koopman_dimension, bias=False)
-            for _ in range(self.n_control_features + 1)
-        ])
+            for _ in range(self.n_control_features + 1)]
+        if self.const_term:
+            tmp.append(nn.Linear(self.n_control_features, self.koopman_dimension, bias=False))
+        self.operators = nn.ModuleList(tmp)
 
         # Build MLP decoder: maps Koopman space back to output features
-        self.decoder_layers = self.build_mlp(
-            input_dimension=self.koopman_dimension,
-            latent_dimension=self.latent_dimension,
-            output_dimension=self.n_total_state_features,
-            num_layers=self.n_decoder_layers
+        self.decoder_net = MLP(
+            input_dim  = self.koopman_dimension,
+            latent_dim = self.latent_dimension,
+            output_dim = self.n_total_state_features,
+            n_layers   = dec_depth,
+            **opts
         )
-
-    def init_params(self):
-        """Initialize model parameters."""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if hasattr(module, 'bias') and module.bias is not None:
-                    nn.init.zeros_(module.bias)
 
     def encoder(self, w: torch.Tensor) -> torch.Tensor:
         """Encode combined features to Koopman space."""
-        return self.encoder_layers(w)
+        return self.encoder_net(w)
 
     def decoder(self, z: torch.Tensor) -> torch.Tensor:
         """Decode from Koopman space back to state space."""
         # Apply decoder layers (now nn.Sequential or nn.Identity/nn.Linear)
-        return self.decoder_layers(z)
+        return self.decoder_net(z)
 
     def features(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         return x
@@ -78,10 +92,14 @@ class KBF(ModelBase):
 
         # Add control-dependent terms: sum(u_i * B_i @ z)
         for i in range(self.n_control_features):
-            control_i = u[:, i].unsqueeze(-1)  # Extract control i and add dimension for broadcasting
+            control_i = u[..., i].unsqueeze(-1)  # Extract control i and add dimension for broadcasting
             z_dot = z_dot + control_i * self.operators[i + 1](z)
 
-        return z, z_dot
+        # Add constant term if enabled
+        if self.const_term:
+            z_dot = z_dot + self.operators[-1](u)
+
+        return z_dot
 
     def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor],
                 method: str = 'dopri5') -> torch.Tensor:
@@ -113,9 +131,8 @@ class KBF(ModelBase):
             Tuple of (latent, latent_derivative, reconstruction)
         """
         z = self.encoder(x)
-        z, z_dot = self.dynamics(z, u)
+        z_dot = self.dynamics(z, u)
         x_hat = self.decoder(z)
-
         return z, z_dot, x_hat
 
 class GKBF(ModelBase):

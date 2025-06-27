@@ -49,26 +49,26 @@ class LDM(ModelBase):
 
         # Build network components
         self.encoder_net = MLP(
-            input_dim = self.n_total_features,
+            input_dim  = self.n_total_features,
             latent_dim = self.latent_dimension,
             output_dim = enc_out_dim,
-            n_layers = enc_depth,
+            n_layers   = enc_depth,
             **opts
         )
 
         self.dynamics_net = MLP(
-            input_dim = enc_out_dim,
+            input_dim  = enc_out_dim,
             latent_dim = self.latent_dimension,
             output_dim = dec_inp_dim,
-            n_layers = proc_depth,
+            n_layers   = proc_depth,
             **opts
         )
 
         self.decoder_net = MLP(
-            input_dim = dec_inp_dim,
+            input_dim  = dec_inp_dim,
             latent_dim = self.latent_dimension,
             output_dim = self.n_total_state_features,
-            n_layers = dec_depth,
+            n_layers   = dec_depth,
             **opts
         )
 
