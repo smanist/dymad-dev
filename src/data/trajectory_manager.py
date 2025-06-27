@@ -48,7 +48,7 @@ class TrajectoryManager:
             raise ValueError("Delay must be non-negative.")
         self.delay = self.metadata['config']['data']['delay']
         self.model_type = self.metadata['config']['model']['type'].upper()
-        self.enable_weak_form = self.metadata['config']['weak_form']['enabled']
+        self.enable_weak_form = 'weak_form' in self.metadata['config']
         self.device = device
         self.data_path = self.metadata['config']['data']['path']
         self.adj = adj  # Store the adjacency matrix if provided externally
@@ -343,8 +343,8 @@ class TrajectoryManager:
 
         This method uses the generate_weak_weights function from the weak module.
         """
-        weak_cfg = self.metadata['config'].get("weak_form", {})
-        if not weak_cfg.get("enabled", False):
+        weak_cfg = self.metadata['config'].get("weak_form", None)
+        if weak_cfg is None:
             return
 
         logging.info("Generating weak form parameters with the following configuration:")

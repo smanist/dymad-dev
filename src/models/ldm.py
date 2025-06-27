@@ -26,8 +26,8 @@ class LDM(ModelBase):
         self.n_total_features = data_meta.get('n_total_features')
         self.latent_dimension = model_config.get('latent_dimension', 64)
 
-        # Track training mode to determine prediction method
-        self.training_mode = None  # Will be set by trainer: 'node' or 'weak_form'
+        # Method for input handling
+        self.input_order = model_config.get('input_order', 'cubic')
 
         # Get layer depths from config
         enc_depth = model_config.get('encoder_layers', 2)
@@ -159,4 +159,4 @@ class LDM(ModelBase):
             - Single: (time_steps, n_total_state_features)
             - Batch: (time_steps, batch_size, n_total_state_features)
         """
-        return predict_continuous(self, x0, us, ts, method=method)
+        return predict_continuous(self, x0, us, ts, method=method, order=self.input_order)

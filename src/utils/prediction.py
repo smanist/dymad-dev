@@ -5,6 +5,8 @@ import torch
 from torchdiffeq import odeint
 from typing import Union
 
+from .modules import ControlInterpolator
+
 logger = logging.getLogger(__name__)
 
 def predict_continuous(
@@ -13,6 +15,7 @@ def predict_continuous(
     us: torch.Tensor,
     ts: Union[np.ndarray, torch.Tensor],
     method: str = 'dopri5',
+    order: str = 'cubic',
     **kwargs
 ) -> torch.Tensor:
     """
@@ -29,6 +32,7 @@ def predict_continuous(
             For autonomous systems, use zero-valued controls
         ts: Time points (n_steps,)
         method: ODE solver method
+        order: Interpolation method for control inputs ('zoh', 'linear' or 'cubic')
 
     Returns:
         Predicted trajectory(ies):
@@ -40,15 +44,17 @@ def predict_continuous(
     """
     device = x0.device
     is_batch = x0.ndim == 2
-    is_node_trained = getattr(model, 'training_mode', None) == 'node'
 
-    # Dimension checking
     if is_batch:
         if x0.ndim != 2 or us.ndim != 3:
             raise ValueError(f"Batch mode: x0 must be 2D, us must be 3D. Got x0: {x0.shape}, us: {us.shape}")
+        _x0 = x0.clone().detach().to(device)
+        _us = us.clone().detach().to(device)
     else:
         if x0.ndim != 1 or us.ndim != 2:
             raise ValueError(f"Single mode: x0 must be 1D, us must be 2D. Got x0: {x0.shape}, us: {us.shape}")
+        _x0 = x0.clone().detach().to(device).unsqueeze(0)
+        _us = us.clone().detach().to(device).unsqueeze(0)
 
     # Convert ts to tensor
     if isinstance(ts, np.ndarray):
@@ -57,76 +63,31 @@ def predict_continuous(
         ts = ts.float().to(device)
 
     n_steps = len(ts)
-    us_time_dim = 1 if is_batch else 0
-    if us.shape[us_time_dim] != n_steps:
-        raise ValueError(f"us time dimension ({us.shape[us_time_dim]}) must match time steps ({n_steps})")
+    if _us.shape[1] != n_steps:
+        raise ValueError(f"us time dimension ({_us.shape[1]}) must match time steps ({n_steps})")
 
-    logger.debug(f"predict_continuous: {'Batch' if is_batch else 'Single'} mode, {'NODE' if is_node_trained else 'Weak form'} training")
+    logger.debug(f"predict_continuous: {'Batch' if is_batch else 'Single'} mode")
 
     # Initial state preparation
-    u0 = us[:, 0, :] if is_batch else us[0, :]
+    u0 = _us[:, 0, :]
+    w0 = model.features(_x0, u0)
+    z0 = model.encoder(w0)
 
-    if is_node_trained:
-        # NODE: combine state and control into full vector
-        z0 = torch.cat([x0, u0], dim=-1)
-    else:
-        # Weak form: encode to latent space
-        if is_batch:
-            w0 = model.features(x0, u0)
-            z0 = model.encoder(w0)
-        else:
-            # Add batch dimension for encoder, then remove
-            w0 = model.features(x0.unsqueeze(0), u0.unsqueeze(0))
-            z0 = model.encoder(w0).squeeze(0)
-
-    # ODE function
-    if is_node_trained:
-        # NODE: use direct ode_function
-        ode_func = lambda t, z: model.ode_function(t, z)
-    else:
-        # Weak form: need control interpolation
-        us_np = us.cpu().numpy()
-        ts_np = ts.cpu().numpy()
-
-        if is_batch:
-            def ode_func(t, z):
-                t_np = t.detach().cpu().numpy() if isinstance(t, torch.Tensor) else t
-                u_batch = np.zeros((us.shape[0], us.shape[-1]))
-                for b in range(us.shape[0]):
-                    interp = sp_inter.interp1d(ts_np, us_np[b], axis=0, fill_value='extrapolate')
-                    u_batch[b] = interp(t_np)
-                u_t = torch.tensor(u_batch, dtype=us.dtype, device=device)
-                x = model.decoder(z)
-                _, z_dot, _ = model(x, u_t)
-                return z_dot
-        else:
-            interp = sp_inter.interp1d(ts_np, us_np, axis=0, fill_value='extrapolate')
-            def ode_func(t, z):
-                t_np = t.detach().cpu().numpy() if isinstance(t, torch.Tensor) else t
-                u_t = torch.tensor(interp(t_np), dtype=us.dtype, device=device)
-                z_batch = z.unsqueeze(0)
-                x = model.decoder(z_batch)
-                u_t_batch = u_t.unsqueeze(0)
-                _, z_dot, _ = model(x, u_t_batch)
-                return z_dot.squeeze(0)
+    interp = ControlInterpolator(ts, _us, order=order)
+    def ode_func(t, z):
+        x = model.decoder(z)
+        u = interp(t)
+        _, z_dot, _ = model(x, u)
+        return z_dot
 
     # Integrate
-    logger.debug(f"predict_continuous: Starting ODE integration with shape {z0.shape}")
+    logger.debug(f"predict_continuous: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order}")
     z_traj = odeint(ode_func, z0, ts, method=method)
     logger.debug(f"predict_continuous: Completed integration, trajectory shape: {z_traj.shape}")
 
-    # Extract final trajectory
-    if is_node_trained:
-        # NODE: extract state part from full vector
-        x_traj = z_traj[..., :model.n_total_state_features]
-    else:
-        # Weak form: decode from latent space
-        if is_batch:
-            x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1])).view(n_steps, z_traj.shape[1], -1)
-        else:
-            z_traj_batch = z_traj.unsqueeze(1)
-            x_traj = model.decoder(z_traj_batch.view(-1, z_traj_batch.shape[-1])).view(n_steps, 1, -1)
-            x_traj = x_traj.squeeze(1)
+    x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1])).view(n_steps, z_traj.shape[1], -1)
+    if not is_batch:
+        x_traj = x_traj.squeeze(1)
 
     logger.debug(f"predict_continuous: Final trajectory shape {x_traj.shape}")
     return x_traj

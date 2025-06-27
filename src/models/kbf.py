@@ -14,7 +14,6 @@ class KBF(ModelBase):
     """
     Koopman Bilinear Form (KBF) model - non-graph version.
     Uses MLP encoder/decoder and KBF operators for dynamics.
-    Trained with weak form loss.
     """
 
     def __init__(self, model_config: Dict, data_meta: Dict):
@@ -29,9 +28,6 @@ class KBF(ModelBase):
         self.koopman_dimension = model_config.get('koopman_dimension', 16)
         self.n_encoder_layers = model_config.get('encoder_layers', 2)
         self.n_decoder_layers = model_config.get('decoder_layers', 2)
-
-        # Track training mode to determine prediction method
-        self.training_mode = None  # Will be set by trainer: 'node' or 'weak_form'
 
         # Build MLP encoder: maps input features to Koopman space
         self.encoder_layers = self.build_mlp(

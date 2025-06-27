@@ -14,15 +14,15 @@ class NODETrainer(TrainerBase):
         """Initialize NODE trainer with configuration."""
         super().__init__(config_path, model_class)
 
-        # Set training mode on the model for prediction method selection
-        self.model.training_mode = 'node'
-
         # ODE solver settings from config
         self.ode_method = self.config['training'].get('ode_method', 'dopri5')
         self.rtol = self.config['training'].get('rtol', 1e-7)
         self.atol = self.config['training'].get('atol', 1e-9)
 
-    def _process_batch(self, batch: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
+        self.dynamics_weight = self.config['training'].get('dynamics_weight', 1.0)
+
+    def _process_batch(self, batch: torch.Tensor) -> torch.Tensor:
         """Process a batch and return predictions and ground truth states."""
         batch = batch.to(self.device)
         states = batch[:, :, :self.metadata['n_total_state_features']]
@@ -36,8 +36,16 @@ class NODETrainer(TrainerBase):
         # predictions shape: (time_steps, batch_size, n_total_state_features)
         # We need: (batch_size, time_steps, n_total_state_features)
         predictions = predictions.permute(1, 0, 2)
+        # Dynamics loss
+        dynamics_loss = self.criterion(predictions, states)
 
-        return predictions, states
+        if self.recon_weight > 0:
+            # Add reconstruction loss
+            _, _, x_hat = self.model(states, controls)
+            recon_loss = self.criterion(states, x_hat)
+            return self.dynamics_weight * dynamics_loss + self.recon_weight * recon_loss
+        else:
+            return dynamics_loss
 
     def train_epoch(self) -> float:
         """Train the model for one epoch."""
@@ -47,8 +55,7 @@ class NODETrainer(TrainerBase):
 
         for batch in self.train_loader:
             self.optimizer.zero_grad(set_to_none=True)
-            predictions, states = self._process_batch(batch)
-            loss = self.criterion(predictions, states)
+            loss = self._process_batch(batch)
             loss.backward()
             self.optimizer.step()
             total_loss += loss.item()
@@ -67,8 +74,7 @@ class NODETrainer(TrainerBase):
 
         with torch.no_grad():
             for batch in dataloader:
-                predictions, states = self._process_batch(batch)
-                loss = self.criterion(predictions, states)
+                loss = self._process_batch(batch)
                 total_loss += loss.item()
 
         return total_loss / len(dataloader)

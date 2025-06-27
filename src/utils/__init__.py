@@ -1,10 +1,11 @@
 from .checkpoint import load_checkpoint, save_checkpoint
-from .modules import MLP
+from .modules import ControlInterpolator, MLP
 from .plot import plot_trajectory, plot_hist
 from .prediction import predict_continuous
 from .weak import generate_weak_weights
 
 __all__ = [
+    "ControlInterpolator",
     "generate_weak_weights",
     "load_checkpoint",
     "MLP",

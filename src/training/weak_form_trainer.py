@@ -15,9 +15,6 @@ class WeakFormTrainer(TrainerBase):
         """Initialize weak form trainer with configuration."""
         super().__init__(config_path, model_class)
 
-        # Set training mode on the model for prediction method selection
-        self.model.training_mode = 'weak_form'
-
         # Weak form loss weights from config
         self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
         self.dynamics_weight = self.config['training'].get('dynamics_weight', 1.0)
