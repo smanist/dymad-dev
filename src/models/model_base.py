@@ -3,8 +3,6 @@ import torch
 import torch.nn as nn
 from typing import Tuple
 
-from ...src.utils import TakeFirst
-
 class ModelBase(nn.Module, ABC):
     """
     Base class for dynamic models.
@@ -27,10 +25,6 @@ class ModelBase(nn.Module, ABC):
         super(ModelBase, self).__init__()
 
     @abstractmethod
-    def init_params(self):
-        raise NotImplementedError("This is the base class.")
-
-    @abstractmethod
     def encoder(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
@@ -49,22 +43,3 @@ class ModelBase(nn.Module, ABC):
     @abstractmethod
     def predict(self, x0: torch.Tensor, us: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError("This is the base class.")
-
-    @staticmethod
-    def build_mlp(input_dimension: int, latent_dimension: int, output_dimension: int, num_layers: int) -> nn.Sequential:
-        if num_layers == 0:
-            if input_dimension == output_dimension:
-                return nn.Identity()
-            else:
-                return TakeFirst(output_dimension)
-        elif num_layers == 1:
-            return nn.Sequential(
-                nn.Linear(input_dimension, output_dimension),
-                nn.PReLU()
-            )
-        layers = [nn.Linear(input_dimension, latent_dimension), nn.PReLU()]
-        for _ in range(num_layers - 2):
-            layers.extend([nn.Linear(latent_dimension, latent_dimension), nn.PReLU()])
-        layers.append(nn.Linear(latent_dimension, output_dimension))
-        layers.append(nn.PReLU())
-        return nn.Sequential(*layers)

@@ -4,7 +4,7 @@ import torch.nn as nn
 from typing import Tuple, Dict, Union
 
 from .model_base import ModelBase
-from ...src.utils.prediction import predict_continuous
+from ...src.utils import MLP, predict_continuous
 
 class LDM(ModelBase):
     """
@@ -13,6 +13,11 @@ class LDM(ModelBase):
     - Weak form trainer (weak form loss)
 
     This model combines the functionality of both NODE and weakFormLDM.
+
+    In the minimal case,
+        Encoder: z = (x,u)
+        Dynamics: z_dot = f(z)
+        Decoder: x_hat = TakeFirst(z)
     """
     def __init__(self, model_config: Dict, data_meta: Dict):
         super(LDM, self).__init__()
@@ -29,35 +34,43 @@ class LDM(ModelBase):
         proc_depth = model_config.get('processor_layers', 2)
         dec_depth = model_config.get('decoder_layers', 2)
 
+        # Determine dimensions
+        enc_out_dim = self.latent_dimension if enc_depth > 0 else self.n_total_features
+        dec_inp_dim = self.latent_dimension if dec_depth > 0 else self.n_total_features
+
+        # Determine other options for MLP layers
+        opts = {
+            'activation'     : model_config.get('activation', 'prelu'),
+            'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
+            'bias_init'      : model_config.get('bias_init', 'zeros'),
+            'gain'           : model_config.get('gain', 1.0),
+            'end_activation' : model_config.get('end_activation', True)
+        }
+
         # Build network components
-        self.encoder_net = self.build_mlp(
-            input_dimension=self.n_total_features,
-            latent_dimension=self.latent_dimension,
-            output_dimension=self.latent_dimension,
-            num_layers=enc_depth
+        self.encoder_net = MLP(
+            input_dim = self.n_total_features,
+            latent_dim = self.latent_dimension,
+            output_dim = enc_out_dim,
+            n_layers = enc_depth,
+            **opts
         )
 
-        self.dynamics_net = self.build_mlp(
-            input_dimension=self.latent_dimension,
-            latent_dimension=self.latent_dimension,
-            output_dimension=self.latent_dimension,
-            num_layers=proc_depth
+        self.dynamics_net = MLP(
+            input_dim = enc_out_dim,
+            latent_dim = self.latent_dimension,
+            output_dim = dec_inp_dim,
+            n_layers = proc_depth,
+            **opts
         )
 
-        self.decoder_net = self.build_mlp(
-            input_dimension=self.latent_dimension,
-            latent_dimension=self.latent_dimension,
-            output_dimension=self.n_total_state_features,
-            num_layers=dec_depth
+        self.decoder_net = MLP(
+            input_dim = dec_inp_dim,
+            latent_dim = self.latent_dimension,
+            output_dim = self.n_total_state_features,
+            n_layers = dec_depth,
+            **opts
         )
-
-    def init_params(self):
-        """Initialize model parameters with Xavier uniform initialization."""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
 
     def features(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """
@@ -124,37 +137,6 @@ class LDM(ModelBase):
         z_dot = self.dynamics(z)
         x_hat = self.decoder(z)
         return z, z_dot, x_hat
-
-    def ode_function(self, t, z):
-        """
-        ODE function for direct integration for NODE type training (not needed for weak form training)
-        - Take full state+control vector
-        - Use all layers (encoder->dynamics->decoder)
-        - Return state derivatives with zeroed control derivatives
-
-        Args:
-            t: Time parameter (required by odeint but unused)
-            z: Combined state+control tensor (n_total_features,)
-
-        Returns:
-            Full derivative vector with control derivatives zeroed
-        """
-        # Split state and control parts
-        x = z[..., :self.n_total_state_features]  # State part
-        u = z[..., self.n_total_state_features:]  # Control part
-
-        # Use full forward pass: encoder -> dynamics -> decoder
-        w = self.features(x, u)  # Combine state and control
-        z_latent = self.encoder(w)  # Encode to latent space
-        z_dot_latent = self.dynamics(z_latent)  # Latent dynamics
-        x_dot = self.decoder(z_dot_latent)  # Decode to state derivatives
-
-        # Create full derivative vector: state derivatives + zero control derivatives
-        full_derivatives = torch.zeros_like(z)
-        full_derivatives[..., :self.n_total_state_features] = x_dot
-        # Control derivatives remain zero (not making predictions on control)
-
-        return full_derivatives
 
     def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor],
                 method: str = 'dopri5') -> torch.Tensor:
