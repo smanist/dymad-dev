@@ -1,5 +1,11 @@
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
+
+# Disable logging for matplotlib to avoid clutter in DEBUG mode
+plt_logger = logging.getLogger('matplotlib')
+plt_logger.setLevel(logging.INFO)
+
 
 def plot_trajectory(traj, ts, model_name, metadata):
     assert len(traj) == 2, "Expected exactly 2 trajectories (prediction and truth)"
