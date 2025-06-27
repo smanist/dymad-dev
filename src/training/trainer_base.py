@@ -1,4 +1,4 @@
-import yaml, logging, os, torch, random
+import logging, random, torch, os, yaml
 from typing import Dict, List, Tuple, Type
 
 from ...src.data.trajectory_manager import TrajectoryManager
@@ -37,8 +37,18 @@ class TrainerBase:
         # Training history
         self.start_epoch, self.best_loss, self.hist, _ = self._load_checkpoint()
 
+        # Summary of information
+        logger.info("Trainer Initialized:")
+        logger.info(f"Model name: {self.model_name}")
+        logger.info(self.model)
+        logger.info(self.model.diagnostic_info())
+        logger.info("Optimization settings:")
+        logger.info(self.optimizer)
+        logger.info(self.criterion)
+        logger.info(f"LR decay: {self.scheduler.gamma}")
         logger.info(f"Using device: {self.device}")
         logger.info(f"Double precision: {self.config['data']['double_precision']}")
+        logger.info(f"Epochs: {self.config['training']['n_epochs']}, Save interval: {self.config['training']['save_interval']}")
 
     def _load_config(self, config_path: str) -> Dict:
         """Load configuration from YAML file."""
@@ -74,11 +84,11 @@ class TrainerBase:
         if self.config['data']['double_precision']:
             self.model = self.model.double()
 
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-3)
-        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.999)
+        _lr = float(self.config['training']['learning_rate'])
+        _gm = float(self.config['training']['decay_rate'])
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=_lr)
+        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=_gm)
         self.criterion = torch.nn.MSELoss(reduction='mean')
-        logger.info("Model:")
-        logger.info(self.model)
 
     def _load_checkpoint(self) -> Tuple[int, float, List, Dict]:
         """Load checkpoint if it exists."""

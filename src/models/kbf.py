@@ -73,6 +73,19 @@ class KBF(ModelBase):
             **opts
         )
 
+    def diagnostic_info(self) -> str:
+        """
+        Return diagnostic information about the model.
+
+        Returns:
+            String with model details
+        """
+        model_info = super(KBF, self).diagnostic_info()
+        model_info += f"Encoder: {self.encoder_net.diagnostic_info()}\n"
+        model_info += f"Decoder: {self.decoder_net.diagnostic_info()}\n"
+        model_info += f"Input order: {self.input_order}"
+        return model_info
+
     def encoder(self, w: torch.Tensor) -> torch.Tensor:
         """Encode combined features to Koopman space."""
         return self.encoder_net(w)

@@ -24,6 +24,9 @@ class ModelBase(nn.Module, ABC):
     def __init__(self):
         super(ModelBase, self).__init__()
 
+    def diagnostic_info(self) -> str:
+        return f"Model parameters: {sum(p.numel() for p in self.parameters())}\n"
+
     @abstractmethod
     def encoder(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")

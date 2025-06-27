@@ -190,6 +190,19 @@ class MLP(nn.Module):
         # Initialise weights & biases
         self.apply(self._init_linear)
 
+    def diagnostic_info(self) -> str:
+        """
+        Return diagnostic information about the MLP.
+
+        Returns
+        -------
+        str
+            String with model details
+        """
+        return f"Weight init: {self._weight_init}, " + \
+               f"Weight gain: {self._gain}, " + \
+               f"Bias init: {self._bias_init}"
+
     def _init_linear(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
             self._weight_init(m.weight, self._gain)

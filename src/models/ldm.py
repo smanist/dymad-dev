@@ -72,6 +72,20 @@ class LDM(ModelBase):
             **opts
         )
 
+    def diagnostic_info(self) -> str:
+        """
+        Return diagnostic information about the model.
+
+        Returns:
+            String with model details
+        """
+        model_info = super(LDM, self).diagnostic_info()
+        model_info += f"Encoder: {self.encoder_net.diagnostic_info()}\n"
+        model_info += f"Dynamics: {self.dynamics_net.diagnostic_info()}\n"
+        model_info += f"Decoder: {self.decoder_net.diagnostic_info()}\n"
+        model_info += f"Input order: {self.input_order}"
+        return model_info
+
     def features(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """
         Create features by concatenating state and control.

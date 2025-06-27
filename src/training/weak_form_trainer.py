@@ -1,9 +1,12 @@
+import logging
 import torch
 from typing import Type
 
 from .trainer_base import TrainerBase
 from ...src.losses.weak_form import weak_form_loss_batch
 from ...src.models.ldm import LDM
+
+logger = logging.getLogger(__name__)
 
 class WeakFormTrainer(TrainerBase):
     """
@@ -18,6 +21,9 @@ class WeakFormTrainer(TrainerBase):
         # Weak form loss weights from config
         self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
         self.dynamics_weight = self.config['training'].get('dynamics_weight', 1.0)
+
+        # Additional logging
+        logging.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
 
     def train_epoch(self) -> float:
         """Train the model for one epoch."""

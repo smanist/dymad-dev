@@ -1,8 +1,11 @@
+import logging
 import torch
 from typing import Tuple, Type
 
 from .trainer_base import TrainerBase
 from ...src.models.ldm import LDM
+
+logger = logging.getLogger(__name__)
 
 class NODETrainer(TrainerBase):
     """
@@ -21,6 +24,10 @@ class NODETrainer(TrainerBase):
 
         self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
         self.dynamics_weight = self.config['training'].get('dynamics_weight', 1.0)
+
+        # Additional logging
+        logging.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
+        logging.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
 
     def _process_batch(self, batch: torch.Tensor) -> torch.Tensor:
         """Process a batch and return predictions and ground truth states."""
