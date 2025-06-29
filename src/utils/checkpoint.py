@@ -1,4 +1,7 @@
-import torch, os, logging
+import logging
+import os
+import torch
+import yaml
 
 logging=logging.getLogger(__name__)
 
@@ -22,7 +25,7 @@ def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_chec
 
     if not os.path.exists(checkpoint_path) or not load_from_checkpoint:
         logging.info(f"No checkpoint found at {checkpoint_path}. Starting from scratch.")
-        return 0, float("inf"), [], None
+        return 0, float("inf"), [], [], None
 
     logging.info(f"Loading checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, weights_only=False)
@@ -32,9 +35,9 @@ def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_chec
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
-    return checkpoint["epoch"], checkpoint["best_loss"], checkpoint["hist"], checkpoint["metadata"]
+    return checkpoint["epoch"], checkpoint["best_loss"], checkpoint["hist"], checkpoint["rmse"], checkpoint["metadata"]
 
-def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, metadata, checkpoint_path):
+def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, rmse, metadata, checkpoint_path):
     """
     Save the model, optimizer, and scheduler states to a checkpoint file.
 
@@ -45,6 +48,7 @@ def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, metadat
         epoch (int): The current epoch number.
         best_loss (float): The best loss recorded so far.
         hist (list): The history of losses.
+        rmse (list): The history of RMSE of trajectories - can be different from loss.
         metadata (dict): Metadata about the data.
         checkpoint_path (str): Path to save the checkpoint file.
     """
@@ -55,5 +59,21 @@ def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, metadat
         "scheduler_state_dict": scheduler.state_dict(),
         "best_loss": best_loss,
         "hist": hist,
+        "rmse": rmse,
         "metadata": metadata,
     }, checkpoint_path)
+
+def load_model(model_class, checkpoint_path, config_path):
+    """ Load a model from a checkpoint file.
+
+    Args:
+        model_class: The class of the model to load.
+        checkpoint_path (str): Path to the checkpoint file.
+        config_path (str): Path to the configuration file.
+    """
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    chkpt = torch.load(checkpoint_path, weights_only=False)
+    model = model_class(config['model'], chkpt['metadata'])
+    model.load_state_dict(chkpt['model_state_dict'])
+    return model

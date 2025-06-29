@@ -1,4 +1,10 @@
-import logging, random, torch, os, yaml
+import logging
+import numpy as np
+import random
+import time
+import torch
+import os
+import yaml
 from typing import Dict, List, Tuple, Type
 
 from ...src.data.trajectory_manager import TrajectoryManager
@@ -35,7 +41,7 @@ class TrainerBase:
         # Setup model and training components
         self._setup_model()
         # Training history
-        self.start_epoch, self.best_loss, self.hist, _ = self._load_checkpoint()
+        self.start_epoch, self.best_loss, self.hist, self.rmse, _ = self._load_checkpoint()
 
         # Summary of information
         logger.info("Trainer Initialized:")
@@ -84,8 +90,8 @@ class TrainerBase:
         if self.config['data']['double_precision']:
             self.model = self.model.double()
 
-        _lr = float(self.config['training']['learning_rate'])
-        _gm = float(self.config['training']['decay_rate'])
+        _lr = float(self.config['training'].get('learning_rate', 1e-3))
+        _gm = float(self.config['training'].get('decay_rate', 0.999))
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=_lr)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=_gm)
         self.criterion = torch.nn.MSELoss(reduction='mean')
@@ -159,9 +165,10 @@ class TrainerBase:
         """Save model if validation loss improved."""
         if val_loss < self.best_loss:
             self.best_loss = val_loss
+            self.convergence_epoch = epoch+1
             save_checkpoint(
                 self.model, self.optimizer, self.scheduler,
-                epoch, self.best_loss, self.hist, self.metadata,
+                epoch, self.best_loss, self.hist, self.rmse, self.metadata,
                 self.best_model_path
             )
             logger.info(f"Best model saved at epoch {epoch+1} with validation loss {self.best_loss:.4e}")
@@ -172,7 +179,7 @@ class TrainerBase:
         """Save training checkpoint."""
         save_checkpoint(
             self.model, self.optimizer, self.scheduler,
-            epoch, self.best_loss, self.hist, self.metadata,
+            epoch, self.best_loss, self.hist, self.rmse, self.metadata,
             self.checkpoint_path
         )
 
@@ -182,14 +189,26 @@ class TrainerBase:
         n_epochs = self.config['training']['n_epochs']
         save_interval = self.config['training']['save_interval']
 
+        self.convergence_epoch = None
+        self.epoch_times = []
+
+        overall_start_time = time.time()
         for epoch in range(self.start_epoch, n_epochs):
             # Training and evaluation
+            # Only timing the train and validation phases
+            # since test loss is only for reference
+            epoch_start_time = time.time()
+
             train_loss = self.train_epoch()
             val_loss = self.evaluate(self.validation_loader)
+
+            epoch_time = time.time() - epoch_start_time
+            self.epoch_times.append(epoch_time)
+
             test_loss = self.evaluate(self.test_loader)
 
             # Record history
-            self.hist.append([train_loss, val_loss, test_loss])
+            self.hist.append([epoch, train_loss, val_loss, test_loss])
 
             # Logging
             logger.info(
@@ -199,9 +218,6 @@ class TrainerBase:
                 f"Test Loss: {test_loss:.4e}"
             )
 
-            # Plotting
-            plot_hist(self.hist, epoch+1, self.model_name)
-
             # Save best model
             self.save_if_best(val_loss, epoch)
 
@@ -209,14 +225,60 @@ class TrainerBase:
             if epoch % save_interval == 0:
                 self.save_checkpoint(epoch)
 
+                # Plot loss curves
+                plot_hist(self.hist, epoch+1, self.model_name)
+
                 # Evaluate RMSE on random trajectories
-                rmse_train = self.evaluate_rmse('train', plot=False)
-                rmse_val = self.evaluate_rmse('validation', plot=False)
-                rmse_test = self.evaluate_rmse('test', plot=True)
+                train_rmse = self.evaluate_rmse('train', plot=False)
+                val_rmse   = self.evaluate_rmse('validation', plot=False)
+                test_rmse  = self.evaluate_rmse('test', plot=True)
+                self.rmse.append([epoch, train_rmse, val_rmse, test_rmse])
 
                 logger.info(
                     f"Prediction RMSE - "
-                    f"Train: {rmse_train:.4e}, "
-                    f"Validation: {rmse_val:.4e}, "
-                    f"Test: {rmse_test:.4e}"
+                    f"Train: {train_rmse:.4e}, "
+                    f"Validation: {val_rmse:.4e}, "
+                    f"Test: {test_rmse:.4e}"
                 )
+
+        plot_hist(self.hist, epoch+1, self.model_name)
+        total_training_time = time.time() - overall_start_time
+        avg_epoch_time = np.mean(self.epoch_times)
+        final_train_loss = self.evaluate(self.train_loader)
+        final_val_loss = self.evaluate(self.validation_loader)
+        final_test_loss = self.evaluate(self.test_loader)
+        _ = self.evaluate_rmse('test', plot=True)
+
+        # Process histories of loss and RMSE
+        # These are saved in the checkpoint too, but here we process them for easier post-processing
+        tmp = np.array(self.hist).T
+        epoch_loss, losses = tmp[0], tmp[1:]
+        tmp = np.array(self.rmse).T
+        epoch_rmse, rmses = tmp[0], tmp[1:]
+
+        # Save summary of training
+        # Here we also save the model itself - a lazy approach but more "out-of-the-box" for deployment
+        results = {
+            'model_name': self.model_name,
+            'total_training_time': total_training_time,
+            'avg_epoch_time': avg_epoch_time,
+            'final_train_loss': final_train_loss,
+            'final_val_loss': final_val_loss,
+            'final_test_loss': final_test_loss,
+            'best_val_loss': self.best_loss,
+            'convergence_epoch': self.convergence_epoch,
+            'epoch_loss': epoch_loss,
+            'losses': losses,
+            'epoch_rmse': epoch_rmse,
+            'rmses': rmses,
+        }
+
+        file_name = f'{self.model_name}_summary.npz'
+        np.savez_compressed(file_name, **results)
+        logger.info(f"Training complete. Summary of training:")
+        for key in ['model_name', 'total_training_time', 'avg_epoch_time',
+                    'final_train_loss', 'final_val_loss', 'final_test_loss',
+                    'best_val_loss', 'convergence_epoch']:
+            info = f"{results[key]:.4e}" if isinstance(results[key], float) else str(results[key])
+            logger.info(f"{key}: {info}")
+        logger.info(f"Summary and loss/rmse histories saved to {file_name}")

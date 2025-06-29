@@ -73,22 +73,22 @@ def plot_trajectory(traj, ts, model_name, metadata):
 
 def plot_hist(hist, epoch, model_name):
     """Plot training history with loss curves for train/validation/test sets."""
-    hist = np.array(hist)
+    tmp = np.array(hist).T
+    _e, _h = tmp[0][:epoch], tmp[1:,:epoch]
 
     # Create figure
     plt.figure(figsize=(8, 6))
 
     # Plot loss curves with modern styling
-    epochs = np.arange(1, epoch + 1)
-    plt.semilogy(epochs, hist[:epoch, 0], '--', color='#3498db', linewidth=2,
+    plt.semilogy(_e, _h[0], '--', color='#3498db', linewidth=2,
                  label='Training', alpha=0.8)
-    plt.semilogy(epochs, hist[:epoch, 1], '-', color='#e74c3c', linewidth=2,
+    plt.semilogy(_e, _h[1], '-', color='#e74c3c', linewidth=2,
                  label='Validation', alpha=0.9)
-    plt.semilogy(epochs, hist[:epoch, 2], '-', color='#2ecc71', linewidth=2,
+    plt.semilogy(_e, _h[2], '-', color='#2ecc71', linewidth=2,
                  label='Test', alpha=0.9)
 
     # Styling
-    plt.xlim([1, epoch+2])
+    plt.xlim([_e[0], _e[-1]+1])
     plt.xlabel('Epoch', fontsize=12)
     plt.ylabel('Loss (log scale)', fontsize=12)
     plt.title(f'{model_name} - Training History', fontsize=14, fontweight='bold')
