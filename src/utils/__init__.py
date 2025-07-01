@@ -4,6 +4,7 @@ from .modules import ControlInterpolator, MLP
 from .plot import plot_trajectory, plot_hist
 from .prediction import predict_continuous, predict_graph_continuous
 from .weak import generate_weak_weights
+from .sampling import TrajectorySampler
 
 __all__ = [
     "ControlInterpolator",
@@ -16,5 +17,6 @@ __all__ = [
     "predict_continuous",
     "predict_graph_continuous",
     "save_checkpoint",
-    "setup_logging"
+    "setup_logging",
+    "TrajectorySampler"
 ]
