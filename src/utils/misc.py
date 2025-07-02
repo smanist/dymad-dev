@@ -15,3 +15,10 @@ def setup_logging(config_path: str, mode: str = 'info') -> None:
         level=_l,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     )
+
+def close_logging() -> None:
+    logger = logging.getLogger(__name__)
+    handlers = logger.handlers[:]
+    for handler in handlers:
+        logger.removeHandler(handler)
+        handler.close()

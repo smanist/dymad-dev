@@ -42,7 +42,8 @@ def prediction_rmse(model,
         rmse = np.sqrt(np.mean((x_pred - x_truth)**2))
 
         if plot:
-            plot_trajectory(np.array([x_pred, x_truth]), ts, model_name, metadata)
+            plot_trajectory(np.array([x_truth, x_pred]), ts, model_name, metadata,
+                            us=us, labels=['Truth', 'Prediction'])
 
         return rmse
 
@@ -96,7 +97,8 @@ def prediction_rmse_graph(model,
         rmse = np.sqrt(np.mean((z_pred_np - z_truth_np)**2))
 
         if plot: # Delay embedding may exist, so we plot the first state
-            plot_trajectory(np.array([z_pred_np[..., 0], z_truth_np[..., 0]]), ts, model_name, metadata)
+            plot_trajectory(np.array([z_pred_np[..., 0], z_truth_np[..., 0]]), ts, model_name, metadata,
+                            us=us, labels=['Truth', 'Prediction'])
 
         return rmse
 
@@ -144,6 +146,7 @@ def prediction_rmse_lstm(model,
         rmse = np.sqrt(np.mean((x_pred - x_truth)**2))
 
         if plot:
-            plot_trajectory(np.array([x_pred, x_truth]), ts, model_name, metadata)
+            plot_trajectory(np.array([x_pred, x_truth]), ts, model_name, metadata,
+                            us=us, labels=['Truth', 'Prediction'])
 
         return rmse
