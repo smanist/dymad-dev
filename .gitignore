@@ -6,3 +6,5 @@
 **/dev.ipynb
 build/
 src/dymad.egg-info/
+docs/_build
+docs/api
