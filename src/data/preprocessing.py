@@ -12,6 +12,9 @@ class Transform(ABC):
     Transform always assumes the input is list-like, where each element is a numpy array
     of shape (n_samples, n_features).
     """
+    def __init__(self, **kwargs):  # Optional
+        pass
+
     def fit(self, data: Array) -> None:  # Optional
         pass
 
@@ -338,6 +341,9 @@ def make_transform(config: List[Dict[str, Any]]) -> Transform:
     """
     if config is None or len(config) == 0:
         return Identity()
+    
+    if isinstance(config, dict):
+        config = [config]
 
     transforms = []
     for t in config:

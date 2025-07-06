@@ -2,6 +2,41 @@ import numpy as np
 import torch
 from typing import Tuple, Dict, Callable
 
+from ..utils.weak import generate_weak_weights
+
+def generate_weak_form_params(metadata, dtype, device) -> None:
+    if len(metadata["dt_and_n_steps"]) > 1:
+        raise ValueError("Weak form generation is not currently supported for trajectories with different lengths.")
+
+    N      = metadata["config"]["training"]["weak_form_params"]["N"]
+    dN     = metadata["config"]["training"]["weak_form_params"]["dN"]
+    ordpol = metadata["config"]["training"]["weak_form_params"]["ordpol"]
+    ordint = metadata["config"]["training"]["weak_form_params"]["ordint"]
+    alpha  = metadata["config"]["training"]["weak_form_params"].get("alpha", 1.0)
+
+    # Call the generate_weak_weights function to get C, D, and K.
+    C, D, K = generate_weak_weights(
+        dt=metadata["dt_and_n_steps"][0][0],
+        n_steps=metadata["dt_and_n_steps"][0][1],
+        n_integration_points=N,
+        integration_stride=dN,
+        poly_order=ordpol,
+        int_rule_order=ordint,
+    )
+
+    # Convert weights to torch tensors and store in the weak_dyn_param dictionary.
+    weak_dyn_param = {
+        "C": torch.tensor(C, dtype=dtype, device=device),
+        "D": torch.tensor(D, dtype=dtype, device=device),
+        "K": K,
+        "N": N,
+        "dN": dN,
+        "ordPoly": ordpol,
+        "ordInt": ordint,
+        "alpha": alpha,
+    }
+    return weak_dyn_param
+
 def weak_form_loss(truth: torch.Tensor, pred: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
                   weak_dyn_param: Dict, criterion: Callable,
                   reconstruction_weight: float = 1.0, dynamics_weight: float = 1.0) -> torch.Tensor:
@@ -58,7 +93,7 @@ def weak_form_loss(truth: torch.Tensor, pred: Tuple[torch.Tensor, torch.Tensor, 
     return dynamics_weight * weak_loss + reconstruction_weight * recon_loss
 
 def weak_form_loss_batch(batch: torch.Tensor, pred_batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-                        metadata: Dict, criterion: Callable,
+                        n_total_state_features: int, weak_dyn_param: Dict, criterion: Callable,
                         reconstruction_weight: float = 1.0, dynamics_weight: float = 1.0) -> torch.Tensor:
     """Compute weak form loss for a batch of trajectories.
 
@@ -74,14 +109,13 @@ def weak_form_loss_batch(batch: torch.Tensor, pred_batch: Tuple[torch.Tensor, to
         Mean weighted loss across the batch
     """
     z_batch, z_dot_batch, x_hat_batch = pred_batch
-    n_states = metadata['n_total_state_features']
 
     # Compute loss for each trajectory in the batch
     losses = [
         weak_form_loss(
-            traj[..., :n_states],  # Extract state features
+            traj[..., :n_total_state_features],  # Extract state features
             [z, z_dot, x_hat],
-            metadata['weak_dyn_param'],
+            weak_dyn_param,
             criterion,
             reconstruction_weight=reconstruction_weight,
             dynamics_weight=dynamics_weight

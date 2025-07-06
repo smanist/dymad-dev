@@ -10,8 +10,7 @@ except:
     PyGData, GeoDataLoader, dense_to_sparse = None, None, None
 from typing import Optional, Union, Tuple, Dict, List
 
-from .preprocessing import Scaler, DelayEmbedder
-from ..utils.weak import generate_weak_weights
+from .preprocessing import make_transform
 
 logging = logging.getLogger(__name__)
 
@@ -44,15 +43,63 @@ class TrajectoryManager:
         """
         self.metadata = metadata
         self.dtype = torch.double if self.metadata['config']['data'].get('double_precision', False) else torch.float
-        if self.metadata['config']['data']['delay'] < 0:
-            raise ValueError("Delay must be non-negative.")
-        self.delay = self.metadata['config']['data']['delay']
         self.model_type = self.metadata['config']['model']['type'].upper()
-        self.enable_weak_form = 'weak_form' in self.metadata['config']
         self.device = device
         self.data_path = self.metadata['config']['data']['path']
         self.adj = adj  # Store the adjacency matrix if provided externally
         self.n_nodes = self.metadata['config']['data'].get('n_nodes', None)
+
+        self._data_transform_x = make_transform(self.metadata['config'].get('transform_x', None))
+        self._data_transform_u = make_transform(self.metadata['config'].get('transform_u', None))
+        self.metadata["delay"] = max(self._data_transform_x.delay, self._data_transform_u.delay)
+
+        if "train_set_index" in metadata:
+            # If train_set_index is already in metadata, we assume the dataset has been split before.
+            assert metadata["n_train"] == len(metadata["train_set_index"])
+            assert metadata["n_val"]   == len(metadata["valid_set_index"])
+            assert metadata["n_test"]  == len(metadata["test_set_index"])
+            logging.info(f"Reusing data split from provided metadata.")
+
+            self.train_set_index = torch.tensor(metadata["train_set_index"], dtype=torch.long)
+            self.valid_set_index = torch.tensor(metadata["valid_set_index"], dtype=torch.long)
+            self.test_set_index  = torch.tensor(metadata["test_set_index"], dtype=torch.long)
+
+            self.metadata["n_train"] = metadata["n_train"]
+            self.metadata["n_val"]   = metadata["n_val"]
+            self.metadata["n_test"]  = metadata["n_test"]
+            self.metadata["train_set_index"] = self.train_set_index.tolist()
+            self.metadata["valid_set_index"] = self.valid_set_index.tolist()
+            self.metadata["test_set_index"]  = self.test_set_index.tolist()
+
+            self._data_is_split = True
+        else:
+            self.train_set_index = None
+            self.valid_set_index = None
+            self.test_set_index  = None
+
+            self._data_is_split  = False
+
+    def process_all(self) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
+        """
+        Returns:
+            A tuple containing:
+              - A tuple of (train_loader, valid_loader, test_loader)
+              - A tuple of (train_set, valid_set, test_set) tensors
+              - A metadata dictionary
+        """
+        self.load_data(self.data_path)
+        self.data_truncation()
+
+        if not self._data_is_split:        # Train-Valid-Test split before data transformations
+            self.split_dataset_index()
+        self.apply_data_transformations()  # Assembles the datasets
+        self.create_dataloaders()          # Creates the dataloaders, depending on the model type
+
+        logging.info(f"Data processing complete. Train/Validation/Test sizes: {len(self.train_set)}, {len(self.valid_set)}, {len(self.test_set)}.")
+        return \
+            (self.train_loader, self.valid_loader, self.test_loader), \
+            (self.train_set, self.valid_set, self.test_set), \
+            self.metadata
 
     def load_data(self, path: str) -> None:
         """
@@ -237,11 +284,7 @@ class TrajectoryManager:
             self.u = [inp[:n_steps] for inp in self.u]
             self.t = [ti[:n_steps] for ti in self.t]
 
-        # Store dt and n_steps metadata
-        self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
-
         # Populate metadata.
-        self.metadata['delay'] = self.delay
         self.metadata["n_samples"] = len(self.x)
         self.metadata["n_state_features"] = int(self.x[0].shape[-1])
         # For autonomous systems, we created zero controls with 1 feature, but logically it's 0 controls
@@ -254,6 +297,101 @@ class TrajectoryManager:
         logging.info(f"Number of state features: {self.metadata['n_state_features']}")
         logging.info(f"Number of control features: {self.metadata['n_control_features']}")
         logging.info(f"Delay embedding size: {self.metadata['delay']}")
+
+    def split_dataset_index(self):
+        """
+        Split the dataset into training, validation, and test sets.
+
+        The training fraction is specified in the YAML config (default 0.75).
+        The split is performed by shuffling whole trajectories.
+        """
+        split_cfg = self.metadata['config'].get("split", {})
+        train_frac: float = split_cfg.get("train_frac", 0.75)
+
+        n_train = int(self.metadata["n_samples"] * train_frac)
+        remaining = self.metadata["n_samples"] - n_train
+        n_val = remaining // 2
+        n_test = remaining - n_val
+
+        self.metadata["n_train"] = n_train
+        self.metadata["n_val"]   = n_val
+        self.metadata["n_test"]  = n_test
+
+        perm = torch.randperm(self.metadata["n_samples"])
+
+        self.train_set_index = perm[:n_train]
+        self.valid_set_index = perm[n_train:n_train+n_val]
+        self.test_set_index  = perm[n_train+n_val:]
+
+        self.metadata["train_set_index"] = self.train_set_index.tolist()
+        self.metadata["valid_set_index"] = self.valid_set_index.tolist()
+        self.metadata["test_set_index"]  = self.test_set_index.tolist()
+
+    def apply_data_transformations(self) -> None:
+        """
+        Apply data transformations to the loaded trajectories and control inputs.
+        This creates the train-valid-test datasets.
+
+        This method applies transformations defined in the configuration for both
+        state features (x) and control inputs (u).
+        """
+        assert self.train_set_index is not None, "Dataset must be split before applying transformations."
+
+        logging.info("Fitting transformation for state features.")
+        X = [self.x[i] for i in self.train_set_index]
+        self._data_transform_x.fit(X)
+
+        logging.info("Fitting transformation for control inputs.")
+        U = [self.u[i] for i in self.train_set_index]
+        self._data_transform_u.fit(U)
+
+        logging.info("Applying transformations to state features and control inputs.")
+        logging.info("Training...")
+        self.train_set = self._transform_by_index(self.train_set_index)
+
+        logging.info("Validation...")
+        self.valid_set = self._transform_by_index(self.valid_set_index)
+
+        logging.info("Test...")
+        self.test_set = self._transform_by_index(self.test_set_index)
+
+        if self.metadata["delay"] > 0:
+            logging.info("Conforming the time data due to delay.")
+            # For time, we remove the last "delay" time steps.
+            self.t = [ti[:-self.metadata["delay"]] for ti in self.t]
+
+        # Bookkeeping metadata for the dataset.
+        self.metadata['n_total_state_features'] = self.metadata['n_state_features']*(self.metadata['delay']+1)
+        self.metadata['n_total_control_features'] = self.metadata['n_control_features']*(self.metadata['delay']+1)
+        self.metadata['n_total_features'] = self.metadata['n_total_state_features'] + self.metadata['n_total_control_features']
+        self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
+
+    def _transform_by_index(self, indices: torch.Tensor) -> List[torch.Tensor]:
+        # Process X first
+        # If the common delay is larger (larger delay in u), we trim out the first few steps.
+        # This way the latest x and u are aligned.
+        _X = self._data_transform_x.transform([self.x[i] for i in indices])
+        _d = self.metadata["delay"] - self._data_transform_x.delay
+        if _d > 0:
+            _X = [x[_d:] for x in _X]
+
+        if self.metadata["n_control_features"] > 0:
+            # Process U only if there are control features.
+            # Same idea as for X, we trim out the first few steps if the delay in x is larger.
+            _U = self._data_transform_u.transform([self.u[i] for i in indices])
+            _d = self.metadata["delay"] - self._data_transform_u.delay
+            if _d > 0:
+                _U = [u[_d:] for u in _U]
+
+            # Then we assemble the dataset of x and u.
+            dataset = []
+            for _x, _u in zip(_X, _U):
+                tmp = np.concatenate([_x, _u], axis=-1)
+                dataset.append(torch.tensor(tmp, dtype=self.dtype, device=self.device))
+            return dataset
+        else:
+            # Then we assemble the dataset of x.
+            return [torch.tensor(_x, dtype=self.dtype, device=self.device) for _x in _X]
 
     def _create_dt_n_steps_metadata(self) -> List[List[float]]:
         """
@@ -282,158 +420,6 @@ class TrajectoryManager:
                 return metadata_dt_and_n_steps
         else:
             return []
-
-    def apply_scaling(self) -> None:
-        """
-        Apply scaling to the solutions and inputs using the Scaler class.
-
-        The scaling mode is read from the configuration. If a checkpoint is provided via
-        "scaling: load_from_checkpoint" in the config, scaling parameters are loaded from that .pt file.
-        Otherwise, the scaler is fitted using the data.
-        """
-
-        if "scaler" in self.metadata:
-            logging.info("Loading scaling parameters from checkpoint")
-            self.scaler = Scaler(
-            mode=self.metadata["scaler"]['mode'],
-            scl=self.metadata["scaler"]['scale'],
-            off=self.metadata["scaler"]['offset']
-            )
-        else:
-            scaling_mode = self.metadata['config']['scaling']['mode']
-            logging.info(f"Applying scaling with mode: {scaling_mode}.")
-            self.scaler = Scaler(mode=scaling_mode)
-            self.scaler.fit(self.x)
-            self.metadata["scaler"] = {
-                "offset": self.scaler._off,
-                "scale": self.scaler._scl,
-                "mode": scaling_mode
-            }
-
-        # Transform the trajectories.
-        self.x = self.scaler.transform(self.x)
-
-    def apply_delay_embedding(self) -> None:
-        """
-        Apply delay embedding to the trajectories if a positive delay is specified.
-
-        The solutions are transformed using the DelayEmbedder, and the inputs are trimmed
-        accordingly.
-        """
-        delay = self.metadata.get("delay", 0)
-        if delay > 0:
-            logging.info(f"Applying delay embedding with delay={delay}.")
-            # Create a DelayEmbedder instance.
-            self.delay_embedder = DelayEmbedder(delay=delay)
-            # Delay-embed the solutions.
-            self.x = self.delay_embedder.transform(self.x)
-            # For inputs, we simply remove the first `delay` time steps.
-            self.u = [inp[delay:] for inp in self.u]
-            # For time, we remove the last "delay" time steps.
-            self.t = [ti[:-delay] for ti in self.t]
-            # Update the metadata.
-            self.metadata["delay"] = delay
-            self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
-            self.metadata
-        # If delay==0, nothing is changed.
-
-    def generate_weak_form_params(self) -> None:
-        """
-        If weak form is enabled in the configuration, generate and store the weak form parameters.
-
-        This method uses the generate_weak_weights function from the weak module.
-        """
-        weak_cfg = self.metadata['config'].get("weak_form", None)
-        if weak_cfg is None:
-            return
-
-        logging.info("Generating weak form parameters with the following configuration:")
-        logging.info(weak_cfg)
-
-        weakParam = weak_cfg.get("parameters", None)
-        if weakParam is None:
-            raise ValueError("Weak form is enabled but parameters are not provided.")
-
-        # Extract parameters from the configuration.
-        # If the parameter list is length 4, set alpha=1 by default.
-        if len(weakParam) == 4:
-            N, dN, ordpol, ordint = weakParam
-            alpha = 1  # alpha is not used by generate_weak_weights, but we store it for metadata.
-        elif len(weakParam) == 5:
-            N, dN, ordpol, ordint, alpha = weakParam
-        else:
-            raise ValueError("weakParam must be of length 4 or 5.")
-
-        if len(self.metadata["dt_and_n_steps"]) > 1:
-            raise ValueError("Weak form generation is not currently supported for trajectories with different lengths.")
-
-        # Call the generate_weak_weights function to get C, D, and K.
-        C, D, K = generate_weak_weights(
-            dt=self.metadata["dt_and_n_steps"][0][0],  # TODO: non-uniform dt?
-            n_steps=self.metadata["dt_and_n_steps"][0][1], # TODO: non-uniform n_steps?
-            n_integration_points=N,
-            integration_stride=dN,
-            poly_order=ordpol,
-            int_rule_order=ordint,
-        )
-
-        # Convert weights to torch tensors and store in the weak_dyn_param dictionary.
-        self.weak_dyn_param = {
-            "C": torch.tensor(C, dtype=self.dtype, device=self.device),
-            "D": torch.tensor(D, dtype=self.dtype, device=self.device),
-            "K": K,
-            "N": N,
-            "dN": dN,
-            "ordPoly": ordpol,
-            "ordInt": ordint,
-            "alpha": alpha,
-        }
-        self.metadata["weak_dyn_param"] = self.weak_dyn_param
-        logging.info("Weak form parameters generated.")
-
-    def create_dataset(self) -> torch.Tensor: # TODO: this needs to be looked at again, as only some of the projects use this data structure
-        """
-        Create a dataset by concatenating the trajectories and control inputs.
-
-        Returns:
-            A torch.Tensor representing the dataset.
-        """
-        if self.metadata["n_control_features"] == 0: # autonomous
-            self.dataset = self.x
-        else:
-            # Concatenate along the feature dimension.
-            self.dataset = [np.concatenate([traj, inp], axis=-1) for traj, inp in zip(self.x, self.u)]
-        # Convert to torch.Tensor.
-        self.dataset = [torch.tensor(entry, dtype=self.dtype, device=self.device) for entry in self.dataset]
-        self.metadata['n_total_state_features'] = self.metadata['n_state_features']*(self.metadata['delay']+1)
-        self.metadata['n_total_features'] = self.metadata['n_total_state_features'] + self.metadata['n_control_features']
-
-    def split_dataset(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Split the dataset into training, validation, and test sets.
-
-        The training fraction is specified in the YAML config (default 0.75).
-        The split is performed by shuffling whole trajectories.
-
-        """
-        split_cfg = self.metadata['config'].get("split", {})
-        train_frac: float = split_cfg.get("train_frac", 0.75)
-        # Shuffle the trajectories randomly.
-        perm = torch.randperm(self.metadata["n_samples"])
-        dataset_rand = [self.dataset[i] for i in perm.tolist()]
-
-        n_train = int(self.metadata["n_samples"] * train_frac)
-        remaining = self.metadata["n_samples"] - n_train
-        n_val = remaining // 2
-        n_test = remaining - n_val
-
-        self.metadata["n_train"] = n_train
-        self.metadata["n_val"] = n_val
-        self.metadata["n_test"] = n_test
-
-        self.train_set = dataset_rand[:n_train]
-        self.valid_set = dataset_rand[n_train:n_train+n_val]
-        self.test_set = dataset_rand[n_train+n_val:]
 
     def create_dataloaders(self) -> None:
         """
@@ -594,62 +580,6 @@ class TrajectoryManager:
         y_tensor = torch.stack(y_list)
         return X_tensor, y_tensor
 
-    def process_all(self, steps: Optional[List[str]] = None) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
-        """
-        Run the data processing pipeline with user-defined steps.
-
-        Args:
-            steps (List[str], optional): List of processing steps to execute in order.
-                If None, uses default pipeline. Available steps:
-                - 'load_data': Load raw data from file
-                - 'data_truncation': Truncate data according to config
-                - 'scaling': Apply scaling to data
-                - 'delay_embedding': Apply delay embedding
-                - 'weak_form': Generate weak form parameters
-                - 'create_dataset': Create dataset from processed data
-                - 'split_dataset': Split into train/val/test sets
-                - 'create_dataloaders': Create dataloaders for each split
-
-        Returns:
-            A tuple containing:
-              - A tuple of (train_loader, valid_loader, test_loader)
-              - A tuple of (train_set, valid_set, test_set) tensors
-              - A metadata dictionary
-        """
-        # Define the default pipeline if no steps provided
-        if steps is None:
-            steps = [
-                'load_data',
-                'data_truncation',
-                'scaling',
-                'delay_embedding',
-                'weak_form',
-                'create_dataset',
-                'split_dataset',
-                'create_dataloaders'
-            ]
-
-        # Define step mapping
-        step_functions = {
-            'load_data': lambda: self.load_data(self.data_path),
-            'data_truncation': self.data_truncation,
-            'scaling': self.apply_scaling,
-            'delay_embedding': lambda: self.apply_delay_embedding() if self.model_type == 'NN' else None,
-            'weak_form': lambda: self.generate_weak_form_params() if self.enable_weak_form else None,
-            'create_dataset': self.create_dataset,
-            'split_dataset': lambda: self.split_dataset(),
-            'create_dataloaders': self.create_dataloaders
-        }
-
-        # Execute each step in order
-        for step in steps:
-            if step not in step_functions:
-                raise ValueError(f"Unknown processing step: {step}")
-            step_functions[step]()
-
-        logging.info(f"Data processing complete. Train/Validation/Test sizes: {len(self.train_set)}, {len(self.valid_set)}, {len(self.test_set)}.")
-        return (self.train_loader, self.valid_loader, self.test_loader), (self.train_set, self.valid_set, self.test_set), self.metadata
-
     def __getitem__(self, index: int) -> torch.Tensor:
         """
         Retrieve the dataset item at the specified index.
@@ -660,9 +590,10 @@ class TrajectoryManager:
         Returns:
             torch.Tensor: The dataset entry corresponding to the index.
         """
-        if self.dataset is None:
-            raise ValueError("Dataset not created. Please call create_dataset() first.")
-        return self.dataset[index]
+        raise NotImplementedError("This method is temporarily disabled.")
+        # if self.dataset is None:
+        #     raise ValueError("Dataset not created. Please call create_dataset() first.")
+        # return self.dataset[index]
 
     def __len__(self) -> int:
         """
@@ -671,4 +602,5 @@ class TrajectoryManager:
         Returns:
             int: The number of dataset entries.
         """
-        return 0 if self.dataset is None else len(self.dataset)
+        raise NotImplementedError("This method is temporarily disabled.")
+        # return 0 if self.dataset is None else len(self.dataset)
