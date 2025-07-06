@@ -1,10 +1,10 @@
-from .checkpoint import load_checkpoint, load_model, save_checkpoint
-from .misc import close_logging, setup_logging
-from .modules import ControlInterpolator, MLP
-from .plot import plot_trajectory, plot_hist
-from .prediction import predict_continuous, predict_graph_continuous
-from .weak import generate_weak_weights
-from .sampling import TrajectorySampler
+from dymad.utils.checkpoint import load_checkpoint, load_model, save_checkpoint
+from dymad.utils.misc import close_logging, setup_logging
+from dymad.utils.modules import ControlInterpolator, MLP
+from dymad.utils.plot import plot_trajectory, plot_hist
+from dymad.utils.prediction import predict_continuous, predict_graph_continuous
+from dymad.utils.weak import generate_weak_weights
+from dymad.utils.sampling import TrajectorySampler
 
 __all__ = [
     "close_logging",

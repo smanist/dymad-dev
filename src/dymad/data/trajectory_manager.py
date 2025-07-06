@@ -10,7 +10,7 @@ except:
     PyGData, GeoDataLoader, dense_to_sparse = None, None, None
 from typing import Optional, Union, Tuple, Dict, List
 
-from .preprocessing import make_transform
+from dymad.data.preprocessing import make_transform
 
 logging = logging.getLogger(__name__)
 

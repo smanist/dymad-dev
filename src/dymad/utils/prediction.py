@@ -5,7 +5,7 @@ import torch
 from torchdiffeq import odeint
 from typing import Union
 
-from .modules import ControlInterpolator
+from dymad.utils.modules import ControlInterpolator
 
 logger = logging.getLogger(__name__)
 

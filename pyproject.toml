@@ -1,0 +1,21 @@
+[build-system]
+requires      = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name            = "dymad"
+version         = "0.1.0"
+description     = "Dynamics Modeling and Analysis via Data"
+authors         = [{name = "APUS Lab @ PSU"}]
+readme          = "README.md"
+requires-python = ">=3.12"
+
+[project.optional-dependencies]
+docs = [
+  # keep this list short; matches docs/requirements.txt
+  "sphinx>=7",
+  "furo",
+  "myst-parser",            # optional: Markdown support
+  "myst-nb>=1.0",
+  "sphinx-autodoc-typehints"
+]

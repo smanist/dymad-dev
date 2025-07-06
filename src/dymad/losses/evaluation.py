@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from typing import Union, List
 
-from ...src.utils.plot import plot_trajectory
+from dymad.utils.plot import plot_trajectory
 
 def prediction_rmse(model,
                    truth: torch.Tensor,

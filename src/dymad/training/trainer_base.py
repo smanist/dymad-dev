@@ -7,10 +7,10 @@ import os
 import yaml
 from typing import Dict, List, Tuple, Type
 
-from ...src.data.trajectory_manager import TrajectoryManager
-from ...src.losses.evaluation import prediction_rmse
-from ...src.utils.checkpoint import load_checkpoint, save_checkpoint
-from ...src.utils.plot import plot_hist
+from dymad.data.trajectory_manager import TrajectoryManager
+from dymad.losses.evaluation import prediction_rmse
+from dymad.utils.checkpoint import load_checkpoint, save_checkpoint
+from dymad.utils.plot import plot_hist
 
 logger = logging.getLogger(__name__)
 

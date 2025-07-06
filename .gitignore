@@ -4,3 +4,5 @@
 **/*.png
 **/*.pt
 **/dev.ipynb
+build/
+src/dymad.egg-info/

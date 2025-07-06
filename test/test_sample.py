@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from dymad.src.utils import setup_logging, TrajectorySampler
+from dymad.utils import setup_logging, TrajectorySampler
 from matplotlib.gridspec import GridSpec
 
 config_path = 'lti_data.yaml'

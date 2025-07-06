@@ -7,8 +7,8 @@ except:
     SAGEConv = None
 from typing import Dict, Union, Tuple
 
-from .model_base import ModelBase
-from ...src.utils import MLP, predict_continuous, predict_graph_continuous
+from dymad.models.model_base import ModelBase
+from dymad.utils import MLP, predict_continuous, predict_graph_continuous
 
 class KBF(ModelBase):
     """

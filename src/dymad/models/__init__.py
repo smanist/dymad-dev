@@ -1,8 +1,8 @@
 # Import all models
-from .model_base import ModelBase
-from .kbf import KBF, GKBF
-from .ldm import LDM
-from .lstm import LSTM
+from dymad.models.model_base import ModelBase
+from dymad.models.kbf import KBF, GKBF
+from dymad.models.ldm import LDM
+from dymad.models.lstm import LSTM
 
 __all__ = [
     "ModelBase",

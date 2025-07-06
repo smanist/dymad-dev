@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 from typing import Tuple, Dict, Union
 
-from .model_base import ModelBase
-from ...src.utils import MLP, predict_continuous
+from dymad.models.model_base import ModelBase
+from dymad.utils import MLP, predict_continuous
 
 class LDM(ModelBase):
     """

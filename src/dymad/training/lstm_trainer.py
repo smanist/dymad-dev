@@ -1,8 +1,8 @@
 import torch
 from typing import Type
 
-from .trainer_base import TrainerBase
-from ...src.models.lstm import LSTM
+from dymad.training.trainer_base import TrainerBase
+from dymad.models.lstm import LSTM
 
 class LSTMTrainer(TrainerBase):
     """Trainer class for LSTM discrete-time models."""
@@ -68,5 +68,5 @@ class LSTMTrainer(TrainerBase):
 
     def get_prediction_rmse_func(self):
         """Return the LSTM-specific prediction RMSE function."""
-        from ...src.losses.evaluation import prediction_rmse_lstm
+        from dymad.losses.evaluation import prediction_rmse_lstm
         return prediction_rmse_lstm

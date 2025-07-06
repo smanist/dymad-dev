@@ -1,11 +1,11 @@
 import torch, random
 from typing import Type
 
-from .trainer_base import TrainerBase
-from ...src.data.trajectory_manager import TrajectoryManager
-from ...src.losses.weak_form import weak_form_loss
-from ...src.losses.evaluation import prediction_rmse_graph
-from ...src.models.kbf import GKBF
+from dymad.training.trainer_base import TrainerBase
+from dymad.data.trajectory_manager import TrajectoryManager
+from dymad.losses.weak_form import weak_form_loss
+from dymad.losses.evaluation import prediction_rmse_graph
+from dymad.models.kbf import GKBF
 
 class GKBFTrainer(TrainerBase):
     """Trainer class for graph Koopman bilinear form (GKBF) models."""
@@ -77,5 +77,5 @@ class GKBFTrainer(TrainerBase):
 
     def get_prediction_rmse_func(self):
         """Return the graph-specific prediction RMSE function."""
-        from ...src.losses.evaluation import prediction_rmse_graph
+        from dymad.losses.evaluation import prediction_rmse_graph
         return prediction_rmse_graph

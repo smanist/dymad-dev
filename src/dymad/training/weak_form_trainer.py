@@ -2,9 +2,9 @@ import logging
 import torch
 from typing import Type
 
-from .trainer_base import TrainerBase
-from ...src.losses.weak_form import generate_weak_form_params, weak_form_loss_batch
-from ...src.models.ldm import LDM
+from dymad.training.trainer_base import TrainerBase
+from dymad.losses.weak_form import generate_weak_form_params, weak_form_loss_batch
+from dymad.models.ldm import LDM
 
 logger = logging.getLogger(__name__)
 

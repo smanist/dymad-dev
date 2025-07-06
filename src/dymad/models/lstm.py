@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from typing import Tuple, Dict, Union
 
-from .model_base import ModelBase
+from dymad.models.model_base import ModelBase
 
 class LSTM(ModelBase):
     """

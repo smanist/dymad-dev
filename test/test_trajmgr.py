@@ -6,8 +6,8 @@ def check_data(out, ref, label=''):
     for _s, _t in zip(out, ref):
         assert np.allclose(_s, _t), f"{label} failed: {_s} != {_t}"
 
-from dymad.src.data import make_transform, TrajectoryManager
-from dymad.src.utils import TrajectorySampler
+from dymad.data import make_transform, TrajectoryManager
+from dymad.utils import TrajectorySampler
 
 # --------------------
 # Data generation

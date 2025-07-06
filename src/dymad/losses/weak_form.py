@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from typing import Tuple, Dict, Callable
 
-from ..utils.weak import generate_weak_weights
+from dymad.utils.weak import generate_weak_weights
 
 def generate_weak_form_params(metadata, dtype, device) -> None:
     if len(metadata["dt_and_n_steps"]) > 1:

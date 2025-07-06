@@ -3,7 +3,7 @@ import os
 import torch
 import yaml
 
-from ...src.data import make_transform
+from dymad.data import make_transform
 
 logging=logging.getLogger(__name__)
 
