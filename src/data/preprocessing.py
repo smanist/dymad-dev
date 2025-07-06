@@ -341,7 +341,7 @@ def make_transform(config: List[Dict[str, Any]]) -> Transform:
     """
     if config is None or len(config) == 0:
         return Identity()
-    
+
     if isinstance(config, dict):
         config = [config]
 

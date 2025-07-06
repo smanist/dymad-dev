@@ -3,6 +3,8 @@ import os
 import torch
 import yaml
 
+from keystone.src.data import make_transform
+
 logging=logging.getLogger(__name__)
 
 def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_checkpoint, inference_mode=False):
@@ -74,6 +76,28 @@ def load_model(model_class, checkpoint_path, config_path):
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
     chkpt = torch.load(checkpoint_path, weights_only=False)
-    model = model_class(config['model'], chkpt['metadata'])
+    md = chkpt['metadata']
+
+    # Model
+    model = model_class(config['model'], md)
     model.load_state_dict(chkpt['model_state_dict'])
-    return model
+    dtype = next(model.parameters()).dtype
+
+    # Data transformations
+    _data_transform_x = make_transform(md['config'].get('transform_x', None))
+    _data_transform_u = make_transform(md['config'].get('transform_u', None))
+    _data_transform_x.load_state_dict(md["transform_x_state"])
+    _data_transform_u.load_state_dict(md["transform_u_state"])
+
+    # Prediction in data space
+    def predict_fn(x0, u, t, device="cpu"):
+        """Predict trajectory in data space."""
+        _x0 = _data_transform_x.transform([x0])[0]
+        _x0 = torch.tensor(_x0, dtype=dtype, device=device)
+        _u  = _data_transform_u.transform([u])[0]
+        _u  = torch.tensor(_u, dtype=dtype, device=device)
+        with torch.no_grad():
+            pred = model.predict(_x0, _u, t).cpu().numpy()
+        return _data_transform_x.inverse_transform([pred])[0]
+
+    return model, predict_fn

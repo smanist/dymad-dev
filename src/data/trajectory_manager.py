@@ -70,14 +70,18 @@ class TrajectoryManager:
             self.metadata["train_set_index"] = self.train_set_index.tolist()
             self.metadata["valid_set_index"] = self.valid_set_index.tolist()
             self.metadata["test_set_index"]  = self.test_set_index.tolist()
-
             self._data_is_split = True
+
+            self._data_transform_x.load_state_dict(metadata["transform_x_state"])
+            self._data_transform_u.load_state_dict(metadata["transform_u_state"])
+            self._transform_fitted = True
         else:
             self.train_set_index = None
             self.valid_set_index = None
             self.test_set_index  = None
 
             self._data_is_split  = False
+            self._transform_fitted = False
 
     def process_all(self) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
         """
@@ -337,13 +341,19 @@ class TrajectoryManager:
         """
         assert self.train_set_index is not None, "Dataset must be split before applying transformations."
 
-        logging.info("Fitting transformation for state features.")
-        X = [self.x[i] for i in self.train_set_index]
-        self._data_transform_x.fit(X)
+        if not self._transform_fitted:
+            logging.info("Fitting transformation for state features.")
+            X = [self.x[i] for i in self.train_set_index]
+            self._data_transform_x.fit(X)
 
-        logging.info("Fitting transformation for control inputs.")
-        U = [self.u[i] for i in self.train_set_index]
-        self._data_transform_u.fit(U)
+            logging.info("Fitting transformation for control inputs.")
+            U = [self.u[i] for i in self.train_set_index]
+            self._data_transform_u.fit(U)
+
+            self.metadata["transform_x_state"] = self._data_transform_x.state_dict()
+            self.metadata["transform_u_state"] = self._data_transform_u.state_dict()
+        else:
+            logging.info("Transformations already fitted. Skipping fitting step.")
 
         logging.info("Applying transformations to state features and control inputs.")
         logging.info("Training...")
