@@ -10,6 +10,6 @@ This is the root.
    :maxdepth: 2
    :caption: Contents:
 
-..    getting_started
-..    examples
-..    api_ref
+   getting_started
+   examples
+   api_ref
