@@ -1,6 +1,6 @@
 import numpy as np
 
-from keystone.src import weight_bdf, weight_nc
+from dymad.src import weight_bdf, weight_nc
 
 # Check BDF
 x = np.linspace(0.5, 1, 5)

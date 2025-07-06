@@ -3,7 +3,7 @@ import os
 import torch
 import yaml
 
-from keystone.src.data import make_transform
+from ...src.data import make_transform
 
 logging=logging.getLogger(__name__)
 
