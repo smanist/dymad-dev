@@ -51,7 +51,7 @@ class TrainerBase:
         logger.info("Optimization settings:")
         logger.info(self.optimizer)
         logger.info(self.criterion)
-        logger.info(f"LR decay: {self.scheduler.gamma}")
+        logger.info(f"LR decay: {self.schedulers[0].gamma}")
         logger.info(f"Using device: {self.device}")
         logger.info(f"Double precision: {self.config['data']['double_precision']}")
         logger.info(f"Epochs: {self.config['training']['n_epochs']}, Save interval: {self.config['training']['save_interval']}")
@@ -90,16 +90,18 @@ class TrainerBase:
         if self.config['data']['double_precision']:
             self.model = self.model.double()
 
+        # By default there is only one scheduler.
+        # There might be more, e.g., in NODETrainer with sweep scheduler.
         _lr = float(self.config['training'].get('learning_rate', 1e-3))
         _gm = float(self.config['training'].get('decay_rate', 0.999))
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=_lr)
-        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=_gm)
-        self.criterion = torch.nn.MSELoss(reduction='mean')
+        self.optimizer  = torch.optim.Adam(self.model.parameters(), lr=_lr)
+        self.schedulers = [torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=_gm)]
+        self.criterion  = torch.nn.MSELoss(reduction='mean')
 
     def _load_checkpoint(self) -> Tuple[int, float, List, Dict]:
         """Load checkpoint if it exists."""
         return load_checkpoint(
-            self.model, self.optimizer, self.scheduler,
+            self.model, self.optimizer, self.schedulers,
             self.checkpoint_path, self.config['training']['load_checkpoint']
         )
 
@@ -167,7 +169,7 @@ class TrainerBase:
             self.best_loss = val_loss
             self.convergence_epoch = epoch+1
             save_checkpoint(
-                self.model, self.optimizer, self.scheduler,
+                self.model, self.optimizer, self.schedulers,
                 epoch, self.best_loss, self.hist, self.rmse, self.metadata,
                 self.best_model_path
             )
@@ -178,7 +180,7 @@ class TrainerBase:
     def save_checkpoint(self, epoch: int) -> None:
         """Save training checkpoint."""
         save_checkpoint(
-            self.model, self.optimizer, self.scheduler,
+            self.model, self.optimizer, self.schedulers,
             epoch, self.best_loss, self.hist, self.rmse, self.metadata,
             self.checkpoint_path
         )

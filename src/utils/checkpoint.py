@@ -7,16 +7,16 @@ from keystone.src.data import make_transform
 
 logging=logging.getLogger(__name__)
 
-def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_checkpoint, inference_mode=False):
+def load_checkpoint(model, optimizer, schedulers, checkpoint_path, load_from_checkpoint, inference_mode=False):
     """
     Load a checkpoint from the specified path.
 
     Args:
         model: The model to load the state into.
         optimizer: The optimizer to load the state into.
-        scheduler: The scheduler to load the state into.
+        schedulers: The schedulers to load the state into.
         checkpoint_path (str): Path to the checkpoint file.
-        inference_mode (bool, optional): If True, skip loading optimizer and scheduler.
+        inference_mode (bool, optional): If True, skip loading optimizer and schedulers.
 
     Returns:
         int: The epoch number from which to continue training.
@@ -35,18 +35,21 @@ def load_checkpoint(model, optimizer, scheduler, checkpoint_path, load_from_chec
 
     if not inference_mode:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        assert len(schedulers) == len(checkpoint["scheduler_state_dict"]), \
+            f"Expected {len(schedulers)} schedulers, but got {len(checkpoint['scheduler_state_dict'])} in checkpoint."
+        for i in range(len(schedulers)):
+            schedulers[i].load_state_dict(checkpoint["scheduler_state_dict"][i])
 
     return checkpoint["epoch"], checkpoint["best_loss"], checkpoint["hist"], checkpoint["rmse"], checkpoint["metadata"]
 
-def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, rmse, metadata, checkpoint_path):
+def save_checkpoint(model, optimizer, schedulers, epoch, best_loss, hist, rmse, metadata, checkpoint_path):
     """
     Save the model, optimizer, and scheduler states to a checkpoint file.
 
     Args:
         model: The model to save.
         optimizer: The optimizer to save.
-        scheduler: The scheduler to save.
+        schedulers: The schedulers to save.
         epoch (int): The current epoch number.
         best_loss (float): The best loss recorded so far.
         hist (list): The history of losses.
@@ -58,7 +61,7 @@ def save_checkpoint(model, optimizer, scheduler, epoch, best_loss, hist, rmse, m
         "epoch": epoch,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
-        "scheduler_state_dict": scheduler.state_dict(),
+        "scheduler_state_dict": [scheduler.state_dict() for scheduler in schedulers],
         "best_loss": best_loss,
         "hist": hist,
         "rmse": rmse,

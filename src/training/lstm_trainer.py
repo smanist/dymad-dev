@@ -35,7 +35,8 @@ class LSTMTrainer(TrainerBase):
             self.optimizer.step()
             total_loss += loss.item()
 
-        self.scheduler.step()
+        for scheduler in self.schedulers:
+            scheduler.step()
         # Maintain minimum learning rate
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = max(param_group['lr'], min_lr)
