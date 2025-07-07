@@ -1,0 +1,44 @@
+data:
+  path: './data/lti.npz'
+  n_samples: 128
+  n_steps: 501
+  double_precision: false
+
+transform_x:
+  type: "identity"
+
+transform_u:
+  type: "identity"
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 64
+
+model:
+  name: 'lti_kbf_node'
+  type: "NN"   # Options: "NN", "LSTM", "GNN"
+  encoder_layers: 1
+  decoder_layers: 1
+  latent_dimension: 32
+  koopman_dimension: 4
+  const_term: true
+  activation: "none"
+  weight_init: "xavier_uniform"
+  input_order: "cubic"
+
+training:
+  n_epochs: 500
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 5e-3
+  decay_rate: 0.999
+  reconstruction_weight: 1.0
+  dynamics_weight: 1.0 
+  # NODE specific parameters
+  sweep_lengths: [50, 100, 200, 300, 501]
+  sweep_epoch_step: 100
+  ode_method: 'dopri5'
+  rtol: 1e-7
+  atol: 1e-9
