@@ -11,13 +11,16 @@ def jacobi_polynomial(order: int, coords: np.ndarray) -> np.ndarray:
     alpha = 1, beta = 1 at the given coordinates.
 
     Args:
-        order (int): The highest polynomial order to evaluate (exclusive).
-                     We compute polynomials 0, 1, ..., order-1.
+        order (int):
+            The highest polynomial order to evaluate (exclusive).
+            We compute polynomials 0, 1, ..., order-1.
+
         coords (np.ndarray): 1D array of points at which to evaluate.
 
     Returns:
-        np.ndarray: A 2D array of shape (order, len(coords)) where each row is the
-                    evaluated polynomial of a specific order.
+        np.ndarray:
+            A 2D array of shape (order, len(coords)) where each row is the
+            evaluated polynomial of a specific order.
     """
     polynomials = np.zeros((order, len(coords)))
     for i in range(order):
@@ -30,17 +33,19 @@ def jacobi_polynomial_derivative(order: int, coords: np.ndarray) -> np.ndarray:
     Evaluate the first derivative of the Jacobi polynomials with alpha=1, beta=1
     for orders 1 to `order-1`, at the given coordinates.
 
-    Note: The returned array has shape (order, len(coords)) for consistency,
-          but the 0-th row remains all zeros (since derivative is not computed for n=0).
+    Note:
+        The returned array has shape (order, len(coords)) for consistency,
+        but the 0-th row remains all zeros (since derivative is not computed for n=0).
 
     Args:
         order (int): The highest polynomial order to evaluate (exclusive).
         coords (np.ndarray): 1D array of points at which to evaluate.
 
     Returns:
-        np.ndarray: A 2D array of shape (order, len(coords)) where row i holds the
-                    derivative of Jacobi polynomial i at those coordinates.
-                    Row 0 is zeros by definition here.
+        np.ndarray:
+            A 2D array of shape (order, len(coords)) where row i holds the
+            derivative of Jacobi polynomial i at those coordinates.
+            Row 0 is zeros by definition here.
     """
     derivatives = np.zeros((order, len(coords)))
     for i in range(1, order):
@@ -108,16 +113,17 @@ def generate_weak_weights(
     the number of “windows” K along the time dimension.
 
     Steps:
-    1. Build a time array of size num_time_points given dt and n_steps
-    2. Compute a length scale L = (t_{N-1} - t_0) / 2.
-    3. Generate Jacobi polynomial basis (P0) and its derivative (P1), each
-       with alpha=1, beta=1, on a grid of size n_integration_points in [-1,1].
-    4. Construct weighting arrays w0=1-h^2 and w1=-2*h / L for the integrals.
-    5. Compute Newton-Cotes integration weights on that grid.
-    6. Combine everything to form:
-         C = -(P1 * w0 + P0 * w1) * w
-         D = P0 * w0 * w
-    7. K = number of segments in time = (len(ts) - (N - dN)) // dN
+
+        1. Build a time array of size num_time_points given dt and n_steps
+        2. Compute a length scale L = (t_{N-1} - t_0) / 2.
+        3. Generate Jacobi polynomial basis (P0) and its derivative (P1), each
+            with alpha=1, beta=1, on a grid of size n_integration_points in [-1,1].
+        4. Construct weighting arrays w0=1-h^2 and w1=-2*h / L for the integrals.
+        5. Compute Newton-Cotes integration weights on that grid.
+        6. Combine everything to form:
+            C = -(P1 * w0 + P0 * w1) * w
+            D = P0 * w0 * w
+        7. K = number of segments in time = (len(ts) - (N - dN)) // dN
 
     Args:
         dt (float): Time step size.
@@ -128,10 +134,12 @@ def generate_weak_weights(
         int_rule_order (int): Order of Newton-Cotes integration rule (1..4).
 
     Returns:
-        (C, D, K) where
-          - C: np.ndarray of shape (poly_order, n_integration_points),
-          - D: np.ndarray of shape (poly_order, n_integration_points),
-          - K: int, number of intervals in time after sub-sampling.
+        (C, D, K) where:
+
+            - C: np.ndarray of shape (poly_order, n_integration_points),
+            - D: np.ndarray of shape (poly_order, n_integration_points),
+            - K: int, number of intervals in time after sub-sampling.
+
     """
     # Build time array
     time_array = np.arange(0, n_steps) * dt

@@ -139,8 +139,10 @@ class TrainerBase:
         Args:
             split: Dataset split to use ('train', 'validation', 'test')
             plot: Whether to plot the results (only works when evaluate_all=False)
-            evaluate_all: If True, evaluate all trajectories and return mean RMSE.
-                         If False, evaluate a single random trajectory.
+            evaluate_all:
+
+                - If True, evaluate all trajectories and return mean RMSE.
+                - If False, evaluate a single random trajectory.
 
         Returns:
             RMSE value (mean RMSE if evaluate_all=True)

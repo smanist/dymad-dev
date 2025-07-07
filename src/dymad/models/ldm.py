@@ -159,18 +159,24 @@ class LDM(ModelBase):
 
         Args:
             x0: Initial state tensor(s):
+
                 - Single: (n_total_state_features,)
                 - Batch: (batch_size, n_total_state_features)
+
             us: Control inputs:
+
                 - Single: (time_steps, n_control_features)
                 - Batch: (batch_size, time_steps, n_control_features)
+
                 For autonomous systems, use zero-valued controls
+
             ts: Time points for prediction
             method: ODE solver method
 
         Returns:
             Predicted trajectory tensor(s):
-            - Single: (time_steps, n_total_state_features)
-            - Batch: (time_steps, batch_size, n_total_state_features)
+
+                - Single: (time_steps, n_total_state_features)
+                - Batch: (time_steps, batch_size, n_total_state_features)
         """
         return predict_continuous(self, x0, us, ts, method=method, order=self.input_order)

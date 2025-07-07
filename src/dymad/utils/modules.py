@@ -119,11 +119,11 @@ class MLP(nn.Module):
     activation : nn.Module or Callable[[], nn.Module], default = nn.ReLU
         Non-linearity to insert after every hidden Linear.
         Pass either a class (e.g. `nn.Tanh`) or an already-constructed module.
-    weight_init : Callable[[torch.Tensor, float], None], default = nn.init.kaiming_uniform_
+    weight_init : Callable[[torch.Tensor, float], None], default = `nn.init.kaiming_uniform_`
         Function used to initialise each Linear layer's *weight* tensor.
         Must accept `(tensor, gain)` signature like the functions in
         `torch.nn.init`.
-    bias_init : Callable[[torch.Tensor], None], default = nn.init.zeros_
+    bias_init : Callable[[torch.Tensor], None], default = `nn.init.zeros_`
         Function used to initialise each Linear layer's *bias* tensor.
     gain : Optional[float], default = 1.0
         In the linear layers, the weights are initialised with the standard
@@ -219,9 +219,13 @@ class ControlInterpolator(nn.Module):
     Parameters
     ----------
     t      : (N,) 1-D tensor
+
         sampling times (must be ascending)
+
     u      : (..., N, m) tensor
+
         control samples, m inputs per step
+
     mode   : {'zoh','linear','cubic',etc}
     """
     def __init__(self, t, u, order='linear'):

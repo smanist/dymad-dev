@@ -211,12 +211,15 @@ class DelayEmbedder(Transform):
     'delay' time steps.
 
     For example, if a sequence has shape (seq_length=100, features=5) and delay=2, then:
-      - Each new row in the output will be:
+      - Each new row in the output will be::
+
             [ X[t], X[t+1], X[t+2] ]
+
       - The output will have shape: (seq_length - delay, features * (delay + 1)).
 
     When applied to a batch of sequences with shape (num_sequences, seq_length, features),
-    the output shape will be:
+    the output shape will be::
+
         (num_sequences, seq_length - delay, features * (delay + 1)).
     """
 

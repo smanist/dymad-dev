@@ -44,7 +44,9 @@ def weak_form_loss(truth: torch.Tensor, pred: Tuple[torch.Tensor, torch.Tensor, 
 
     Mathematical foundation:
     - For dynamical systems dx/dt = f(x), we enforce the weak form:
-      ∫ φ(t) * dx/dt dt = ∫ φ(t) * f(x) dt  (where φ are test functions)
+
+        ∫ φ(t) * dx/dt dt = ∫ φ(t) * f(x) dt  (where φ are test functions)
+
     - In matrix form: C*z ≈ D*z_dot
       where C contains test functions and D contains their derivatives
 

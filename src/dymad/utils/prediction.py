@@ -24,20 +24,26 @@ def predict_continuous(
     Args:
         model: Model with encoder, decoder, and dynamics methods
         x0: Initial state(s):
+
             - Single: (n_features,)
             - Batch: (batch_size, n_features)
+
         us: Control trajectory(ies):
+
             - Single: (n_steps, n_controls)
             - Batch: (batch_size, n_steps, n_controls)
+
             For autonomous systems, use zero-valued controls
+
         ts: Time points (n_steps,)
         method: ODE solver method
         order: Interpolation method for control inputs ('zoh', 'linear' or 'cubic')
 
     Returns:
         Predicted trajectory(ies):
-        - Single: (n_steps, n_features)
-        - Batch: (n_steps, batch_size, n_features)
+
+            - Single: (n_steps, n_features)
+            - Batch: (n_steps, batch_size, n_features)
 
     Raises:
         ValueError: If input dimensions don't match requirements
@@ -109,9 +115,12 @@ def predict_graph_continuous(
         model: Graph model with encoder, decoder, and dynamics methods
         x0: Initial node states (n_nodes, n_features)
         us: Control trajectory:
+
             - Constant control: (n_controls,) or (1, n_controls)
             - Time-varying control: (n_steps, n_controls)
+
             For autonomous systems, use zero-valued controls
+
         ts: Time points (n_steps,)
         edge_index: Graph connectivity tensor (2, n_edges)
         method: ODE solver method
