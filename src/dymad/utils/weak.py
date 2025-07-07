@@ -14,7 +14,6 @@ def jacobi_polynomial(order: int, coords: np.ndarray) -> np.ndarray:
         order (int):
             The highest polynomial order to evaluate (exclusive).
             We compute polynomials 0, 1, ..., order-1.
-
         coords (np.ndarray): 1D array of points at which to evaluate.
 
     Returns:
@@ -108,21 +107,30 @@ def generate_weak_weights(
     poly_order: int = 4,
     int_rule_order: int = 4,
 ):
-    """
+    r"""
     Generate weights for a weak formulation approach, returning arrays (C, D) and
-    the number of “windows” K along the time dimension.
+    the number of "windows" K along the time dimension.
 
     Steps:
-
         1. Build a time array of size num_time_points given dt and n_steps
-        2. Compute a length scale L = (t_{N-1} - t_0) / 2.
+        2. Compute a length scale:
+
+        .. math::
+            L = \frac{t_{N-1} - t_0}{2}
+
         3. Generate Jacobi polynomial basis (P0) and its derivative (P1), each
-            with alpha=1, beta=1, on a grid of size n_integration_points in [-1,1].
-        4. Construct weighting arrays w0=1-h^2 and w1=-2*h / L for the integrals.
+           with alpha=1, beta=1, on a grid of size n_integration_points in [-1,1].
+        4. Construct weighting arrays for the integrals:
+
+        .. math::
+            w_0 = 1 - h^2,\quad w_1 = -\frac{2h}{L}
+
         5. Compute Newton-Cotes integration weights on that grid.
         6. Combine everything to form:
-            C = -(P1 * w0 + P0 * w1) * w
-            D = P0 * w0 * w
+
+        .. math::
+            C = -(P_1 w_0 + P_0 w_1) w,\quad D = P_0 w_0 w
+
         7. K = number of segments in time = (len(ts) - (N - dN)) // dN
 
     Args:
@@ -134,12 +142,12 @@ def generate_weak_weights(
         int_rule_order (int): Order of Newton-Cotes integration rule (1..4).
 
     Returns:
-        (C, D, K) where:
+        Tuple[np.ndarray, np.ndarray, int]:
+            Weights C and D, and number of intervals K:
 
-            - C: np.ndarray of shape (poly_order, n_integration_points),
-            - D: np.ndarray of shape (poly_order, n_integration_points),
-            - K: int, number of intervals in time after sub-sampling.
-
+            - C: shape (poly_order, n_integration_points),
+            - D: shape (poly_order, n_integration_points),
+            - K: number of intervals in time after sub-sampling.
     """
     # Build time array
     time_array = np.arange(0, n_steps) * dt

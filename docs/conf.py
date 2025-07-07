@@ -20,11 +20,12 @@ release = importlib.metadata.version("dymad")
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
+    # "myst_parser",   # Loaded by myst_nb
+    "myst_nb",
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.doctest',
-    # "myst_parser",   # Loaded by myst_nb
-    "myst_nb",
+    'sphinx.ext.napoleon',
     "sphinx_autodoc_typehints",
 ]
 
