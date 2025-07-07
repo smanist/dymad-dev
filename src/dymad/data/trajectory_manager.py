@@ -12,7 +12,7 @@ from typing import Optional, Union, Tuple, Dict, List
 
 from dymad.data.preprocessing import make_transform
 
-logging = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 class TrajectoryManager:
     """

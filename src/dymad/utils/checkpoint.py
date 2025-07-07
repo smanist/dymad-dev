@@ -5,7 +5,7 @@ import yaml
 
 from dymad.data import make_transform
 
-logging=logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 def load_checkpoint(model, optimizer, schedulers, checkpoint_path, load_from_checkpoint, inference_mode=False):
     """

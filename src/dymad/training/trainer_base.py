@@ -33,6 +33,8 @@ class TrainerBase:
         os.makedirs('./checkpoints', exist_ok=True)
         self.checkpoint_path = f'./checkpoints/{self.model_name}_checkpoint.pt'
         self.best_model_path = f'./{self.model_name}.pt'
+        os.makedirs('./results', exist_ok=True)
+        self.results_prefix = './results'
         # Initialize metadata
         self.metadata = self._init_metadata()
         # Setup data
@@ -159,7 +161,8 @@ class TrainerBase:
             dataset = [random.choice(full_dataset)]
 
         rmse_values = [
-            prediction_rmse_func(self.model, trajectory, self.t, self.metadata, self.model_name, plot=plot)
+            prediction_rmse_func(self.model, trajectory, self.t, self.metadata, self.model_name,
+                                 plot=plot, prefix=self.results_prefix)
             for trajectory in dataset
         ]
 
@@ -230,7 +233,7 @@ class TrainerBase:
                 self.save_checkpoint(epoch)
 
                 # Plot loss curves
-                plot_hist(self.hist, epoch+1, self.model_name)
+                plot_hist(self.hist, epoch+1, self.model_name, prefix=self.results_prefix)
 
                 # Evaluate RMSE on random trajectories
                 train_rmse = self.evaluate_rmse('train', plot=False)
@@ -245,7 +248,7 @@ class TrainerBase:
                     f"Test: {test_rmse:.4e}"
                 )
 
-        plot_hist(self.hist, epoch+1, self.model_name)
+        plot_hist(self.hist, epoch+1, self.model_name, prefix=self.results_prefix)
         total_training_time = time.time() - overall_start_time
         avg_epoch_time = np.mean(self.epoch_times)
         final_train_loss = self.evaluate(self.train_loader)
@@ -277,7 +280,7 @@ class TrainerBase:
             'rmses': rmses,
         }
 
-        file_name = f'{self.model_name}_summary.npz'
+        file_name = f'{self.results_prefix}/{self.model_name}_summary.npz'
         np.savez_compressed(file_name, **results)
         logger.info(f"Training complete. Summary of training:")
         for key in ['model_name', 'total_training_time', 'avg_epoch_time',

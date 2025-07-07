@@ -10,7 +10,8 @@ def prediction_rmse(model,
                    metadata: dict,
                    model_name: str,
                    method: str = 'dopri5',
-                   plot: bool = False) -> float:
+                   plot: bool = False,
+                   prefix: str = '.') -> float:
     """
     Calculate RMSE between model predictions and ground truth for regular models
 
@@ -43,7 +44,7 @@ def prediction_rmse(model,
 
         if plot:
             plot_trajectory(np.array([x_truth, x_pred]), ts, model_name, metadata,
-                            us=us, labels=['Truth', 'Prediction'])
+                            us=us, labels=['Truth', 'Prediction'], prefix=prefix)
 
         return rmse
 

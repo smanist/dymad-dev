@@ -1,7 +1,7 @@
 from datetime import datetime
 import logging
 
-def setup_logging(config_path: str, mode: str = 'info') -> None:
+def setup_logging(config_path: str, mode: str = 'info', prefix='.') -> None:
     """
     Setup logging configuration based on the config file.
     Assuming the config file name is in the format '<case>.yaml'
@@ -10,15 +10,11 @@ def setup_logging(config_path: str, mode: str = 'info') -> None:
     _t = str(datetime.now())
     _t = _t.split('.')[0].replace(' ', '-')
     logging.basicConfig(
-        filename=f'{config_path.split(".")[0]}_{_t}.log',  
+        filename=f'{prefix}/{config_path.split(".")[0]}_{_t}.log',  
         filemode='w',  
         level=_l,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        force=True
     )
-
-def close_logging() -> None:
-    logger = logging.getLogger(__name__)
-    handlers = logger.handlers[:]
-    for handler in handlers:
-        logger.removeHandler(handler)
-        handler.close()
+    # Having force=True flushes and closes any existing handlers,
+    # so no need to close them manually here.

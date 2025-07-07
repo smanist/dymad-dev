@@ -9,7 +9,7 @@ LINESTY = ["-", "--", "-.", ":"]
 plt_logger = logging.getLogger('matplotlib')
 plt_logger.setLevel(logging.INFO)
 
-def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclose=True):
+def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclose=True, prefix='.'):
     if traj.ndim == 2:
         traj = np.array([traj])
 
@@ -30,7 +30,7 @@ def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclos
 
     # Adjust layout and save
     plt.tight_layout()
-    plt.savefig(f'./{model_name}_prediction.png', dpi=150, bbox_inches='tight',
+    plt.savefig(f'{prefix}/{model_name}_prediction.png', dpi=150, bbox_inches='tight',
                 facecolor='white', edgecolor='none')
     if ifclose:
         plt.close()
@@ -107,7 +107,7 @@ def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=Non
 
     return fig, ax
 
-def plot_hist(hist, epoch, model_name):
+def plot_hist(hist, epoch, model_name, prefix='.'):
     """Plot training history with loss curves for train/validation/test sets."""
     tmp = np.array(hist).T
     _e, _h = tmp[0][:epoch], tmp[1:,:epoch]
@@ -136,6 +136,6 @@ def plot_hist(hist, epoch, model_name):
 
     # Save with clean formatting
     plt.tight_layout()
-    plt.savefig(f'./{model_name}_history.png', dpi=150, bbox_inches='tight',
+    plt.savefig(f'{prefix}/{model_name}_history.png', dpi=150, bbox_inches='tight',
                 facecolor='white', edgecolor='none')
     plt.close()

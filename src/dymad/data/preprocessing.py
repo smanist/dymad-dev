@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 Array = List[np.ndarray]
 
-logging = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 class Transform(ABC):
     """
