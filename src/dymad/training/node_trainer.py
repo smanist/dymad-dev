@@ -11,6 +11,10 @@ class SweepScheduler:
     """
     Scheduler to manage sweep lengths during training.
     Cycles through predefined sweep lengths.
+
+    Args:
+        sweep_lengths (list): List of sweep lengths to cycle through.
+        epoch_step (int): Number of epochs after which to switch to the next sweep length.
     """
 
     def __init__(self, sweep_lengths: list, epoch_step: int = 10):
@@ -45,8 +49,7 @@ class SweepScheduler:
 
 class NODETrainer(TrainerBase):
     """
-    Trainer for Neural ODE models using direct ODE integration loss.
-    Uses the unified LDM model.
+    Trainer using Neural ODE approach.
     """
 
     def __init__(self, config_path: str, model_class: Type[torch.nn.Module] = LDM):

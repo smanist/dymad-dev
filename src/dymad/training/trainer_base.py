@@ -15,15 +15,13 @@ from dymad.utils.plot import plot_hist
 logger = logging.getLogger(__name__)
 
 class TrainerBase:
-    """Base trainer class for dynamical system models."""
+    """Base trainer class for dynamical system models.
 
+    Args:
+        config_path (str): Path to the YAML configuration file
+        model_class (Type[torch.nn.Module]): Class of the model to train
+    """
     def __init__(self, config_path: str, model_class: Type[torch.nn.Module]):
-        """
-        Initialize trainer with configuration.
-        Args:
-            config_path: Path to the YAML configuration file
-            model_class: Class of the model to train
-        """
         self.config = self._load_config(config_path)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model_name = self.config['model']['name']
@@ -127,10 +125,10 @@ class TrainerBase:
         Get the dataset for evaluation. Override in subclasses if needed.
 
         Args:
-            split: Dataset split to use ('train', 'validation', 'test')
+            split (str): Dataset split to use ('train', 'validation', 'test')
 
         Returns:
-            Dataset for evaluation
+            List[torch.Tensor]: Dataset for evaluation
         """
         return getattr(self, f"{split}_set")
 
@@ -139,15 +137,15 @@ class TrainerBase:
         Calculate RMSE on trajectory(ies) from the specified split.
 
         Args:
-            split: Dataset split to use ('train', 'validation', 'test')
-            plot: Whether to plot the results (only works when evaluate_all=False)
-            evaluate_all:
+            split (str): Dataset split to use ('train', 'validation', 'test')
+            plot (bool): Whether to plot the results (only works when evaluate_all=False)
+            evaluate_all (bool):
 
                 - If True, evaluate all trajectories and return mean RMSE.
                 - If False, evaluate a single random trajectory.
 
         Returns:
-            RMSE value (mean RMSE if evaluate_all=True)
+            float: RMSE value (mean RMSE if evaluate_all=True)
         """
 
         # Get the appropriate prediction function and dataset

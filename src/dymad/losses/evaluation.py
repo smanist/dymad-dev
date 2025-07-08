@@ -16,13 +16,13 @@ def prediction_rmse(model,
     Calculate RMSE between model predictions and ground truth for regular models
 
     Args:
-        model: The model to evaluate (any model with a predict method)
-        truth: Ground truth trajectory tensor [time, features]
-        ts: Time points for the trajectory
-        model_name: Name of the model to save the plot
-        metadata: Metadata dictionary with n_state_features and n_control_features
-        method: ODE solver method (for models that use ODE solvers)
-        plot: Whether to plot the predicted vs ground truth trajectories
+        model (torch.nn.Module): The model to evaluate (any model with a predict method)
+        truth (torch.Tensor): Ground truth trajectory tensor [time, features]
+        ts (Union[np.ndarray, torch.Tensor]): Time points for the trajectory
+        model_name (str): Name of the model to save the plot
+        metadata (dict): Metadata dictionary with n_state_features and n_control_features
+        method (str): ODE solver method (for models that use ODE solvers)
+        plot (bool): Whether to plot the predicted vs ground truth trajectories
 
     Returns:
         float: Root mean squared error between predictions and ground truth
@@ -59,13 +59,13 @@ def prediction_rmse_graph(model,
     Calculate RMSE between model predictions and ground truth for graph-based models
 
     Args:
-        model: The model to evaluate (graph model with predict method)
-        truth: List of Data objects containing ground truth trajectories
-        ts: Time points for the trajectory
-        metadata: Metadata dictionary with graph structure info
-        model_name: Name of the model to save the plot
-        method: ODE solver method (for models that use ODE solvers)
-        plot: Whether to plot the predicted vs ground truth trajectories
+        model (torch.nn.Module): The model to evaluate (graph model with predict method)
+        truth (List[Data]): List of Data objects containing ground truth trajectories
+        ts (Union[np.ndarray, torch.Tensor]): Time points for the trajectory
+        metadata (dict): Metadata dictionary with graph structure info
+        model_name (str): Name of the model to save the plot
+        method (str): ODE solver method (for models that use ODE solvers)
+        plot (bool): Whether to plot the predicted vs ground truth trajectories
 
     Returns:
         float: Root mean squared error between predictions and ground truth
@@ -114,12 +114,12 @@ def prediction_rmse_lstm(model,
     The input truth is a single trajectory, not a list of trajectories
 
     Args:
-        model: The LSTM model to evaluate
-        truth: Ground truth trajectory tensor [time, state_features + control_features]
-        ts: Time points for the trajectory
-        metadata: Metadata dictionary with n_state_features and n_control_features
-        model_name: Name of the model to save the plot
-        plot: Whether to plot the predicted vs ground truth trajectories
+        model (torch.nn.Module): The LSTM model to evaluate
+        truth (torch.Tensor): Ground truth trajectory tensor [time, state_features + control_features]
+        ts (Union[np.ndarray, torch.Tensor]): Time points for the trajectory
+        metadata (dict): Metadata dictionary with n_state_features and n_control_features
+        model_name (str): Name of the model to save the plot
+        plot (bool): Whether to plot the predicted vs ground truth trajectories
 
     Returns:
         float: Root mean squared error between predictions and ground truth

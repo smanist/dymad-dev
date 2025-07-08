@@ -16,24 +16,59 @@ class Transform(ABC):
         pass
 
     def fit(self, data: Array) -> None:  # Optional
+        """
+        Determine parameters of the transform based on the data.
+
+        Args:
+            data (List[np.ndarray]): array-like or list of array-like, shape (n_samples, n_input_features)
+                Training data. If training data contains multiple trajectories, data should be
+                a list containing data for each trajectory. Individual trajectories may contain
+                different numbers of samples.
+        """
         pass
 
     @abstractmethod
     def transform(self, data: Array) -> Array:
+        """
+        Apply the transform to the data.
+
+        The shape of data is maintained as much as possible.
+
+        Args:
+            data (List[np.ndarray]): List of array-like objects, each of shape (n_samples, n_input_features).
+
+        Returns:
+            List[np.ndarray]: transformed data.
+        """
         raise NotImplementedError("Transform must implement the transform method.")
 
     @abstractmethod
     def inverse_transform(self, data: Array) -> Array:
-        raise NotImplementedError("Transform must implement the transform method.")
+        """
+        Apply the inverse transform to the data.
+
+        The shape of data is maintained as much as possible.
+
+        Args:
+            data (List[np.ndarray]): List of array-like objects, each of shape (n_samples, n_input_features).
+
+        Returns:
+            List[np.ndarray]: inversely transformed data.
+        """
+        raise NotImplementedError("Transform must implement the inverse_transform method.")
 
     def state_dict(self) -> dict[str, Any]:
+        """Return a dictionary containing the state of the transform.
+        This is used for saving the transform parameters and reloading later.
+        """
         return {}
 
     def load_state_dict(self, d: dict[str, Any]) -> None:
+        """Load the state of the transform from a dictionary."""
         pass
 
 class Compose(Transform):
-    """Apply transforms **in order**.  Inverse is applied in reverse."""
+    """Apply transforms in order.  Inverse is applied in reverse."""
     def __init__(self, transforms: List[Transform] = None):
         if transforms is None:
             # Reload from state_dict is expected.
@@ -57,22 +92,26 @@ class Compose(Transform):
         return "compose"
 
     def fit(self, data: Array) -> None:
+        """"""
         _d = data
         for t in self.T:
             t.fit(_d)
             _d = t.transform(_d)
 
     def transform(self, data: Array) -> Array:
+        """"""
         for t in self.T:
             data = t.transform(data)
         return data
 
     def inverse_transform(self, data: Array) -> Array:
+        """"""
         for t in reversed(self.T):
             data = t.inverse_transform(data)
         return data
 
     def state_dict(self) -> dict[str, Any]:
+        """"""
         return {
             "type": "Compose",
             "names": self._T_names,
@@ -80,6 +119,7 @@ class Compose(Transform):
             "children": [t.state_dict() for t in self.T]}
 
     def load_state_dict(self, d) -> None:
+        """"""
         logging.info(f"Compose: Loading parameters from checkpoint")
         self._T_names = d["names"]
         self.T = []
@@ -91,13 +131,16 @@ class Compose(Transform):
         self.delay = d["delay"]
 
 class Identity(Transform):
+    """A class that performs no transformation on the data."""
     def __str__(self):
         return "identity"
 
     def transform(self, X: Array) -> Array:
+        """"""
         return X
 
     def inverse_transform(self, X: Array) -> Array:
+        """"""
         return X
 
 class Scaler(Transform):
@@ -106,17 +149,14 @@ class Scaler(Transform):
 
     This class computes scaling parameters based on the provided dataset and applies
     scaling transformations to the data.
+
+    Args:
+        mode (str): Scaling mode ('01', '-11', 'std', or 'none').
+        scl (Optional[float]): Scaling factor for inference datasets (if provided).
+        off (Optional[float]): Offset value for inference datasets (if provided).
     """
 
     def __init__(self, mode: str = "01", scl: Optional[float] = None, off: Optional[float] = None):
-        """
-        Initialize the Scaler with a scaling mode.
-
-        Args:
-            mode (str): Scaling mode ('01', '-11', 'std', or 'none').
-            scl (Optional[float]): Scaling factor for inference datasets (if provided).
-            off (Optional[float]): Offset value for inference datasets (if provided).
-        """
         self._mode = mode.lower()
         self._off = off
         self._scl = scl
@@ -125,15 +165,7 @@ class Scaler(Transform):
         return "scaler"
 
     def fit(self, X: Array) -> None:
-        """
-        Compute scaling parameters based on the provided data.
-
-        Args:
-            X: array-like or list of array-like, shape (n_samples, n_input_features)
-               Training data. If training data contains multiple trajectories, X should be
-               a list containing data for each trajectory. Individual trajectories may contain
-               different numbers of samples.
-        """
+        """"""
         # Combine all trajectories along the sample axis.
         X_combined = np.vstack(X)
         features = X_combined.shape[-1]
@@ -157,15 +189,7 @@ class Scaler(Transform):
         self._scl[msk] = 1.0  # Avoid division by zero
 
     def transform(self, X: Array) -> Array:
-        """
-        Apply scaling to a list of trajectories.
-
-        Args:
-            X: List of array-like objects, each of shape (n_samples, n_input_features).
-
-        Returns:
-            List of numpy.ndarray: Scaled data with the same shapes as the input trajectories.
-        """
+        """"""
         logging.info(f"Scaler: Applying scaling with offset={self._off}, scale={self._scl}.")
         if self._off is None or self._scl is None:
             raise ValueError("Scaler parameters are not initialized. Call `fit` first.")
@@ -173,16 +197,7 @@ class Scaler(Transform):
         return [(trajectory - self._off) / self._scl for trajectory in X]
 
     def inverse_transform(self, X: Array) -> Array:
-        """
-        Revert scaled data back to the original scale for a list of trajectories.
-
-        Args:
-            X: List of array-like objects representing scaled data.
-               Each element should have the same shape as the corresponding original trajectory.
-
-        Returns:
-            List of numpy.ndarray: Data in the original scale with the same shapes as the input trajectories.
-        """
+        """"""
         logging.info(f"Scaler: Applying un-scaling with offset={self._off}, scale={self._scl}.")
         if self._off is None or self._scl is None:
             raise ValueError("Scaler parameters are not initialized. Call `fit` first.")
@@ -190,6 +205,7 @@ class Scaler(Transform):
         return [trajectory * self._scl + self._off for trajectory in X]
 
     def state_dict(self) -> dict[str, Any]:
+        """"""
         return {
             "mode": self._mode,
             "off":  self._off,
@@ -197,6 +213,7 @@ class Scaler(Transform):
             }
 
     def load_state_dict(self, d) -> None:
+        """"""
         logging.info(f"Scaler: Loading parameters from checkpoint :{d}")
         self._mode = d["mode"].lower()
         self._off  = d["off"]
@@ -211,31 +228,31 @@ class DelayEmbedder(Transform):
     'delay' time steps.
 
     For example, if a sequence has shape (seq_length=100, features=5) and delay=2, then:
-      - Each new row in the output will be::
+      - Each new row in the output will be:
 
             [ X[t], X[t+1], X[t+2] ]
 
-      - The output will have shape: (seq_length - delay, features * (delay + 1)).
+      - The output will have shape:
+      
+            (seq_length - delay, features * (delay + 1)).
 
     When applied to a batch of sequences with shape (num_sequences, seq_length, features),
-    the output shape will be::
+    the output shape will be:
 
         (num_sequences, seq_length - delay, features * (delay + 1)).
+
+    Args:
+        delay (int): Number of subsequent time steps to include in the embedding.
     """
 
     def __init__(self, delay: int = 1):
-        """
-        Initialize the DelayEmbedder.
-
-        Args:
-            delay (int): Number of subsequent time steps to include in the embedding.
-        """
         self.delay = delay
 
     def __str__(self):
         return "delay"
 
     def fit(self, X: Array) -> None:
+        """"""
         self.dim = X[0].shape[-1]
 
     def _delay(self, sequence: np.ndarray) -> np.ndarray:
@@ -308,6 +325,7 @@ class DelayEmbedder(Transform):
         return delayed_sequences
 
     def inverse_transform(self, X: Array) -> Array:
+        """"""
         logging.info(f"DelayEmbedder: Unrolling the data.")
         unrolled_sequences = []
         for sequence in X:
@@ -315,12 +333,14 @@ class DelayEmbedder(Transform):
         return unrolled_sequences
 
     def state_dict(self) -> dict[str, Any]:
+        """"""
         return {
             "delay": self.delay,
             "dim":   self.dim,
             }
 
     def load_state_dict(self, d) -> None:
+        """"""
         logging.info(f"DelayEmbedder: Loading parameters from checkpoint :{d}")
         self.delay = d["delay"]
         self.dim   = d["dim"]

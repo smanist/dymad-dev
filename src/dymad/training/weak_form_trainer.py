@@ -10,8 +10,7 @@ logger = logging.getLogger(__name__)
 
 class WeakFormTrainer(TrainerBase):
     """
-    Trainer for weak form Latent Dynamics Models.
-    Uses the unified LDM model with weak form loss.
+    Trainer using weak form loss.
     """
 
     def __init__(self, config_path: str, model_class: Type[torch.nn.Module] = LDM):

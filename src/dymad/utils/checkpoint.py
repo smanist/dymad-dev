@@ -12,15 +12,20 @@ def load_checkpoint(model, optimizer, schedulers, checkpoint_path, load_from_che
     Load a checkpoint from the specified path.
 
     Args:
-        model: The model to load the state into.
-        optimizer: The optimizer to load the state into.
-        schedulers: The schedulers to load the state into.
+        model (torch.nn.Module): The model to load the state into.
+        optimizer (torch.optim.Optimizer): The optimizer to load the state into.
+        schedulers (list[torch.optim.lr_scheduler._LRScheduler]): The schedulers to load the state into.
         checkpoint_path (str): Path to the checkpoint file.
         inference_mode (bool, optional): If True, skip loading optimizer and schedulers.
 
     Returns:
-        int: The epoch number from which to continue training.
-        float: The best loss recorded in the checkpoint.
+        tuple: A tuple containing:
+
+        - int: The epoch number from which to continue training.
+        - float: The best loss recorded in the checkpoint.
+        - list: History of losses.
+        - list: History of RMSE of trajectories - can be different from loss.
+        - dict: Metadata about the data.
     """
     mode = "Inference" if inference_mode else "Training"
     logging.info(f"{mode} mode is enabled.")
@@ -47,9 +52,9 @@ def save_checkpoint(model, optimizer, schedulers, epoch, best_loss, hist, rmse, 
     Save the model, optimizer, and scheduler states to a checkpoint file.
 
     Args:
-        model: The model to save.
-        optimizer: The optimizer to save.
-        schedulers: The schedulers to save.
+        model (torch.nn.Module): The model to save.
+        optimizer (torch.optim.Optimizer): The optimizer to save.
+        schedulers (list[torch.optim.lr_scheduler._LRScheduler]): The schedulers to save.
         epoch (int): The current epoch number.
         best_loss (float): The best loss recorded so far.
         hist (list): The history of losses.
@@ -69,12 +74,19 @@ def save_checkpoint(model, optimizer, schedulers, epoch, best_loss, hist, rmse, 
     }, checkpoint_path)
 
 def load_model(model_class, checkpoint_path, config_path):
-    """ Load a model from a checkpoint file.
+    """
+    Load a model from a checkpoint file.
 
     Args:
-        model_class: The class of the model to load.
+        model_class (torch.nn.Module): The class of the model to load.
         checkpoint_path (str): Path to the checkpoint file.
         config_path (str): Path to the configuration file.
+
+    Returns:
+        tuple: A tuple containing the model and a prediction function.
+
+        - nn.Module: The loaded model.
+        - callable: A function to predict trajectories in data space.
     """
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)

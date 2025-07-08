@@ -20,27 +20,23 @@ class TrajectoryManager:
     dataloader creation.
 
     The workflow includes:
+
       - Loading raw data from a binary file.
       - Preprocessing (trimming trajectories, subsetting, etc.).
-      - Scaling using the provided Scaler class.
-      - Delay embedding using the provided DelayEmbedder class.
-      - (Optionally) generating weak-form parameters.
       - Creating a dataset and splitting into train/validation/test sets.
+      - Normalizing and transforming the data using specified transformations.
       - Creating dataloaders tailored for NN, LSTM, or GNN models.
 
     The class is configured via a YAML configuration file.
+
+    Args:
+        metadata (dict): Configuration dictionary.
+        device (torch.device): Torch device to use.
+        adj (torch.Tensor or np.ndarray, optional): Adjacency matrix for GNN models.
+            If not provided, will try to get from config.
     """
 
     def __init__(self, metadata: Dict, device: torch.device = torch.device("cpu"), adj: Optional[Union[torch.Tensor, np.ndarray]] = None):
-        """
-        Initialize the TrajectoryManager by loading the YAML config.
-
-        Args:
-            metadata (dict): Configuration dictionary.
-            device (torch.device): Torch device to use.
-            adj (torch.Tensor or np.ndarray, optional): Adjacency matrix for GNN models.
-                If not provided, will try to get from config.
-        """
         self.metadata = metadata
         self.dtype = torch.double if self.metadata['config']['data'].get('double_precision', False) else torch.float
         self.model_type = self.metadata['config']['model']['type'].upper()
@@ -562,19 +558,21 @@ class TrajectoryManager:
 
     def _create_lstm_sequences(
         self, dataset: list[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Create sliding window sequences for LSTM models.
-        # For each trajectory (assumed to be of shape (T, n_state_features + n_control_features))
-        # where T can vary, this method creates sequences of length `seq_length` (X) with the subsequent
-        # time step as the target (y).
-        #
-        # Args:
-        #   dataset (list[torch.Tensor]): List of tensors, each of shape (T, n_state_features + n_control_features)
-        #   seq_length (int): Length of the input sequence.
-        #
-        # Returns:
-        #   A tuple (X, y) where:
-        #     - X is of shape (N, seq_length, n_state_features + n_control_features)
-        #     - y is of shape (N, n_state_features)
+        """
+        Create sliding window sequences for LSTM models.
+        For each trajectory (assumed to be of shape (T, n_state_features + n_control_features))
+        where T can vary, this method creates sequences of length `seq_length` (X) with the subsequent
+        time step as the target (y).
+
+        Args:
+          dataset (list[torch.Tensor]): List of tensors, each of shape (T, n_state_features + n_control_features)
+          seq_length (int): Length of the input sequence.
+
+        Returns:
+          A tuple (X, y) where:
+            - X is of shape (N, seq_length, n_state_features + n_control_features)
+            - y is of shape (N, n_state_features)
+        """
         seq_length = self.metadata['delay'] + 1
         X_list = []
         y_list = []

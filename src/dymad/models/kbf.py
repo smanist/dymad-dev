@@ -12,8 +12,12 @@ from dymad.utils import MLP, predict_continuous, predict_graph_continuous
 
 class KBF(ModelBase):
     """
-    Koopman Bilinear Form (KBF) model - non-graph version.
+    Koopman Bilinear Form (KBF) model - standard version.
     Uses MLP encoder/decoder and KBF operators for dynamics.
+
+    - z = encoder(x)
+    - z_dot = Az + sum(B_i * u_i * z)
+    - x_hat = decoder(z)
     """
 
     def __init__(self, model_config: Dict, data_meta: Dict):
@@ -74,12 +78,6 @@ class KBF(ModelBase):
         )
 
     def diagnostic_info(self) -> str:
-        """
-        Return diagnostic information about the model.
-
-        Returns:
-            String with model details
-        """
         model_info = super(KBF, self).diagnostic_info()
         model_info += f"Encoder: {self.encoder_net.diagnostic_info()}\n"
         model_info += f"Decoder: {self.decoder_net.diagnostic_info()}\n"

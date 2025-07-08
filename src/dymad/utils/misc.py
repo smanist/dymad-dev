@@ -5,6 +5,11 @@ def setup_logging(config_path: str, mode: str = 'info', prefix='.') -> None:
     """
     Setup logging configuration based on the config file.
     Assuming the config file name is in the format '<case>.yaml'
+
+    Args:
+        config_path (str): Path to the configuration file.
+        mode (str): Logging mode, either 'debug' or 'info'. Default is 'info'.
+        prefix (str): Directory prefix for the log file. Default is '.' (current directory).
     """
     _l = logging.DEBUG if mode == 'debug' else logging.INFO
     _t = str(datetime.now())

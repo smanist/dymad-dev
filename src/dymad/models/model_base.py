@@ -8,23 +8,33 @@ class ModelBase(nn.Module, ABC):
     Base class for dynamic models.
 
     Notation:
-      x: Physical state space.
-      z: Embedding (latent) space.
+
+    - x: Physical state/observation space.
+    - u: Control input.
+    - z: Embedding (latent) space.
 
     Discrete-time model:
-      z_k = encoder(x_k)
-      z_k+1 = dynamics(z_k, u_k)
-      x_k+1 = decoder(z_k+1)
+
+    - z_k = encoder(x_k)
+    - z_{k+1} = dynamics(z_k, u_k)
+    - x_{k+1} = decoder(z_{k+1})
 
     Continuous-time model:
-      z = encoder(x)
-      z_dot = dynamics(z, u)
-      x = decoder(z)
+
+    - z = encoder(x)
+    - \dot{z} = dynamics(z, u)
+    - x = decoder(z)
     """
     def __init__(self):
         super(ModelBase, self).__init__()
 
     def diagnostic_info(self) -> str:
+        """
+        Return diagnostic information about the model.
+
+        Returns:
+            str: String with model details
+        """
         return f"Model parameters: {sum(p.numel() for p in self.parameters())}\n"
 
     @abstractmethod

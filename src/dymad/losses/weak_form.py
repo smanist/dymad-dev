@@ -5,6 +5,11 @@ from typing import Tuple, Dict, Callable
 from dymad.utils.weak import generate_weak_weights
 
 def generate_weak_form_params(metadata, dtype, device) -> None:
+    """
+    Generate weak form parameters for a single trajectory.
+
+    See `dymad.utils.weak.weak_form_loss` for more details.
+    """
     if len(metadata["dt_and_n_steps"]) > 1:
         raise ValueError("Weak form generation is not currently supported for trajectories with different lengths.")
 
@@ -40,32 +45,36 @@ def generate_weak_form_params(metadata, dtype, device) -> None:
 def weak_form_loss(truth: torch.Tensor, pred: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
                   weak_dyn_param: Dict, criterion: Callable,
                   reconstruction_weight: float = 1.0, dynamics_weight: float = 1.0) -> torch.Tensor:
-    """Compute weak form loss for a single trajectory.
+    r"""Compute weak form loss for a single trajectory.
 
-    Mathematical foundation:
-    - For dynamical systems dx/dt = f(x), we enforce the weak form:
+    Key idea:
+        Instead of enforcing pointwise dynamics, we enforce a weak form over sliding windows
+        using compactly supported test functions \phi(t):
 
-        ∫ φ(t) * dx/dt dt = ∫ φ(t) * f(x) dt  (where φ are test functions)
-
-    - In matrix form: C*z ≈ D*z_dot
-      where C contains test functions and D contains their derivatives
+        .. math::
+            \begin{align*}
+            \int_{t_0}^{t_1} \phi(t) \dot{x}(t) dt &= \int_{t_0}^{t_1} \phi(t) f(x) dt \\
+            -\int_{t_0}^{t_1} \dot{\phi}(t) x(t) dt &= \int_{t_0}^{t_1} \phi(t) f(x) dt \\
+            CX &= D \dot{X}
+            \end{align*}
 
     Implementation details:
+
     1. For each trajectory, applies sliding windows of size N with stride dN
-    2. Enforces C*z ≈ D*z_dot for each window (weak form consistency)
+    2. Enforces weak form loss for each window (weak form consistency)
     3. Also enforces reconstruction accuracy via decoder loss
     4. Optimized to reuse C and D matrices and minimize tensor operations
 
     Args:
-        truth: Ground truth states of shape (n_steps, n_states)
-        pred: Tuple of (latent states, latent dynamics, reconstructed states)
-        weak_dyn_param: Dictionary containing weak form parameters (C, D, N, dN, K)
-        criterion: Loss function to use (e.g., MSE)
-        reconstruction_weight: Weight for reconstruction loss component
-        dynamics_weight: Weight for weak form dynamics loss component
+        truth (torch.Tensor): Ground truth states of shape (n_steps, n_states)
+        pred (Tuple[torch.Tensor, torch.Tensor, torch.Tensor]): Tuple of (latent states, latent dynamics, reconstructed states)
+        weak_dyn_param (Dict): Dictionary containing weak form parameters (C, D, N, dN, K)
+        criterion (Callable): Loss function to use (e.g., MSE)
+        reconstruction_weight (float): Weight for reconstruction loss component
+        dynamics_weight (float): Weight for weak form dynamics loss component
 
     Returns:
-        Weighted combination of weak form and reconstruction loss
+        torch.Tensor: Weighted combination of weak form and reconstruction loss
     """
     # Extract weak form parameters
     C, D = weak_dyn_param['C'], weak_dyn_param['D']
@@ -100,15 +109,15 @@ def weak_form_loss_batch(batch: torch.Tensor, pred_batch: Tuple[torch.Tensor, to
     """Compute weak form loss for a batch of trajectories.
 
     Args:
-        batch: Batch of trajectories of shape (batch_size, n_steps, n_features)
-        pred_batch: Tuple of (latent states, latent dynamics, reconstructed states) for the batch
-        metadata: Dictionary containing metadata including weak form parameters
-        criterion: Loss function to use (e.g., MSE)
-        reconstruction_weight: Weight for reconstruction loss component
-        dynamics_weight: Weight for weak form dynamics loss component
+        batch (torch.Tensor): Batch of trajectories of shape (batch_size, n_steps, n_features)
+        pred_batch (Tuple[torch.Tensor, torch.Tensor, torch.Tensor]): Tuple of (latent states, latent dynamics, reconstructed states) for the batch
+        weak_dyn_param (Dict): Dictionary containing weak form parameters
+        criterion (Callable): Loss function to use (e.g., MSE)
+        reconstruction_weight (float): Weight for reconstruction loss component
+        dynamics_weight (float): Weight for weak form dynamics loss component
 
     Returns:
-        Mean weighted loss across the batch
+        torch.Tensor: Mean weighted loss across the batch
     """
     z_batch, z_dot_batch, x_hat_batch = pred_batch
 

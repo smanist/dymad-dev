@@ -7,17 +7,9 @@ from dymad.models.model_base import ModelBase
 from dymad.utils import MLP, predict_continuous
 
 class LDM(ModelBase):
-    """
-    Latent Dynamics Model (LDM) that can be trained with either:
-    - NODE trainer (direct ODE integration)
-    - Weak form trainer (weak form loss)
+    """Latent Dynamics Model (LDM)
 
-    This model combines the functionality of both NODE and weakFormLDM.
-
-    In the minimal case,
-        Encoder: z = (x,u)
-        Dynamics: z_dot = f(z)
-        Decoder: x_hat = TakeFirst(z)
+    The encoder, dynamics, and decoder networks are implemented as MLPs.
     """
     def __init__(self, model_config: Dict, data_meta: Dict):
         super(LDM, self).__init__()
@@ -73,12 +65,6 @@ class LDM(ModelBase):
         )
 
     def diagnostic_info(self) -> str:
-        """
-        Return diagnostic information about the model.
-
-        Returns:
-            String with model details
-        """
         model_info = super(LDM, self).diagnostic_info()
         model_info += f"Encoder: {self.encoder_net.diagnostic_info()}\n"
         model_info += f"Dynamics: {self.dynamics_net.diagnostic_info()}\n"
@@ -91,11 +77,11 @@ class LDM(ModelBase):
         Create features by concatenating state and control.
 
         Args:
-            x: State tensor of shape (batch_size, n_total_state_features)
-            u: Control tensor of shape (batch_size, n_control_features)
+            x (torch.Tensor): State tensor of shape (batch_size, n_total_state_features)
+            u (torch.Tensor): Control tensor of shape (batch_size, n_control_features)
 
         Returns:
-            Combined feature tensor
+            torch.Tensor: Combined feature tensor
         """
         return torch.cat([x, u], dim=-1)
 
@@ -104,10 +90,10 @@ class LDM(ModelBase):
         Map features to latent space.
 
         Args:
-            w: Raw features (state and control concatenated)
+            w (torch.Tensor): Raw features (state and control concatenated)
 
         Returns:
-            Latent representation
+            torch.Tensor: Latent representation
         """
         return self.encoder_net(w)
 
@@ -116,10 +102,10 @@ class LDM(ModelBase):
         Map from latent space back to state space.
 
         Args:
-            z: Latent state
+            z (torch.Tensor): Latent state
 
         Returns:
-            Reconstructed state
+            torch.Tensor: Reconstructed state
         """
         return self.decoder_net(z)
 
@@ -128,10 +114,10 @@ class LDM(ModelBase):
         Compute latent dynamics (derivative).
 
         Args:
-            z: Latent state
+            z (torch.Tensor): Latent state
 
         Returns:
-            Latent state derivative
+            torch.Tensor: Latent state derivative
         """
         return self.dynamics_net(z)
 
@@ -140,8 +126,8 @@ class LDM(ModelBase):
         Forward pass through the model.
 
         Args:
-            x: State tensor
-            u: Control tensor
+            x (torch.Tensor): State tensor
+            u (torch.Tensor): Control tensor
 
         Returns:
             Tuple of (latent, latent_derivative, reconstruction)
@@ -158,23 +144,23 @@ class LDM(ModelBase):
         Predict trajectory using continuous-time integration.
 
         Args:
-            x0: Initial state tensor(s):
+            x0 (torch.Tensor): Initial state tensor(s):
 
                 - Single: (n_total_state_features,)
                 - Batch: (batch_size, n_total_state_features)
 
-            us: Control inputs:
+            us (torch.Tensor): Control inputs:
 
                 - Single: (time_steps, n_control_features)
                 - Batch: (batch_size, time_steps, n_control_features)
 
                 For autonomous systems, use zero-valued controls
 
-            ts: Time points for prediction
-            method: ODE solver method
+            ts (Union[np.ndarray, torch.Tensor]): Time points for prediction
+            method (str): ODE solver method
 
         Returns:
-            Predicted trajectory tensor(s):
+            torch.Tensor: Predicted trajectory tensor(s):
 
                 - Single: (time_steps, n_total_state_features)
                 - Batch: (time_steps, batch_size, n_total_state_features)
