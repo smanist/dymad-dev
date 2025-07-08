@@ -107,10 +107,11 @@ def predict_graph_continuous(
     ts: Union[np.ndarray, torch.Tensor],
     edge_index: torch.Tensor,
     method: str = 'dopri5',
+    order: str = 'cubic',
     **kwargs
 ) -> torch.Tensor:
     """
-    Predict single trajectory for graph models using the original working implementation.
+    Predict single trajectory for graph models.
 
     Args:
         model: Graph model with encoder, decoder, and dynamics methods
@@ -125,6 +126,7 @@ def predict_graph_continuous(
         ts: Time points (n_steps,)
         edge_index: Graph connectivity tensor (2, n_edges)
         method: ODE solver method
+        order: Interpolation method for control inputs ('zoh', 'linear' or 'cubic')
 
     Returns:
         np.ndarray: Predicted trajectory (n_steps, n_nodes, n_features)
@@ -156,23 +158,25 @@ def predict_graph_continuous(
     n_steps = len(ts)
     logger.debug(f"predict_graph_continuous: Integrating over {n_steps} time steps using {method} solver")
 
-    # Handle control inputs
-    if (us.ndim == 1) or (us.ndim == 2 and us.shape[0] == 1):
-        # Constant control
-        logger.debug(f"predict_graph_continuous: Using constant control")
-        u_func = lambda t: us.to(device)
-    else:
-        # Time-varying control: interpolate
-        logger.debug(f"predict_graph_continuous: Using time-varying control with interpolation")
-        u_np = us.cpu().detach().numpy()
-        ts_np = ts.cpu().detach().numpy()
-        u_interp = sp_inter.interp1d(ts_np[:len(u_np)], u_np, axis=0, fill_value='extrapolate')
-        u_func = lambda t: torch.tensor(u_interp(t.cpu().detach().numpy()),
-                                      dtype=us.dtype).to(device)
+    # # Handle control inputs
+    # if (us.ndim == 1) or (us.ndim == 2 and us.shape[0] == 1):
+    #     # Constant control
+    #     logger.debug(f"predict_graph_continuous: Using constant control")
+    #     u_func = lambda t: us.to(device)
+    # else:
+    #     # Time-varying control: interpolate
+    #     logger.debug(f"predict_graph_continuous: Using time-varying control with interpolation")
+    #     u_np = us.cpu().detach().numpy()
+    #     ts_np = ts.cpu().detach().numpy()
+    #     u_interp = sp_inter.interp1d(ts_np[:len(u_np)], u_np, axis=0, fill_value='extrapolate')
+    #     u_func = lambda t: torch.tensor(u_interp(t.cpu().detach().numpy()),
+    #                                   dtype=us.dtype).to(device)
+
+    interp = ControlInterpolator(ts, us, order=order)
 
     # Initial encoding
-    t0 = torch.tensor(0.0).to(device)
-    u0 = u_func(t0)
+    t0 = torch.tensor(ts[0]).to(device)
+    u0 = interp(t0)
     w0 = model.encoder(x0, u0, edge_index)
     w0 = w0.T.flatten().detach()
     logger.debug(f"predict_graph_continuous: Encoded initial state to latent dimension {w0.shape}")
@@ -180,7 +184,7 @@ def predict_graph_continuous(
     def ode_func(t, w):
         # Reshape latent vector to (n_nodes, latent_dim)
         w_reshaped = w.reshape(-1, model.n_nodes).T
-        u_t = u_func(t)
+        u_t = interp(t)
         # Get dynamics
         w_dot = model.dynamics(w_reshaped, u_t)[1]  # Get w_dot from dynamics
         return w_dot.squeeze().detach()
