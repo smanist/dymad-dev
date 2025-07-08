@@ -40,7 +40,8 @@ def predict_continuous(
         order: Interpolation method for control inputs ('zoh', 'linear' or 'cubic')
 
     Returns:
-        Predicted trajectory(ies):
+        np.ndarray:
+            Predicted trajectory(ies)
 
             - Single: (n_steps, n_features)
             - Batch: (n_steps, batch_size, n_features)
@@ -126,7 +127,7 @@ def predict_graph_continuous(
         method: ODE solver method
 
     Returns:
-        Predicted trajectory (n_steps, n_nodes, n_features)
+        np.ndarray: Predicted trajectory (n_steps, n_nodes, n_features)
 
     Raises:
         ValueError: If input dimensions don't match requirements

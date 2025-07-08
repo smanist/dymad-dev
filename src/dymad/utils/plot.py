@@ -10,6 +10,19 @@ plt_logger = logging.getLogger('matplotlib')
 plt_logger.setLevel(logging.INFO)
 
 def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclose=True, prefix='.'):
+    """
+    Plot trajectories with optional control inputs and save the figure.
+
+    Args:
+        traj (np.ndarray): Trajectory data, shape (n_steps, n_features) or (n_traj, n_steps, n_features)
+        ts (np.ndarray): Time points corresponding to the trajectory data, shape (n_steps,)
+        model_name (str): Name of the model for the plot title and filename
+        metadata (dict): Metadata containing configuration and state information
+        us (np.ndarray, optional): Control inputs, shape (n_steps, n_controls)
+        labels (list, optional): Labels for each trajectory, length must match number of trajectories
+        ifclose (bool): Whether to close the plot after saving
+        prefix (str): Directory prefix for saving the plot
+    """
     if traj.ndim == 2:
         traj = np.array([traj])
 
@@ -36,6 +49,9 @@ def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclos
         plt.close()
 
 def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=None):
+    """
+    Used by plot_trajectory to plot a single trajectory.
+    """
     if us is None:
         dim_u = 0
     else:
@@ -107,8 +123,18 @@ def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=Non
 
     return fig, ax
 
-def plot_hist(hist, epoch, model_name, prefix='.'):
-    """Plot training history with loss curves for train/validation/test sets."""
+def plot_hist(hist, epoch, model_name, ifclose=True, prefix='.'):
+    """
+    Plot training history with loss curves for train/validation/test sets.
+
+    Args:
+        hist (list): History of losses, where hist[0] is epoch numbers and
+                     hist[1:] contains losses for train, validation, and test sets.
+        epoch (int): Number of epochs to plot.
+        model_name (str): Name of the model for the plot title and filename.
+        ifclose (bool): Whether to close the plot after saving.
+        prefix (str): Directory prefix for saving the plot.
+    """
     tmp = np.array(hist).T
     _e, _h = tmp[0][:epoch], tmp[1:,:epoch]
 
@@ -138,4 +164,6 @@ def plot_hist(hist, epoch, model_name, prefix='.'):
     plt.tight_layout()
     plt.savefig(f'{prefix}/{model_name}_history.png', dpi=150, bbox_inches='tight',
                 facecolor='white', edgecolor='none')
-    plt.close()
+
+    if ifclose:
+        plt.close()

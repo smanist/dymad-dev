@@ -8,13 +8,8 @@ class TakeFirst(nn.Module):
     """
     Pass-through layer that returns the first `m` entries in the last axis.
 
-    Examples
-    --------
-    >>> sel = TakeFirst(m=2)
-    >>> a = torch.randn(3, 4)
-    >>> out = sel(a)
-    >>> out.shape
-    (3, 2)
+    Args:
+        m (int): Number of entries to take from the last axis.
     """
     def __init__(self, m: int):
         super().__init__()
@@ -22,6 +17,7 @@ class TakeFirst(nn.Module):
         self.m = m
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """"""
         return x[..., :self.m] if x.ndim > 1 else x[:self.m]
 
 _ACT_MAP = {
@@ -98,45 +94,42 @@ class MLP(nn.Module):
     r"""
     Fully-connected feed-forward network
 
-    Architecture
-    ------------
-    in_dim -> (Linear -> Act) x n_latent -> Linear -> out_dim
+    Assuming the following architecture:
 
-    Parameters
-    ----------
-    input_dim : int
-        Dimension of the input features.
-    latent_dim : int
-        Width of every hidden layer.
-    output_dim : int
-        Dimension of the network output.
-    n_layers : int, default = 2
-        Number of total layers.
-        If 0, same as Identity, or TakeFirst.
-        If 1, same as Linear.
-        If 2, same as `Linear -> activation -> Linear`.
-        Otherwise, latent layers are inserted.
-    activation : nn.Module or Callable[[], nn.Module], default = nn.ReLU
-        Non-linearity to insert after every hidden Linear.
-        Pass either a class (e.g. `nn.Tanh`) or an already-constructed module.
-    weight_init : Callable[[torch.Tensor, float], None], default = `nn.init.kaiming_uniform_`
-        Function used to initialise each Linear layer's *weight* tensor.
-        Must accept `(tensor, gain)` signature like the functions in
-        `torch.nn.init`.
-    bias_init : Callable[[torch.Tensor], None], default = `nn.init.zeros_`
-        Function used to initialise each Linear layer's *bias* tensor.
-    gain : Optional[float], default = 1.0
-        In the linear layers, the weights are initialised with the standard
-        `nn.init.calculate_gain(<nonlinearity>)`
-        Gain is multiplied to the calculated gain.  By default gain=1, so no change.
-    end_activation : bool, default = True
-        If ``True``, the last layer is followed by an activation function.
-        Otherwise, the last layer is a plain Linear layer.
+        in_dim -> (Linear -> Act) x n_latent -> Linear -> out_dim
 
-    Notes
-    -----
-    * Returns a plain tensor, **not** a tuple.
-    * TorchScript-able: the internal Sequential is scripted automatically.
+    Args:
+        input_dim (int):
+            Dimension of the input features.
+        latent_dim (int):
+            Width of every hidden layer.
+        output_dim (int):
+            Dimension of the network output.
+        n_layers (int, default = 2):
+            Number of total layers.
+
+            - If 0, same as Identity, or TakeFirst.
+            - If 1, same as Linear.
+            - If 2, same as `Linear -> activation -> Linear`.
+            - Otherwise, latent layers are inserted.
+
+        activation (nn.Module or Callable[[], nn.Module], default = nn.ReLU):
+            Non-linearity to insert after every hidden Linear.
+            Pass either a class (e.g. `nn.Tanh`) or an already-constructed module.
+        weight_init (Callable[[torch.Tensor, float], None], default = `nn.init.kaiming_uniform_`):
+            Function used to initialise each Linear layer's *weight* tensor.
+            Must accept `(tensor, gain)` signature like the functions in
+            `torch.nn.init`.
+        bias_init (Callable[[torch.Tensor], None], default = `nn.init.zeros_`):
+            Function used to initialise each Linear layer's *bias* tensor.
+        gain (Optional[float], default = 1.0):
+            In the linear layers, the weights are initialised with the standard
+            `nn.init.calculate_gain(<nonlinearity>)`
+            Gain is multiplied to the calculated gain.  By default gain=1, so no change.
+        end_activation (bool, default = True):
+
+            - If ``True``, the last layer is followed by an activation function.
+            - Otherwise, the last layer is a plain Linear layer.
     """
 
     def __init__(
@@ -213,20 +206,18 @@ class MLP(nn.Module):
 
 class ControlInterpolator(nn.Module):
     """
-    Interpolates the sampled control signal u(t_k) when the ODE RHS
+    Interpolates the sampled control signal u(t_k) when the ODE solver
     requests u(t_query).
 
-    Parameters
-    ----------
-    t      : (N,) 1-D tensor
+    Args:
+        t (torch.Tensor): 1-D tensor of shape (N,). Sampling times (must be ascending).
+        u (torch.Tensor): Tensor of shape (..., N, m). Control samples, m inputs per step.
+        order (str): Interpolation mode. One of {'zoh', 'linear', 'cubic', etc}.
 
-        sampling times (must be ascending)
-
-    u      : (..., N, m) tensor
-
-        control samples, m inputs per step
-
-    mode   : {'zoh','linear','cubic',etc}
+    Note:
+        Not to be confused with `dymad.utils.sampling._build_interpolant`,
+        which is for data generation, esp. with Numpy.
+        `ControlInterpolator` is meant to be used in a Torch setting.
     """
     def __init__(self, t, u, order='linear'):
         super().__init__()
