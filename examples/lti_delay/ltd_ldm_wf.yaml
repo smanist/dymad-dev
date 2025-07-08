@@ -1,14 +1,18 @@
 data:
-  path: './data/lti.npz'
+  path: './data/ltd.npz'
   n_samples: 128
   n_steps: 501
   double_precision: false
 
 transform_x:
-  type: "identity"
+  - type: "scaler"
+    mode: "std"
+  - type: "delay"
+    delay: 1
 
 transform_u:
-  type: "identity"
+  type: "delay"
+  delay: 1
 
 split:
   train_frac: 0.75
@@ -17,7 +21,7 @@ dataloader:
   batch_size: 64
 
 model:
-  name: 'lti_ldm_wf'
+  name: 'ltd_ldm_wf'
   type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 0
   processor_layers: 1

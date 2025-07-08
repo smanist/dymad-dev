@@ -107,7 +107,7 @@ def load_model(model_class, checkpoint_path, config_path):
     # Prediction in data space
     def predict_fn(x0, u, t, device="cpu"):
         """Predict trajectory in data space."""
-        _x0 = _data_transform_x.transform([x0])[0]
+        _x0 = _data_transform_x.transform([x0])[0][0]
         _x0 = torch.tensor(_x0, dtype=dtype, device=device)
         _u  = _data_transform_u.transform([u])[0]
         _u  = torch.tensor(_u, dtype=dtype, device=device)

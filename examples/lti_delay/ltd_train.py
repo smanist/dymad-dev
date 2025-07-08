@@ -38,24 +38,24 @@ config_gau = {
             "mode": "zoh"}}}
 
 ifdat = 0
-iftrn = 0
-ifplt = 0
+iftrn = 1
+ifplt = 1
 ifprd = 1
 
 if ifdat:
-    sampler = TrajectorySampler(f, g, config='lti_data.yaml', config_mod=config_chr)
+    sampler = TrajectorySampler(f, g, config='ltd_data.yaml', config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
-    np.savez_compressed('./data/lti.npz', t=ts, x=ys, u=us)
+    np.savez_compressed('./data/ltd.npz', t=ts, x=ys, u=us)
 
 if iftrn:
     cases = [
-        {"model" : LDM, "trainer": WeakFormTrainer, "config": 'lti_ldm_wf.yaml'},
-        {"model" : LDM, "trainer": NODETrainer,     "config": 'lti_ldm_node.yaml'},
-        {"model" : KBF, "trainer": WeakFormTrainer, "config": 'lti_kbf_wf.yaml'},
-        {"model" : KBF, "trainer": NODETrainer,     "config": 'lti_kbf_node.yaml'}
+        {"model" : LDM, "trainer": WeakFormTrainer, "config": 'ltd_ldm_wf.yaml'},
+        {"model" : LDM, "trainer": NODETrainer,     "config": 'ltd_ldm_node.yaml'},
+        {"model" : KBF, "trainer": WeakFormTrainer, "config": 'ltd_kbf_wf.yaml'},
+        {"model" : KBF, "trainer": NODETrainer,     "config": 'ltd_kbf_node.yaml'}
     ]
 
-    for _i in [0, 1]:
+    for _i in [3]:
         Model = cases[_i]['model']
         Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']
@@ -66,10 +66,10 @@ if iftrn:
         trainer.train()
 
 if ifplt:
-    mdl = 'ldm'
-    # mdl = 'kbf'
-    sum_wf = np.load(f'results/lti_{mdl}_wf_summary.npz')
-    sum_nd = np.load(f'results/lti_{mdl}_node_summary.npz')
+    # mdl = 'ldm'
+    mdl = 'kbf'
+    sum_wf = np.load(f'results/ltd_{mdl}_wf_summary.npz')
+    sum_nd = np.load(f'results/ltd_{mdl}_node_summary.npz')
 
     e_loss_wf, h_loss_wf = sum_wf['epoch_loss'], sum_wf['losses']
     e_loss_nd, h_loss_nd = sum_nd['epoch_loss'], sum_nd['losses']
@@ -95,12 +95,12 @@ if ifplt:
     print("Epoch time NODE/WF:", sum_nd['avg_epoch_time']/sum_wf['avg_epoch_time'])
 
 if ifprd:
-    MDL, mdl = LDM, 'ldm'
-    # MDL, mdl = KBF, 'kbf'
-    mdl_wf, prd_wf = load_model(MDL, f'lti_{mdl}_wf.pt', f'lti_{mdl}_wf.yaml')
-    mdl_nd, prd_nd = load_model(MDL, f'lti_{mdl}_node.pt', f'lti_{mdl}_node.yaml')
+    # MDL, mdl = LDM, 'ldm'
+    MDL, mdl = KBF, 'kbf'
+    mdl_wf, prd_wf = load_model(MDL, f'ltd_{mdl}_wf.pt', f'ltd_{mdl}_wf.yaml')
+    mdl_nd, prd_nd = load_model(MDL, f'ltd_{mdl}_node.pt', f'ltd_{mdl}_node.yaml')
 
-    sampler = TrajectorySampler(f, g, config='lti_data.yaml', config_mod=config_gau)
+    sampler = TrajectorySampler(f, g, config='ltd_data.yaml', config_mod=config_gau)
 
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
@@ -108,8 +108,8 @@ if ifprd:
     u_data = us[0]
 
     with torch.no_grad():
-        weak_pred = prd_wf(x_data, u_data, t_data)
-        node_pred = prd_nd(x_data, u_data, t_data)
+        weak_pred = prd_wf(x_data, u_data, t_data[:-1])
+        node_pred = prd_nd(x_data, u_data, t_data[:-1])
 
     plot_trajectory(
         np.array([x_data, weak_pred, node_pred]), t_data, "LTI", metadata={'n_state_features': 2},

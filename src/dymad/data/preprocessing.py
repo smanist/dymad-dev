@@ -292,7 +292,7 @@ class DelayEmbedder(Transform):
     def fit(self, X: Array) -> None:
         """"""
         self._inp_dim = X[0].shape[-1]
-        self._out_dim = self._inp_dim * self.delay
+        self._out_dim = self._inp_dim * (self.delay + 1)
 
     def _delay(self, sequence: np.ndarray) -> np.ndarray:
         """

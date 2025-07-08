@@ -29,10 +29,9 @@ def prediction_rmse(model,
     """
     with torch.no_grad():
         # Extract states and controls
-        # use -metadata['n_control_features'] because we don't delay embed controls
-        x_truth = truth[:, :-metadata['n_control_features']]
-        x0 = truth[0, :-metadata['n_control_features']]
-        us = truth[:, -metadata['n_control_features']:]
+        x_truth = truth[:, :-metadata['n_total_control_features']]
+        x0 = truth[0, :-metadata['n_total_control_features']]
+        us = truth[:, -metadata['n_total_control_features']:]
 
         # Make prediction
         x_pred = model.predict(x0, us, ts, method=method)

@@ -52,6 +52,8 @@ def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=Non
     """
     Used by plot_trajectory to plot a single trajectory.
     """
+    dim_x = traj.shape[1]
+
     if us is None:
         dim_u = 0
     else:
@@ -72,7 +74,7 @@ def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=Non
             fig_size = (3 * n_cols, 2.5 * n_rows)
         else:
             # Default: one column with a row per state
-            n_rows, n_cols = metadata['n_state_features'] + dim_u, 1
+            n_rows, n_cols = dim_x + dim_u, 1
             fig_size = (6, n_rows * 2)
 
         # Create subplots
@@ -87,7 +89,7 @@ def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=Non
         ax = axes
 
     # Plot each state
-    for i in range(metadata['n_state_features']):
+    for i in range(dim_x):
         ax[i].plot(ts, traj[:, i], LINESTY[idx%4], color=PALETTE[idx%6], linewidth=2, label=label)
         ax[i].set_xlim([0, ts[-1]])
         ax[i].grid(True, alpha=0.3)
@@ -97,7 +99,7 @@ def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=Non
             ax[i].legend(loc='best', fontsize=9)
 
     if axes is None:
-        for i in range(metadata['n_state_features']):
+        for i in range(dim_x):
             # Set y-limits based on scaling mode (for normalized data)
             if 'scaler' in metadata:
                 mode = metadata['scaler']['mode']
@@ -113,7 +115,7 @@ def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=Non
                     ax[i].set_ylim([ymn-0.1*abs(ymn), ymx+0.1*abs(ymx)])  # Use data range with buffer
 
     if axes is None and dim_u > 0:
-        offset = metadata['n_state_features']
+        offset = dim_x
         for i in range(dim_u):
             ax[offset + i].plot(ts, us[:, i], '-', color='#3498db', linewidth=2)
             ax[offset + i].set_xlim([0, ts[-1]])
