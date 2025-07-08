@@ -78,7 +78,7 @@ class NODETrainer(TrainerBase):
 
         batch = batch.to(self.device)
         states = batch[:, :num_steps, :self.metadata['n_total_state_features']]
-        controls = batch[:, :num_steps, -self.metadata['n_control_features']:]
+        controls = batch[:, :num_steps, -self.metadata['n_total_control_features']:]
         init_states = states[:, 0, :]  # (batch_size, n_total_state_features)
 
         # Use the actual time points from trajectory manager

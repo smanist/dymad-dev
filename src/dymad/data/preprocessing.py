@@ -98,6 +98,14 @@ class Compose(Transform):
             t.fit(_d)
             _d = t.transform(_d)
 
+        self._inp_dim = self.T[0]._inp_dim
+        self._out_dim = self.T[-1]._out_dim
+
+        for _i in range(len(self.T)-1):
+            assert self.T[_i]._out_dim == self.T[_i+1]._inp_dim, \
+                f"Compose: Output dimension of transform {_i} ({self.T[_i]._out_dim}) " \
+                f"does not match input dimension of transform {_i+1} ({self.T[_i+1]._inp_dim})."
+
     def transform(self, data: Array) -> Array:
         """"""
         for t in self.T:
@@ -116,7 +124,10 @@ class Compose(Transform):
             "type": "Compose",
             "names": self._T_names,
             "delay": self.delay,
-            "children": [t.state_dict() for t in self.T]}
+            "children": [t.state_dict() for t in self.T],
+            "inp": self._inp_dim,
+            "out": self._out_dim,
+            }
 
     def load_state_dict(self, d) -> None:
         """"""
@@ -129,11 +140,18 @@ class Compose(Transform):
             self.T.append(_TRN_MAP[name]())
             self.T[-1].load_state_dict(sd)
         self.delay = d["delay"]
+        self._inp_dim = d["inp"]
+        self._out_dim = d["out"]
 
 class Identity(Transform):
     """A class that performs no transformation on the data."""
     def __str__(self):
         return "identity"
+
+    def fit(self, X: Array) -> None:
+        """"""
+        self._inp_dim = X[0].shape[-1]
+        self._out_dim = self._inp_dim
 
     def transform(self, X: Array) -> Array:
         """"""
@@ -142,6 +160,19 @@ class Identity(Transform):
     def inverse_transform(self, X: Array) -> Array:
         """"""
         return X
+
+    def state_dict(self) -> dict[str, Any]:
+        """"""
+        return {
+            "inp": self._inp_dim,
+            "out": self._out_dim,
+            }
+
+    def load_state_dict(self, d) -> None:
+        """"""
+        logging.info(f"Identity: Loading parameters from checkpoint :{d}")
+        self._inp_dim = d["inp"]
+        self._out_dim = d["out"]
 
 class Scaler(Transform):
     """
@@ -188,6 +219,9 @@ class Scaler(Transform):
         msk = self._scl < 1e-12
         self._scl[msk] = 1.0  # Avoid division by zero
 
+        self._inp_dim = len(self._scl)
+        self._out_dim = self._inp_dim
+
     def transform(self, X: Array) -> Array:
         """"""
         logging.info(f"Scaler: Applying scaling with offset={self._off}, scale={self._scl}.")
@@ -210,6 +244,8 @@ class Scaler(Transform):
             "mode": self._mode,
             "off":  self._off,
             "scl":  self._scl,
+            "inp": self._inp_dim,
+            "out": self._out_dim,
             }
 
     def load_state_dict(self, d) -> None:
@@ -218,6 +254,8 @@ class Scaler(Transform):
         self._mode = d["mode"].lower()
         self._off  = d["off"]
         self._scl  = d["scl"]
+        self._inp_dim = d["inp"]
+        self._out_dim = d["out"]
 
 class DelayEmbedder(Transform):
     """
@@ -253,7 +291,8 @@ class DelayEmbedder(Transform):
 
     def fit(self, X: Array) -> None:
         """"""
-        self.dim = X[0].shape[-1]
+        self._inp_dim = X[0].shape[-1]
+        self._out_dim = self._inp_dim * self.delay
 
     def _delay(self, sequence: np.ndarray) -> np.ndarray:
         """
@@ -303,8 +342,8 @@ class DelayEmbedder(Transform):
             np.ndarray: The original sequence of shape (seq_length, features).
         """
         arr = [
-            sequence[:, :self.dim],
-            sequence[-1, self.dim:].reshape(self.delay, self.dim)]
+            sequence[:, :self._inp_dim],
+            sequence[-1, self._inp_dim:].reshape(self.delay, self._inp_dim)]
         return np.vstack(arr)
 
     def transform(self, X: Array) -> Array:
@@ -336,14 +375,16 @@ class DelayEmbedder(Transform):
         """"""
         return {
             "delay": self.delay,
-            "dim":   self.dim,
+            "inp":   self._inp_dim,
+            "out":   self._out_dim,
             }
 
     def load_state_dict(self, d) -> None:
         """"""
         logging.info(f"DelayEmbedder: Loading parameters from checkpoint :{d}")
-        self.delay = d["delay"]
-        self.dim   = d["dim"]
+        self.delay    = d["delay"]
+        self._inp_dim = d["inp"]
+        self._out_dim = d["out"]
 
 _TRN_MAP = {
     str(Compose()):       Compose,
