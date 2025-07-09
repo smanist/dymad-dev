@@ -8,7 +8,7 @@ except:
 from typing import Dict, Union, Tuple
 
 from dymad.models.model_base import ModelBase
-from dymad.utils import GNN, MLP, predict_continuous, predict_graph_continuous
+from dymad.utils import DynData, GNN, MLP, predict_continuous, predict_graph_continuous
 
 class KBF(ModelBase):
     """
@@ -83,17 +83,14 @@ class KBF(ModelBase):
         model_info += f"Input order: {self.input_order}"
         return model_info
 
-    def encoder(self, w: torch.Tensor) -> torch.Tensor:
+    def encoder(self, w: DynData) -> torch.Tensor:
         """Encode combined features to Koopman space."""
-        return self.encoder_net(w)
+        return self.encoder_net(w.x)
 
     def decoder(self, z: torch.Tensor) -> torch.Tensor:
         """Decode from Koopman space back to state space."""
         # Apply decoder layers (now nn.Sequential or nn.Identity/nn.Linear)
         return self.decoder_net(z)
-
-    def features(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        return x
 
     def dynamics(self, z: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """Compute dynamics in Koopman space using bilinear form."""
@@ -135,7 +132,7 @@ class KBF(ModelBase):
         """
         return predict_continuous(self, x0, us, ts, method=method, order=self.input_order)
 
-    def forward(self, x: torch.Tensor, u: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass for KBF model.
 
         Args:
@@ -145,8 +142,8 @@ class KBF(ModelBase):
         Returns:
             Tuple of (latent, latent_derivative, reconstruction)
         """
-        z = self.encoder(x)
-        z_dot = self.dynamics(z, u)
+        z = self.encoder(w)
+        z_dot = self.dynamics(z, w.u)
         x_hat = self.decoder(z)
         return z, z_dot, x_hat
 

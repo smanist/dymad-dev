@@ -4,7 +4,7 @@ import torch.nn as nn
 from typing import Tuple
 
 class ModelBase(nn.Module, ABC):
-    """
+    r"""
     Base class for dynamic models.
 
     Notation:
@@ -43,10 +43,6 @@ class ModelBase(nn.Module, ABC):
 
     @abstractmethod
     def decoder(self, z: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("This is the base class.")
-
-    @abstractmethod
-    def features(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
     @abstractmethod

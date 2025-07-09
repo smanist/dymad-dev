@@ -11,6 +11,7 @@ except:
 from typing import Optional, Union, Tuple, Dict, List
 
 from dymad.data.preprocessing import make_transform
+from dymad.utils.modules import DynData
 
 logger = logging.getLogger(__name__)
 
@@ -395,12 +396,16 @@ class TrajectoryManager:
             # Then we assemble the dataset of x and u.
             dataset = []
             for _x, _u in zip(_X, _U):
-                tmp = np.concatenate([_x, _u], axis=-1)
-                dataset.append(torch.tensor(tmp, dtype=self.dtype, device=self.device))
+                dataset.append(DynData(
+                    x=torch.tensor(_x, dtype=self.dtype, device=self.device),
+                    u=torch.tensor(_u, dtype=self.dtype, device=self.device)
+                ))
             return dataset
         else:
             # Then we assemble the dataset of x.
-            return [torch.tensor(_x, dtype=self.dtype, device=self.device) for _x in _X]
+            return [DynData(
+                x=torch.tensor(_x, dtype=self.dtype, device=self.device),
+                u=None) for _x in _X]
 
     def _create_dt_n_steps_metadata(self) -> List[List[float]]:
         """
@@ -447,9 +452,9 @@ class TrajectoryManager:
 
         if self.model_type == "NN":
             logging.info(f"Creating dataloaders for NN model with batch size {batch_size}.")
-            self.train_loader = DataLoader(self.train_set, batch_size=batch_size, shuffle=True)
-            self.valid_loader = DataLoader(self.valid_set, batch_size=batch_size, shuffle=False)
-            self.test_loader = DataLoader(self.test_set, batch_size=batch_size, shuffle=False)
+            self.train_loader = DataLoader(self.train_set, batch_size=batch_size, shuffle=True, collate_fn=DynData.collate)
+            self.valid_loader = DataLoader(self.valid_set, batch_size=batch_size, shuffle=False, collate_fn=DynData.collate)
+            self.test_loader = DataLoader(self.test_set, batch_size=batch_size, shuffle=False, collate_fn=DynData.collate)
 
         elif self.model_type == "LSTM":
             logging.info(f"Creating dataloaders for LSTM model with batch size {batch_size}.")

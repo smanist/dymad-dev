@@ -5,7 +5,7 @@ import torch
 from torchdiffeq import odeint
 from typing import Union
 
-from dymad.utils.modules import ControlInterpolator
+from dymad.utils.modules import ControlInterpolator, DynData
 
 logger = logging.getLogger(__name__)
 
@@ -77,14 +77,13 @@ def predict_continuous(
 
     # Initial state preparation
     u0 = _us[:, 0, :]
-    w0 = model.features(_x0, u0)
-    z0 = model.encoder(w0)
+    z0 = model.encoder(DynData(_x0, u0))
 
     interp = ControlInterpolator(ts, _us, order=order)
     def ode_func(t, z):
         x = model.decoder(z)
         u = interp(t)
-        _, z_dot, _ = model(x, u)
+        _, z_dot, _ = model(DynData(x, u))
         return z_dot
 
     # Integrate

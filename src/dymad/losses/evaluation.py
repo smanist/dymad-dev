@@ -3,9 +3,10 @@ import torch
 from typing import Union, List
 
 from dymad.utils.plot import plot_trajectory
+from dymad.utils.modules import DynData
 
 def prediction_rmse(model,
-                   truth: torch.Tensor,
+                   truth: DynData,
                    ts: Union[np.ndarray, torch.Tensor],
                    metadata: dict,
                    model_name: str,
@@ -17,7 +18,7 @@ def prediction_rmse(model,
 
     Args:
         model (torch.nn.Module): The model to evaluate (any model with a predict method)
-        truth (torch.Tensor): Ground truth trajectory tensor [time, features]
+        truth (DynData): Ground truth trajectory data
         ts (Union[np.ndarray, torch.Tensor]): Time points for the trajectory
         model_name (str): Name of the model to save the plot
         metadata (dict): Metadata dictionary with n_state_features and n_control_features
@@ -29,9 +30,9 @@ def prediction_rmse(model,
     """
     with torch.no_grad():
         # Extract states and controls
-        x_truth = truth[:, :-metadata['n_total_control_features']]
-        x0 = truth[0, :-metadata['n_total_control_features']]
-        us = truth[:, -metadata['n_total_control_features']:]
+        x_truth = truth.x
+        x0 = truth.x[0]
+        us = truth.u
 
         # Make prediction
         x_pred = model.predict(x0, us, ts, method=method)

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import numpy as np
 from scipy.interpolate import interp1d
 import torch
@@ -8,7 +9,7 @@ try:
 except:
     MessagePassing = None
     ChebConv, SAGEConv = None, None
-from typing import Callable, Optional, Union
+from typing import Callable, List, Optional, Union
 
 class TakeFirst(nn.Module):
     """
@@ -367,3 +368,50 @@ class ControlInterpolator(nn.Module):
         return torch.as_tensor(uq,
                                 device=t_query.device,
                                 dtype=self.u.dtype)
+
+@dataclass
+class DynData:
+    """
+    Data structure for dynamic data, containing state and control tensors.
+
+    Attributes:
+        x (torch.Tensor): State tensor of shape (batch_size, n_steps, n_features).
+        u (torch.Tensor): Control tensor of shape (batch_size, n_steps, n_controls).
+    """
+    x: torch.Tensor
+    u: Union[torch.Tensor, None]
+
+    def to(self, device: torch.device, non_blocking: bool = False) -> "DynData":
+        """
+        Move the state and control tensors to a different device.
+
+        Args:
+            device (torch.device): The target device.
+            non_blocking (bool, optional): If True, the operation will be non-blocking.
+
+        Returns:
+            DynData: A DynData instance with tensors on the target device.
+        """
+        self.x = self.x.to(device, non_blocking=non_blocking)
+        if self.u is not None:
+            self.u = self.u.to(device, non_blocking=non_blocking)
+        return self
+
+    @classmethod
+    def collate(cls, batch_list: List["DynData"]) -> "DynData":
+        """
+        Collate a list of DynData instances into a single DynData instance.
+        Needed by DataLoader to stack state and control tensors.
+
+        Args:
+            batch_list (List[DynData]): List of DynData instances to collate.
+
+        Returns:
+            DynData: A single DynData instance with stacked state and control tensors.
+        """
+        xs = torch.stack([b.x for b in batch_list], dim=0)
+        if batch_list[0].u is not None:
+            us = torch.stack([b.u for b in batch_list], dim=0)
+        else:
+            us = None
+        return DynData(xs, us)
