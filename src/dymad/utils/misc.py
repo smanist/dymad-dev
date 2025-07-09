@@ -13,7 +13,7 @@ def setup_logging(config_path: str, mode: str = 'info', prefix='.') -> None:
     """
     _l = logging.DEBUG if mode == 'debug' else logging.INFO
     _t = str(datetime.now())
-    _t = _t.split('.')[0].replace(' ', '-')
+    _t = _t.split('.')[0].replace(' ', '-').replace(':', '-')
     logging.basicConfig(
         filename=f'{prefix}/{config_path.split(".")[0]}_{_t}.log',  
         filemode='w',  

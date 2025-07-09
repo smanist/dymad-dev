@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
-from typing import Tuple
+from typing import Tuple, Union
 
-from dymad.utils.modules import DynData
+from dymad.utils.modules import DynData, DynGeoData
+
+Data = Union[DynData, DynGeoData]
 
 class ModelBase(nn.Module, ABC):
     r"""
@@ -40,15 +42,15 @@ class ModelBase(nn.Module, ABC):
         return f"Model parameters: {sum(p.numel() for p in self.parameters())}\n"
 
     @abstractmethod
-    def encoder(self, w: DynData) -> torch.Tensor:
+    def encoder(self, w: Data) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
     @abstractmethod
-    def decoder(self, z: torch.Tensor) -> torch.Tensor:
+    def decoder(self, z: torch.Tensor, w: Data) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
     @abstractmethod
-    def dynamics(self, z: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+    def dynamics(self, z: torch.Tensor, w: Data) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
     @abstractmethod

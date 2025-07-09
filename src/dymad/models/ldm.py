@@ -84,7 +84,7 @@ class LDM(ModelBase):
         """
         return self.encoder_net(torch.cat([w.x, w.u], dim=-1))
 
-    def decoder(self, z: torch.Tensor) -> torch.Tensor:
+    def decoder(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
         """
         Map from latent space back to state space.
 
@@ -96,7 +96,7 @@ class LDM(ModelBase):
         """
         return self.decoder_net(z)
 
-    def dynamics(self, z: torch.Tensor) -> torch.Tensor:
+    def dynamics(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
         """
         Compute latent dynamics (derivative).
 
@@ -119,8 +119,8 @@ class LDM(ModelBase):
             Tuple of (latent, latent_derivative, reconstruction)
         """
         z = self.encoder(w)
-        z_dot = self.dynamics(z)
-        x_hat = self.decoder(z)
+        z_dot = self.dynamics(z, w)
+        x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
 
     def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor],

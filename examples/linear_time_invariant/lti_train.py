@@ -37,6 +37,9 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
+# MDL, mdl = LDM, 'ldm'
+MDL, mdl = KBF, 'kbf'
+
 ifdat = 0
 iftrn = 1
 ifplt = 1
@@ -55,7 +58,7 @@ if iftrn:
         {"model" : KBF, "trainer": NODETrainer,     "config": 'lti_kbf_node.yaml'}
     ]
 
-    for _i in [0, 1]:
+    for _i in [2, 3]:
         Model = cases[_i]['model']
         Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']
@@ -66,8 +69,6 @@ if iftrn:
         trainer.train()
 
 if ifplt:
-    mdl = 'ldm'
-    # mdl = 'kbf'
     sum_wf = np.load(f'results/lti_{mdl}_wf_summary.npz')
     sum_nd = np.load(f'results/lti_{mdl}_node_summary.npz')
 
@@ -95,8 +96,6 @@ if ifplt:
     print("Epoch time NODE/WF:", sum_nd['avg_epoch_time']/sum_wf['avg_epoch_time'])
 
 if ifprd:
-    MDL, mdl = LDM, 'ldm'
-    # MDL, mdl = KBF, 'kbf'
     mdl_wf, prd_wf = load_model(MDL, f'lti_{mdl}_wf.pt', f'lti_{mdl}_wf.yaml')
     mdl_nd, prd_nd = load_model(MDL, f'lti_{mdl}_node.pt', f'lti_{mdl}_node.yaml')
 

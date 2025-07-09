@@ -81,7 +81,7 @@ def predict_continuous(
 
     interp = ControlInterpolator(ts, _us, order=order)
     def ode_func(t, z):
-        x = model.decoder(z)
+        x = model.decoder(z, None)
         u = interp(t)
         _, z_dot, _ = model(DynData(x, u))
         return z_dot
@@ -91,7 +91,7 @@ def predict_continuous(
     z_traj = odeint(ode_func, z0, ts, method=method)
     logger.debug(f"predict_continuous: Completed integration, trajectory shape: {z_traj.shape}")
 
-    x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1])).view(n_steps, z_traj.shape[1], -1)
+    x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1]), None).view(n_steps, z_traj.shape[1], -1)
     if not is_batch:
         x_traj = x_traj.squeeze(1)
 
