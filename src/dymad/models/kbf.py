@@ -8,7 +8,7 @@ except:
 from typing import Dict, Union, Tuple
 
 from dymad.models.model_base import ModelBase
-from dymad.utils import DynData, GNN, MLP, predict_continuous, predict_graph_continuous
+from dymad.utils import DynData, DynGeoData, GNN, MLP, predict_continuous, predict_graph_continuous
 
 class KBF(ModelBase):
     """
@@ -209,14 +209,11 @@ class GKBF(ModelBase):
             **opts
         )
 
-    def encoder(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
-        return self.encoder_net(x, edge_index)
+    def encoder(self, w: DynGeoData) -> torch.Tensor:
+        return self.encoder_net(w.x, w.edge_index)
 
     def decoder(self, z: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         return self.decoder_net(z, edge_index)
-
-    def features(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        return x
 
     def dynamics(self, z: torch.Tensor, u: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         # Reshape z into (batch_size, system_dim)
@@ -237,8 +234,8 @@ class GKBF(ModelBase):
                 edge_index: torch.Tensor, method: str = 'dopri5') -> torch.Tensor:
         return predict_graph_continuous(self, x0, us, ts, edge_index, method=method, order=self.input_order)
 
-    def forward(self, x: torch.Tensor, u: torch.Tensor, edge_index: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        Gz = self.encoder(x, edge_index)
-        z, z_dot = self.dynamics(Gz, u)
-        x_hat = self.decoder(Gz, edge_index)
+    def forward(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        Gz = self.encoder(w)
+        z, z_dot = self.dynamics(Gz, w.u)
+        x_hat = self.decoder(Gz, w.edge_index)
         return z, z_dot, x_hat

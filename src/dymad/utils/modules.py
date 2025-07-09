@@ -415,3 +415,55 @@ class DynData:
         else:
             us = None
         return DynData(xs, us)
+
+@dataclass
+class DynGeoData:
+    """
+    Data structure for dynamic geometric data, containing state and control tensors,
+    and topological information.
+
+    Attributes:
+        x (torch.Tensor): State tensor of shape (batch_size, n_steps, n_features).
+        u (torch.Tensor): Control tensor of shape (batch_size, n_steps, n_controls).
+        edge_index (torch.Tensor): Edge index tensor for graph structure, shape (2, n_edges).
+    """
+    x: torch.Tensor
+    u: Union[torch.Tensor, None]
+    edge_index: torch.Tensor
+
+    def to(self, device: torch.device, non_blocking: bool = False) -> "DynGeoData":
+        """
+        Move the data to a different device.
+
+        Args:
+            device (torch.device): The target device.
+            non_blocking (bool, optional): If True, the operation will be non-blocking.
+
+        Returns:
+            DynGeoData: A DynGeoData instance with tensors on the target device.
+        """
+        self.x = self.x.to(device, non_blocking=non_blocking)
+        if self.u is not None:
+            self.u = self.u.to(device, non_blocking=non_blocking)
+        self.edge_index = self.edge_index.to(device, non_blocking=non_blocking)
+        return self
+
+    @classmethod
+    def collate(cls, batch_list: List["DynGeoData"]) -> "DynGeoData":
+        """
+        Collate a list of DynGeoData instances into a single DynGeoData instance.
+        Needed by DataLoader to stack state and control tensors.
+
+        Args:
+            batch_list (List[DynGeoData]): List of DynGeoData instances to collate.
+
+        Returns:
+            DynGeoData: A single DynGeoData instance with stacked state and control tensors.
+        """
+        xs = torch.stack([b.x for b in batch_list], dim=0)
+        if batch_list[0].u is not None:
+            us = torch.stack([b.u for b in batch_list], dim=0)
+        else:
+            us = None
+        edge_index = torch.cat([b.edge_index for b in batch_list], dim=0)
+        return DynGeoData(xs, us, edge_index)

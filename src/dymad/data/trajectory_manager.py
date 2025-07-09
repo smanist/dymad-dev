@@ -2,18 +2,18 @@ import logging
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-try:
-    from torch_geometric.data import Data as PyGData
-    from torch_geometric.loader import DataLoader as GeoDataLoader
-    from torch_geometric.utils import dense_to_sparse
-except:
-    PyGData, GeoDataLoader, dense_to_sparse = None, None, None
 from typing import Optional, Union, Tuple, Dict, List
 
 from dymad.data.preprocessing import make_transform
-from dymad.utils.modules import DynData
+from dymad.utils.modules import DynData, DynGeoData
 
 logger = logging.getLogger(__name__)
+
+try:
+    from torch_geometric.utils import dense_to_sparse
+except:
+    logging.warning("torch_geometric is not installed. GNN-related functionality will be unavailable.")
+    dense_to_sparse = None
 
 class TrajectoryManager:
     """
@@ -33,18 +33,14 @@ class TrajectoryManager:
     Args:
         metadata (dict): Configuration dictionary.
         device (torch.device): Torch device to use.
-        adj (torch.Tensor or np.ndarray, optional): Adjacency matrix for GNN models.
-            If not provided, will try to get from config.
     """
 
-    def __init__(self, metadata: Dict, device: torch.device = torch.device("cpu"), adj: Optional[Union[torch.Tensor, np.ndarray]] = None):
+    def __init__(self, metadata: Dict, device: torch.device = torch.device("cpu")):
         self.metadata = metadata
         self.dtype = torch.double if self.metadata['config']['data'].get('double_precision', False) else torch.float
         self.model_type = self.metadata['config']['model']['type'].upper()
         self.device = device
         self.data_path = self.metadata['config']['data']['path']
-        self.adj = adj  # Store the adjacency matrix if provided externally
-        self.n_nodes = self.metadata['config']['data'].get('n_nodes', None)
 
         self._data_transform_x = make_transform(self.metadata['config'].get('transform_x', None))
         self._data_transform_u = make_transform(self.metadata['config'].get('transform_u', None))
@@ -248,15 +244,6 @@ class TrajectoryManager:
             logging.error("t must be a float, numpy array, or list of numpy arrays")
             raise TypeError("t must be a float, numpy array, or list of numpy arrays")
 
-        # Try to load adjacency matrix from data if not provided externally and model type is GNN
-        if self.adj is None and self.model_type == "GNN":
-            try:
-                self.adj = data['adj_mat']
-                logging.info("Loaded adjacency matrix from data file")
-            except KeyError:
-                logging.error("No adjacency matrix found in data file and none provided externally")
-                raise ValueError("Adjacency matrix is required for GNN model type but none was found")
-
     def data_truncation(self) -> None:
         """
         Truncate the loaded data according to the configuration.
@@ -376,7 +363,7 @@ class TrajectoryManager:
         logging.info(f"Number of total state features: {self.metadata['n_total_state_features']}")
         logging.info(f"Number of total control features: {self.metadata['n_total_control_features']}")
 
-    def _transform_by_index(self, indices: torch.Tensor) -> List[torch.Tensor]:
+    def _transform_by_index(self, indices: torch.Tensor) -> List[DynData]:
         # Process X first
         # If the common delay is larger (larger delay in u), we trim out the first few steps.
         # This way the latest x and u are aligned.
@@ -472,97 +459,8 @@ class TrajectoryManager:
             self.valid_loader = DataLoader(TensorDataset(valid_X, valid_y), batch_size=batch_size, shuffle=False)
             self.test_loader = DataLoader(TensorDataset(test_X, test_y), batch_size=batch_size, shuffle=False)
 
-        elif self.model_type == "GNN":
-            logging.info(f"Creating dataloaders for GNN model with batch size {batch_size}.")
-            gnn_cfg = dl_cfg.get("gnn", {})
-            # Use provided adj matrix if available, otherwise try to get from config (TODO: does not support dynamic graphs yet)
-            adj = self.adj if self.adj is not None else gnn_cfg.get("adjacency", None)
-
-            # Build graph objects for each set
-            self.train_set = self._create_gnn_sequences(self.train_set, adj)
-            self.valid_set = self._create_gnn_sequences(self.valid_set, adj)
-            self.test_set = self._create_gnn_sequences(self.test_set, adj)
-            self.t = [ti[:-(self.metadata['delay']+1)] for ti in self.t]
-            self.t = [self.t[0]] if len(set(map(len, self.t))) == 1 else self.t
-            # Create dataloaders
-            # Note: we use a GeoDataLoader for each trajectory in the dataset, with the batch size being the length of the trajectory.
-            # This is because we want to ensure that each trajectory is processed as a whole, and not split into smaller batches.
-            self.train_loader = [GeoDataLoader(_traj, batch_size=len(_traj), shuffle=False) for _traj in self.train_set]
-            self.valid_loader = [GeoDataLoader(_traj, batch_size=len(_traj), shuffle=False) for _traj in self.valid_set]
-            self.test_loader = [GeoDataLoader(_traj, batch_size=len(_traj), shuffle=False) for _traj in self.test_set]
-
         else:
             raise ValueError(f"Unknown model type: {self.model_type}")
-
-    def _create_gnn_sequences(
-        self, dataset: list[torch.Tensor], adj: Optional[Union[torch.Tensor, np.ndarray]] = None) -> list[PyGData]:
-        """
-        Create a list of PyTorch Geometric Data objects from a list of tensors.
-
-        Args:
-            dataset (list[torch.Tensor]): List of tensors, each of shape (T, n_state_features + n_control_features)
-            adj (torch.Tensor or np.ndarray, optional): Adjacency matrix of shape (n_nodes, n_nodes)
-
-        Returns:
-            list[PyGData]: List of PyTorch Geometric Data objects
-        """
-        seq_length = self.metadata['delay'] + 1
-        n_nodes = self.n_nodes
-        n_features_per_node = self.metadata['n_state_features'] // n_nodes
-        data_list = []
-
-        for traj in dataset:
-            T = traj.shape[0]
-            seq = []
-            if T <= seq_length:
-                continue  # Skip trajectories that are too short
-            for i in range(T - seq_length):
-                # Get states for the sequence window
-                states = traj[i:i + seq_length, :self.metadata['n_state_features']]  # [seq_length, n_state_features]
-                # Get control at the last step of the sequence
-                controls = traj[i + seq_length - 1, -self.metadata['n_control_features']:]  # [n_control_features]
-
-                # Reshape states to group features by node
-                # From [seq_length, n_state_features] to [n_nodes, seq_length * n_features_per_node]
-                states = states.reshape(seq_length, n_nodes, n_features_per_node)  # [seq_length, n_nodes, n_features_per_node]
-                states = states.permute(1, 0, 2)  # [n_nodes, seq_length, n_features_per_node]
-                states = states.reshape(n_nodes, -1)  # [n_nodes, seq_length * n_features_per_node]
-                seq.append(self._create_pyg_data(states, controls, adj))
-            data_list.append(seq)
-        # Update metadata
-        self.metadata['n_features_per_node'] = seq_length*n_features_per_node
-        return data_list
-
-    def _create_pyg_data(self,
-        states: torch.Tensor,
-        controls: torch.Tensor,
-        adj: Optional[Union[torch.Tensor, np.ndarray]] = None,
-    ) -> PyGData: # TODO: this implmentation does not support dynamic graphs yet.
-        """
-        Create a graph from a trajectory using an optional adjacency matrix.
-
-        Args:
-            states (torch.Tensor): Node feature matrix of shape (n_nodes, n_total_features)
-            controls (torch.Tensor): Control input array of shape (n_control_features, )
-            adj (torch.Tensor or np.ndarray, optional): Adjacency matrix of shape (n_nodes, n_nodes)
-
-        Returns:
-            PyGData: PyTorch Geometric Data object with node features and optional edge information
-        """
-
-        # Convert numpy array to torch tensor if needed
-        if isinstance(adj, np.ndarray):
-            adj = torch.tensor(adj, dtype=self.dtype, device=states.device)
-        else:
-            adj = adj.to(states.device)
-
-        # Verify node count matches
-        if adj.size(0) != self.n_nodes or adj.size(1) != self.n_nodes:
-            raise ValueError(f"Adjacency matrix shape {adj.shape} does not match the number of nodes {self.n_nodes}.")
-
-        # Convert adjacency matrix to edge_index and edge_attr using PyG
-        edge_index, edge_attr = dense_to_sparse(adj)
-        return PyGData(x=states, u=controls, edge_index=edge_index, edge_attr=edge_attr)
 
     def _create_lstm_sequences(
         self, dataset: list[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -620,3 +518,198 @@ class TrajectoryManager:
         """
         raise NotImplementedError("This method is temporarily disabled.")
         # return 0 if self.dataset is None else len(self.dataset)
+
+class TrajectoryManagerGraph(TrajectoryManager):
+    r"""
+    A class to manage trajectory data loading, preprocessing, and
+    dataloader creation - graph version.
+
+    The graph data is assumed to be homogeneous, that each node has the same number of features.
+    Hence the normalization, if done, is applied globally to all nodes.
+
+    In the raw data, the nodal state features are expected to be concatenated sequentially.
+    For example, for N nodes with M features each, the raw data for states at a time step is
+    
+    .. math::
+        x = [x_1, x_2, ..., x_N], \text{where } x_i \in R^M,
+
+    Same applies to control inputs, if present.
+
+    Note:
+        Currently, edge attributes and time-varying adjacency matrices are not supported.
+
+    Args:
+        metadata (dict): Configuration dictionary.
+        device (torch.device): Torch device to use.
+        adj (torch.Tensor or np.ndarray, optional): Adjacency matrix for GNN models.
+            If not provided, will try to get from config.
+    """
+
+    def __init__(self, metadata: Dict, device: torch.device = torch.device("cpu"), adj: Optional[Union[torch.Tensor, np.ndarray]] = None):
+        super().__init__(metadata, device)
+        self.adj = adj  # Store the adjacency matrix if provided externally
+        self.n_nodes = self.metadata['config']['data'].get('n_nodes', None)
+
+        if self.n_nodes is None:
+            logging.error("Number of nodes (n_nodes) must be specified in the configuration for graph models.")
+            raise ValueError("Number of nodes (n_nodes) must be specified in the configuration for graph models.")
+
+    def load_data(self, path: str) -> None:
+        """
+        Load raw data from a binary file.
+
+        Args:
+            path (str): Path to the data file.
+        """
+        super().load_data(path)
+
+        # Load the binary data from the file.
+        data = np.load(path, allow_pickle=True)
+
+        # Try to load adjacency matrix from data if not provided externally
+        if self.adj is None:
+            try:
+                self.adj = data['adj_mat']
+                logging.info("Loaded adjacency matrix from data file")
+            except KeyError:
+                logging.error("No adjacency matrix found in data file and none provided externally")
+                raise ValueError("Adjacency matrix is required for GNN model type but none was found")
+
+    def apply_data_transformations(self) -> None:
+        """
+        Apply data transformations to the loaded trajectories and control inputs.
+        This creates the train-valid-test datasets.
+
+        This method applies transformations defined in the configuration for both
+        state features (x) and control inputs (u).
+
+        The raw data is expected to be [T, n_nodes * n_features], but the transformation
+        assumes [T * n_nodes, n_features].  So extra reshaping is needed.
+        """
+        assert self.train_set_index is not None, "Dataset must be split before applying transformations."
+
+        if not self._transform_fitted:
+            logging.info("Fitting transformation for state features.")
+            X = [self._graph_data_reshape(self.x[i], forward=True) for i in self.train_set_index]
+            self._data_transform_x.fit(np.vstack(X))  # Make sure the input is 3D
+
+            logging.info("Fitting transformation for control inputs.")
+            U = [self._graph_data_reshape(self.u[i], forward=True) for i in self.train_set_index]
+            self._data_transform_u.fit(np.vstack(U))
+
+            self.metadata["transform_x_state"] = self._data_transform_x.state_dict()
+            self.metadata["transform_u_state"] = self._data_transform_u.state_dict()
+        else:
+            logging.info("Transformations already fitted. Skipping fitting step.")
+
+        logging.info("Applying transformations to state features and control inputs.")
+        logging.info("Training...")
+        self.train_set = self._transform_by_index(self.train_set_index)
+
+        logging.info("Validation...")
+        self.valid_set = self._transform_by_index(self.valid_set_index)
+
+        logging.info("Test...")
+        self.test_set = self._transform_by_index(self.test_set_index)
+
+        if self.metadata["delay"] > 0:
+            logging.info("Conforming the time data due to delay.")
+            # For time, we remove the last "delay" time steps.
+            self.t = [ti[:-self.metadata["delay"]] for ti in self.t]
+
+        # Bookkeeping metadata for the dataset.
+        self.metadata['n_total_state_features'] = self._data_transform_x._out_dim
+        self.metadata['n_total_control_features'] = self._data_transform_u._out_dim
+        self.metadata['n_total_features'] = self.metadata['n_total_state_features'] + self.metadata['n_total_control_features']
+        self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
+
+        logging.info(f"Number of total state features: {self.metadata['n_total_state_features']}")
+        logging.info(f"Number of total control features: {self.metadata['n_total_control_features']}")
+
+    def _transform_by_index(self, indices: torch.Tensor) -> List[DynData]:
+        # Process X first
+        # If the common delay is larger (larger delay in u), we trim out the first few steps.
+        # This way the latest x and u are aligned.
+        tmp = [self._graph_data_reshape(self.x[i], forward=True) for i in indices]
+        _X = [self._data_transform_x.transform(_t) for _t in tmp]
+        _d = self.metadata["delay"] - self._data_transform_x.delay
+        if _d > 0:
+            _X = [x[_d:] for x in _X]
+
+        if self.metadata["n_control_features"] > 0:
+            # Process U only if there are control features.
+            # Same idea as for X, we trim out the first few steps if the delay in x is larger.
+            tmp = [self._graph_data_reshape(self.u[i], forward=True) for i in indices]
+            _U = [self._data_transform_u.transform(_t) for _t in tmp]
+            _d = self.metadata["delay"] - self._data_transform_u.delay
+            if _d > 0:
+                _U = [u[_d:] for u in _U]
+
+            # Then we assemble the dataset of x and u.
+            dataset = []
+            for _x, _u in zip(_X, _U):
+                dataset.append(DynData(
+                    x=torch.tensor(self._graph_data_reshape(_x, forward=False), dtype=self.dtype, device=self.device),
+                    u=torch.tensor(self._graph_data_reshape(_u, forward=False), dtype=self.dtype, device=self.device)
+                ))
+            return dataset
+        else:
+            # Then we assemble the dataset of x.
+            return [DynData(
+                x=torch.tensor(self._graph_data_reshape(_x, forward=False), dtype=self.dtype, device=self.device),
+                u=None) for _x in _X]
+
+    def _graph_data_reshape(self, data: np.ndarray, forward: bool) -> np.ndarray:
+        """
+        Reshape the raw data between [T, n_nodes * n_features] and [n_nodes, T, n_features].
+
+        The 0th axis is as if batch.
+        """
+        if forward:
+            # Reshape from [T, n_nodes * n_features] to [n_nodes, T, n_features]
+            tmp = data.reshape(data.shape[0], self.n_nodes, -1)  # [T, n_nodes, n_features_per_node]
+            return np.swapaxes(tmp, 0, 1)  # [n_nodes, T, n_features_per_node]
+
+        # Reshape from [n_nodes, T, n_features] to [T, n_nodes * n_features]
+        tmp = np.swapaxes(data, 0, 1)  # [T, n_nodes, n_features_per_node]
+        return tmp.reshape(tmp.shape[0], -1)
+
+    def create_dataloaders(self) -> None:
+        """
+        Create dataloaders for train, validation, and test sets.
+
+        This method creates and stores three dataloaders as class attributes:
+        - self.train_loader
+        - self.valid_loader
+        - self.test_loader
+        """
+        dl_cfg = self.metadata['config'].get("dataloader", {})
+        batch_size: int = dl_cfg.get("batch_size", 1)
+
+        logging.info(f"Creating dataloaders for GNN model with batch size {batch_size}.")
+        gnn_cfg = dl_cfg.get("gnn", {})
+        # Use provided adj matrix if available, otherwise try to get from config (TODO: does not support dynamic graphs yet)
+        adj = self.adj if self.adj is not None else gnn_cfg.get("adjacency", None)
+
+        # Convert numpy array to torch tensor if needed
+        if isinstance(adj, np.ndarray):
+            adj = torch.tensor(adj, dtype=self.dtype, device=self.train_set[0].x.device)
+        else:
+            adj = adj.to(self.train_set[0].x.device)
+
+        # Verify node count matches
+        if adj.size(0) != self.n_nodes or adj.size(1) != self.n_nodes:
+            raise ValueError(f"Adjacency matrix shape {adj.shape} does not match the number of nodes {self.n_nodes}.")
+
+        # Convert adjacency matrix to edge_index and edge_attr using PyG
+        edge_index, _ = dense_to_sparse(adj)
+
+        # Create DynGeoData objects for each set
+        self.train_set = [DynGeoData(x=traj.x, u=traj.u, edge_index=edge_index) for traj in self.train_set]
+        self.valid_set = [DynGeoData(x=traj.x, u=traj.u, edge_index=edge_index) for traj in self.valid_set]
+        self.test_set  = [DynGeoData(x=traj.x, u=traj.u, edge_index=edge_index) for traj in self.test_set]
+
+        # Lastly the dataloaders
+        self.train_loader = DataLoader(self.train_set, batch_size=batch_size, shuffle=True,  collate_fn=DynGeoData.collate)
+        self.valid_loader = DataLoader(self.valid_set, batch_size=batch_size, shuffle=False, collate_fn=DynGeoData.collate)
+        self.test_loader  = DataLoader(self.test_set,  batch_size=batch_size, shuffle=False, collate_fn=DynGeoData.collate)
