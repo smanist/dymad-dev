@@ -38,8 +38,8 @@ config_gau = {
             "mode": "zoh"}}}
 
 ifdat = 0
-iftrn = 0
-ifplt = 0
+iftrn = 1
+ifplt = 1
 ifprd = 1
 
 if ifdat:

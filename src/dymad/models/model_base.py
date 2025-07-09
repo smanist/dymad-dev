@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 from typing import Tuple
 
+from dymad.utils.modules import DynData
+
 class ModelBase(nn.Module, ABC):
     r"""
     Base class for dynamic models.
@@ -38,7 +40,7 @@ class ModelBase(nn.Module, ABC):
         return f"Model parameters: {sum(p.numel() for p in self.parameters())}\n"
 
     @abstractmethod
-    def encoder(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+    def encoder(self, w: DynData) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
     @abstractmethod
@@ -51,4 +53,8 @@ class ModelBase(nn.Module, ABC):
 
     @abstractmethod
     def predict(self, x0: torch.Tensor, us: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        raise NotImplementedError("This is the base class.")
+
+    @abstractmethod
+    def forward(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         raise NotImplementedError("This is the base class.")

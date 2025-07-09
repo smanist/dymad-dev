@@ -4,7 +4,7 @@ import torch.nn as nn
 from typing import Tuple, Dict, Union
 
 from dymad.models.model_base import ModelBase
-from dymad.utils import MLP, predict_continuous
+from dymad.utils import DynData, MLP, predict_continuous
 
 class LDM(ModelBase):
     """Latent Dynamics Model (LDM)
@@ -72,30 +72,17 @@ class LDM(ModelBase):
         model_info += f"Input order: {self.input_order}"
         return model_info
 
-    def features(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        """
-        Create features by concatenating state and control.
-
-        Args:
-            x (torch.Tensor): State tensor of shape (batch_size, n_total_state_features)
-            u (torch.Tensor): Control tensor of shape (batch_size, n_control_features)
-
-        Returns:
-            torch.Tensor: Combined feature tensor
-        """
-        return torch.cat([x, u], dim=-1)
-
-    def encoder(self, w: torch.Tensor) -> torch.Tensor:
+    def encoder(self, w: DynData) -> torch.Tensor:
         """
         Map features to latent space.
 
         Args:
-            w (torch.Tensor): Raw features (state and control concatenated)
+            w (DynData): Raw features
 
         Returns:
             torch.Tensor: Latent representation
         """
-        return self.encoder_net(w)
+        return self.encoder_net(torch.cat([w.x, w.u], dim=-1))
 
     def decoder(self, z: torch.Tensor) -> torch.Tensor:
         """
@@ -121,18 +108,16 @@ class LDM(ModelBase):
         """
         return self.dynamics_net(z)
 
-    def forward(self, x: torch.Tensor, u: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through the model.
 
         Args:
-            x (torch.Tensor): State tensor
-            u (torch.Tensor): Control tensor
+            w (DynData): Input data containing state and control tensors
 
         Returns:
             Tuple of (latent, latent_derivative, reconstruction)
         """
-        w = self.features(x, u)
         z = self.encoder(w)
         z_dot = self.dynamics(z)
         x_hat = self.decoder(z)

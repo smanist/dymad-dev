@@ -4,6 +4,7 @@ from typing import Tuple, Type
 
 from dymad.training.trainer_base import TrainerBase
 from dymad.models.ldm import LDM
+from dymad.utils import DynData
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +78,8 @@ class NODETrainer(TrainerBase):
         num_steps = self.schedulers[1].get_length()
 
         batch = batch.to(self.device)
-        states = batch[:, :num_steps, :self.metadata['n_total_state_features']]
-        controls = batch[:, :num_steps, -self.metadata['n_total_control_features']:]
+        states = batch.x[:, :num_steps]
+        controls = batch.u[:, :num_steps]
         init_states = states[:, 0, :]  # (batch_size, n_total_state_features)
 
         # Use the actual time points from trajectory manager
@@ -93,7 +94,7 @@ class NODETrainer(TrainerBase):
 
         if self.recon_weight > 0:
             # Add reconstruction loss
-            _, _, x_hat = self.model(states, controls)
+            _, _, x_hat = self.model(DynData(states, controls))
             recon_loss = self.criterion(states, x_hat)
             return self.dynamics_weight * dynamics_loss + self.recon_weight * recon_loss
         else:
