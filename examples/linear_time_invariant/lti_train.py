@@ -3,9 +3,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from src.dymad.models import LDM, KBF
-from src.dymad.training import WeakFormTrainer, NODETrainer
-from src.dymad.utils import load_model, plot_trajectory, setup_logging, TrajectorySampler
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
+
+from dymad.models import LDM, KBF
+from dymad.training import WeakFormTrainer, NODETrainer
+from dymad.utils import load_model, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 128
 N = 501

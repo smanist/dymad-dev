@@ -12,7 +12,7 @@ def setup_logging(config_path: str, mode: str = 'info', prefix='.') -> None:
         prefix (str): Directory prefix for the log file. Default is '.' (current directory).
     """
     _l = logging.DEBUG if mode == 'debug' else logging.INFO
-    _t = str(datetime.now())
+    _t = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     _t = _t.split('.')[0].replace(' ', '-')
     logging.basicConfig(
         filename=f'{prefix}/{config_path.split(".")[0]}_{_t}.log',  
