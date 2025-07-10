@@ -5,7 +5,7 @@ import torch
 
 from dymad.models import LDM, KBF
 from dymad.training import WeakFormTrainer, NODETrainer
-from dymad.utils import load_model, plot_trajectory, setup_logging, TrajectorySampler
+from dymad.utils import DynData, load_model, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 128
 N = 501
@@ -37,8 +37,8 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
-# MDL, mdl = LDM, 'ldm'
-MDL, mdl = KBF, 'kbf'
+MDL, mdl = LDM, 'ldm'
+# MDL, mdl = KBF, 'kbf'
 
 ifdat = 0
 iftrn = 1
@@ -58,7 +58,7 @@ if iftrn:
         {"model" : KBF, "trainer": NODETrainer,     "config": 'lti_kbf_node.yaml'}
     ]
 
-    for _i in [2, 3]:
+    for _i in [0, 1]:
         Model = cases[_i]['model']
         Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']
@@ -107,8 +107,10 @@ if ifprd:
     u_data = us[0]
 
     with torch.no_grad():
-        weak_pred = prd_wf(x_data, u_data, t_data)
-        node_pred = prd_nd(x_data, u_data, t_data)
+        _data = DynData(x_data, u_data)
+        weak_pred = prd_wf(x_data, _data, t_data)
+        _data = DynData(x_data, u_data)
+        node_pred = prd_nd(x_data, _data, t_data)
 
     plot_trajectory(
         np.array([x_data, weak_pred, node_pred]), t_data, "LTI", metadata={'n_state_features': 2},

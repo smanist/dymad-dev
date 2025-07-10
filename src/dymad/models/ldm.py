@@ -125,7 +125,7 @@ class LDM(ModelBase):
         x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
 
-    def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor],
+    def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
                 method: str = 'dopri5') -> torch.Tensor:
         """
         Predict trajectory using continuous-time integration.
@@ -152,7 +152,7 @@ class LDM(ModelBase):
                 - Single: (time_steps, n_total_state_features)
                 - Batch: (time_steps, batch_size, n_total_state_features)
         """
-        return predict_continuous(self, x0, us, ts, method=method, order=self.input_order)
+        return predict_continuous(self, x0, w.u, ts, method=method, order=self.input_order)
 
 class GLDM(ModelBase):
     """Graph Latent Dynamics Model (GLDM).

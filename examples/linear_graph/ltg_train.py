@@ -48,7 +48,7 @@ config_gau = {
 MDL, mdl = GKBF, 'kbf'
 
 ifdat = 0
-iftrn = 1
+iftrn = 0
 ifplt = 0
 ifprd = 1
 
@@ -117,10 +117,11 @@ if ifprd:
     x_data = np.concatenate([ys[0], ys[0], ys[0]], axis=-1)
     t_data = ts[0]
     u_data = np.concatenate([us[0], us[0], us[0]], axis=-1)
-    _data  = DynGeoData(x_data, u_data, edge_index)
 
     with torch.no_grad():
+        _data = DynGeoData(x_data, u_data, edge_index)
         weak_pred = prd_wf(x_data, _data, t_data)
+        _data = DynGeoData(x_data, u_data, edge_index)
         node_pred = prd_nd(x_data, _data, t_data)
 
     plot_trajectory(
