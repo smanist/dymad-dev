@@ -109,7 +109,7 @@ class KBF(ModelBase):
 
         return z_dot
 
-    def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor],
+    def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
                 method: str = 'dopri5') -> torch.Tensor:
         """Predict trajectory using continuous-time integration.
 
@@ -131,7 +131,7 @@ class KBF(ModelBase):
                 - Single: (time_steps, n_state_features)
                 - Batch: (time_steps, batch_size, n_state_features)
         """
-        return predict_continuous(self, x0, us, ts, method=method, order=self.input_order)
+        return predict_continuous(self, x0, w.u, ts, method=method, order=self.input_order)
 
     def forward(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass for KBF model.
@@ -234,9 +234,8 @@ class GKBF(ModelBase):
 
         return z_dot
 
-    def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor],
-                edge_index: torch.Tensor, method: str = 'dopri5') -> torch.Tensor:
-        return predict_graph_continuous(self, x0, us, ts, edge_index, method=method, order=self.input_order)
+    def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
+        return predict_graph_continuous(self, x0, w.u, ts, w.edge_index, method=method, order=self.input_order)
 
     def forward(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         z = self.encoder(w)

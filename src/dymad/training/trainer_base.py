@@ -8,7 +8,7 @@ import yaml
 from typing import Dict, List, Tuple, Type
 
 from dymad.data.trajectory_manager import TrajectoryManager, TrajectoryManagerGraph
-from dymad.losses.evaluation import prediction_rmse, prediction_rmse_graph
+from dymad.losses.evaluation import prediction_rmse
 from dymad.utils.checkpoint import load_checkpoint, save_checkpoint
 from dymad.utils.plot import plot_hist
 
@@ -121,10 +121,7 @@ class TrainerBase:
         Return the appropriate prediction RMSE function for this trainer.
         Override in subclasses to use different evaluation functions.
         """
-        if self.model_class.GRAPH:
-            return prediction_rmse_graph
-        else:
-            return prediction_rmse
+        return prediction_rmse
 
     def get_evaluation_dataset(self, split: str):
         """

@@ -1,12 +1,12 @@
 import numpy as np
 import torch
-from typing import Union, List
+from typing import Union
 
 from dymad.utils.plot import plot_trajectory
-from dymad.utils.modules import DynData
+from dymad.utils.modules import DynData, DynGeoData
 
 def prediction_rmse(model,
-                   truth: DynData,
+                   truth: Union[DynData, DynGeoData],
                    ts: Union[np.ndarray, torch.Tensor],
                    metadata: dict,
                    model_name: str,
@@ -36,52 +36,7 @@ def prediction_rmse(model,
         us = truth.u
 
         # Make prediction
-        x_pred = model.predict(x0, us, ts, method=method)
-
-        x_truth = x_truth.detach().cpu().numpy()
-        x_pred = x_pred.detach().cpu().numpy()
-        # Calculate RMSE
-        rmse = np.sqrt(np.mean((x_pred - x_truth)**2))
-
-        if plot:
-            plot_trajectory(np.array([x_truth, x_pred]), ts, model_name, metadata,
-                            us=us, labels=['Truth', 'Prediction'], prefix=prefix)
-
-        return rmse
-
-def prediction_rmse_graph(model,
-                         truth: List[torch.Tensor],
-                         ts: Union[np.ndarray, torch.Tensor],
-                         metadata: dict,
-                         model_name: str,
-                         method: str = 'dopri5',
-                         plot: bool = False,
-                         prefix: str = '.') -> float:
-    """
-    Calculate RMSE between model predictions and ground truth for graph-based models
-
-    Args:
-        model (torch.nn.Module): The model to evaluate (graph model with predict method)
-        truth (List[Data]): List of Data objects containing ground truth trajectories
-        ts (Union[np.ndarray, torch.Tensor]): Time points for the trajectory
-        metadata (dict): Metadata dictionary with graph structure info
-        model_name (str): Name of the model to save the plot
-        method (str): ODE solver method (for models that use ODE solvers)
-        plot (bool): Whether to plot the predicted vs ground truth trajectories
-        prefix (str): Path prefix for saving plots
-
-    Returns:
-        float: Root mean squared error between predictions and ground truth
-    """
-    with torch.no_grad():
-        # Extract states and controls
-        x_truth = truth.x
-        x0 = truth.x[0]
-        us = truth.u
-        edge_index = truth.edge_index
-
-        # Make prediction
-        x_pred = model.predict(x0, us, ts, edge_index, method=method)
+        x_pred = model.predict(x0, truth, ts, method=method)
 
         x_truth = x_truth.detach().cpu().numpy()
         x_pred = x_pred.detach().cpu().numpy()

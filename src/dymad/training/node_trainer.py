@@ -73,29 +73,28 @@ class NODETrainer(TrainerBase):
         logging.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
         logging.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
 
-    def _process_batch(self, batch: torch.Tensor) -> torch.Tensor:
+    def _process_batch(self, batch: DynData) -> torch.Tensor:
         """Process a batch and return predictions and ground truth states."""
         num_steps = self.schedulers[1].get_length()
 
-        batch = batch.to(self.device)
-        states = batch.x[:, :num_steps]
-        controls = batch.u[:, :num_steps]
-        init_states = states[:, 0, :]  # (batch_size, n_total_state_features)
+        B = batch.truncate(num_steps)  # Truncate batch to the current sweep length
+        B = B.to(self.device)
+        init_states = B.x[:, 0, :]  # (batch_size, n_total_state_features)
 
         # Use the actual time points from trajectory manager
         ts = self.t[:num_steps].to(self.device)
         # Use native batch prediction
-        predictions = self.model.predict(init_states, controls, ts, method=self.ode_method)
+        predictions = self.model.predict(init_states, B, ts, method=self.ode_method)
         # predictions shape: (time_steps, batch_size, n_total_state_features)
         # We need: (batch_size, time_steps, n_total_state_features)
         predictions = predictions.permute(1, 0, 2)
         # Dynamics loss
-        dynamics_loss = self.criterion(predictions, states)
+        dynamics_loss = self.criterion(predictions, B.x)
 
         if self.recon_weight > 0:
             # Add reconstruction loss
-            _, _, x_hat = self.model(DynData(states, controls))
-            recon_loss = self.criterion(states, x_hat)
+            _, _, x_hat = self.model(B)
+            recon_loss = self.criterion(B.x, x_hat)
             return self.dynamics_weight * dynamics_loss + self.recon_weight * recon_loss
         else:
             return dynamics_loss

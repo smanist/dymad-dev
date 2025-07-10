@@ -185,7 +185,9 @@ def predict_graph_continuous(
     logger.debug(f"predict_continuous: Completed integration, trajectory shape: {z_traj.shape}")
 
     # x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1]), _data).view(n_steps, z_traj.shape[1], -1)
-    x_traj = model.decoder(z_traj, _data)
+    tmp = z_traj.permute(1, 0, 2)  # (batch_size, n_steps, n_features)
+    x_traj = model.decoder(tmp, _data).permute(1, 0, 2)
+
     if not is_batch:
         x_traj = x_traj.squeeze(1)
 

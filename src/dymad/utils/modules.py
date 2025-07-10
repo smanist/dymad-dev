@@ -320,14 +320,10 @@ class GNN(nn.Module):
         The output is reshaped back to (N, n_nodes * n_features).
         """
         if edge_index.shape[0] == 1:
-            if x.ndim == 2:
-                return self._forward_single(x, edge_index[0], **kwargs)
-            else:
-                tmp = []
-                for _x in x:
-                    tmp.append(self._forward_single(_x, edge_index[0], **kwargs))
-                return torch.stack(tmp, dim=0)
+            return self._forward_single(x, edge_index[0], **kwargs)
         else:
+            assert len(x) == len(edge_index), \
+                "Batch size of x and edge_index must match. Got {} and {}.".format(x.shape, edge_index.shape)
             tmp = []
             for _x, _e in zip(x, edge_index):
                 tmp.append(self._forward_single(_x, _e, **kwargs))
@@ -335,16 +331,23 @@ class GNN(nn.Module):
 
     def _forward_single(self, x, edge_index, **kwargs):
         """
-        Forward pass for a single instance.
+        Forward pass for one edge_index.
+
+        x should be of shape (..., n_nodes*input_features).  It is reshaped to
+        (..., n_nodes, input_features) before passing through the GNN layers.
+        In the end it is reshaped back to (..., n_nodes*output_features).
         """
-        _N = x.shape[0]
-        x = x.reshape(_N, self.n_nodes, -1)
+        orig_shape = x.shape
+        feature_dim = orig_shape[-1] // self.n_nodes
+        x = x.reshape(-1, self.n_nodes, feature_dim)
         for layer in self.layers:
             if isinstance(layer, MessagePassing):
                 x = layer(x, edge_index, **kwargs)
             else:
                 x = layer(x)
-        return x.reshape(_N, -1)
+        # Restore original leading dimensions, but last two are merged as before
+        out = x.reshape(*orig_shape[:-1], -1)
+        return out
 
 class ControlInterpolator(nn.Module):
     """
@@ -452,6 +455,10 @@ class DynData:
         else:
             us = None
         return DynData(xs, us)
+    
+    def truncate(self, num_step):
+        return DynData(self.x[:, :num_step, :],
+                       self.u[:, :num_step, :] if self.u is not None else None)
 
 @dataclass
 class DynGeoData:
@@ -504,3 +511,8 @@ class DynGeoData:
             us = None
         edge_index = torch.stack([b.edge_index for b in batch_list], dim=0)
         return DynGeoData(xs, us, edge_index)
+
+    def truncate(self, num_step):
+        return DynGeoData(self.x[:, :num_step, :],
+                          self.u[:, :num_step, :] if self.u is not None else None,
+                          self.edge_index)
