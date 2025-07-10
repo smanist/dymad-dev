@@ -44,11 +44,11 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
-# MDL, mdl = GLDM, 'ldm'
-MDL, mdl = GKBF, 'kbf'
+MDL, mdl = GLDM, 'ldm'
+# MDL, mdl = GKBF, 'kbf'
 
 ifdat = 0
-iftrn = 0
+iftrn = 1
 ifplt = 0
 ifprd = 1
 
@@ -69,7 +69,7 @@ if iftrn:
         {"model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'}
     ]
 
-    for _i in [2]:
+    for _i in [0]:
         Model = cases[_i]['model']
         Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']

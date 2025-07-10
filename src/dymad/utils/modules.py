@@ -271,6 +271,7 @@ class GNN(nn.Module):
     ):
         super().__init__()
         self.n_nodes = n_nodes
+        assert n_layers > 0, "n_layers must be a positive integer"
 
         _gcl = _resolve_gcl(gcl)
         _act = _resolve_activation(activation)
