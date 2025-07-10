@@ -41,7 +41,6 @@ class WeakFormTrainer(TrainerBase):
             # Use weak form loss with weights
             loss = weak_form_loss_batch(
                 batch.x, predictions,
-                self.metadata['n_total_state_features'],
                 self.weak_dyn_param,
                 self.criterion,
                 reconstruction_weight=self.recon_weight,
@@ -72,7 +71,6 @@ class WeakFormTrainer(TrainerBase):
                 # Use weak form loss with weights
                 loss = weak_form_loss_batch(
                     batch.x, predictions,
-                    self.metadata['n_total_state_features'],
                     self.weak_dyn_param,
                     self.criterion,
                     reconstruction_weight=self.recon_weight,

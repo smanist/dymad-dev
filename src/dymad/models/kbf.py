@@ -19,6 +19,7 @@ class KBF(ModelBase):
     - z_dot = Az + sum(B_i * u_i * z)
     - x_hat = decoder(z)
     """
+    GRAPH = False
 
     def __init__(self, model_config: Dict, data_meta: Dict):
         super(KBF, self).__init__()
@@ -153,6 +154,8 @@ class GKBF(ModelBase):
 
     Koopman dimension is defined per node.
     """
+    GRAPH = True
+
     def __init__(self, model_config: Dict, data_meta: Dict):
         super(GKBF, self).__init__()
         self.n_total_state_features = data_meta.get('n_total_state_features')
@@ -174,6 +177,7 @@ class GKBF(ModelBase):
 
         # Determine other options for GNN layers
         opts = {
+            'n_nodes'        : self.n_nodes,
             'gcl'            : model_config.get('gcl', 'sage'),
             'activation'     : model_config.get('activation', 'prelu'),
             'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
@@ -184,7 +188,7 @@ class GKBF(ModelBase):
 
         # Build GNN encoder: maps input features to Koopman space
         self.encoder_net = GNN(
-            input_dim=self.n_total_state_features,
+            input_dim=self.n_total_state_features // self.n_nodes,
             latent_dim=self.latent_dimension,
             output_dim=self.koopman_dimension,
             n_layers=enc_depth,
@@ -204,7 +208,7 @@ class GKBF(ModelBase):
         self.decoder_net = GNN(
             input_dim=self.koopman_dimension,
             latent_dim=self.latent_dimension,
-            output_dim=self.n_total_state_features,
+            output_dim=self.n_total_state_features // self.n_nodes,
             n_layers=dec_depth,
             **opts
         )
@@ -216,26 +220,26 @@ class GKBF(ModelBase):
         return self.decoder_net(z, w.edge_index)
 
     def dynamics(self, z: torch.Tensor, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Reshape z into (batch_size, system_dim)
-        n_steps = z.shape[0] // self.n_nodes
-        w = z.reshape(n_steps, self.n_nodes, -1).permute(0, 2, 1)
-        w = w.reshape(n_steps, -1)
-        # Autonomous part: A @ w
-        w_dot = self.operators[0](w)
-        # Add control-dependent terms: sum(u_i * B_i @ w)
-        u_reshaped = w.u.reshape(n_steps, -1)
+        # Autonomous part: A @ z
+        z_dot = self.operators[0](z)
+
+        # Add control-dependent terms: sum(u_i * B_i @ z)
         for i in range(self.n_total_control_features):
-            w_dot = w_dot + u_reshaped[:, i].unsqueeze(-1) * self.operators[i + 1](w)
+            control_i = w.u[..., i].unsqueeze(-1)  # Extract control i and add dimension for broadcasting
+            z_dot = z_dot + control_i * self.operators[i + 1](z)
+
+        # Add constant term if enabled
         if self.const_term:
-            w_dot = w_dot + self.operators[-1](u_reshaped)
-        return w, w_dot
+            z_dot = z_dot + self.operators[-1](w.u)
+
+        return z_dot
 
     def predict(self, x0: torch.Tensor, us: torch.Tensor, ts: Union[np.ndarray, torch.Tensor],
                 edge_index: torch.Tensor, method: str = 'dopri5') -> torch.Tensor:
         return predict_graph_continuous(self, x0, us, ts, edge_index, method=method, order=self.input_order)
 
     def forward(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        Gz = self.encoder(w)
-        z, z_dot = self.dynamics(Gz, w)
-        x_hat = self.decoder(Gz, w)
+        z = self.encoder(w)
+        z_dot = self.dynamics(z, w)
+        x_hat = self.decoder(z, w)
         return z, z_dot, x_hat

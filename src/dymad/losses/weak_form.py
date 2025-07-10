@@ -104,7 +104,7 @@ def weak_form_loss(truth: torch.Tensor, pred: Tuple[torch.Tensor, torch.Tensor, 
     return dynamics_weight * weak_loss + reconstruction_weight * recon_loss
 
 def weak_form_loss_batch(batch: torch.Tensor, pred_batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-                        n_total_state_features: int, weak_dyn_param: Dict, criterion: Callable,
+                        weak_dyn_param: Dict, criterion: Callable,
                         reconstruction_weight: float = 1.0, dynamics_weight: float = 1.0) -> torch.Tensor:
     """Compute weak form loss for a batch of trajectories.
 
@@ -124,7 +124,7 @@ def weak_form_loss_batch(batch: torch.Tensor, pred_batch: Tuple[torch.Tensor, to
     # Compute loss for each trajectory in the batch
     losses = [
         weak_form_loss(
-            traj[..., :n_total_state_features],  # Extract state features
+            traj,
             [z, z_dot, x_hat],
             weak_dyn_param,
             criterion,

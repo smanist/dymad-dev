@@ -68,7 +68,7 @@ _INIT_MAP_B = {
     "ones":  nn.init.ones_,
 }
 
-def _make_activation(spec) -> nn.Module:
+def _resolve_activation(spec) -> nn.Module:
     """
     Turn a user-supplied activation *specification* into an nn.Module.
     `spec` can be a string, an activation class, or a constructed module.
@@ -79,20 +79,20 @@ def _make_activation(spec) -> nn.Module:
         if key not in _ACT_MAP:
             raise ValueError(f"Unknown activation string '{spec}'. "
                              f"Valid keys are {sorted(_ACT_MAP.keys())}.")
-        return _ACT_MAP[key]()                     # instantiate
+        return _ACT_MAP[key]
 
     # case 2 ─ activation *class* (subclass of nn.Module)
     if isinstance(spec, type) and issubclass(spec, nn.Module):
-        return spec()                              # instantiate
+        return spec
 
     # case 3 ─ already-constructed module
     if isinstance(spec, nn.Module):
-        return spec
+        return type(spec)
 
     raise TypeError("activation must be str, nn.Module subclass, "
                     f"or nn.Module instance, got {type(spec)}")
 
-def _make_gcl(spec) -> nn.Module:
+def _resolve_gcl(spec) -> nn.Module:
     """
     Turn a user-supplied graph convolutional layer *specification* into an nn.Module.
     `spec` can be a string, a GCL class, or a constructed module.
@@ -103,15 +103,15 @@ def _make_gcl(spec) -> nn.Module:
         if key not in _GCL_MAP:
             raise ValueError(f"Unknown GCL string '{spec}'. "
                              f"Valid keys are {sorted(_GCL_MAP.keys())}.")
-        return _GCL_MAP[key]()                     # instantiate
+        return _GCL_MAP[key]
 
     # case 2 ─ GCL *class* (subclass of MessagePassing)
     if isinstance(spec, type) and issubclass(spec, MessagePassing):
-        return spec()                              # instantiate
+        return spec
 
     # case 3 ─ already-constructed module
     if isinstance(spec, MessagePassing):
-        return spec
+        return type(spec)
 
     raise TypeError("GCL must be str, MessagePassing subclass, "
                     f"or MessagePassing instance, got {type(spec)}")
@@ -184,7 +184,7 @@ class MLP(nn.Module):
     ):
         super().__init__()
 
-        _act = _make_activation(activation)
+        _act = _resolve_activation(activation)
 
         if n_layers == 0:
             if input_dim == output_dim:
@@ -195,17 +195,17 @@ class MLP(nn.Module):
             if end_activation:
                 self.net = nn.Sequential(
                     nn.Linear(input_dim, output_dim),
-                    _act
+                    _act()
                 )
             else:
                 self.net = nn.Linear(input_dim, output_dim)
         else:
-            layers = [nn.Linear(input_dim, latent_dim), _act]
+            layers = [nn.Linear(input_dim, latent_dim), _act()]
             for _ in range(n_layers - 2):
-                layers += [nn.Linear(latent_dim, latent_dim), _act]
+                layers += [nn.Linear(latent_dim, latent_dim), _act()]
             layers.append(nn.Linear(latent_dim, output_dim))
             if end_activation:
-                layers.append(_act)
+                layers.append(_act())
             self.net = nn.Sequential(*layers)
 
         # Cache init kwargs for later use in self.apply
@@ -213,7 +213,7 @@ class MLP(nn.Module):
         self._bias_init = _resolve_init(bias_init, _INIT_MAP_B)
 
         # Compute gain
-        act_name = _act.__class__.__name__.lower()
+        act_name = _act().__class__.__name__.lower()
         _g = nn.init.calculate_gain(act_name if act_name not in ["gelu", "prelu", "identity"] else "relu")
         self._gain = gain*_g
 
@@ -237,6 +237,11 @@ class GNN(nn.Module):
     """
     Configurable Graph Neural Network using a choice of GCL (e.g., SAGEConv, ChebConv) and activations.
 
+    Due to the implementation, the GNN is applied sequentially to batch data.
+
+    To interface with other parts of the code, the model assumes concatenated features across nodes.
+    See `forward` method for details.
+
     Args:
         input_dim (int): Dimension of input node features.
         latent_dim (int): Dimension of hidden layers.
@@ -256,6 +261,7 @@ class GNN(nn.Module):
         output_dim: int,
         n_layers: int,
         *,
+        n_nodes: int = 0,
         gcl: Union[str, nn.Module, type] = 'sage',
         activation: Union[str, nn.Module, Callable[[], nn.Module]] = 'prelu',
         weight_init: Union[str, Callable[[torch.Tensor, float], None]] = 'xavier_uniform',
@@ -264,13 +270,14 @@ class GNN(nn.Module):
         end_activation: bool = True,
     ):
         super().__init__()
+        self.n_nodes = n_nodes
 
-        _gcl = _make_gcl(gcl)
-        _act = _make_activation(activation)
+        _gcl = _resolve_gcl(gcl)
+        _act = _resolve_activation(activation)
         self._weight_init = _resolve_init(weight_init, _INIT_MAP_W)
         self._bias_init = _resolve_init(bias_init, _INIT_MAP_B)
 
-        act_name = _act.__class__.__name__.lower()
+        act_name = _act().__class__.__name__.lower()
         _g = nn.init.calculate_gain(act_name if act_name not in ["gelu", "prelu", "identity"] else "relu")
         self._gain = gain * _g
 
@@ -279,12 +286,12 @@ class GNN(nn.Module):
             in_dim = input_dim if i == 0 else latent_dim
             out_dim = output_dim if i == n_layers - 1 else latent_dim
             # Each GCL layer can be a new instance
-            gcl_layer = type(_gcl)(in_dim, out_dim)
+            gcl_layer = _gcl(in_dim, out_dim)
             layers.append(gcl_layer)
             # Only add activation if not last layer or end_activation is True
             if i < n_layers - 1 or end_activation:
                 # Each activation can be a new instance
-                layers.append(type(_act)(out_dim) if isinstance(_act, nn.PReLU) else type(_act)())
+                layers.append(_act())
         self.layers = nn.ModuleList(layers)
 
         self.apply(self._init_gcl)
@@ -302,12 +309,42 @@ class GNN(nn.Module):
             self._bias_init(m.bias)
 
     def forward(self, x, edge_index, **kwargs):
+        """
+        The main bottleneck is that batch operation is only applicable to the same edge_index.
+
+        If edge_index is 2D, we can process the entire batch in one go.
+
+        The input is reshaped to (N, n_nodes, n_features) where N is the batch size,
+        before passing through the GNN layers.
+
+        The output is reshaped back to (N, n_nodes * n_features).
+        """
+        if edge_index.shape[0] == 1:
+            if x.ndim == 2:
+                return self._forward_single(x, edge_index[0], **kwargs)
+            else:
+                tmp = []
+                for _x in x:
+                    tmp.append(self._forward_single(_x, edge_index[0], **kwargs))
+                return torch.stack(tmp, dim=0)
+        else:
+            tmp = []
+            for _x, _e in zip(x, edge_index):
+                tmp.append(self._forward_single(_x, _e, **kwargs))
+            return torch.stack(tmp, dim=0)
+
+    def _forward_single(self, x, edge_index, **kwargs):
+        """
+        Forward pass for a single instance.
+        """
+        _N = x.shape[0]
+        x = x.reshape(_N, self.n_nodes, -1)
         for layer in self.layers:
             if isinstance(layer, MessagePassing):
                 x = layer(x, edge_index, **kwargs)
             else:
                 x = layer(x)
-        return x
+        return x.reshape(_N, -1)
 
 class ControlInterpolator(nn.Module):
     """
@@ -465,5 +502,5 @@ class DynGeoData:
             us = torch.stack([b.u for b in batch_list], dim=0)
         else:
             us = None
-        edge_index = torch.cat([b.edge_index for b in batch_list], dim=0)
+        edge_index = torch.stack([b.edge_index for b in batch_list], dim=0)
         return DynGeoData(xs, us, edge_index)

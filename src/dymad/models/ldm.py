@@ -11,6 +11,8 @@ class LDM(ModelBase):
 
     The encoder, dynamics, and decoder networks are implemented as MLPs.
     """
+    GRAPH = False
+
     def __init__(self, model_config: Dict, data_meta: Dict):
         super(LDM, self).__init__()
         self.n_total_state_features = data_meta.get('n_total_state_features')

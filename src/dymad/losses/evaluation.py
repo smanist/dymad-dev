@@ -24,6 +24,7 @@ def prediction_rmse(model,
         metadata (dict): Metadata dictionary with n_state_features and n_control_features
         method (str): ODE solver method (for models that use ODE solvers)
         plot (bool): Whether to plot the predicted vs ground truth trajectories
+        prefix (str): Path prefix for saving plots
 
     Returns:
         float: Root mean squared error between predictions and ground truth
@@ -54,7 +55,8 @@ def prediction_rmse_graph(model,
                          metadata: dict,
                          model_name: str,
                          method: str = 'dopri5',
-                         plot: bool = False) -> float:
+                         plot: bool = False,
+                         prefix: str = '.') -> float:
     """
     Calculate RMSE between model predictions and ground truth for graph-based models
 
@@ -66,40 +68,29 @@ def prediction_rmse_graph(model,
         model_name (str): Name of the model to save the plot
         method (str): ODE solver method (for models that use ODE solvers)
         plot (bool): Whether to plot the predicted vs ground truth trajectories
+        prefix (str): Path prefix for saving plots
 
     Returns:
         float: Root mean squared error between predictions and ground truth
     """
     with torch.no_grad():
-        device = next(model.parameters()).device
+        # Extract states and controls
+        x_truth = truth.x
+        x0 = truth.x[0]
+        us = truth.u
+        edge_index = truth.edge_index
 
-        # Extract initial conditions and trajectory data
-        x0 = truth[0].x.to(device)
-        edge_index = truth[0].edge_index.to(device)
+        # Make prediction
+        x_pred = model.predict(x0, us, ts, edge_index, method=method)
 
-        # Extract control trajectory and true states
-        us = []
-        z_truth = []
-        for step in truth:
-            us.append(step.u.to(device))
-            z_truth.append(step.x.to(device))
-
-        us = torch.stack(us)  # (n_steps, n_controls)
-        z_truth = torch.stack(z_truth)  # (n_steps, n_nodes, n_features)
-
-        # Make prediction using graph-specific prediction function
-        z_pred = model.predict(x0, us, ts, edge_index, method=method)
-
-        # Convert to numpy for RMSE calculation and plotting
-        z_pred_np = z_pred.detach().cpu().numpy()
-        z_truth_np = z_truth.detach().cpu().numpy()
-
+        x_truth = x_truth.detach().cpu().numpy()
+        x_pred = x_pred.detach().cpu().numpy()
         # Calculate RMSE
-        rmse = np.sqrt(np.mean((z_pred_np - z_truth_np)**2))
+        rmse = np.sqrt(np.mean((x_pred - x_truth)**2))
 
-        if plot: # Delay embedding may exist, so we plot the first state
-            plot_trajectory(np.array([z_pred_np[..., 0], z_truth_np[..., 0]]), ts, model_name, metadata,
-                            us=us, labels=['Truth', 'Prediction'])
+        if plot:
+            plot_trajectory(np.array([x_truth, x_pred]), ts, model_name, metadata,
+                            us=us, labels=['Truth', 'Prediction'], prefix=prefix)
 
         return rmse
 

@@ -7,8 +7,8 @@ import os
 import yaml
 from typing import Dict, List, Tuple, Type
 
-from dymad.data.trajectory_manager import TrajectoryManager
-from dymad.losses.evaluation import prediction_rmse
+from dymad.data.trajectory_manager import TrajectoryManager, TrajectoryManagerGraph
+from dymad.losses.evaluation import prediction_rmse, prediction_rmse_graph
 from dymad.utils.checkpoint import load_checkpoint, save_checkpoint
 from dymad.utils.plot import plot_hist
 
@@ -82,7 +82,10 @@ class TrainerBase:
     def _create_trajectory_manager(self):
         """Create and return a TrajectoryManager instance.
         Override this method in subclasses to customize TrajectoryManager creation."""
-        return TrajectoryManager(self.metadata, device=self.device)
+        if self.model_class.GRAPH:
+            return TrajectoryManagerGraph(self.metadata, device=self.device)
+        else:
+            return TrajectoryManager(self.metadata, device=self.device)
 
     def _setup_model(self) -> None:
         """Setup model, optimizer, scheduler and criterion."""
@@ -118,7 +121,10 @@ class TrainerBase:
         Return the appropriate prediction RMSE function for this trainer.
         Override in subclasses to use different evaluation functions.
         """
-        return prediction_rmse
+        if self.model_class.GRAPH:
+            return prediction_rmse_graph
+        else:
+            return prediction_rmse
 
     def get_evaluation_dataset(self, split: str):
         """

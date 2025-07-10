@@ -618,8 +618,9 @@ class TrajectoryManagerGraph(TrajectoryManager):
             self.t = [ti[:-self.metadata["delay"]] for ti in self.t]
 
         # Bookkeeping metadata for the dataset.
-        self.metadata['n_total_state_features'] = self._data_transform_x._out_dim
-        self.metadata['n_total_control_features'] = self._data_transform_u._out_dim
+        # The total number of features is the sum of state and control features.
+        self.metadata['n_total_state_features'] = self._data_transform_x._out_dim * self.n_nodes
+        self.metadata['n_total_control_features'] = self._data_transform_u._out_dim * self.n_nodes
         self.metadata['n_total_features'] = self.metadata['n_total_state_features'] + self.metadata['n_total_control_features']
         self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
 
