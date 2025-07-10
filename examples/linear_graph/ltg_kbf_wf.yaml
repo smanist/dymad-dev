@@ -23,7 +23,7 @@ model:
   encoder_layers: 1
   decoder_layers: 1
   latent_dimension: 32
-  koopman_dimension: 4
+  koopman_dimension: 2
   const_term: true
   gcl: "sage"
   activation: "none"

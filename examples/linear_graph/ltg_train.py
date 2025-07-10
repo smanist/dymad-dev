@@ -2,10 +2,11 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from torch_geometric.utils import dense_to_sparse
 
-from dymad.models import LDM, GKBF
+from dymad.models import GLDM, GKBF
 from dymad.training import WeakFormTrainer, NODETrainer
-from dymad.utils import load_model, plot_trajectory, setup_logging, TrajectorySampler
+from dymad.utils import DynGeoData, load_model, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 128
 N = 501
@@ -43,10 +44,13 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
+# MDL, mdl = GLDM, 'ldm'
+MDL, mdl = GKBF, 'kbf'
+
 ifdat = 0
 iftrn = 1
 ifplt = 0
-ifprd = 0
+ifprd = 1
 
 if ifdat:
     sampler = TrajectorySampler(f, g, config='ltg_data.yaml', config_mod=config_chr)
@@ -59,13 +63,13 @@ if ifdat:
 
 if iftrn:
     cases = [
-        {"model" : LDM, "trainer": WeakFormTrainer, "config": 'ltg_ldm_wf.yaml'},
-        {"model" : LDM, "trainer": NODETrainer,     "config": 'ltg_ldm_node.yaml'},
+        {"model" : GLDM, "trainer": WeakFormTrainer, "config": 'ltg_ldm_wf.yaml'},
+        {"model" : GLDM, "trainer": NODETrainer,     "config": 'ltg_ldm_node.yaml'},
         {"model" : GKBF, "trainer": WeakFormTrainer, "config": 'ltg_kbf_wf.yaml'},
         {"model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'}
     ]
 
-    for _i in [3]:
+    for _i in [2]:
         Model = cases[_i]['model']
         Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']
@@ -76,8 +80,6 @@ if iftrn:
         trainer.train()
 
 if ifplt:
-    # mdl = 'ldm'
-    mdl = 'kbf'
     sum_wf = np.load(f'results/ltg_{mdl}_wf_summary.npz')
     sum_nd = np.load(f'results/ltg_{mdl}_node_summary.npz')
 
@@ -105,21 +107,21 @@ if ifplt:
     print("Epoch time NODE/WF:", sum_nd['avg_epoch_time']/sum_wf['avg_epoch_time'])
 
 if ifprd:
-    # MDL, mdl = LDM, 'ldm'
-    MDL, mdl = GKBF, 'kbf'
     mdl_wf, prd_wf = load_model(MDL, f'ltg_{mdl}_wf.pt', f'ltg_{mdl}_wf.yaml')
     mdl_nd, prd_nd = load_model(MDL, f'ltg_{mdl}_node.pt', f'ltg_{mdl}_node.yaml')
 
     sampler = TrajectorySampler(f, g, config='ltg_data.yaml', config_mod=config_gau)
+    edge_index = dense_to_sparse(torch.Tensor(adj))[0]
 
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
-    x_data = xs[0]
+    x_data = np.concatenate([ys[0], ys[0], ys[0]], axis=-1)
     t_data = ts[0]
-    u_data = us[0]
+    u_data = np.concatenate([us[0], us[0], us[0]], axis=-1)
+    _data  = DynGeoData(x_data, u_data, edge_index)
 
     with torch.no_grad():
-        weak_pred = prd_wf(x_data, u_data, t_data)
-        node_pred = prd_nd(x_data, u_data, t_data)
+        weak_pred = prd_wf(x_data, _data, t_data)
+        node_pred = prd_nd(x_data, _data, t_data)
 
     plot_trajectory(
         np.array([x_data, weak_pred, node_pred]), t_data, "LTI", metadata={'n_state_features': 2},

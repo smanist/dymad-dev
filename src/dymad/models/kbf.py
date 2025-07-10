@@ -137,8 +137,7 @@ class KBF(ModelBase):
         """Forward pass for KBF model.
 
         Args:
-            x: State features tensor
-            u: Control inputs tensor
+            w: DynData obejct, containing state (x) and control (u) tensors.
 
         Returns:
             Tuple of (latent, latent_derivative, reconstruction)
@@ -212,6 +211,13 @@ class GKBF(ModelBase):
             n_layers=dec_depth,
             **opts
         )
+
+    def diagnostic_info(self) -> str:
+        model_info = super(GKBF, self).diagnostic_info()
+        model_info += f"Encoder: {self.encoder_net.diagnostic_info()}\n"
+        model_info += f"Decoder: {self.decoder_net.diagnostic_info()}\n"
+        model_info += f"Input order: {self.input_order}"
+        return model_info
 
     def encoder(self, w: DynGeoData) -> torch.Tensor:
         return self.encoder_net(w.x, w.edge_index)

@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 import os
 import torch
 import yaml
@@ -105,14 +106,17 @@ def load_model(model_class, checkpoint_path, config_path):
     _data_transform_u.load_state_dict(md["transform_u_state"])
 
     # Prediction in data space
-    def predict_fn(x0, u, t, device="cpu"):
+    def predict_fn(x0, data, t, device="cpu"):
         """Predict trajectory in data space."""
         _x0 = _data_transform_x.transform([x0])[0][0]
         _x0 = torch.tensor(_x0, dtype=dtype, device=device)
-        _u  = _data_transform_u.transform([u])[0]
-        _u  = torch.tensor(_u, dtype=dtype, device=device)
+        _u  = _data_transform_u.transform([data.u])[0]
+        if isinstance(_u, np.ndarray):
+            data.u = torch.tensor(_u, dtype=dtype, device=device)
+        else:
+            data.u = _u.clone().detach().to(device)
         with torch.no_grad():
-            pred = model.predict(_x0, _u, t).cpu().numpy()
+            pred = model.predict(_x0, data, t).cpu().numpy()
         return _data_transform_x.inverse_transform([pred])[0]
 
     return model, predict_fn

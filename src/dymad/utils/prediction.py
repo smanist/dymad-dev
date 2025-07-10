@@ -147,13 +147,18 @@ def predict_graph_continuous(
             raise ValueError(f"Batch mode: x0 must be 2D, us must be 3D. Got x0: {x0.shape}, us: {us.shape}")
         _x0 = x0.clone().detach().to(device)
         _us = us.clone().detach().to(device)
-        _ei = edge_index.clone().detach().to(device)
     else:
         if x0.ndim != 1 or us.ndim != 2:
             raise ValueError(f"Single mode: x0 must be 1D, us must be 2D. Got x0: {x0.shape}, us: {us.shape}")
         _x0 = x0.clone().detach().to(device).unsqueeze(0)
         _us = us.clone().detach().to(device).unsqueeze(0)
+
+    if edge_index.ndim == 2:
         _ei = edge_index.clone().detach().to(device).unsqueeze(0)
+    elif edge_index.ndim == 3:
+        _ei = edge_index.clone().detach().to(device)
+    else:
+        raise ValueError(f"edge_index must be 2D or 3D tensor. Got {edge_index.shape}")
 
     # Convert ts to tensor
     if isinstance(ts, np.ndarray):
