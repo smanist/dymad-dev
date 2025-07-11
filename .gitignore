@@ -8,4 +8,5 @@ build/
 src/dymad.egg-info/
 docs/_build
 docs/api
-examples/**/*.npz
+examples/*/data/*.npz
+examples/*/results/*.npz
