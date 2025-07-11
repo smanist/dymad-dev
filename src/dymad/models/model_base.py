@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from typing import Tuple, Union
 
-from dymad.utils.modules import DynData, DynGeoData
+from dymad.data import DynData, DynGeoData
 
 Data = Union[DynData, DynGeoData]
 

@@ -3,9 +3,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from dymad.data import DynData
 from dymad.models import LDM, KBF
 from dymad.training import WeakFormTrainer, NODETrainer
-from dymad.utils import DynData, load_model, plot_trajectory, setup_logging, TrajectorySampler
+from dymad.utils import load_model, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 128
 N = 501

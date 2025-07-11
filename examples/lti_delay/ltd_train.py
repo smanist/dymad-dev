@@ -3,9 +3,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from dymad.data import DynData
 from dymad.models import LDM, KBF
 from dymad.training import WeakFormTrainer, NODETrainer
-from dymad.utils import DynData, load_model, plot_trajectory, setup_logging, TrajectorySampler
+from dymad.utils import load_model, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 128
 N = 501
@@ -37,8 +38,8 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
-MDL, mdl = LDM, 'ldm'
-# MDL, mdl = KBF, 'kbf'
+# MDL, mdl = LDM, 'ldm'
+MDL, mdl = KBF, 'kbf'
 
 ifdat = 0
 iftrn = 1
@@ -58,7 +59,7 @@ if iftrn:
         {"model" : KBF, "trainer": NODETrainer,     "config": 'ltd_kbf_node.yaml'}
     ]
 
-    for _i in [0, 1]:
+    for _i in [2, 3]:
         Model = cases[_i]['model']
         Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']

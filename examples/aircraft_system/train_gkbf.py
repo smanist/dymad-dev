@@ -12,7 +12,7 @@ logging.basicConfig(
 
 import torch
 from torch_geometric import utils as pyg_utils
-from src.training.gkbf_trainer import GKBFTrainer
+# from src.training.gkbf_trainer import GKBFTrainer
 
 if __name__ == "__main__":
 

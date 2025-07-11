@@ -5,7 +5,8 @@ import torch
 from torchdiffeq import odeint
 from typing import Union
 
-from dymad.utils.modules import ControlInterpolator, DynData, DynGeoData
+from dymad.data import DynData, DynGeoData
+from dymad.utils import ControlInterpolator
 
 logger = logging.getLogger(__name__)
 

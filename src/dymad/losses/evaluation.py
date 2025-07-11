@@ -2,8 +2,8 @@ import numpy as np
 import torch
 from typing import Union
 
-from dymad.utils.plot import plot_trajectory
-from dymad.utils.modules import DynData, DynGeoData
+from dymad.data import DynData, DynGeoData
+from dymad.utils import plot_trajectory
 
 def prediction_rmse(model,
                    truth: Union[DynData, DynGeoData],

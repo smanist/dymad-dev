@@ -2,9 +2,9 @@ import logging
 import torch
 from typing import Tuple, Type
 
-from dymad.training.trainer_base import TrainerBase
-from dymad.models.ldm import LDM
-from dymad.utils import DynData
+from dymad.data import DynData
+from dymad.models import LDM
+from dymad.training import TrainerBase
 
 logger = logging.getLogger(__name__)
 

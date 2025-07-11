@@ -1,8 +1,8 @@
 import copy
 import numpy as np
 
-from dymad.data import make_transform, TrajectoryManager
-from dymad.utils import DynData, TrajectorySampler
+from dymad.data import DynData, make_transform, TrajectoryManager
+from dymad.utils import TrajectorySampler
 
 def check_data(out, ref, label=''):
     for _s, _t in zip(out, ref):
