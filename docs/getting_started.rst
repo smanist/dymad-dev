@@ -1,6 +1,11 @@
 Getting Started
 ===============
 
-Welcome!  Install the package, then try:
+The hands-on examples with detailed explanations are coming soon.
 
->>> import dymad
+For now, you can check our GitHub repository for example scripts (`dymad/examples`) to get started with DyMAD.
+
+You can also
+
+- Read the :doc:`Roadmap <roadmap>` to understand the current capabilities and future directions of DyMAD.
+- Explore the :doc:`API reference <api_ref>` to understand the public classes and functions available in DyMAD.

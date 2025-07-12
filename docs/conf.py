@@ -27,6 +27,7 @@ extensions = [
     'sphinx.ext.doctest',
     'sphinx.ext.napoleon',
     "sphinx_autodoc_typehints",
+    'sphinxemoji.sphinxemoji'
 ]
 
 templates_path = ['_templates']
