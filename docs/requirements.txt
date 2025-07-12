@@ -4,5 +4,9 @@ myst-parser
 myst-nb>=1.0
 sphinx-autodoc-typehints
 sphinxemoji
+matplotlib
 numpy
+scipy
 torch
+torchdiffeq
+torch-geometric
