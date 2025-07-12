@@ -3,7 +3,7 @@ Getting Started
 
 The hands-on examples with detailed explanations are coming soon.
 
-For now, you can check our GitHub repository for example scripts (`dymad/examples`) to get started with DyMAD.
+For now, you can check our `GitHub repository <https://github.com/apus-lab/dymad>`_ for example scripts (`dymad/examples`) to get started with DyMAD.
 
 You can also
 
