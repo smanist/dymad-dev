@@ -2,11 +2,7 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from torch_geometric.utils import dense_to_sparse
-
-import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
 from dymad.models import LDM, KBF
 from dymad.training import WeakFormTrainer, NODETrainer
@@ -48,16 +44,14 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
-MDL, mdl = GLDM, 'ldm'
-# MDL, mdl = GKBF, 'kbf'
-
 ifdat = 0
 iftrn = 1
 ifplt = 0
 ifprd = 1
 
 if ifdat:
-    sampler = TrajectorySampler(f, g, config='ltg_data.yaml', config_mod=config_chr)
+    os.makedirs('./data', exist_ok=True)
+    sampler = TrajectorySampler(f, g, config='lti_data.yaml', config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
     # Pretending a 3-node graph
     np.savez_compressed(
