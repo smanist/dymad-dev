@@ -52,7 +52,8 @@ ifplt = 1
 ifprd = 1
 
 if ifdat:
-    sampler = TrajectorySampler(f, g, config='ltg_data.yaml', config_mod=config_chr)
+    os.makedirs('./data', exist_ok=True)
+    sampler = TrajectorySampler(f, g, config='lti_data.yaml', config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
     # Pretending a 3-node graph
     np.savez_compressed(
