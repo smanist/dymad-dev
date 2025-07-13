@@ -1,7 +1,6 @@
 from datetime import datetime
 import logging
 import os
-import yaml
 
 def setup_logging(config_path: str, mode: str = 'info', prefix='.') -> None:
     """
@@ -13,6 +12,7 @@ def setup_logging(config_path: str, mode: str = 'info', prefix='.') -> None:
         mode (str): Logging mode, either 'debug' or 'info'. Default is 'info'.
         prefix (str): Directory prefix for the log file. Default is '.' (current directory).
     """
+    os.makedirs(prefix, exist_ok=True)  # Ensure the prefix directory exists
     _l = logging.DEBUG if mode == 'debug' else logging.INFO
     _t=str(datetime.now())
     _t = _t.split('.')[0].replace(' ', '-').replace(':', '-')
