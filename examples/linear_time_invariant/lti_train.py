@@ -2,10 +2,7 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
-import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
 from dymad.models import LDM, KBF
 from dymad.training import WeakFormTrainer, NODETrainer
@@ -41,12 +38,13 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
-ifdat = 0
+ifdat = 1
 iftrn = 1
 ifplt = 0
 ifprd = 1
 
 if ifdat:
+    os.makedirs('./data', exist_ok=True)
     sampler = TrajectorySampler(f, g, config='lti_data.yaml', config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
     np.savez_compressed('./data/lti.npz', t=ts, x=ys, u=us)
