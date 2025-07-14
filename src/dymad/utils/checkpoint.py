@@ -2,9 +2,9 @@ import logging
 import numpy as np
 import os
 import torch
-import yaml
 
-from dymad.data import make_transform
+from dymad.data import DynData, DynGeoData, make_transform
+from dymad.utils.misc import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def save_checkpoint(model, optimizer, schedulers, epoch, best_loss, hist, rmse, 
         "metadata": metadata,
     }, checkpoint_path)
 
-def load_model(model_class, checkpoint_path, config_path):
+def load_model(model_class, checkpoint_path, config_path, config_mod=None):
     """
     Load a model from a checkpoint file.
 
@@ -82,6 +82,7 @@ def load_model(model_class, checkpoint_path, config_path):
         model_class (torch.nn.Module): The class of the model to load.
         checkpoint_path (str): Path to the checkpoint file.
         config_path (str): Path to the configuration file.
+        config_mod (dict, optional): Dictionary to merge into the config.
 
     Returns:
         tuple: A tuple containing the model and a prediction function.
@@ -89,8 +90,7 @@ def load_model(model_class, checkpoint_path, config_path):
         - nn.Module: The loaded model.
         - callable: A function to predict trajectories in data space.
     """
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_path, config_mod)
     chkpt = torch.load(checkpoint_path, weights_only=False)
     md = chkpt['metadata']
 
@@ -106,17 +106,31 @@ def load_model(model_class, checkpoint_path, config_path):
     _data_transform_u.load_state_dict(md["transform_u_state"])
 
     # Prediction in data space
-    def predict_fn(x0, data, t, device="cpu"):
-        """Predict trajectory in data space."""
-        _x0 = _data_transform_x.transform([x0])[0][0]
-        _x0 = torch.tensor(_x0, dtype=dtype, device=device)
-        _u  = _data_transform_u.transform([data.u])[0]
-        if isinstance(_u, np.ndarray):
-            data.u = torch.tensor(_u, dtype=dtype, device=device)
-        else:
-            data.u = _u.clone().detach().to(device)
-        with torch.no_grad():
-            pred = model.predict(_x0, data, t).cpu().numpy()
-        return _data_transform_x.inverse_transform([pred])[0]
+    if model.GRAPH:
+        def predict_fn(x0, us, t, ei=None, device="cpu"):
+            """Predict trajectory in data space."""
+            _x0 = _data_transform_x.transform([x0])[0][0]
+            _x0 = torch.tensor(_x0, dtype=dtype, device=device)
+            _u  = _data_transform_u.transform([us])[0]
+            if isinstance(_u, np.ndarray):
+                _u = torch.tensor(_u, dtype=dtype, device=device)
+            else:
+                _u = _u.clone().detach().to(device)
+            with torch.no_grad():
+                pred = model.predict(_x0, DynGeoData(None, _u, ei), t).cpu().numpy()
+            return _data_transform_x.inverse_transform([pred])[0]
+    else:
+        def predict_fn(x0, us, t, device="cpu"):
+            """Predict trajectory in data space."""
+            _x0 = _data_transform_x.transform([x0])[0][0]
+            _x0 = torch.tensor(_x0, dtype=dtype, device=device)
+            _u  = _data_transform_u.transform([us])[0]
+            if isinstance(_u, np.ndarray):
+                _u = torch.tensor(_u, dtype=dtype, device=device)
+            else:
+                _u = _u.clone().detach().to(device)
+            with torch.no_grad():
+                pred = model.predict(_x0, DynData(None, _u), t).cpu().numpy()
+            return _data_transform_x.inverse_transform([pred])[0]
 
     return model, predict_fn

@@ -4,13 +4,11 @@ import random
 import time
 import torch
 import os
-import yaml
 from typing import Dict, List, Tuple, Type
 
-from dymad.data.trajectory_manager import TrajectoryManager, TrajectoryManagerGraph
-from dymad.losses.evaluation import prediction_rmse
-from dymad.utils.checkpoint import load_checkpoint, save_checkpoint
-from dymad.utils.plot import plot_hist
+from dymad.data import TrajectoryManager, TrajectoryManagerGraph
+from dymad.losses import prediction_rmse
+from dymad.utils import load_checkpoint, load_config, plot_hist, save_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +19,8 @@ class TrainerBase:
         config_path (str): Path to the YAML configuration file
         model_class (Type[torch.nn.Module]): Class of the model to train
     """
-    def __init__(self, config_path: str, model_class: Type[torch.nn.Module]):
-        self.config = self._load_config(config_path)
+    def __init__(self, config_path: str, model_class: Type[torch.nn.Module], config_mod: Dict = None):
+        self.config = load_config(config_path, config_mod)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model_name = self.config['model']['name']
         self.model_class = model_class
@@ -55,11 +53,6 @@ class TrainerBase:
         logger.info(f"Using device: {self.device}")
         logger.info(f"Double precision: {self.config['data']['double_precision']}")
         logger.info(f"Epochs: {self.config['training']['n_epochs']}, Save interval: {self.config['training']['save_interval']}")
-
-    def _load_config(self, config_path: str) -> Dict:
-        """Load configuration from YAML file."""
-        with open(config_path, "r") as f:
-            return yaml.safe_load(f)
 
     def _init_metadata(self) -> Dict:
         """Initialize metadata from config or checkpoint."""

@@ -1,10 +1,12 @@
 import logging
 import numpy as np
+import os
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d, CubicSpline
 from scipy.signal import chirp
 from typing import Callable, Dict, Tuple, Union
-import yaml
+
+from dymad.utils.misc import load_config
 
 Array = np.ndarray
 
@@ -337,12 +339,7 @@ class TrajectorySampler:
         self.g   = (lambda t, x, u: x) if g is None else g
         self.rng = np.random.default_rng(rng)
 
-        with open(config, "r") as f:
-            self.config = yaml.safe_load(f)
-        if config_mod is not None:
-            if not isinstance(config_mod, dict):
-                raise TypeError("config_mod must be a dictionary.")
-            self.config.update(config_mod)
+        self.config = load_config(config, config_mod)
 
         tmp = self.config.get("dims", None)
         if tmp is None:
@@ -424,7 +421,8 @@ class TrajectorySampler:
 
     def sample(self,
                t_samples: Array,
-               batch: int = 1) -> dict:
+               batch: int = 1,
+               save = None) -> dict:
         """
         Sample trajectories for a given time grid.
 
@@ -432,6 +430,8 @@ class TrajectorySampler:
             t_samples (Array): Time samples for the trajectory.
                 Should be a 1D array of time points.  Assuming length T.
             batch (int): Number of trajectories to sample.  Assuming B trajectories.
+            save (str, optional): If provided, saves the sampled trajectories to a file.
+                The states are discarded.
 
         Returns:
             Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -470,5 +470,10 @@ class TrajectorySampler:
             yy = self.g(tt, xx, uu)
 
             ts[i], xs[i], us[i], ys[i] = tt, xx, uu, yy
+
+        if save is not None:
+            assert isinstance(save, str), "Save path must be a string."
+            os.makedirs(os.path.dirname(save), exist_ok=True)
+            np.savez_compressed(save, t=ts, x=ys, u=us)
 
         return ts, xs, us, ys

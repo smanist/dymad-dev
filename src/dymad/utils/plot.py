@@ -1,6 +1,7 @@
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 
 PALETTE = ["#000000", "#9b59b6", "#3498db", "#95a5a6", "#e74c3c", "#34495e"]
 LINESTY = ["-", "--", "-.", ":"]
@@ -43,6 +44,8 @@ def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclos
 
     # Adjust layout and save
     plt.tight_layout()
+    if prefix != '.':
+        os.makedirs(prefix, exist_ok=True)
     plt.savefig(f'{prefix}/{model_name}_prediction.png', dpi=150, bbox_inches='tight',
                 facecolor='white', edgecolor='none')
     if ifclose:
@@ -169,3 +172,61 @@ def plot_hist(hist, epoch, model_name, ifclose=True, prefix='.'):
 
     if ifclose:
         plt.close()
+
+def plot_summary(npz_files, labels=None, ifclose=True, prefix='.'):
+    """
+    Plot training loss and trajectory RMSE for multiple summary files on the same figure.
+
+    Args:
+        npz_files (list): List of NPZ file paths containing summary data.
+        labels (list): List of labels for each run (optional).
+        ifclose (bool): Whether to close the plot after saving.
+        prefix (str): Directory prefix for saving the plot.
+    """
+    ax = None
+    for idx, npz_file in enumerate(npz_files):
+        label = labels[idx] if labels is not None else f'Run {idx+1}'
+        ax = plot_one_summary(npz_file, label=label, index=idx, axes=ax)
+
+    plt.tight_layout()
+    if prefix != '.':
+        os.makedirs(prefix, exist_ok=True)
+    plt.savefig(f'{prefix}/node_summary.png', dpi=150, bbox_inches='tight',
+                facecolor='white', edgecolor='none')
+    if ifclose:
+        plt.close()
+
+def plot_one_summary(npz_file, label='', index=0, axes=None):
+    """
+    Plot training loss and trajectory RMSE from a summary file.
+
+    Args:
+        npz_file (str): Path to the NPZ file containing summary data.
+        label (str): Label for the plot legend.
+        index (int): Index to select color from the PALETTE.
+        axes (list, optional): List of axes to plot on. If None, creates new subplots.
+    """
+    sum = np.load(npz_file)
+    clr = PALETTE[index % len(PALETTE)]
+
+    e_loss, h_loss = sum['epoch_loss'], sum['losses']
+    e_rmse, h_rmse = sum['epoch_rmse'], sum['rmses']
+
+    if axes is None:
+        fig, ax = plt.subplots(nrows=2, sharex=True, figsize=(8, 6))
+    else:
+        fig = axes[0].figure
+        ax = axes
+    ax[0].semilogy(e_loss, h_loss[0]/h_loss[0,0], '-', color=clr, label=label)
+    ax[0].set_title('Training Loss (relative)')
+    ax[0].set_ylabel('Relative Loss')
+    ax[0].legend()
+
+    ax[1].semilogy(e_rmse, h_rmse[0], '-',  color=clr, label=f'{label}, Train')
+    ax[1].semilogy(e_rmse, h_rmse[2], '--', color=clr, label=f'{label}, Test')
+    ax[1].set_title('Traj RMSE')
+    ax[1].set_xlabel('Epoch')
+    ax[1].set_ylabel('RMSE')
+    ax[1].legend()
+
+    return fig, ax

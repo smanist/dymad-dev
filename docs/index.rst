@@ -38,4 +38,5 @@ Explore More
 
    getting_started
    roadmap
+   examples
    api_ref

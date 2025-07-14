@@ -40,7 +40,6 @@ class TrajectoryManager:
     def __init__(self, metadata: Dict, device: torch.device = torch.device("cpu")):
         self.metadata = metadata
         self.dtype = torch.double if self.metadata['config']['data'].get('double_precision', False) else torch.float
-        self.model_type = self.metadata['config']['model']['type'].upper()
         self.device = device
         self.data_path = self.metadata['config']['data']['path']
 
@@ -439,30 +438,37 @@ class TrajectoryManager:
         dl_cfg = self.metadata['config'].get("dataloader", {})
         batch_size: int = dl_cfg.get("batch_size", 1)
 
-        if self.model_type == "NN":
-            logging.info(f"Creating dataloaders for NN model with batch size {batch_size}.")
-            self.train_loader = DataLoader(self.train_set, batch_size=batch_size, shuffle=True, collate_fn=DynData.collate)
-            self.valid_loader = DataLoader(self.valid_set, batch_size=batch_size, shuffle=False, collate_fn=DynData.collate)
-            self.test_loader = DataLoader(self.test_set, batch_size=batch_size, shuffle=False, collate_fn=DynData.collate)
+        logging.info(f"Creating dataloaders for NN model with batch size {batch_size}.")
+        self.train_loader = DataLoader(self.train_set, batch_size=batch_size, shuffle=True, collate_fn=DynData.collate)
+        self.valid_loader = DataLoader(self.valid_set, batch_size=batch_size, shuffle=False, collate_fn=DynData.collate)
+        self.test_loader = DataLoader(self.test_set, batch_size=batch_size, shuffle=False, collate_fn=DynData.collate)
 
-        elif self.model_type == "LSTM":
-            logging.info(f"Creating dataloaders for LSTM model with batch size {batch_size}.")
-            # Create sequences for each set
-            train_X, train_y = self._create_lstm_sequences(self.train_set)
-            valid_X, valid_y = self._create_lstm_sequences(self.valid_set)
-            test_X, test_y = self._create_lstm_sequences(self.test_set)
+        # Shelved until LSTM is verified.
 
-            # self.train_set = TensorDataset(train_X, train_y)
-            # self.valid_set = TensorDataset(valid_X, valid_y)
-            # self.test_set = TensorDataset(test_X, test_y)
+        # if self.model_type == "NN":
+        #     logging.info(f"Creating dataloaders for NN model with batch size {batch_size}.")
+        #     self.train_loader = DataLoader(self.train_set, batch_size=batch_size, shuffle=True, collate_fn=DynData.collate)
+        #     self.valid_loader = DataLoader(self.valid_set, batch_size=batch_size, shuffle=False, collate_fn=DynData.collate)
+        #     self.test_loader = DataLoader(self.test_set, batch_size=batch_size, shuffle=False, collate_fn=DynData.collate)
 
-            # Create dataloaders
-            self.train_loader = DataLoader(TensorDataset(train_X, train_y), batch_size=batch_size, shuffle=True)
-            self.valid_loader = DataLoader(TensorDataset(valid_X, valid_y), batch_size=batch_size, shuffle=False)
-            self.test_loader = DataLoader(TensorDataset(test_X, test_y), batch_size=batch_size, shuffle=False)
+        # elif self.model_type == "LSTM":
+        #     logging.info(f"Creating dataloaders for LSTM model with batch size {batch_size}.")
+        #     # Create sequences for each set
+        #     train_X, train_y = self._create_lstm_sequences(self.train_set)
+        #     valid_X, valid_y = self._create_lstm_sequences(self.valid_set)
+        #     test_X, test_y = self._create_lstm_sequences(self.test_set)
 
-        else:
-            raise ValueError(f"Unknown model type: {self.model_type}")
+        #     # self.train_set = TensorDataset(train_X, train_y)
+        #     # self.valid_set = TensorDataset(valid_X, valid_y)
+        #     # self.test_set = TensorDataset(test_X, test_y)
+
+        #     # Create dataloaders
+        #     self.train_loader = DataLoader(TensorDataset(train_X, train_y), batch_size=batch_size, shuffle=True)
+        #     self.valid_loader = DataLoader(TensorDataset(valid_X, valid_y), batch_size=batch_size, shuffle=False)
+        #     self.test_loader = DataLoader(TensorDataset(test_X, test_y), batch_size=batch_size, shuffle=False)
+
+        # else:
+        #     raise ValueError(f"Unknown model type: {self.model_type}")
 
     def _create_lstm_sequences(
         self, dataset: list[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
