@@ -22,8 +22,11 @@ class SweepScheduler:
     def __init__(self, sweep_lengths: list, tolerances: list, epoch_step: int = 10):
         self.sweep_lengths = sweep_lengths
         self.epoch_step    = epoch_step
+        self.tolerances    = tolerances
         self.current_epoch = 0
+        self.sweep_epoch = 0
         self.current_index = 0
+        self.current_tol   = 0
 
         logging.info(f"Sweep lengths: {self.sweep_lengths}, Epoch step: {self.epoch_step}")
 
@@ -96,7 +99,8 @@ class NODETrainer(TrainerBase):
 
         sweep_lengths = self.config['training'].get('sweep_lengths', [len(self.t)])
         epoch_step = self.config['training'].get('sweep_epoch_step', self.config['training']['n_epochs'])
-        self.schedulers.append(SweepScheduler(sweep_lengths, epoch_step))
+        tolerances = self.config['training'].get('Tolerance_Sweeps') if self.config['training'].get('Tolerance_Sweeps') else None
+        self.schedulers.append(SweepScheduler(sweep_lengths, tolerances,epoch_step))
 
         # Additional logging
         logging.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
