@@ -232,7 +232,7 @@ class TrainerBase:
                 # Evaluate RMSE on random trajectories
                 train_rmse = self.evaluate_rmse('train', plot=False)
                 val_rmse   = self.evaluate_rmse('validation', plot=False)
-                test_rmse  = self.evaluate_rmse('test', plot=True)
+                test_rmse  = self.evaluate_rmse('test', plot=False)
                 self.rmse.append([epoch, train_rmse, val_rmse, test_rmse])
 
                 logger.info(
