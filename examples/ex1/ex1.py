@@ -41,10 +41,24 @@ config_gau = {
             "mode": "zoh"}}}
 
 dataproc = 1
+iftrain=1
+
 
 if dataproc:
     os.makedirs('./data', exist_ok=True)
     sampler = TrajectorySampler(f, g, config='ex1_data.yaml', config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
     np.savez_compressed('./data/ex1.npz', t=ts, x=ys, u=us)
-    print("yep")
+    # print("yep")
+if iftrain:
+    cases={'model' : LDM, 'trainer': NODETrainer, 'config': 'ex1_ldm_node.yaml'}
+    Model= cases['model']
+    Trainer = cases['trainer']
+    config_path = cases['config']
+    setup_logging(config_path, mode='info', prefix='./logs')
+    logging.info(f'Starting Training : {Model.__name__} with {Trainer.__name__} using config {config_path}')
+    trainer= Trainer(config_path,Model)
+    trainer.train()
+    
+
+
