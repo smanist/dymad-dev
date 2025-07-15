@@ -1,6 +1,6 @@
 import logging
 import torch
-from typing import Tuple, Type
+from typing import Dict, Type
 
 from dymad.data import DynData
 from dymad.models import LDM
@@ -53,9 +53,9 @@ class NODETrainer(TrainerBase):
     Trainer using Neural ODE approach.
     """
 
-    def __init__(self, config_path: str, model_class: Type[torch.nn.Module] = LDM):
+    def __init__(self, config_path: str, model_class: Type[torch.nn.Module] = LDM, config_mod: Dict = None):
         """Initialize NODE trainer with configuration."""
-        super().__init__(config_path, model_class)
+        super().__init__(config_path, model_class, config_mod)
 
         # ODE solver settings from config
         self.ode_method = self.config['training'].get('ode_method', 'dopri5')

@@ -1,6 +1,6 @@
 import logging
 import torch
-from typing import Type
+from typing import Dict, Type
 
 from dymad.training.trainer_base import TrainerBase
 from dymad.losses.weak_form import generate_weak_form_params, weak_form_loss_batch
@@ -13,9 +13,9 @@ class WeakFormTrainer(TrainerBase):
     Trainer using weak form loss.
     """
 
-    def __init__(self, config_path: str, model_class: Type[torch.nn.Module] = LDM):
+    def __init__(self, config_path: str, model_class: Type[torch.nn.Module] = LDM, config_mod: Dict = None):
         """Initialize weak form trainer with configuration."""
-        super().__init__(config_path, model_class)
+        super().__init__(config_path, model_class, config_mod)
 
         # Weak form loss weights from config
         self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)

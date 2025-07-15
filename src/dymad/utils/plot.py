@@ -183,10 +183,11 @@ def plot_summary(npz_files, labels=None, ifclose=True, prefix='.'):
         ifclose (bool): Whether to close the plot after saving.
         prefix (str): Directory prefix for saving the plot.
     """
+    npzs = [np.load(_f) for _f in npz_files]
     ax = None
-    for idx, npz_file in enumerate(npz_files):
+    for idx, npz in enumerate(npzs):
         label = labels[idx] if labels is not None else f'Run {idx+1}'
-        ax = plot_one_summary(npz_file, label=label, index=idx, axes=ax)
+        fig, ax = plot_one_summary(npz, label=label, index=idx, axes=ax)
 
     plt.tight_layout()
     if prefix != '.':
@@ -196,21 +197,22 @@ def plot_summary(npz_files, labels=None, ifclose=True, prefix='.'):
     if ifclose:
         plt.close()
 
-def plot_one_summary(npz_file, label='', index=0, axes=None):
+    return npzs
+
+def plot_one_summary(npz, label='', index=0, axes=None):
     """
     Plot training loss and trajectory RMSE from a summary file.
 
     Args:
-        npz_file (str): Path to the NPZ file containing summary data.
+        npz (dict): Dictionary from the NPZ file.
         label (str): Label for the plot legend.
         index (int): Index to select color from the PALETTE.
         axes (list, optional): List of axes to plot on. If None, creates new subplots.
     """
-    sum = np.load(npz_file)
     clr = PALETTE[index % len(PALETTE)]
 
-    e_loss, h_loss = sum['epoch_loss'], sum['losses']
-    e_rmse, h_rmse = sum['epoch_rmse'], sum['rmses']
+    e_loss, h_loss = npz['epoch_loss'], npz['losses']
+    e_rmse, h_rmse = npz['epoch_rmse'], npz['rmses']
 
     if axes is None:
         fig, ax = plt.subplots(nrows=2, sharex=True, figsize=(8, 6))

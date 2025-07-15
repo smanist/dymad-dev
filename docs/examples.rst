@@ -7,4 +7,6 @@ This guide explains the public classes and functions at a glance.
    :maxdepth: 2
    :caption: Notebook Gallery
 
-   examples/1d_oscillator/main
+   examples/1d_oscillator/part1
+   examples/1d_oscillator/part2
+   examples/1d_oscillator/part3
