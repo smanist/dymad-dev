@@ -18,7 +18,8 @@ Remove `-E` for incremental build.
 
 # TODO notes
 
-- Simplify YAML parsing with dict-based modifications
 - Extend DynGeoData with subgraph to parallelize batch processing
+- Update the linear graph example
 - Include edge_attr etc in DynGeoData, see [here](https://pytorch-geometric.readthedocs.io/en/latest/cheatsheet/gnn_cheatsheet.html)
-
+- Verify the RNN-type training
+- Update the aircraft and double pendulum examples
