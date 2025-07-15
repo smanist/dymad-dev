@@ -18,7 +18,6 @@ dataloader:
 
 model:
   name: 'lti_kbf_wf'
-  type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   decoder_layers: 1
   latent_dimension: 32
