@@ -43,15 +43,17 @@ class SweepScheduler:
         else:
             self.current_epoch += 1
             self.sweep_epoch += 1
+            
             tolerance = float(self.tolerances[self.current_tol]) if self.tolerances else None
             if eploss is not None and eploss < tolerance:
                 self.sweep_epoch = 0
                 self.current_index += 1
-                logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} at epoch {self.current_epoch} with loss {eploss:.4f} < tolerance {tolerance:.4f}")
                 if self.current_index >= len(self.sweep_lengths):
                     self.current_index = 0
                     self.current_tol += 1
                     logging.info(f"Resetting to first sweep length after reaching end of list. Current tolerance {self.tolerances[self.current_tol]}")
+                    
+                logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} at epoch {self.current_epoch} with loss {eploss:.4f} < tolerance {tolerance:.4f}")
 
     def get_length(self) -> int:
         return self.sweep_lengths[self.current_index]
@@ -84,7 +86,7 @@ class NODETrainer(TrainerBase):
 
         sweep_lengths = self.config['training'].get('sweep_lengths', [len(self.t)])
         epoch_step = self.config['training'].get('sweep_epoch_step', self.config['training']['n_epochs'])
-        tolerances = self.config['training'].get('Tolerance_Sweeps') if self.config['training'].get('Tolerance_Sweeps') else None
+        tolerances = self.config['training'].get('Tolerance_sweeps') if self.config['training'].get('Tolerance_sweeps') else None
         self.schedulers.append(SweepScheduler(sweep_lengths, tolerances,epoch_step))
 
         # Additional logging
@@ -131,7 +133,7 @@ class NODETrainer(TrainerBase):
             total_loss += loss.item()
 
         for scheduler in self.schedulers:
-            scheduler.step(total_loss)
+            scheduler.step(total_loss/ len(self.train_loader))
         # Maintain minimum learning rate
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = max(param_group['lr'], min_lr)
