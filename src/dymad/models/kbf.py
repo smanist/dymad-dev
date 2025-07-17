@@ -9,7 +9,7 @@ from typing import Dict, Union, Tuple
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import GNN, MLP, predict_continuous, predict_graph_continuous
+from dymad.utils import GNN, MLP, predict_continuous, predict_continuous_auto, predict_graph_continuous
 
 class KBF(ModelBase):
     """
@@ -65,7 +65,7 @@ class KBF(ModelBase):
         tmp = [
             nn.Linear(self.koopman_dimension, self.koopman_dimension, bias=False)
             for _ in range(self.n_total_control_features + 1)]
-        if self.const_term:
+        if self.const_term and self.n_total_control_features > 0:
             tmp.append(nn.Linear(self.n_total_control_features, self.koopman_dimension, bias=False))
         self.operators = nn.ModuleList(tmp)
 
@@ -77,6 +77,13 @@ class KBF(ModelBase):
             n_layers   = dec_depth,
             **opts
         )
+
+        if self.n_total_control_features == 0:
+            self.dynamics = self._dynamics_auto
+            self.predict = self._predict_auto
+        else:
+            self.dynamics = self._dynamics_ctrl
+            self.predict = self._predict_ctrl
 
     def diagnostic_info(self) -> str:
         model_info = super(KBF, self).diagnostic_info()
@@ -94,7 +101,7 @@ class KBF(ModelBase):
         # Apply decoder layers (now nn.Sequential or nn.Identity/nn.Linear)
         return self.decoder_net(z)
 
-    def dynamics(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+    def _dynamics_ctrl(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
         """Compute dynamics in Koopman space using bilinear form."""
         # Autonomous part: A @ z
         z_dot = self.operators[0](z)
@@ -110,8 +117,28 @@ class KBF(ModelBase):
 
         return z_dot
 
-    def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
-                method: str = 'dopri5') -> torch.Tensor:
+    def _dynamics_auto(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+        """Compute dynamics in Koopman space using bilinear form. Autonomous case."""
+        # Autonomous part: A @ z
+        z_dot = self.operators[0](z)
+        return z_dot
+
+    def forward(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Forward pass for KBF model.
+
+        Args:
+            w: DynData obejct, containing state (x) and control (u) tensors.
+
+        Returns:
+            Tuple of (latent, latent_derivative, reconstruction)
+        """
+        z = self.encoder(w)
+        z_dot = self.dynamics(z, w)
+        x_hat = self.decoder(z, w)
+        return z, z_dot, x_hat
+
+    def _predict_ctrl(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
+                      method: str = 'dopri5') -> torch.Tensor:
         """Predict trajectory using continuous-time integration.
 
         Args:
@@ -134,19 +161,26 @@ class KBF(ModelBase):
         """
         return predict_continuous(self, x0, w.u, ts, method=method, order=self.input_order)
 
-    def forward(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Forward pass for KBF model.
+    def _predict_auto(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
+                      method: str = 'dopri5') -> torch.Tensor:
+        """Predict trajectory using continuous-time integration.
+        Autonomous case.
 
         Args:
-            w: DynData obejct, containing state (x) and control (u) tensors.
+            x0: Initial state tensor(s):
+
+                - Single: (n_state_features,)
+
+            ts: Time points for prediction
+            method: ODE solver method (default: 'dopri5')
 
         Returns:
-            Tuple of (latent, latent_derivative, reconstruction)
+            Predicted trajectory tensor(s):
+
+                - Single: (time_steps, n_state_features)
+                - Batch: (time_steps, batch_size, n_state_features)
         """
-        z = self.encoder(w)
-        z_dot = self.dynamics(z, w)
-        x_hat = self.decoder(z, w)
-        return z, z_dot, x_hat
+        return predict_continuous_auto(self, x0, ts, method=method)
 
 class GKBF(ModelBase):
     """Graph Koopman Bilinear Form (GKBF) model - graph-specific version.

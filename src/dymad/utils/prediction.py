@@ -34,8 +34,6 @@ def predict_continuous(
             - Single: (n_steps, n_controls)
             - Batch: (batch_size, n_steps, n_controls)
 
-            For autonomous systems, use zero-valued controls
-
         ts: Time points (n_steps,)
         method: ODE solver method
         order: Interpolation method for control inputs ('zoh', 'linear' or 'cubic')
@@ -97,6 +95,81 @@ def predict_continuous(
         x_traj = x_traj.squeeze(1)
 
     logger.debug(f"predict_continuous: Final trajectory shape {x_traj.shape}")
+    return x_traj
+
+def predict_continuous_auto(
+    model,
+    x0: torch.Tensor,
+    ts: Union[np.ndarray, torch.Tensor],
+    method: str = 'dopri5',
+    **kwargs
+) -> torch.Tensor:
+    """
+    Predict trajectory(ies) for regular (non-graph) models with batch support.
+
+    Autonomous case.
+
+    Args:
+        model: Model with encoder, decoder, and dynamics methods
+        x0: Initial state(s):
+
+            - Single: (n_features,)
+            - Batch: (batch_size, n_features)
+
+        ts: Time points (n_steps,)
+        method: ODE solver method
+        order: Interpolation method for control inputs ('zoh', 'linear' or 'cubic')
+
+    Returns:
+        np.ndarray:
+            Predicted trajectory(ies)
+
+            - Single: (n_steps, n_features)
+            - Batch: (n_steps, batch_size, n_features)
+
+    Raises:
+        ValueError: If input dimensions don't match requirements
+    """
+    device = x0.device
+    is_batch = x0.ndim == 2
+
+    if is_batch:
+        if x0.ndim != 2:
+            raise ValueError(f"Batch mode: x0 must be 2D. Got x0: {x0.shape}")
+        _x0 = x0.clone().detach().to(device)
+    else:
+        if x0.ndim != 1:
+            raise ValueError(f"Single mode: x0 must be 1D. Got x0: {x0.shape}")
+        _x0 = x0.clone().detach().to(device).unsqueeze(0)
+
+    # Convert ts to tensor
+    if isinstance(ts, np.ndarray):
+        ts = torch.from_numpy(ts).float().to(device)
+    else:
+        ts = ts.float().to(device)
+
+    n_steps = len(ts)
+
+    logger.debug(f"predict_continuous_auto: {'Batch' if is_batch else 'Single'} mode")
+
+    # Initial state preparation
+    z0 = model.encoder(DynData(_x0, None))
+
+    def ode_func(t, z):
+        x = model.decoder(z, None)
+        _, z_dot, _ = model(DynData(x, None))
+        return z_dot
+
+    # Integrate
+    logger.debug(f"predict_continuous_auto: Starting ODE integration with shape {z0.shape} and method {method}")
+    z_traj = odeint(ode_func, z0, ts, method=method)
+    logger.debug(f"predict_continuous_auto: Completed integration, trajectory shape: {z_traj.shape}")
+
+    x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1]), None).view(n_steps, z_traj.shape[1], -1)
+    if not is_batch:
+        x_traj = x_traj.squeeze(1)
+
+    logger.debug(f"predict_continuous_auto: Final trajectory shape {x_traj.shape}")
     return x_traj
 
 def predict_graph_continuous(

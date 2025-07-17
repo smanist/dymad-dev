@@ -5,7 +5,7 @@ from typing import Tuple, Dict, Union
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import GNN, MLP, predict_continuous, predict_graph_continuous
+from dymad.utils import GNN, MLP, predict_continuous, predict_continuous_auto, predict_graph_continuous
 
 class LDM(ModelBase):
     """Latent Dynamics Model (LDM)
@@ -67,6 +67,13 @@ class LDM(ModelBase):
             **opts
         )
 
+        if self.n_total_control_features == 0:
+            self.encoder = self._encoder_auto
+            self.predict = self._predict_auto
+        else:
+            self.encoder = self._encoder_ctrl
+            self.predict = self._predict_ctrl
+
     def diagnostic_info(self) -> str:
         model_info = super(LDM, self).diagnostic_info()
         model_info += f"Encoder: {self.encoder_net.diagnostic_info()}\n"
@@ -75,9 +82,9 @@ class LDM(ModelBase):
         model_info += f"Input order: {self.input_order}"
         return model_info
 
-    def encoder(self, w: DynData) -> torch.Tensor:
+    def _encoder_ctrl(self, w: DynData) -> torch.Tensor:
         """
-        Map features to latent space.
+        Map features to latent space for systems with inputs.
 
         Args:
             w (DynData): Raw features
@@ -86,6 +93,18 @@ class LDM(ModelBase):
             torch.Tensor: Latent representation
         """
         return self.encoder_net(torch.cat([w.x, w.u], dim=-1))
+
+    def _encoder_auto(self, w: DynData) -> torch.Tensor:
+        """
+        Map features to latent space for autonomous systems.
+
+        Args:
+            w (DynData): Raw features
+
+        Returns:
+            torch.Tensor: Latent representation
+        """
+        return self.encoder_net(w.x)
 
     def decoder(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
         """
@@ -126,8 +145,8 @@ class LDM(ModelBase):
         x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
 
-    def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
-                method: str = 'dopri5') -> torch.Tensor:
+    def _predict_ctrl(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
+                      method: str = 'dopri5') -> torch.Tensor:
         """
         Predict trajectory using continuous-time integration.
 
@@ -154,6 +173,35 @@ class LDM(ModelBase):
                 - Batch: (time_steps, batch_size, n_total_state_features)
         """
         return predict_continuous(self, x0, w.u, ts, method=method, order=self.input_order)
+
+    def _predict_auto(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
+                      method: str = 'dopri5') -> torch.Tensor:
+        """
+        Predict trajectory using continuous-time integration.
+
+        Args:
+            x0 (torch.Tensor): Initial state tensor(s):
+
+                - Single: (n_total_state_features,)
+                - Batch: (batch_size, n_total_state_features)
+
+            us (torch.Tensor): Control inputs:
+
+                - Single: (time_steps, n_total_control_features)
+                - Batch: (batch_size, time_steps, n_total_control_features)
+
+                For autonomous systems, use zero-valued controls
+
+            ts (Union[np.ndarray, torch.Tensor]): Time points for prediction
+            method (str): ODE solver method
+
+        Returns:
+            torch.Tensor: Predicted trajectory tensor(s):
+
+                - Single: (time_steps, n_total_state_features)
+                - Batch: (time_steps, batch_size, n_total_state_features)
+        """
+        return predict_continuous_auto(self, x0, ts, method=method)
 
 class GLDM(ModelBase):
     """Graph Latent Dynamics Model (GLDM).

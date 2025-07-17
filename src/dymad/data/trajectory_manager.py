@@ -138,7 +138,8 @@ class TrajectoryManager:
         logging.info("Raw data loaded.")
         logging.info(f"x shape: {self.x.shape if isinstance(self.x, np.ndarray) else f'{len(self.x)} list of arrays'}")
         logging.info(f"t shape: {self.t.shape if isinstance(self.t, np.ndarray) else f'{len(self.t)} list of arrays'}")
-        logging.info(f"u shape: {self.u.shape if isinstance(self.u, np.ndarray) else f'{len(self.u)} list of arrays'}")
+        if self.u is not None:
+            logging.info(f"u shape: {self.u.shape if isinstance(self.u, np.ndarray) else f'{len(self.u)} list of arrays'}")
         # Process x
         if isinstance(self.x, np.ndarray):
             if self.x.ndim == 3:  # multiple trajectories as (n_traj, n_steps, n_features)
@@ -158,10 +159,13 @@ class TrajectoryManager:
             raise TypeError("x must be a numpy array or list of arrays")
 
         # Process u
+        self._is_autonomous = False
         if self.u is None:
             logging.info("No control input u detected. Creating zero-valued control inputs for autonomous system.")
             # Create zero control inputs with shape (n_steps, 1) for each trajectory
+            # for unified processing later.
             self.u = [np.zeros((x.shape[0], 1)) for x in self.x]
+            self._is_autonomous = True
         elif isinstance(self.u, np.ndarray):
             if self.u.ndim == 3:  # (n_traj, n_steps, n_controls)
                 logging.info(f"Detected u as 3D np.ndarray (n_traj, n_steps, n_controls): {self.u.shape}. Splitting into list of arrays.")
@@ -261,10 +265,11 @@ class TrajectoryManager:
             raise ValueError("Data not loaded. Call load_data() first.")
         # Subset trajectories if n_samples is provided.
         if n_samples is not None:
-            self.x = self.x[:n_samples]
-            self.u = self.u[:n_samples]
-            self.t = self.t[:n_samples]
-            self.dt = self.dt[:n_samples]
+            if n_samples > 1:
+                self.x = self.x[:n_samples]
+                self.u = self.u[:n_samples]
+                self.t = self.t[:n_samples]
+                self.dt = self.dt[:n_samples]
 
         # Truncate each trajectory's length if n_steps is provided.
         if n_steps is not None:
@@ -276,11 +281,10 @@ class TrajectoryManager:
         # Populate metadata.
         self.metadata["n_samples"] = len(self.x)
         self.metadata["n_state_features"] = int(self.x[0].shape[-1])
-        # For autonomous systems, we created zero controls with 1 feature, but logically it's 0 controls
-        n_control_features = int(self.u[0].shape[-1])
-        # Check if this is an autonomous system (all controls are zero)
-        is_autonomous = all(np.allclose(u, 0) for u in self.u)
-        self.metadata["n_control_features"] = 0 if is_autonomous and n_control_features == 1 else n_control_features
+        if self._is_autonomous:
+            self.metadata["n_control_features"] = 0
+        else:
+            self.metadata["n_control_features"] = int(self.u[0].shape[-1])
         logging.info("Data loaded and processed.")
         logging.info(f"Number of samples: {self.metadata['n_samples']}")
         logging.info(f"Number of state features: {self.metadata['n_state_features']}")
@@ -297,20 +301,37 @@ class TrajectoryManager:
         split_cfg = self.metadata['config'].get("split", {})
         train_frac: float = split_cfg.get("train_frac", 0.75)
 
-        n_train = int(self.metadata["n_samples"] * train_frac)
-        remaining = self.metadata["n_samples"] - n_train
-        n_val = remaining // 2
-        n_test = remaining - n_val
+        if train_frac < 1.0:
+            n_train = int(self.metadata["n_samples"] * train_frac)
+            remaining = self.metadata["n_samples"] - n_train
+            n_val = remaining // 2
+            n_test = remaining - n_val
+
+            assert n_train > 0, f"Training set must have at least one sample. Got {n_train}."
+            assert n_val > 0, f"Validation set must have at least one sample. Got {n_val}."
+            assert n_test > 0, f"Test set must have at least one sample. Got {n_test}."
+
+            perm = torch.randperm(self.metadata["n_samples"])
+
+            self.train_set_index = perm[:n_train]
+            self.valid_set_index = perm[n_train:n_train+n_val]
+            self.test_set_index  = perm[n_train+n_val:]
+        else:
+            logging.info("Using the entire dataset as train/valid/test since train_frac is 1.0.")
+            logging.info("This should be done only for testing/debugging purposes.")
+
+            n_train = self.metadata["n_samples"]
+            n_val = n_test = n_train
+
+            idcs = torch.arange(self.metadata["n_samples"])
+            self.train_set_index = idcs
+            self.valid_set_index = idcs
+            self.test_set_index  = idcs
 
         self.metadata["n_train"] = n_train
         self.metadata["n_val"]   = n_val
         self.metadata["n_test"]  = n_test
-
-        perm = torch.randperm(self.metadata["n_samples"])
-
-        self.train_set_index = perm[:n_train]
-        self.valid_set_index = perm[n_train:n_train+n_val]
-        self.test_set_index  = perm[n_train+n_val:]
+        logging.info(f"Dataset size: Train: {n_train}, Validation: {n_val}, Test: {n_test}.")
 
         self.metadata["train_set_index"] = self.train_set_index.tolist()
         self.metadata["valid_set_index"] = self.valid_set_index.tolist()
@@ -357,7 +378,10 @@ class TrajectoryManager:
 
         # Bookkeeping metadata for the dataset.
         self.metadata['n_total_state_features'] = self._data_transform_x._out_dim
-        self.metadata['n_total_control_features'] = self._data_transform_u._out_dim
+        if self._is_autonomous:
+            self.metadata['n_total_control_features'] = 0
+        else:
+            self.metadata['n_total_control_features'] = self._data_transform_u._out_dim
         self.metadata['n_total_features'] = self.metadata['n_total_state_features'] + self.metadata['n_total_control_features']
         self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
 

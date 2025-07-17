@@ -308,18 +308,30 @@ class TrajectorySampler:
 
     The dynamics are
 
+    With input:
+
     .. math::
         \begin{align*}
         \dot{x} &= f(t, x, u) \\
         y &= g(t, x, u)
         \end{align*}
 
+    Without input:
+
+    .. math::
+        \begin{align*}
+        \dot{x} &= f(t, x) \\
+        y &= g(t, x)
+        \end{align*}
+
     Args:
         f (Callable[[float, Array, Array], Array]): Function defining the system dynamics.
             It should take time `t`, state `x`, and control input `u` as arguments and return the state derivative.
+            Or just `f(t, x)` if the system is autonomous (no control input).
         g (Callable[[float, Array, Array], Array], optional): Function defining the observation
             model. It should take time `t`, state `x`, and control input `u` as arguments and return the observation.
             If not provided, it defaults to the identity function (`g(t, x, u) = x`).
+            Or just `g(t, x)` if the system is autonomous (no control input).
         config (Union[str, Dict], optional): Path to a YAML configuration file or a dictionary
             containing the configuration for the sampler. The configuration should specify the dimensions
             of the states, inputs, and observations, as well as control and initial condition specifications.
@@ -336,7 +348,7 @@ class TrajectorySampler:
                  rng: Union[int, np.random.Generator, None] = None,
                  config_mod: Dict = None):
         self.f   = f
-        self.g   = (lambda t, x, u: x) if g is None else g
+        self.g   = (lambda t, x, u=None: x) if g is None else g
         self.rng = np.random.default_rng(rng)
 
         self.config = load_config(config, config_mod)
@@ -346,12 +358,25 @@ class TrajectorySampler:
             raise ValueError("Config must specify 'dims' (state/observation/input dimensions).")
         self.dims = [tmp["states"], tmp["inputs"], tmp["observations"]]
 
+        self._is_autonomous = (self.dims[1] == 0)
+        if self._is_autonomous:
+            self.sample = self._sample_auto
+        else:
+            self.sample = self._sample_ctrl
+
+        self._n_skip = self.config.get("postprocess", {}).get("n_skip", 0)
+        self._shift_t = self.config.get("postprocess", {}).get("shift_t", False)
+
         logger.info(f"TrajectorySampler initialized with dims: "
                     f"states={self.dims[0]}, inputs={self.dims[1]}, "
                     f"observations={self.dims[2]}")
-        logger.info(f"Control config: {self.config.get('control', None)}")
+        if self._is_autonomous:
+            logger.info("Sampler is autonomous (no control inputs).")
+        else:
+            logger.info(f"Control config: {self.config.get('control', None)}")
         logger.info(f"Init. Cond. config: {self.config.get('x0', None)}")
         logger.info(f"Solver config: {self.config.get('solver', None)}")
+        logger.info(f"Postprocess config: {self.config.get('postprocess', None)}")
 
     def _create_control_sampler(self,
                                 t_grid: Array,
@@ -419,12 +444,12 @@ class TrajectorySampler:
 
         raise TypeError("Unrecognised x0_spec type.")
 
-    def sample(self,
-               t_samples: Array,
-               batch: int = 1,
-               save = None) -> dict:
+    def _sample_ctrl(self,
+                     t_samples: Array,
+                     batch: int = 1,
+                     save = None) -> dict:
         """
-        Sample trajectories for a given time grid.
+        Sample trajectories with control for a given time grid.
 
         Args:
             t_samples (Array): Time samples for the trajectory.
@@ -443,7 +468,9 @@ class TrajectorySampler:
                 - 'y': Observations (shape: (B, T, m))
         """
         tt = np.asarray(t_samples)
-        Nt = tt.size
+        Nt = tt.size - self._n_skip
+        if Nt <= 0:
+            raise ValueError(f"Time samples must be longer than n_skip.  Got {Nt} vs skip={self._n_skip}.")
         opts = self.config.get("solver", {})
 
         ts = np.zeros((batch, Nt))
@@ -469,7 +496,11 @@ class TrajectorySampler:
             xx = sol.y.T
             yy = self.g(tt, xx, uu)
 
-            ts[i], xs[i], us[i], ys[i] = tt, xx, uu, yy
+            if self._shift_t:
+                ts[i] = tt[self._n_skip:] - tt[self._n_skip]
+            else:
+                ts[i] = tt[self._n_skip:]
+            xs[i], us[i], ys[i] = xx[self._n_skip:], uu[self._n_skip:], yy[self._n_skip:]
 
         if save is not None:
             assert isinstance(save, str), "Save path must be a string."
@@ -477,3 +508,63 @@ class TrajectorySampler:
             np.savez_compressed(save, t=ts, x=ys, u=us)
 
         return ts, xs, us, ys
+
+    def _sample_auto(self,
+                     t_samples: Array,
+                     batch: int = 1,
+                     save = None) -> dict:
+        """
+        Sample trajectories without control for a given time grid.
+
+        Args:
+            t_samples (Array): Time samples for the trajectory.
+                Should be a 1D array of time points.  Assuming length T.
+            batch (int): Number of trajectories to sample.  Assuming B trajectories.
+            save (str, optional): If provided, saves the sampled trajectories to a file.
+                The states are discarded.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                A dictionary containing the sampled trajectories. The keys are:
+
+                - 't': Time samples (shape: (B, T))
+                - 'u': Control inputs (shape: (B, T, k))
+                - 'x': States (shape: (B, T, n))
+                - 'y': Observations (shape: (B, T, m))
+        """
+        tt = np.asarray(t_samples)
+        Nt = tt.size - self._n_skip
+        if Nt <= 0:
+            raise ValueError(f"Time samples must be longer than n_skip.  Got {Nt} vs skip={self._n_skip}.")
+        opts = self.config.get("solver", {})
+
+        ts = np.zeros((batch, Nt))
+        xs = np.zeros((batch, Nt, self.dims[0]))
+        ys = np.zeros((batch, Nt, self.dims[2]))
+
+        for i in range(batch):
+            logger.info(f"Generating trajectory {i+1}/{batch}...")
+
+            x0  = self._sample_x0(i)
+            sol = solve_ivp(self.f,
+                            (tt[0], tt[-1]),
+                            x0,
+                            t_eval=tt,
+                            **opts)
+            if not sol.success:
+                raise RuntimeError(f"Integration failed on traj {i}: {sol.message}")
+            xx = sol.y.T
+            yy = self.g(tt, xx)
+
+            if self._shift_t:
+                ts[i] = tt[self._n_skip:] - tt[self._n_skip]
+            else:
+                ts[i] = tt[self._n_skip:]
+            xs[i], ys[i] = xx[self._n_skip:], yy[self._n_skip:]
+
+        if save is not None:
+            assert isinstance(save, str), "Save path must be a string."
+            os.makedirs(os.path.dirname(save), exist_ok=True)
+            np.savez_compressed(save, t=ts, x=ys)
+
+        return ts, xs, ys

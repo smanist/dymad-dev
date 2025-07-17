@@ -126,6 +126,8 @@ def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=Non
             ax[offset + i].set_ylabel(f'Control {i+1}', fontsize=10)
     ax[-1].set_xlabel('Time', fontsize=10)
 
+    ax[-1].set_xlim([2*ts[0]-ts[1], 2*ts[-1]-ts[-2]])
+
     return fig, ax
 
 def plot_hist(hist, epoch, model_name, ifclose=True, prefix='.'):

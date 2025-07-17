@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 import torch
 import torch.nn as nn
 from typing import Tuple, Union
@@ -41,22 +41,17 @@ class ModelBase(nn.Module, ABC):
         """
         return f"Model parameters: {sum(p.numel() for p in self.parameters())}\n"
 
-    @abstractmethod
     def encoder(self, w: Data) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
-    @abstractmethod
     def decoder(self, z: torch.Tensor, w: Data) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
-    @abstractmethod
     def dynamics(self, z: torch.Tensor, w: Data) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
-    @abstractmethod
     def predict(self, x0: torch.Tensor, us: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError("This is the base class.")
 
-    @abstractmethod
     def forward(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         raise NotImplementedError("This is the base class.")

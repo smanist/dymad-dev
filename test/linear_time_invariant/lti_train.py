@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from dymad.data import DynData
 from dymad.models import LDM, KBF
 from dymad.training import WeakFormTrainer, NODETrainer
 from dymad.utils import load_model, plot_summary, plot_trajectory, setup_logging, TrajectorySampler
@@ -38,11 +37,10 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
-# MDL, mdl = LDM, 'ldm'
-MDL, mdl = KBF, 'kbf'
+cfgs = [(LDM, 'ldm'), (KBF, 'kbf')]
 
-ifdat = 0
-iftrn = 0
+ifdat = 1
+iftrn = 1
 ifplt = 1
 ifprd = 1
 
@@ -70,15 +68,14 @@ if iftrn:
         trainer.train()
 
 if ifplt:
-    npz_files = [f'results/lti_{mdl}_node_summary.npz', f'results/lti_{mdl}_wf_summary.npz']
-    npzs = plot_summary(npz_files, labels = [f'{mdl}/NODE', f'{mdl}/WF'], ifclose=False)
+    for cfg in cfgs:
+        MDL, mdl = cfg
+        npz_files = [f'results/lti_{mdl}_node_summary.npz', f'results/lti_{mdl}_wf_summary.npz']
+        npzs = plot_summary(npz_files, labels = [f'{mdl}/NODE', f'{mdl}/WF'], ifclose=False)
 
-    print("Epoch time NODE/WF:", npzs[0]['avg_epoch_time']/npzs[1]['avg_epoch_time'])
+        print("Epoch time NODE/WF:", npzs[0]['avg_epoch_time']/npzs[1]['avg_epoch_time'])
 
 if ifprd:
-    mdl_wf, prd_wf = load_model(MDL, f'lti_{mdl}_wf.pt', f'lti_{mdl}_wf.yaml')
-    mdl_nd, prd_nd = load_model(MDL, f'lti_{mdl}_node.pt', f'lti_{mdl}_node.yaml')
-
     sampler = TrajectorySampler(f, g, config='lti_data.yaml', config_mod=config_gau)
 
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
@@ -86,12 +83,18 @@ if ifprd:
     t_data = ts[0]
     u_data = us[0]
 
-    with torch.no_grad():
-        weak_pred = prd_wf(x_data, u_data, t_data)
-        node_pred = prd_nd(x_data, u_data, t_data)
+    for cfg in cfgs:
+        MDL, mdl = cfg
 
-    plot_trajectory(
-        np.array([x_data, weak_pred, node_pred]), t_data, "LTI", metadata={'n_state_features': 2},
-        us=u_data, labels=['Truth', 'Weak Form', 'NODE'], ifclose=False)
+        mdl_wf, prd_wf = load_model(MDL, f'lti_{mdl}_wf.pt', f'lti_{mdl}_wf.yaml')
+        mdl_nd, prd_nd = load_model(MDL, f'lti_{mdl}_node.pt', f'lti_{mdl}_node.yaml')
+
+        with torch.no_grad():
+            weak_pred = prd_wf(x_data, u_data, t_data)
+            node_pred = prd_nd(x_data, u_data, t_data)
+
+        plot_trajectory(
+            np.array([x_data, weak_pred, node_pred]), t_data, "LTI", metadata={'n_state_features': 2},
+            us=u_data, labels=['Truth', 'Weak Form', 'NODE'], ifclose=False)
 
 plt.show()
