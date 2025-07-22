@@ -44,7 +44,19 @@ class SweepScheduler:
             self.current_epoch += 1
             self.sweep_epoch += 1
             
-            tolerance = float(self.tolerances[self.current_tol]) if self.tolerances else None
+            tolerance = float(self.tolerances[self.current_tol])# if self.tolerances else None
+            
+            if self.sweep_epoch >= self.epoch_step:
+                self.sweep_epoch = 0
+                self.current_index += 1
+                logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} at epoch {self.current_epoch} with loss {eploss:.4f} < tolerance {tolerance:.4f}")
+                if self.current_index >= len(self.sweep_lengths):
+                    self.current_index = 0
+                    self.current_tol += 1
+                    if self.current_tol >= len(self.tolerances):
+                        self.current_tol = 0
+                        logging.info(f"Resetting to first sweep length after reaching end of list. Current tolerance {self.tolerances[self.current_tol]}")
+
             if eploss is not None and eploss < tolerance:
                 self.sweep_epoch = 0
                 self.current_index += 1

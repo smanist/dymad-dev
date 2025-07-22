@@ -40,7 +40,7 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
-dataproc = 1
+dataproc = 0
 iftrain=1
 
 
