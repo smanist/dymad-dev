@@ -19,16 +19,21 @@ class SweepScheduler:
     """
 
     def __init__(self, sweep_lengths: list, tolerances: list, epoch_step: int = 10):
+    def __init__(self, sweep_lengths: list, tolerances: list, epoch_step: int = 10):
         self.sweep_lengths = sweep_lengths
         self.epoch_step    = epoch_step
         self.tolerances    = tolerances
+        self.tolerances    = tolerances
         self.current_epoch = 0
         self.sweep_epoch = 0
+        self.sweep_epoch = 0
         self.current_index = 0
+        self.current_tol   = 0
         self.current_tol   = 0
 
         logging.info(f"Sweep lengths: {self.sweep_lengths}, Epoch step: {self.epoch_step}")
 
+    def step(self,eploss:float=None) -> None:
     def step(self,eploss:float=None) -> None:
         """Advance to the next sweep length."""
 

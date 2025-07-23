@@ -44,7 +44,7 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
-ifdat = 0
+ifdat = 1
 iftrn = 1
 ifplt = 0
 ifprd = 1
