@@ -32,7 +32,7 @@ def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclos
         "Number of trajectories must match number of labels"
 
     # Plot the first trajectory and create the axes
-    fig, ax = plot_one_trajectory(traj[0], ts, metadata, idx=0, us=us, axes=None, label=labels[0])
+    fig, ax = plot_one_trajectory(traj[0], ts, metadata, idx=0, us=us.cpu(), axes=None, label=labels[0])
 
     if Ntrj > 1:
         # Add additional trajectories to the same axes
