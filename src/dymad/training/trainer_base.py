@@ -242,6 +242,8 @@ class TrainerBase:
                     f"Test: {test_rmse:.4e}"
                 )
 
+            self.save_checkpoint(epoch)
+
         plot_hist(self.hist, epoch+1, self.model_name, prefix=self.results_prefix)
         total_training_time = time.time() - overall_start_time
         avg_epoch_time = np.mean(self.epoch_times)
