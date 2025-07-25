@@ -19,7 +19,6 @@ dataloader:
 
 model:
   name: 'ltg_ldm_node'
-  type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   processor_layers: 1
   decoder_layers: 1

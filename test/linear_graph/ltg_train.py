@@ -7,7 +7,7 @@ from torch_geometric.utils import dense_to_sparse
 from dymad.data import DynGeoData
 from dymad.models import GLDM, GKBF
 from dymad.training import WeakFormTrainer, NODETrainer
-from dymad.utils import load_model, plot_trajectory, setup_logging, TrajectorySampler
+from dymad.utils import load_model, plot_summary, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 128
 N = 501
@@ -21,9 +21,9 @@ def f(t, x, u):
 g = lambda t, x, u: x
 
 adj = np.array([
-    [0, 1, 0],
+    [0, 1, 1],
     [1, 0, 1],
-    [0, 1, 0]
+    [1, 1, 0]
 ])
 
 config_chr = {
@@ -45,12 +45,11 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
-MDL, mdl = GLDM, 'ldm'
-# MDL, mdl = GKBF, 'kbf'
+cfgs = [(GLDM, 'ldm'), (GKBF, 'kbf')]
 
-ifdat = 0
+ifdat = 1
 iftrn = 1
-ifplt = 0
+ifplt = 1
 ifprd = 1
 
 if ifdat:
@@ -70,7 +69,7 @@ if iftrn:
         {"model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'}
     ]
 
-    for _i in [0]:
+    for _i in [2, 3]:
         Model = cases[_i]['model']
         Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']
@@ -81,36 +80,14 @@ if iftrn:
         trainer.train()
 
 if ifplt:
-    sum_wf = np.load(f'results/ltg_{mdl}_wf_summary.npz')
-    sum_nd = np.load(f'results/ltg_{mdl}_node_summary.npz')
+    for cfg in [cfgs[1]]:
+        MDL, mdl = cfg
+        npz_files = [f'results/ltg_{mdl}_node_summary.npz', f'results/ltg_{mdl}_wf_summary.npz']
+        npzs = plot_summary(npz_files, labels = [f'{mdl}/NODE', f'{mdl}/WF'], ifclose=False)
 
-    e_loss_wf, h_loss_wf = sum_wf['epoch_loss'], sum_wf['losses']
-    e_loss_nd, h_loss_nd = sum_nd['epoch_loss'], sum_nd['losses']
-    e_rmse_wf, h_rmse_wf = sum_wf['epoch_rmse'], sum_wf['rmses']
-    e_rmse_nd, h_rmse_nd = sum_nd['epoch_rmse'], sum_nd['rmses']
-
-    fig, ax = plt.subplots(nrows=2, sharex=True, figsize=(8, 6))
-    ax[0].semilogy(e_loss_wf, h_loss_wf[0]/h_loss_wf[0,0], 'r-', label='Weak Form')
-    ax[0].semilogy(e_loss_nd, h_loss_nd[0]/h_loss_nd[0,0], 'b-', label='NODE')
-    ax[0].set_title('Training Loss (relative)')
-    ax[0].set_ylabel('Relative Loss')
-    ax[0].legend()
-
-    ax[1].semilogy(e_rmse_wf, h_rmse_wf[0], 'r-', label='Weak Form, Train')
-    ax[1].semilogy(e_rmse_wf, h_rmse_wf[2], 'r--', label='Weak Form, Test')
-    ax[1].semilogy(e_rmse_nd, h_rmse_nd[0], 'b-', label='NODE, Train')
-    ax[1].semilogy(e_rmse_nd, h_rmse_nd[2], 'b--', label='NODE, Test')
-    ax[1].set_title('Traj RMSE')
-    ax[1].set_xlabel('Epoch')
-    ax[1].set_ylabel('RMSE')
-    ax[1].legend()
-
-    print("Epoch time NODE/WF:", sum_nd['avg_epoch_time']/sum_wf['avg_epoch_time'])
+        print("Epoch time NODE/WF:", npzs[0]['avg_epoch_time']/npzs[1]['avg_epoch_time'])
 
 if ifprd:
-    mdl_wf, prd_wf = load_model(MDL, f'ltg_{mdl}_wf.pt', f'ltg_{mdl}_wf.yaml')
-    mdl_nd, prd_nd = load_model(MDL, f'ltg_{mdl}_node.pt', f'ltg_{mdl}_node.yaml')
-
     sampler = TrajectorySampler(f, g, config='ltg_data.yaml', config_mod=config_gau)
     edge_index = dense_to_sparse(torch.Tensor(adj))[0]
 
@@ -119,14 +96,21 @@ if ifprd:
     t_data = ts[0]
     u_data = np.concatenate([us[0], us[0], us[0]], axis=-1)
 
-    with torch.no_grad():
-        _data = DynGeoData(x_data, u_data, edge_index)
-        weak_pred = prd_wf(x_data, _data, t_data)
-        _data = DynGeoData(x_data, u_data, edge_index)
-        node_pred = prd_nd(x_data, _data, t_data)
+    mdl_wf, prd_wf = load_model(MDL, f'ltg_{mdl}_wf.pt', f'ltg_{mdl}_wf.yaml')
+    mdl_nd, prd_nd = load_model(MDL, f'ltg_{mdl}_node.pt', f'ltg_{mdl}_node.yaml')
 
-    plot_trajectory(
-        np.array([x_data, weak_pred, node_pred]), t_data, "LTI", metadata={'n_state_features': 2},
-        us=u_data, labels=['Truth', 'Weak Form', 'NODE'], ifclose=False)
+    for cfg in [cfgs[1]]:
+        MDL, mdl = cfg
+
+        mdl_wf, prd_wf = load_model(MDL, f'ltg_{mdl}_wf.pt', f'ltg_{mdl}_wf.yaml')
+        mdl_nd, prd_nd = load_model(MDL, f'ltg_{mdl}_node.pt', f'ltg_{mdl}_node.yaml')
+
+        with torch.no_grad():
+            weak_pred = prd_wf(x_data, u_data, t_data, ei=edge_index)
+            node_pred = prd_nd(x_data, u_data, t_data, ei=edge_index)
+
+        plot_trajectory(
+            np.array([x_data, weak_pred, node_pred]), t_data, "LTI", metadata={'n_state_features': 2},
+            us=u_data, labels=['Truth', 'Weak Form', 'NODE'], ifclose=False)
 
 plt.show()

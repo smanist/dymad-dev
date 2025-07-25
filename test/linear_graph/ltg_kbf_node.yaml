@@ -19,7 +19,6 @@ dataloader:
 
 model:
   name: 'ltg_kbf_node'
-  type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   decoder_layers: 1
   latent_dimension: 32
