@@ -99,38 +99,61 @@ def load_model(model_class, checkpoint_path, config_path, config_mod=None):
     model.load_state_dict(chkpt['model_state_dict'])
     dtype = next(model.parameters()).dtype
 
+    # Check if autonomous
+    _is_autonomous = md.get('transform_u_state', None) is None
+
     # Data transformations
     _data_transform_x = make_transform(md['config'].get('transform_x', None))
-    _data_transform_u = make_transform(md['config'].get('transform_u', None))
     _data_transform_x.load_state_dict(md["transform_x_state"])
-    _data_transform_u.load_state_dict(md["transform_u_state"])
+
+    if not _is_autonomous:
+        _data_transform_u = make_transform(md['config'].get('transform_u', None))
+        _data_transform_u.load_state_dict(md["transform_u_state"])
 
     # Prediction in data space
     if model.GRAPH:
-        def predict_fn(x0, us, t, ei=None, device="cpu"):
-            """Predict trajectory in data space."""
-            _x0 = _data_transform_x.transform([x0])[0][0]
-            _x0 = torch.tensor(_x0, dtype=dtype, device=device)
-            _u  = _data_transform_u.transform([us])[0]
-            if isinstance(_u, np.ndarray):
-                _u = torch.tensor(_u, dtype=dtype, device=device)
-            else:
-                _u = _u.clone().detach().to(device)
-            with torch.no_grad():
-                pred = model.predict(_x0, DynGeoData(None, _u, ei), t).cpu().numpy()
-            return _data_transform_x.inverse_transform([pred])[0]
+        if _is_autonomous:
+            def predict_fn(x0, t, ei=None, device="cpu"):
+                """Predict trajectory in data space."""
+                _x0 = _data_transform_x.transform([x0])[0][0]
+                _x0 = torch.tensor(_x0, dtype=dtype, device=device)
+                with torch.no_grad():
+                    pred = model.predict(_x0, DynGeoData(None, None, ei), t).cpu().numpy()
+                return _data_transform_x.inverse_transform([pred])[0]
+        else:
+            def predict_fn(x0, us, t, ei=None, device="cpu"):
+                """Predict trajectory in data space."""
+                _x0 = _data_transform_x.transform([x0])[0][0]
+                _x0 = torch.tensor(_x0, dtype=dtype, device=device)
+                _u  = _data_transform_u.transform([us])[0]
+                if isinstance(_u, np.ndarray):
+                    _u = torch.tensor(_u, dtype=dtype, device=device)
+                else:
+                    _u = _u.clone().detach().to(device)
+                with torch.no_grad():
+                    pred = model.predict(_x0, DynGeoData(None, _u, ei), t).cpu().numpy()
+                return _data_transform_x.inverse_transform([pred])[0]
     else:
-        def predict_fn(x0, us, t, device="cpu"):
-            """Predict trajectory in data space."""
-            _x0 = _data_transform_x.transform([x0])[0][0]
-            _x0 = torch.tensor(_x0, dtype=dtype, device=device)
-            _u  = _data_transform_u.transform([us])[0]
-            if isinstance(_u, np.ndarray):
-                _u = torch.tensor(_u, dtype=dtype, device=device)
-            else:
-                _u = _u.clone().detach().to(device)
-            with torch.no_grad():
-                pred = model.predict(_x0, DynData(None, _u), t).cpu().numpy()
-            return _data_transform_x.inverse_transform([pred])[0]
+        if _is_autonomous:
+            def predict_fn(x0, t, device="cpu"):
+                """Predict trajectory in data space."""
+                _x0 = _data_transform_x.transform([x0])[0][0]
+                _x0 = torch.tensor(_x0, dtype=dtype, device=device)
+                with torch.no_grad():
+                    pred = model.predict(_x0, DynData(None, None), t).cpu().numpy()
+                return _data_transform_x.inverse_transform([pred])[0]
+        else:
+            def predict_fn(x0, us, t, device="cpu"):
+                """Predict trajectory in data space."""
+                _x0 = _data_transform_x.transform([x0])[0][0]
+                _x0 = torch.tensor(_x0, dtype=dtype, device=device)
+                _u  = _data_transform_u.transform([us])[0]
+                if isinstance(_u, np.ndarray):
+                    _u = torch.tensor(_u, dtype=dtype, device=device)
+                else:
+                    _u = _u.clone().detach().to(device)
+                with torch.no_grad():
+                    pred = model.predict(_x0, DynData(None, _u), t).cpu().numpy()
+                return _data_transform_x.inverse_transform([pred])[0]
 
     return model, predict_fn

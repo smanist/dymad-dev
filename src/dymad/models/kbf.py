@@ -9,7 +9,8 @@ from typing import Dict, Union, Tuple
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import GNN, MLP, predict_continuous, predict_continuous_auto, predict_graph_continuous
+from dymad.utils import GNN, MLP, predict_continuous, predict_continuous_auto, \
+    predict_graph_continuous, predict_graph_continuous_auto
 
 class KBF(ModelBase):
     """
@@ -234,7 +235,7 @@ class GKBF(ModelBase):
             nn.Linear(self.system_dimension, self.system_dimension, bias=False)
             for _ in range(self.n_total_control_features + 1)
         ]
-        if self.const_term:
+        if self.const_term and self.n_total_control_features > 0:
             tmp.append(nn.Linear(self.n_total_control_features, self.system_dimension, bias=False))
         self.operators = nn.ModuleList(tmp)
 
@@ -246,6 +247,13 @@ class GKBF(ModelBase):
             n_layers=dec_depth,
             **opts
         )
+
+        if self.n_total_control_features == 0:
+            self.dynamics = self._dynamics_auto
+            self.predict = self._predict_auto
+        else:
+            self.dynamics = self._dynamics_ctrl
+            self.predict = self._predict_ctrl
 
     def diagnostic_info(self) -> str:
         model_info = super(GKBF, self).diagnostic_info()
@@ -260,7 +268,7 @@ class GKBF(ModelBase):
     def decoder(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
         return self.decoder_net(z, w.edge_index)
 
-    def dynamics(self, z: torch.Tensor, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _dynamics_ctrl(self, z: torch.Tensor, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
         # Autonomous part: A @ z
         z_dot = self.operators[0](z)
 
@@ -275,11 +283,19 @@ class GKBF(ModelBase):
 
         return z_dot
 
-    def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
-        return predict_graph_continuous(self, x0, w.u, ts, w.edge_index, method=method, order=self.input_order)
+    def _dynamics_auto(self, z: torch.Tensor, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Autonomous part: A @ z
+        z_dot = self.operators[0](z)
+        return z_dot
 
     def forward(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         z = self.encoder(w)
         z_dot = self.dynamics(z, w)
         x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
+
+    def _predict_ctrl(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
+        return predict_graph_continuous(self, x0, w.u, ts, w.edge_index, method=method, order=self.input_order)
+
+    def _predict_auto(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
+        return predict_graph_continuous_auto(self, x0, ts, w.edge_index, method=method, order=self.input_order)

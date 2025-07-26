@@ -351,13 +351,13 @@ class TrajectoryManager:
             logging.info("Fitting transformation for state features.")
             X = [self.x[i] for i in self.train_set_index]
             self._data_transform_x.fit(X)
-
-            logging.info("Fitting transformation for control inputs.")
-            U = [self.u[i] for i in self.train_set_index]
-            self._data_transform_u.fit(U)
-
             self.metadata["transform_x_state"] = self._data_transform_x.state_dict()
-            self.metadata["transform_u_state"] = self._data_transform_u.state_dict()
+
+            if self.metadata["n_control_features"] > 0:
+                logging.info("Fitting transformation for control inputs.")
+                U = [self.u[i] for i in self.train_set_index]
+                self._data_transform_u.fit(U)
+                self.metadata["transform_u_state"] = self._data_transform_u.state_dict()
         else:
             logging.info("Transformations already fitted. Skipping fitting step.")
 
@@ -624,13 +624,13 @@ class TrajectoryManagerGraph(TrajectoryManager):
             logging.info("Fitting transformation for state features.")
             X = [self._graph_data_reshape(self.x[i], forward=True) for i in self.train_set_index]
             self._data_transform_x.fit(np.vstack(X))  # Make sure the input is 3D
-
-            logging.info("Fitting transformation for control inputs.")
-            U = [self._graph_data_reshape(self.u[i], forward=True) for i in self.train_set_index]
-            self._data_transform_u.fit(np.vstack(U))
-
             self.metadata["transform_x_state"] = self._data_transform_x.state_dict()
-            self.metadata["transform_u_state"] = self._data_transform_u.state_dict()
+
+            if self.metadata["n_control_features"] > 0:
+                logging.info("Fitting transformation for control inputs.")
+                U = [self._graph_data_reshape(self.u[i], forward=True) for i in self.train_set_index]
+                self._data_transform_u.fit(np.vstack(U))
+                self.metadata["transform_u_state"] = self._data_transform_u.state_dict()
         else:
             logging.info("Transformations already fitted. Skipping fitting step.")
 
@@ -652,7 +652,10 @@ class TrajectoryManagerGraph(TrajectoryManager):
         # Bookkeeping metadata for the dataset.
         # The total number of features is the sum of state and control features.
         self.metadata['n_total_state_features'] = self._data_transform_x._out_dim * self.n_nodes
-        self.metadata['n_total_control_features'] = self._data_transform_u._out_dim * self.n_nodes
+        if self._is_autonomous:
+            self.metadata['n_total_control_features'] = 0
+        else:
+            self.metadata['n_total_control_features'] = self._data_transform_u._out_dim * self.n_nodes
         self.metadata['n_total_features'] = self.metadata['n_total_state_features'] + self.metadata['n_total_control_features']
         self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
 

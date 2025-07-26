@@ -5,7 +5,8 @@ from typing import Tuple, Dict, Union
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import GNN, MLP, predict_continuous, predict_continuous_auto, predict_graph_continuous
+from dymad.utils import GNN, MLP, predict_continuous, predict_continuous_auto, \
+    predict_graph_continuous, predict_graph_continuous_auto
 
 class LDM(ModelBase):
     """Latent Dynamics Model (LDM)
@@ -271,6 +272,13 @@ class GLDM(ModelBase):
             **opts_gnn
         )
 
+        if self.n_total_control_features == 0:
+            self.encoder = self._encoder_auto
+            self.predict = self._predict_auto
+        else:
+            self.encoder = self._encoder_ctrl
+            self.predict = self._predict_ctrl
+
     def diagnostic_info(self) -> str:
         model_info = super(GLDM, self).diagnostic_info()
         model_info += f"Encoder: {self.encoder_net.diagnostic_info()}\n"
@@ -279,8 +287,11 @@ class GLDM(ModelBase):
         model_info += f"Input order: {self.input_order}"
         return model_info
 
-    def encoder(self, w: DynGeoData) -> torch.Tensor:
+    def _encoder_ctrl(self, w: DynGeoData) -> torch.Tensor:
         return self.encoder_net(torch.cat([w.x, w.u], dim=-1), w.edge_index)
+
+    def _encoder_auto(self, w: DynGeoData) -> torch.Tensor:
+        return self.encoder_net(w.x, w.edge_index)
 
     def decoder(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
         return self.decoder_net(z, w.edge_index)
@@ -294,5 +305,8 @@ class GLDM(ModelBase):
         x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
 
-    def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
+    def _predict_ctrl(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
         return predict_graph_continuous(self, x0, w.u, ts, w.edge_index, method=method, order=self.input_order)
+
+    def _predict_auto(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
+        return predict_graph_continuous_auto(self, x0, ts, w.edge_index, method=method, order=self.input_order)

@@ -4,7 +4,6 @@ import numpy as np
 import torch
 from torch_geometric.utils import dense_to_sparse
 
-from dymad.data import DynGeoData
 from dymad.models import GLDM, GKBF
 from dymad.training import WeakFormTrainer, NODETrainer
 from dymad.utils import load_model, plot_summary, plot_trajectory, setup_logging, TrajectorySampler
