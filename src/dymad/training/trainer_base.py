@@ -194,7 +194,7 @@ class TrainerBase:
         self.epoch_times = []
 
         overall_start_time = time.time()
-        for epoch in range(self.start_epoch, n_epochs):
+        for epoch in range(self.start_epoch, self.start_epoch + n_epochs):
             # Training and evaluation
             # Only timing the train and validation phases
             # since test loss is only for reference
@@ -213,7 +213,7 @@ class TrainerBase:
 
             # Logging
             logger.info(
-                f"Epoch {epoch+1}/{n_epochs}, "
+                f"Epoch {epoch+1}/{self.start_epoch + n_epochs}, "
                 f"Train Loss: {train_loss:.4e}, "
                 f"Validation Loss: {val_loss:.4e}, "
                 f"Test Loss: {test_loss:.4e}"
@@ -223,7 +223,7 @@ class TrainerBase:
             self.save_if_best(val_loss, epoch)
 
             # Periodic checkpoint and evaluation
-            if epoch % save_interval == 0:
+            if (epoch + 1) % save_interval == 0:
                 self.save_checkpoint(epoch)
 
                 # Plot loss curves

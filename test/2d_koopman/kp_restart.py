@@ -35,7 +35,7 @@ mdl_ld = {
     "weight_init": "xavier_uniform"}
 
 trn_wf = {
-    "n_epochs": 2000,
+    "n_epochs": 1000,
     "save_interval": 50,
     "load_checkpoint": False,
     "learning_rate": 5e-3,
@@ -48,7 +48,7 @@ trn_wf = {
         "ordpol": 2,
         "ordint": 2}}
 trn_nd = {
-    "n_epochs": 2000,
+    "n_epochs": 1000,
     "save_interval": 20,
     "load_checkpoint": False,
     "learning_rate": 5e-3,
@@ -56,7 +56,7 @@ trn_nd = {
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
     "sweep_lengths": [30, 50, 100, 200, 301],
-    "sweep_epoch_step": 400,
+    "sweep_epoch_step": 200,
     "ode_method": "dopri5",
     "rtol": 1e-7,
     "atol": 1e-9
@@ -73,32 +73,10 @@ cfgs = [
 # IDX = [0, 1]
 IDX = [2, 3]
 
-ifdat = 0
-iftrn = 1
+iftrn = 0
+ifrst = 1
 ifplt = 1
 ifprd = 1
-
-if ifdat:
-    sampler = TrajectorySampler(f, config='kp_data.yaml')
-    ts, xs, ys = sampler.sample(t_grid, batch=B, save='./data/kp.npz')
-
-    fig = plt.figure(figsize=(8, 6))
-    ax = fig.add_subplot(111)
-    for i in range(B):
-        ax.plot(xs[i, :, 0], xs[i, :, 1], alpha=0.5)
-    ax.set_xlabel('x1')
-    ax.set_ylabel('x2')
-    ax.set_title('2D Trajectories')
-    plt.tight_layout()
-
-    fig, axs = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
-    for i in range(B):
-        axs[0].plot(ts[i], xs[i, :, 0], alpha=0.5)
-        axs[1].plot(ts[i], xs[i, :, 1], alpha=0.5)
-    axs[0].set_ylabel('x1')
-    axs[1].set_xlabel('Time')
-    axs[1].set_ylabel('x2')
-    plt.tight_layout()
 
 if iftrn:
     for i in IDX:
@@ -109,12 +87,34 @@ if iftrn:
         trainer = Trainer(config_path, MDL, config_mod=opt)
         trainer.train()
 
+if ifrst:
+    mdl, MDL, Trainer, opt = cfgs[IDX[0]]
+    opt["model"]["name"] = f"kp_{mdl}_rst"
+    opt["training"]["n_epochs"] = 500
+    setup_logging(config_path, mode='info', prefix='results')
+    logging.info(f"Config: {config_path}")
+    trainer = Trainer(config_path, MDL, config_mod=opt)
+    trainer.train()
+
+    old_mld = cfgs[IDX[0]][0]
+    mdl, MDL, Trainer, opt = cfgs[IDX[1]]
+    opt["model"]["name"] = f"kp_{mdl}_rst"
+    opt["training"]["load_checkpoint"] = f"./checkpoints/kp_{old_mld}_rst_checkpoint.pt"
+    opt["training"]["n_epochs"] = 500
+    # opt["training"]["sweep_lengths"] = None
+    opt["training"]["sweep_epoch_step"] = 100
+    setup_logging(config_path, mode='info', prefix='results')
+    logging.info(f"Config: {config_path}")
+    trainer = Trainer(config_path, MDL, config_mod=opt)
+    trainer.train()
+
 if ifplt:
-    labels = [cfgs[i][0] for i in IDX]
+    labels = [cfgs[i][0] for i in IDX] + [cfgs[IDX[1]][0]+'_rst']
     npz_files = [f'results/kp_{l}_summary.npz' for l in labels]
-    npzs = plot_summary(npz_files, labels=labels, ifclose=False)
+    npzs = plot_summary(npz_files, labels=labels, ifscl=False, ifclose=False)
 
     print(f"Epoch time {labels[0]}/{labels[1]}: {npzs[0]['avg_epoch_time']/npzs[1]['avg_epoch_time']}")
+    print(f"Epoch time {labels[2]}/{labels[1]}: {npzs[2]['avg_epoch_time']/npzs[1]['avg_epoch_time']}")
 
 if ifprd:
     sampler = TrajectorySampler(f, config='kp_data.yaml')
@@ -130,9 +130,16 @@ if ifprd:
         with torch.no_grad():
             pred = prd_func(x_data, t_data)
         res.append(pred)
+    mdl, MDL, Trainer, opt = cfgs[IDX[1]]
+    opt["model"]["name"] = f"kp_{mdl}_rst"
+    _, prd_func = load_model(MDL, f'kp_{mdl}_rst.pt', f'kp_model.yaml', config_mod=opt)
+    with torch.no_grad():
+        pred = prd_func(x_data, t_data)
+    res.append(pred)
 
-    labels = ['Truth'] + [cfgs[i][0] for i in IDX]
+    labels = ['Truth'] + [cfgs[i][0] for i in IDX] + [cfgs[IDX[1]][0]+'_rst']
     plot_trajectory(
         np.array(res), t_data, "KP", metadata={'n_state_features': 2},
         labels=labels, ifclose=False)
+
 plt.show()

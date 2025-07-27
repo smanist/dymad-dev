@@ -175,13 +175,14 @@ def plot_hist(hist, epoch, model_name, ifclose=True, prefix='.'):
     if ifclose:
         plt.close()
 
-def plot_summary(npz_files, labels=None, ifclose=True, prefix='.'):
+def plot_summary(npz_files, labels=None, ifscl=True, ifclose=True, prefix='.'):
     """
     Plot training loss and trajectory RMSE for multiple summary files on the same figure.
 
     Args:
         npz_files (list): List of NPZ file paths containing summary data.
         labels (list): List of labels for each run (optional).
+        ifscl (bool): If True, scale the loss by the first epoch loss.
         ifclose (bool): Whether to close the plot after saving.
         prefix (str): Directory prefix for saving the plot.
     """
@@ -189,7 +190,7 @@ def plot_summary(npz_files, labels=None, ifclose=True, prefix='.'):
     ax = None
     for idx, npz in enumerate(npzs):
         label = labels[idx] if labels is not None else f'Run {idx+1}'
-        fig, ax = plot_one_summary(npz, label=label, index=idx, axes=ax)
+        fig, ax = plot_one_summary(npz, label=label, index=idx, ifscl=ifscl, axes=ax)
 
     plt.tight_layout()
     if prefix != '.':
@@ -201,7 +202,7 @@ def plot_summary(npz_files, labels=None, ifclose=True, prefix='.'):
 
     return npzs
 
-def plot_one_summary(npz, label='', index=0, axes=None):
+def plot_one_summary(npz, label='', index=0, ifscl=True, axes=None):
     """
     Plot training loss and trajectory RMSE from a summary file.
 
@@ -209,6 +210,7 @@ def plot_one_summary(npz, label='', index=0, axes=None):
         npz (dict): Dictionary from the NPZ file.
         label (str): Label for the plot legend.
         index (int): Index to select color from the PALETTE.
+        ifscl (bool): If True, scale the loss by the first epoch loss.
         axes (list, optional): List of axes to plot on. If None, creates new subplots.
     """
     clr = PALETTE[index % len(PALETTE)]
@@ -221,14 +223,19 @@ def plot_one_summary(npz, label='', index=0, axes=None):
     else:
         fig = axes[0].figure
         ax = axes
-    ax[0].semilogy(e_loss, h_loss[0]/h_loss[0,0], '-', color=clr, label=label)
-    ax[0].set_title('Training Loss (relative)')
-    ax[0].set_ylabel('Relative Loss')
+    scl = h_loss[0, 0] if ifscl else 1.0
+    ax[0].semilogy(e_loss, h_loss[0]/scl, '-', color=clr, label=label)
+    if ifscl:
+        ax[0].set_title('Training Loss (relative drop)')
+        ax[0].set_ylabel('Relative Loss')
+    else:
+        ax[0].set_title('Training Loss *magnitude not to compare*')
+        ax[0].set_ylabel('Loss')
     ax[0].legend()
 
     ax[1].semilogy(e_rmse, h_rmse[0], '-',  color=clr, label=f'{label}, Train')
     ax[1].semilogy(e_rmse, h_rmse[2], '--', color=clr, label=f'{label}, Test')
-    ax[1].set_title('Traj RMSE')
+    ax[1].set_title('Trajectory RMSE')
     ax[1].set_xlabel('Epoch')
     ax[1].set_ylabel('RMSE')
     ax[1].legend()

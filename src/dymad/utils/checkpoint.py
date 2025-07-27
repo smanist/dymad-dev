@@ -8,7 +8,7 @@ from dymad.utils.misc import load_config
 
 logger = logging.getLogger(__name__)
 
-def load_checkpoint(model, optimizer, schedulers, checkpoint_path, load_from_checkpoint, inference_mode=False):
+def load_checkpoint(model, optimizer, schedulers, ref_checkpoint_path, load_from_checkpoint=False, inference_mode=False):
     """
     Load a checkpoint from the specified path.
 
@@ -16,7 +16,8 @@ def load_checkpoint(model, optimizer, schedulers, checkpoint_path, load_from_che
         model (torch.nn.Module): The model to load the state into.
         optimizer (torch.optim.Optimizer): The optimizer to load the state into.
         schedulers (list[torch.optim.lr_scheduler._LRScheduler]): The schedulers to load the state into.
-        checkpoint_path (str): Path to the checkpoint file.
+        ref_checkpoint_path (str): Reference path to the checkpoint file - Same as the current case.
+        load_from_checkpoint (bool or str): If True, load from ref_checkpoint_path; if str, use it as the path; otherwise, skip loading.
         inference_mode (bool, optional): If True, skip loading optimizer and schedulers.
 
     Returns:
@@ -31,7 +32,17 @@ def load_checkpoint(model, optimizer, schedulers, checkpoint_path, load_from_che
     mode = "Inference" if inference_mode else "Training"
     logging.info(f"{mode} mode is enabled.")
 
-    if not os.path.exists(checkpoint_path) or not load_from_checkpoint:
+    checkpoint_path = None
+    if isinstance(load_from_checkpoint, str):
+        checkpoint_path = load_from_checkpoint
+    elif load_from_checkpoint:
+        checkpoint_path = ref_checkpoint_path
+
+    if checkpoint_path is None:
+        logging.info(f"Got load_from_checkpoint={load_from_checkpoint}, resulting in checkpoint_path=None. Starting from scratch.")
+        return 0, float("inf"), [], [], None
+
+    if not os.path.exists(checkpoint_path):
         logging.info(f"No checkpoint found at {checkpoint_path}. Starting from scratch.")
         return 0, float("inf"), [], [], None
 
@@ -45,6 +56,9 @@ def load_checkpoint(model, optimizer, schedulers, checkpoint_path, load_from_che
             f"Expected {len(schedulers)} schedulers, but got {len(checkpoint['scheduler_state_dict'])} in checkpoint."
         for i in range(len(schedulers)):
             schedulers[i].load_state_dict(checkpoint["scheduler_state_dict"][i])
+
+        # In this case, we do a new training, so we reset the best loss
+        return checkpoint["epoch"], float("inf"), checkpoint["hist"], checkpoint["rmse"], checkpoint["metadata"]
 
     return checkpoint["epoch"], checkpoint["best_loss"], checkpoint["hist"], checkpoint["rmse"], checkpoint["metadata"]
 
@@ -63,6 +77,7 @@ def save_checkpoint(model, optimizer, schedulers, epoch, best_loss, hist, rmse, 
         metadata (dict): Metadata about the data.
         checkpoint_path (str): Path to save the checkpoint file.
     """
+    logging.info(f"Saving checkpoint to {checkpoint_path}")
     torch.save({
         "epoch": epoch,
         "model_state_dict": model.state_dict(),

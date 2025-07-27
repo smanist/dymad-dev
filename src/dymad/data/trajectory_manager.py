@@ -45,7 +45,10 @@ class TrajectoryManager:
 
         self._data_transform_x = make_transform(self.metadata['config'].get('transform_x', None))
         self._data_transform_u = make_transform(self.metadata['config'].get('transform_u', None))
-        self.metadata["delay"] = max(self._data_transform_x.delay, self._data_transform_u.delay)
+        if self._data_transform_u is None:
+            self.metadata["delay"] = self._data_transform_x.delay
+        else:
+            self.metadata["delay"] = max(self._data_transform_x.delay, self._data_transform_u.delay)
 
         if "train_set_index" in metadata:
             # If train_set_index is already in metadata, we assume the dataset has been split before.
@@ -67,7 +70,8 @@ class TrajectoryManager:
             self._data_is_split = True
 
             self._data_transform_x.load_state_dict(metadata["transform_x_state"])
-            self._data_transform_u.load_state_dict(metadata["transform_u_state"])
+            if "transform_u_state" in metadata:
+                self._data_transform_u.load_state_dict(metadata["transform_u_state"])
             self._transform_fitted = True
         else:
             self.train_set_index = None
