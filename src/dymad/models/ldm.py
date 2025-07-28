@@ -5,7 +5,7 @@ from typing import Tuple, Dict, Union
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import GNN, MLP, predict_continuous, predict_continuous_auto, \
+from dymad.utils import make_autoencoder, MLP, predict_continuous, predict_continuous_auto, \
     predict_graph_continuous, predict_graph_continuous_auto
 
 class LDM(ModelBase):
@@ -42,13 +42,17 @@ class LDM(ModelBase):
             'gain'           : model_config.get('gain', 1.0),
             'end_activation' : model_config.get('end_activation', True)
         }
+        aec_type = model_config.get('autoencoder_type', 'smp')
 
-        # Build network components
-        self.encoder_net = MLP(
-            input_dim  = self.n_total_features,
-            latent_dim = self.latent_dimension,
-            output_dim = enc_out_dim,
-            n_layers   = enc_depth,
+        # Build encoder/decoder networks
+        self.encoder_net, self.decoder_net = make_autoencoder(
+            type="mlp_"+aec_type,
+            input_dim=self.n_total_features,
+            latent_dim=self.latent_dimension,
+            hidden_dim=enc_out_dim,
+            enc_depth=enc_depth,
+            dec_depth=dec_depth,
+            output_dim=self.n_total_state_features,
             **opts
         )
 
@@ -57,14 +61,6 @@ class LDM(ModelBase):
             latent_dim = self.latent_dimension,
             output_dim = dec_inp_dim,
             n_layers   = proc_depth,
-            **opts
-        )
-
-        self.decoder_net = MLP(
-            input_dim  = dec_inp_dim,
-            latent_dim = self.latent_dimension,
-            output_dim = self.n_total_state_features,
-            n_layers   = dec_depth,
             **opts
         )
 
@@ -246,13 +242,17 @@ class GLDM(ModelBase):
             'n_nodes'        : self.n_nodes,
             'gcl'            : model_config.get('gcl', 'sage'),
         })
+        aec_type = model_config.get('autoencoder_type', 'smp')
 
-        # Build network components
-        self.encoder_net = GNN(
-            input_dim=self.n_total_features // self.n_nodes,
+        # Build encoder/decoder networks
+        self.encoder_net, self.decoder_net = make_autoencoder(
+            type="gnn_"+aec_type,
+            input_dim=self.n_total_features,
             latent_dim=self.latent_dimension,
-            output_dim=enc_out_dim,
-            n_layers=enc_depth,
+            hidden_dim=enc_out_dim,
+            enc_depth=enc_depth,
+            dec_depth=dec_depth,
+            output_dim=self.n_total_state_features,
             **opts_gnn
         )
 
@@ -262,14 +262,6 @@ class GLDM(ModelBase):
             output_dim = dec_inp_dim * self.n_nodes,
             n_layers   = proc_depth,
             **opts_mlp
-        )
-
-        self.decoder_net = GNN(
-            input_dim=dec_inp_dim,
-            latent_dim=self.latent_dimension,
-            output_dim=self.n_total_state_features // self.n_nodes,
-            n_layers=dec_depth,
-            **opts_gnn
         )
 
         if self.n_total_control_features == 0:
@@ -288,7 +280,16 @@ class GLDM(ModelBase):
         return model_info
 
     def _encoder_ctrl(self, w: DynGeoData) -> torch.Tensor:
-        return self.encoder_net(torch.cat([w.x, w.u], dim=-1), w.edge_index)
+        x_shape = w.x.shape[:-1] + (self.n_nodes, -1)
+        u_shape = w.u.shape[:-1] + (self.n_nodes, -1)
+
+        x_reshaped = w.x.view(*x_shape)
+        u_reshaped = w.u.view(*u_shape)
+
+        xu_cat = torch.cat([x_reshaped, u_reshaped], dim=-1)
+        xu_flat = xu_cat.view(*w.x.shape[:-1], self.n_total_state_features + self.n_total_control_features)
+
+        return self.encoder_net(xu_flat, w.edge_index)
 
     def _encoder_auto(self, w: DynGeoData) -> torch.Tensor:
         return self.encoder_net(w.x, w.edge_index)

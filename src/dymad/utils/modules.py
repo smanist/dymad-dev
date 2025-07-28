@@ -7,7 +7,7 @@ try:
 except:
     MessagePassing = None
     ChebConv, SAGEConv = None, None
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, Tuple
 
 class TakeFirst(nn.Module):
     """
@@ -24,6 +24,35 @@ class TakeFirst(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """"""
         return x[..., :self.m] if x.ndim > 1 else x[:self.m]
+
+    def diagnostic_info(self) -> str:
+        return f"m: {self.m}"
+
+class TakeFirstGraph(nn.Module):
+    """
+    Graph version of TakeFirst.
+
+    Args:
+        m (int): Number of entries to take from the last axis.
+        n_nodes (int): Number of nodes in the graph.
+    """
+    def __init__(self, m: int, n_nodes: int):
+        super().__init__()
+        assert m > 0, "m must be a positive integer"
+        self.m = m
+        self.n_nodes = n_nodes
+
+    def forward(self, x: torch.Tensor, edge_index, **kwargs) -> torch.Tensor:
+        """"""
+        orig_shape = x.shape
+        n_features = orig_shape[-1] // self.n_nodes
+        x = x.reshape(*orig_shape[:-1], self.n_nodes, n_features)
+        x = x[..., :self.m] if x.ndim > 2 else x[:, :self.m]
+        x = x.reshape(*orig_shape[:-1], self.n_nodes * self.m)
+        return x
+
+    def diagnostic_info(self) -> str:
+        return f"m: {self.m}, n_nodes: {self.n_nodes}"
 
 _ACT_MAP = {
     # common aliases -> canonical class
@@ -231,6 +260,80 @@ class MLP(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
+class ResBlockMLP(MLP):
+    """
+    Residual block with MLP as the nonlinearity.
+
+    See `MLP` for the arguments.
+    """
+    def __init__(self, input_dim: int, latent_dim: int, output_dim: int,
+                 n_layers: int = 2,
+                 activation: Union[str, nn.Module, Callable[[], nn.Module]] = nn.ReLU,
+                 weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
+                 bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+                 gain: Optional[float] = 1.0,
+                 end_activation: bool = True
+                 ):
+        assert input_dim == output_dim, "Input and output dimensions must match for ResBlock"
+        super().__init__(input_dim, latent_dim, output_dim,
+                         n_layers=n_layers,
+                         activation=activation,
+                         weight_init=weight_init,
+                         bias_init=bias_init,
+                         gain=gain,
+                         end_activation=end_activation)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the residual block.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (..., input_dim).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (..., output_dim).
+        """
+        return x + self.net(x)
+
+class IdenCatMLP(MLP):
+    """
+    Identity concatenation MLP.
+
+    This MLP concatenates the input with the output of the MLP.
+
+    Note:
+        The output dimension represents the **total** output features and must be greater than the input dimension.
+
+    See `MLP` for the arguments.
+    """
+    def __init__(self, input_dim: int, latent_dim: int, output_dim: int,
+                 n_layers: int = 2,
+                 activation: Union[str, nn.Module, Callable[[], nn.Module]] = nn.ReLU,
+                 weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
+                 bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+                 gain: Optional[float] = 1.0,
+                 end_activation: bool = True):
+        assert output_dim > input_dim, "Output dimension must be greater than input dimension"
+        super().__init__(input_dim, latent_dim, output_dim-input_dim,
+                         n_layers=n_layers,
+                         activation=activation,
+                         weight_init=weight_init,
+                         bias_init=bias_init,
+                         gain=gain,
+                         end_activation=end_activation)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the identity concatenation MLP.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (..., input_dim).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (..., output_dim).
+        """
+        return torch.cat([x, self.net(x)], dim=-1)
+
 class GNN(nn.Module):
     """
     Configurable Graph Neural Network using a choice of GCL (e.g., SAGEConv, ChebConv) and activations.
@@ -347,6 +450,163 @@ class GNN(nn.Module):
         # Restore original leading dimensions, but last two are merged as before
         out = x.reshape(*orig_shape[:-1], -1)
         return out
+
+class ResBlockGNN(GNN):
+    """
+    Residual block with GNN as the nonlinearity.
+
+    See `GNN` for the arguments.
+    """
+    def __init__(self, input_dim: int, latent_dim: int, output_dim: int,
+                 n_layers: int,
+                 n_nodes: int = 0,
+                 gcl: Union[str, nn.Module, type] = 'sage',
+                 activation: Union[str, nn.Module, Callable[[], nn.Module]] = 'prelu',
+                 weight_init: Union[str, Callable[[torch.Tensor, float], None]] = 'xavier_uniform',
+                 bias_init: Callable[[torch.Tensor], None] = 'zeros',
+                 gain: float = 1.0,
+                 end_activation: bool = True):
+        assert input_dim == output_dim, "Input and output dimensions must match for ResBlock"
+        super().__init__(input_dim, latent_dim, output_dim,
+                         n_layers=n_layers,
+                         n_nodes=n_nodes,
+                         gcl=gcl,
+                         activation=activation,
+                         weight_init=weight_init,
+                         bias_init=bias_init,
+                         gain=gain,
+                         end_activation=end_activation)
+
+    def forward(self, x, edge_index, **kwargs):
+        return x + super().forward(x, edge_index, **kwargs)
+
+class IdenCatGNN(GNN):
+    """
+    Identity concatenation GNN.
+
+    This GNN concatenates the input with the output of the GNN.
+
+    Note:
+        The output dimension represents the **total** output features and must be greater than the input dimension.
+
+    See `GNN` for the arguments.
+    """
+    def __init__(self, input_dim: int, latent_dim: int, output_dim: int,
+                 n_layers: int,
+                 n_nodes: int = 0,
+                 gcl: Union[str, nn.Module, type] = 'sage',
+                 activation: Union[str, nn.Module, Callable[[], nn.Module]] = 'prelu',
+                 weight_init: Union[str, Callable[[torch.Tensor, float], None]] = 'xavier_uniform',
+                 bias_init: Callable[[torch.Tensor], None] = 'zeros',
+                 gain: float = 1.0,
+                 end_activation: bool = True):
+        assert output_dim > input_dim, "Output dimension must be greater than input dimension"
+        super().__init__(input_dim, latent_dim, output_dim-input_dim,
+                         n_layers=n_layers,
+                         n_nodes=n_nodes,
+                         gcl=gcl,
+                         activation=activation,
+                         weight_init=weight_init,
+                         bias_init=bias_init,
+                         gain=gain,
+                         end_activation=end_activation)
+
+    def forward(self, x, edge_index, **kwargs):
+        orig_shape = x.shape
+        n_dim_x = orig_shape[-1] // self.n_nodes
+        tmp = super().forward(x, edge_index, **kwargs)
+        n_features = tmp.shape[-1] // self.n_nodes
+
+        x_reshaped = x.reshape(*orig_shape[:-1], self.n_nodes, n_dim_x)
+        tmp_reshaped = tmp.reshape(*orig_shape[:-1], self.n_nodes, n_features)
+        out = torch.cat([x_reshaped, tmp_reshaped], dim=-1)
+        return out.reshape(*orig_shape[:-1], self.n_nodes * (n_dim_x + n_features))
+
+def make_autoencoder(
+        type: str,
+        input_dim: int, latent_dim: int, hidden_dim: int, enc_depth: int, dec_depth: int,
+        output_dim: int = None, n_nodes: int = None, **kwargs) -> Tuple[nn.Module, nn.Module]:
+    """
+    Factory function to create preset autoencoder models. Including:
+
+    - [mlp_smp] Simple version: MLP-in MLP-out
+    - [mlp_res] Simple version but with ResBlockMLP
+    - [mlp_cat] Concatenation as encoder [x MLP(x)], then TakeFirst as decoder
+    - The graph version of the above: gnn_smp, gnn_res, gnn_cat
+
+    Args:
+        type (str): Type of autoencoder to create.
+            One of {'mlp_smp', 'mlp_res', 'mlp_cat', 'gnn_smp', 'gnn_res', 'gnn_cat'}.
+        input_dim (int): Dimension of the input features.
+        latent_dim (int): Width of the latent layers (not the encoded space).
+        hidden_dim (int): Dimension of the encoded space.
+        enc_depth (int): Number of layers in the encoder.
+        dec_depth (int): Number of layers in the decoder.
+        output_dim (int, optional): Dimension of the output features, defaults to `input_dim`.
+        n_nodes (int, optional): Number of nodes in the graph. Required for GNN-based autoencoders.
+            In the GNN cases, the input and output dimensions are the **total** dimensions across all nodes.
+        **kwargs: Additional keyword arguments passed to the MLP or GNN constructors.
+    """
+    # Prepare the arguments
+    if output_dim is None:
+        output_dim = input_dim
+
+    encoder_args = dict(
+        input_dim=input_dim,
+        latent_dim=latent_dim,
+        output_dim=hidden_dim,
+        n_layers=enc_depth,
+    )
+    encoder_args.update(kwargs)
+    decoder_args = dict(
+        input_dim=hidden_dim,
+        latent_dim=latent_dim,
+        output_dim=output_dim,
+        n_layers=dec_depth,
+    )
+    decoder_args.update(kwargs)
+
+    # Generate the encoder and decoder based on the type
+    _type = type.lower()
+    encoder, decoder = None, None
+    if _type[:3] == "mlp":
+        if _type == "mlp_smp":
+            encoder = MLP(**encoder_args)
+            decoder = MLP(**decoder_args)
+
+        elif _type == "mlp_res":
+            encoder = ResBlockMLP(**encoder_args)
+            decoder = ResBlockMLP(**decoder_args)
+
+        elif _type == "mlp_cat":
+            encoder = IdenCatMLP(**encoder_args)
+            decoder = TakeFirst(output_dim)
+
+    elif _type[:3] == "gnn":
+        assert n_nodes is not None, "n_nodes must be specified for GNN autoencoder"
+        encoder_args.update(
+            input_dim=input_dim // n_nodes,
+            n_nodes=n_nodes)
+        decoder_args.update(
+            output_dim=output_dim // n_nodes,
+            n_nodes=n_nodes)
+
+        if _type == "gnn_smp":
+            encoder = GNN(**encoder_args)
+            decoder = GNN(**decoder_args)
+
+        elif _type == "gnn_res":
+            encoder = ResBlockGNN(**encoder_args)
+            decoder = ResBlockGNN(**decoder_args)
+
+        elif _type == "gnn_cat":
+            encoder = IdenCatGNN(**encoder_args)
+            decoder = TakeFirstGraph(output_dim // n_nodes, n_nodes)
+
+    if encoder is None or decoder is None:
+        raise ValueError(f"Unknown autoencoder type '{type}'.")
+
+    return encoder, decoder
 
 class ControlInterpolator(nn.Module):
     """

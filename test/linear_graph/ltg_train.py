@@ -46,7 +46,7 @@ config_gau = {
 
 cfgs = [(GLDM, 'ldm'), (GKBF, 'kbf')]
 
-ifdat = 1
+ifdat = 0
 iftrn = 1
 ifplt = 1
 ifprd = 1
@@ -68,7 +68,8 @@ if iftrn:
         {"model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'}
     ]
 
-    for _i in [2, 3]:
+    for _i in [0, 1]:
+    # for _i in [2, 3]:
         Model = cases[_i]['model']
         Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']
@@ -79,7 +80,7 @@ if iftrn:
         trainer.train()
 
 if ifplt:
-    for cfg in [cfgs[1]]:
+    for cfg in [cfgs[0]]:
         MDL, mdl = cfg
         npz_files = [f'results/ltg_{mdl}_node_summary.npz', f'results/ltg_{mdl}_wf_summary.npz']
         npzs = plot_summary(npz_files, labels = [f'{mdl}/NODE', f'{mdl}/WF'], ifclose=False)
@@ -98,7 +99,7 @@ if ifprd:
     mdl_wf, prd_wf = load_model(MDL, f'ltg_{mdl}_wf.pt', f'ltg_{mdl}_wf.yaml')
     mdl_nd, prd_nd = load_model(MDL, f'ltg_{mdl}_node.pt', f'ltg_{mdl}_node.yaml')
 
-    for cfg in [cfgs[1]]:
+    for cfg in [cfgs[0]]:
         MDL, mdl = cfg
 
         mdl_wf, prd_wf = load_model(MDL, f'ltg_{mdl}_wf.pt', f'ltg_{mdl}_wf.yaml')

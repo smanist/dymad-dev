@@ -22,8 +22,9 @@ model:
   encoder_layers: 1
   decoder_layers: 1
   latent_dimension: 32
-  koopman_dimension: 2
+  koopman_dimension: 3
   const_term: true
+  autoencoder_type: "cat"
   gcl: "sage"
   activation: "none"
   weight_init: "xavier_uniform"

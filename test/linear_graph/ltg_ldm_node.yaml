@@ -23,6 +23,7 @@ model:
   processor_layers: 1
   decoder_layers: 1
   latent_dimension: 32
+  autoencoder_type: "cat"
   gcl: "sage"
   activation: "none"
   weight_init: "xavier_uniform"

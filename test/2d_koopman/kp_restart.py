@@ -23,6 +23,7 @@ mdl_kb = {
     "decoder_layers" : 2,
     "latent_dimension" : 32,
     "koopman_dimension" : 4,
+    "autoencoder_type": "cat",
     "activation" : "prelu",
     "weight_init" : "xavier_uniform"}
 mdl_ld = {
@@ -31,6 +32,7 @@ mdl_ld = {
     "processor_layers": 2,
     "decoder_layers": 0,
     "latent_dimension": 32,
+    "autoencoder_type": "smp",
     "activation": "prelu",
     "weight_init": "xavier_uniform"}
 
@@ -70,10 +72,10 @@ cfgs = [
     ('kbf_node', KBF, NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
     ]
 
-# IDX = [0, 1]
-IDX = [2, 3]
+IDX = [0, 1]
+# IDX = [2, 3]
 
-iftrn = 0
+iftrn = 1
 ifrst = 1
 ifplt = 1
 ifprd = 1

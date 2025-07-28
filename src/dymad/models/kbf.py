@@ -1,15 +1,11 @@
 import numpy as np
 import torch
 import torch.nn as nn
-try:
-    from torch_geometric.nn import SAGEConv
-except:
-    SAGEConv = None
 from typing import Dict, Union, Tuple
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import GNN, MLP, predict_continuous, predict_continuous_auto, \
+from dymad.utils import make_autoencoder, predict_continuous, predict_continuous_auto, \
     predict_graph_continuous, predict_graph_continuous_auto
 
 class KBF(ModelBase):
@@ -52,13 +48,17 @@ class KBF(ModelBase):
             'gain'           : model_config.get('gain', 1.0),
             'end_activation' : model_config.get('end_activation', True)
         }
+        aec_type = model_config.get('autoencoder_type', 'smp')
 
-        # Build MLP encoder: maps input features to Koopman space
-        self.encoder_net = MLP(
-            input_dim  = self.n_total_state_features,
-            latent_dim = self.latent_dimension,
-            output_dim = self.koopman_dimension,
-            n_layers   = enc_depth,
+        # Build encoder/decoder networks
+        self.encoder_net, self.decoder_net = make_autoencoder(
+            type="mlp_"+aec_type,
+            input_dim=self.n_total_state_features,
+            latent_dim=self.latent_dimension,
+            hidden_dim=self.koopman_dimension,
+            enc_depth=enc_depth,
+            dec_depth=dec_depth,
+            output_dim=self.n_total_state_features,
             **opts
         )
 
@@ -69,15 +69,6 @@ class KBF(ModelBase):
         if self.const_term and self.n_total_control_features > 0:
             tmp.append(nn.Linear(self.n_total_control_features, self.koopman_dimension, bias=False))
         self.operators = nn.ModuleList(tmp)
-
-        # Build MLP decoder: maps Koopman space back to output features
-        self.decoder_net = MLP(
-            input_dim  = self.koopman_dimension,
-            latent_dim = self.latent_dimension,
-            output_dim = self.n_total_state_features,
-            n_layers   = dec_depth,
-            **opts
-        )
 
         if self.n_total_control_features == 0:
             self.dynamics = self._dynamics_auto
@@ -220,13 +211,17 @@ class GKBF(ModelBase):
             'gain'           : model_config.get('gain', 1.0),
             'end_activation' : model_config.get('end_activation', True)
         }
+        aec_type = model_config.get('autoencoder_type', 'smp')
 
-        # Build GNN encoder: maps input features to Koopman space
-        self.encoder_net = GNN(
-            input_dim=self.n_total_state_features // self.n_nodes,
+        # Build encoder/decoder networks
+        self.encoder_net, self.decoder_net = make_autoencoder(
+            type="gnn_"+aec_type,
+            input_dim=self.n_total_state_features,
             latent_dim=self.latent_dimension,
-            output_dim=self.koopman_dimension,
-            n_layers=enc_depth,
+            hidden_dim=self.koopman_dimension,
+            enc_depth=enc_depth,
+            dec_depth=dec_depth,
+            output_dim=self.n_total_state_features,
             **opts
         )
 
@@ -238,15 +233,6 @@ class GKBF(ModelBase):
         if self.const_term and self.n_total_control_features > 0:
             tmp.append(nn.Linear(self.n_total_control_features, self.system_dimension, bias=False))
         self.operators = nn.ModuleList(tmp)
-
-        # Build GNN decoder: maps Koopman space back to output features
-        self.decoder_net = GNN(
-            input_dim=self.koopman_dimension,
-            latent_dim=self.latent_dimension,
-            output_dim=self.n_total_state_features // self.n_nodes,
-            n_layers=dec_depth,
-            **opts
-        )
 
         if self.n_total_control_features == 0:
             self.dynamics = self._dynamics_auto
