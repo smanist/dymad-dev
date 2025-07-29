@@ -28,7 +28,7 @@ model:
   input_order: "cubic"
 
 training:
-  n_epochs: 100
+  n_epochs: 200
   save_interval: 10
   load_checkpoint: True
   learning_rate: 1e-2
@@ -38,7 +38,7 @@ training:
   # NODE-specific parameters
   sweep_lengths: [100, 150, 200, 300, 501]
   Tolerance_sweeps: #[1e-3,1e-4,1e-5, 1e-6,1e-7,1e-8, 1e-9,1e-10, 1e-11, 1e-12]
-  sweep_epoch_step: 100
+  sweep_epoch_step: 20
   ode_method: 'dopri5'
   rtol: 1e-7
   atol: 1e-9

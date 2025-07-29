@@ -30,10 +30,10 @@ model:
   input_order: "cubic"
 
 training:
-  n_epochs: 50
+  n_epochs: 200
   save_interval: 10
   load_checkpoint: false
-  learning_rate: 5e-3
+  learning_rate: 1e-1
   decay_rate: 0.999
   reconstruction_weight: 1.0
   dynamics_weight: 1.0
