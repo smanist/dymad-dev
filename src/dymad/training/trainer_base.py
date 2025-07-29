@@ -242,6 +242,14 @@ class TrainerBase:
                     f"Test: {test_rmse:.4e}"
                 )
 
+            self.save_checkpoint(epoch)
+
+            if self.config['training'].get('Tolerance_sweeps') is not None:
+                if val_loss < float(self.config['training']['Tolerance_sweeps'][-1]):
+                    logger.info(f"Convergence reached at epoch {epoch+1} with validation loss {val_loss:.4e}")
+                    break
+
+
         plot_hist(self.hist, epoch+1, self.model_name, prefix=self.results_prefix)
         total_training_time = time.time() - overall_start_time
         avg_epoch_time = np.mean(self.epoch_times)
