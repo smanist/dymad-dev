@@ -111,9 +111,9 @@ def f(t, x, u):
 g = lambda t, x, u: x
 
 
-ifdat = 0
-ifchk = 0
-iftrn = 1
+ifdat = 1
+ifchk = 1
+iftrn = 0
 ifplt = 0
 ifprd = 0
 
