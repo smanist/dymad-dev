@@ -44,8 +44,9 @@ class TrajectoryManager:
         self.data_path = self.metadata['config']['data']['path']
 
         self._data_transform_x = make_transform(self.metadata['config'].get('transform_x', None))
-        self._data_transform_u = make_transform(self.metadata['config'].get('transform_u', None))
-        if self._data_transform_u is None:
+        cfg_transform_u = self.metadata['config'].get('transform_u', None)
+        self._data_transform_u = make_transform(cfg_transform_u)
+        if cfg_transform_u is None:
             self.metadata["delay"] = self._data_transform_x.delay
         else:
             self.metadata["delay"] = max(self._data_transform_x.delay, self._data_transform_u.delay)

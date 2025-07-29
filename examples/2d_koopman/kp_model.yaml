@@ -1,0 +1,15 @@
+data:
+  path: './data/kp.npz'
+  n_samples: 256
+  n_steps: 301
+  double_precision: true
+
+transform_x:
+  type: "scaler"
+  mode: "std"
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 256
