@@ -34,7 +34,7 @@ def f(t, x, u):
 g = lambda t, x, u: x
 
 
-ifdat = 1
+ifdat = 0
 ifchk = 0
 iftrn = 1
 ifplt = 0
@@ -67,10 +67,12 @@ if ifchk:
     plt.tight_layout()
     plt.show()
 
-case=1
+case=3
 if iftrn:
     cases=[{'model' : LDM, 'trainer': NODETrainer, 'config': 'dp_ldm_node.yaml'},
-           {'model' : LDM, 'trainer': WeakFormTrainer, 'config': 'dp_ldm_wf.yaml'}
+           {'model' : LDM, 'trainer': WeakFormTrainer, 'config': 'dp_ldm_wf.yaml'},
+           {'model' : KBF, 'trainer': NODETrainer, 'config': 'dp_kbf_node.yaml'},
+           {'model' : KBF, 'trainer': WeakFormTrainer, 'config': 'dp_kbf_wf.yaml'}
     ]
     Model= cases[case]['model']
     Trainer = cases[case]['trainer']
@@ -80,18 +82,4 @@ if iftrn:
     trainer= Trainer(config_path,Model)
     trainer.train()
 
-if ifprd:
-    wfmodel, wfprd = load_model(LDM, f'./checkpoints/dp_ldm_wf_checkpoint.pt',f'dp_ldm_wf.yaml')
-
-    sampler = TrajectorySampler(f, g, config='double_pendulum_data.yaml')
-    ts, xs, us, ys = sampler.sample(t_grid, batch=1)
-    ts = ts[0, :]
-    x0 = xs[:, 0, :]
-    us = np.zeros((ts.shape[0], 1))
-
-    print("Before prediction - x0:", x0.shape, "ts:", ts.shape, "us:", us.shape)
-    print("x0 values:", x0)
-    print("us shape and first few values:", us.shape, us[:5].flatten())
-    x_pred = wfprd(x0, us, ts)
-    plot_trajectory(ts, xs[0], x_pred, title='Weak Form Prediction', save_path='dp_wf_prediction.png')
-# 
+ 
