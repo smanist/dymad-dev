@@ -37,8 +37,6 @@ g = lambda t, x, u: x
 ifdat = 0
 ifchk = 0
 iftrn = 1
-ifplt = 0
-ifprd = 0
 
 
 if ifdat:
