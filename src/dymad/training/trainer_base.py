@@ -259,9 +259,9 @@ class TrainerBase:
         # Process histories of loss and RMSE
         # These are saved in the checkpoint too, but here we process them for easier post-processing
         tmp = np.array(self.hist).T
-        epoch_loss, losses = tmp[0], tmp[1:]
+        epoch_loss, losses = tmp[0:], tmp[1:]
         tmp = np.array(self.rmse).T
-        epoch_rmse, rmses = tmp[0], tmp[1:]
+        epoch_rmse, rmses = tmp[0:], tmp[1:]
 
         # Save summary of training
         # Here we also save the model itself - a lazy approach but more "out-of-the-box" for deployment
