@@ -25,6 +25,11 @@ class TrainerBase:
         self.model_name = self.config['model']['name']
         self.model_class = model_class
 
+        if self.config['training'].get('Tolerance_sweeps') is not None:
+            self.convergence_tolerance = float(self.config['training']['Tolerance_sweeps'][-1])
+        else:
+            self.convergence_tolerance = None
+
         # Setup paths
         os.makedirs('./checkpoints', exist_ok=True)
         self.checkpoint_path = f'./checkpoints/{self.model_name}_checkpoint.pt'
@@ -242,13 +247,11 @@ class TrainerBase:
                     f"Test: {test_rmse:.4e}"
                 )
 
-            self.save_checkpoint(epoch)
-
-            if self.config['training'].get('Tolerance_sweeps') is not None:
-                if val_loss < float(self.config['training']['Tolerance_sweeps'][-1]):
-                    logger.info(f"Convergence reached at epoch {epoch+1} with validation loss {val_loss:.4e}")
+            if self.convergence_tolerance is not None:
+                if val_loss < self.convergence_tolerance:
+                    logger.info(f"Convergence reached at epoch {epoch+1} "
+                                f"with validation loss {val_loss:.4e}")
                     break
-
 
         plot_hist(self.hist, epoch+1, self.model_name, prefix=self.results_prefix)
         total_training_time = time.time() - overall_start_time
