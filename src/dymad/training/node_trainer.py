@@ -42,7 +42,7 @@ class SweepScheduler:
         """Handle stepping when no tolerances are provided."""
         index = self.current_epoch // self.epoch_step
         old_index = self.current_index
-        self.current_index = min(index, len(self.sweep_lengths) - 1)
+        self.current_index = min(index, len(self.sweep_lengths)-1)
         
         if old_index != self.current_index:
             logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} at epoch {self.current_epoch}")
@@ -53,20 +53,19 @@ class SweepScheduler:
 
         if self.sweep_epoch >= self.epoch_step or (eploss is not None and eploss < current_tolerance):
             self._advance_sweep(eploss, current_tolerance)
+
     def _advance_sweep(self, eploss: float, current_tolerance: float) -> None:
         self.sweep_epoch = 0
         self.current_index += 1
         if self.current_index >= len(self.sweep_lengths):
             self.current_index = 0
-            self._advance_tolerance()
-        logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} at epoch {self.current_epoch} with loss {eploss:.4f} < tolerance {current_tolerance:.4f}")
-    def _advance_tolerance(self) -> None:
-        """Advance to the next tolerance level."""
-        if self.current_tol < len(self.tolerances) - 1:
-            self.current_tol += 1
-            logging.info(f"Resetting to first sweep length after reaching end of list. Current tolerance {self.tolerances[self.current_tol]}")
-        else:
-            logging.info("Reached Final Tolerance")
+            if self.current_tol < len(self.tolerances)-1:
+                self.current_tol += 1
+                logging.info(f"Resetting to first sweep length after reaching end of list. Current tolerance {self.tolerances[self.current_tol]}")
+            else:
+                logging.info("Reached Final Tolerance")                
+        logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} "
+                     f"at epoch {self.current_epoch} with loss {eploss:.4e} < tolerance {current_tolerance:.4e}")
 
     def get_length(self) -> int:
         return self.sweep_lengths[self.current_index]
@@ -99,8 +98,8 @@ class NODETrainer(TrainerBase):
 
         sweep_lengths = self.config['training'].get('sweep_lengths', [len(self.t)])
         epoch_step = self.config['training'].get('sweep_epoch_step', self.config['training']['n_epochs'])
-        tolerances = self.config['training'].get('Tolerance_Sweeps') if self.config['training'].get('Tolerance_Sweeps') else None
-        self.schedulers.append(SweepScheduler(sweep_lengths, tolerances,epoch_step))
+        tolerances = self.config['training'].get('sweep_tolerances', None)
+        self.schedulers.append(SweepScheduler(sweep_lengths, tolerances, epoch_step))
 
         # Additional logging
         logging.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
@@ -145,14 +144,8 @@ class NODETrainer(TrainerBase):
             self.optimizer.step()
             total_loss += loss.item()
 
-        scheduler_index = 0
         for scheduler in self.schedulers:
-            match scheduler_index:
-                case 1:
-                    scheduler.step(eploss=(total_loss / len(self.train_loader)))
-                case _:
-                    scheduler.step()
-            scheduler_index += 1
+            scheduler.step((total_loss / len(self.train_loader)) if type(scheduler).__name__ == "SweepScheduler" else None)
 
         # Maintain minimum learning rate
         for param_group in self.optimizer.param_groups:
