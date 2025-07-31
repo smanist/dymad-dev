@@ -1,0 +1,42 @@
+data:
+  path: './data/dp_data.npz'
+  n_samples: 128
+  n_steps: 501
+  double_precision: false
+
+transform_x:
+  type: "identity"
+
+transform_u:
+  type: "identity"
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 64
+
+model:
+  name: 'dp_ldm_node'
+  encoder_layers: 1
+  processor_layers: 1
+  decoder_layers: 1
+  latent_dimension: 32
+  activation: "prelu"
+  weight_init: "xavier_uniform"
+  input_order: "cubic"
+
+training:
+  n_epochs: 3000
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 5e-2 
+  decay_rate: 0.999
+  reconstruction_weight: 0.0
+  dynamics_weight: 1.0
+  sweep_lengths: [50, 100, 150, 200, 250, 300]
+  sweep_tolerances: [1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5]  
+  sweep_epoch_step: 300  
+  ode_method: 'dopri5'  
+  rtol: 1e-6  
+  atol: 1e-8  
