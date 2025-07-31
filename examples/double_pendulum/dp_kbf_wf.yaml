@@ -19,13 +19,11 @@ dataloader:
 
 model:
   name: 'dp_kbf_wf'
-  type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   decoder_layers: 1
   latent_dimension: 32
   koopman_dimension: 16  # Key KBF parameter - dimension of Koopman operators
-  const_term: true       
-  gcl: "sage"
+  const_term: true
   activation: "none"
   weight_init: "xavier_uniform"
   input_order: "cubic"
