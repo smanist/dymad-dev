@@ -18,7 +18,6 @@ dataloader:
 
 model:
   name: 'dp_kbf_node'
-  type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   decoder_layers: 1
   latent_dimension: 32
@@ -37,9 +36,8 @@ training:
   decay_rate: 0.999
   reconstruction_weight: 0.0
   dynamics_weight: 1.0 
-  # NODE-specific parameters
   sweep_lengths: [50, 100, 150, 200, 250, 300] 
-  Tolerance_sweeps: [1e-2,5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5]  
+  sweep_tolerances: [1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5]  
   sweep_epoch_step: 100  
   ode_method: 'dopri5' 
   rtol: 1e-6  

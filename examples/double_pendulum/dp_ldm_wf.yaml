@@ -19,12 +19,10 @@ dataloader:
 
 model:
   name: 'dp_ldm_wf'
-  type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   processor_layers: 1
   decoder_layers: 1
   latent_dimension: 32
-  gcl: "sage"
   activation: "none"
   weight_init: "xavier_uniform"
   input_order: "cubic"

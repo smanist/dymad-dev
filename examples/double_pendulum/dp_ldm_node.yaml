@@ -18,7 +18,6 @@ dataloader:
 
 model:
   name: 'dp_ldm_node'
-  type: "NN"   # Options: "NN", "LSTM", "GNN"
   encoder_layers: 1
   processor_layers: 1
   decoder_layers: 1
@@ -31,14 +30,13 @@ training:
   n_epochs: 3000
   save_interval: 10
   load_checkpoint: false
-  learning_rate: 5e-2  # Reduced learning rate for stability
+  learning_rate: 5e-2 
   decay_rate: 0.999
   reconstruction_weight: 0.0
-  dynamics_weight: 1.0 
-  # NODE-specific parameters
-  sweep_lengths: [50, 100, 150, 200, 250, 300]  # More gradual progression
-  Tolerance_sweeps: [1e-2,5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5]  # More conservative tolerances
-  sweep_epoch_step: 300  # Allow more epochs per sweep length
-  ode_method: 'dopri5'  # More stable explicit method
-  rtol: 1e-6  # Slightly relaxed for stability
-  atol: 1e-8  # Slightly relaxed for stability
+  dynamics_weight: 1.0
+  sweep_lengths: [50, 100, 150, 200, 250, 300]
+  sweep_tolerances: [1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5]  
+  sweep_epoch_step: 300  
+  ode_method: 'dopri5'  
+  rtol: 1e-6  
+  atol: 1e-8  

@@ -16,7 +16,6 @@ control:
     phase_range:
     - 0
     - 360
-# control: null
 
 x0:
   kind: uniform
