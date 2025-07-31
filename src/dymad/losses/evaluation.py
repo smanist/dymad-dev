@@ -45,7 +45,7 @@ def prediction_rmse(model,
 
         if plot:
             plot_trajectory(np.array([x_truth, x_pred]), ts, model_name, metadata,
-                            us=us.clone().cpu(), labels=['Truth', 'Prediction'], prefix=prefix)
+                            us=us, labels=['Truth', 'Prediction'], prefix=prefix)
 
         return rmse
 
@@ -94,6 +94,6 @@ def prediction_rmse_lstm(model,
 
         if plot:
             plot_trajectory(np.array([x_pred, x_truth]), ts, model_name, metadata,
-                            us=us.cpu(), labels=['Truth', 'Prediction'])
+                            us=us, labels=['Truth', 'Prediction'])
 
         return rmse
