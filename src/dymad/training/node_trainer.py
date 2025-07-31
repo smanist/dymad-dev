@@ -99,6 +99,7 @@ class NODETrainer(TrainerBase):
         sweep_lengths = self.config['training'].get('sweep_lengths', [len(self.t)])
         epoch_step = self.config['training'].get('sweep_epoch_step', self.config['training']['n_epochs'])
         tolerances = self.config['training'].get('sweep_tolerances', None)
+        self.convergence_tolerance = float(tolerances[-1]) if tolerances is not None else None
         self.schedulers.append(SweepScheduler(sweep_lengths, tolerances, epoch_step))
 
         # Additional logging
@@ -143,15 +144,20 @@ class NODETrainer(TrainerBase):
             loss.backward()
             self.optimizer.step()
             total_loss += loss.item()
+        avg_epoch_loss = total_loss / len(self.train_loader)
 
         for scheduler in self.schedulers:
-            scheduler.step((total_loss / len(self.train_loader)) if type(scheduler).__name__ == "SweepScheduler" else None)
+            scheduler.step((avg_epoch_loss) if type(scheduler).__name__ == "SweepScheduler" else None)
 
         # Maintain minimum learning rate
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = max(param_group['lr'], min_lr)
 
-        return total_loss / len(self.train_loader)
+        if (self.schedulers[1].current_index == len(self.schedulers[1].sweep_lengths)-1
+            and avg_epoch_loss < self.convergence_tolerance):
+                self.convergence_tolerance_reached = True
+
+        return avg_epoch_loss
 
     def evaluate(self, dataloader: torch.utils.data.DataLoader) -> float:
         """Evaluate the model on the provided dataloader."""
