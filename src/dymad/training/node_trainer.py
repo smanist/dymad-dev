@@ -24,7 +24,7 @@ class SweepScheduler:
         self.epoch_step    = epoch_step
         self.tolerances    = tolerances
         self.current_epoch = 0
-        self.sweep_epoch = 0
+        self.sweep_epoch   = 0
         self.current_index = 0
         self.current_tol   = 0
 
@@ -136,7 +136,7 @@ class NODETrainer(TrainerBase):
         """Train the model for one epoch."""
         self.model.train()
         total_loss = 0.0
-        min_lr = 5e-5
+        min_lr     = 5e-5
 
         for batch in self.train_loader:
             self.optimizer.zero_grad(set_to_none=True)
