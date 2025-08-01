@@ -17,7 +17,6 @@ class SweepScheduler:
         epoch_step (int): Number of epochs after which to switch to the next sweep length.
     """
 
-
     def __init__(self, sweep_lengths: list, tolerances: list, epoch_step: int = 10):
         self.sweep_lengths = sweep_lengths
         self.epoch_step    = epoch_step
@@ -36,6 +35,15 @@ class SweepScheduler:
             self._step_no_tolerance()
         else:
             self._step_with_tolerance(eploss)
+
+        flag = False
+        if (self.current_index == len(self.sweep_lengths)-1
+            and self.current_tol == len(self.tolerances)-1):
+                flag = True
+        elif self.current_tol == -1:
+            flag = True
+
+        return flag
 
     def _step_no_tolerance(self) -> None:
         """Handle stepping when no tolerances are provided."""
@@ -145,18 +153,13 @@ class NODETrainer(TrainerBase):
         avg_epoch_loss = total_loss / len(self.train_loader)
 
         for scheduler in self.schedulers:
-            scheduler.step((avg_epoch_loss) if type(scheduler).__name__ == "SweepScheduler" else None)
+            flag = scheduler.step(eploss=avg_epoch_loss)
+            self.convergence_tolerance_reached = self.convergence_tolerance_reached or flag
 
         # Maintain minimum learning rate
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = max(param_group['lr'], min_lr)
 
-        if (self.schedulers[1].current_index == len(self.schedulers[1].sweep_lengths)-1
-            and self.schedulers[1].current_tol == len(self.schedulers[1].tolerances)-1):
-                self.convergence_tolerance_reached = True
-        if self.schedulers[1].current_tol == -1:
-            self.convergence_tolerance_reached = True
-            
         return avg_epoch_loss
 
     def evaluate(self, dataloader: torch.utils.data.DataLoader) -> float:

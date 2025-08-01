@@ -243,10 +243,13 @@ class TrainerBase:
                     f"Validation: {val_rmse:.4e}, "
                     f"Test: {test_rmse:.4e}"
                 )
+
+            # The flag may be set by a scheduler
             if self.convergence_tolerance_reached:
                 logger.info(f"Convergence reached at epoch {epoch+1} "
                             f"with validation loss {val_loss:.4e}")
-                break            
+                break
+
         if self.rmse == []:
             train_rmse = self.evaluate_rmse('train', plot=False)
             val_rmse   = self.evaluate_rmse('validation', plot=False)
