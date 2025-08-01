@@ -1,0 +1,44 @@
+data:
+  path: './data/dp_data.npz'
+  n_samples: 128
+  n_steps: 501
+  double_precision: false
+  n_nodes: 3
+
+transform_x:
+  type: "identity"
+
+transform_u:
+  type: "identity"
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 64
+
+model:
+  name: 'dp_kbf_wf'
+  encoder_layers: 1
+  decoder_layers: 1
+  latent_dimension: 32
+  koopman_dimension: 16  # Key KBF parameter - dimension of Koopman operators
+  const_term: true
+  activation: "none"
+  weight_init: "xavier_uniform"
+  input_order: "cubic"
+  autoencoder_type: "smp"
+
+training:
+  n_epochs: 500
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 1e-2
+  decay_rate: 0.999
+  reconstruction_weight: 1.0
+  dynamics_weight: 1.0
+  weak_form_params:
+    N: 13
+    dN: 2
+    ordpol: 2
+    ordint: 2
