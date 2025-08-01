@@ -25,6 +25,8 @@ class TrainerBase:
         self.model_name = self.config['model']['name']
         self.model_class = model_class
 
+        self.convergence_tolerance_reached = False
+
         # Setup paths
         os.makedirs('./checkpoints', exist_ok=True)
         self.checkpoint_path = f'./checkpoints/{self.model_name}_checkpoint.pt'
@@ -241,6 +243,15 @@ class TrainerBase:
                     f"Validation: {val_rmse:.4e}, "
                     f"Test: {test_rmse:.4e}"
                 )
+            if self.convergence_tolerance_reached:
+                logger.info(f"Convergence reached at epoch {epoch+1} "
+                            f"with validation loss {val_loss:.4e}")
+                break            
+        if self.rmse == []:
+            train_rmse = self.evaluate_rmse('train', plot=False)
+            val_rmse   = self.evaluate_rmse('validation', plot=False)
+            test_rmse  = self.evaluate_rmse('test', plot=False)
+            self.rmse.append([epoch, train_rmse, val_rmse, test_rmse])
 
         plot_hist(self.hist, epoch+1, self.model_name, prefix=self.results_prefix)
         total_training_time = time.time() - overall_start_time

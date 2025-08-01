@@ -18,23 +18,53 @@ class SweepScheduler:
         epoch_step (int): Number of epochs after which to switch to the next sweep length.
     """
 
-    def __init__(self, sweep_lengths: list, epoch_step: int = 10):
+
+    def __init__(self, sweep_lengths: list, tolerances: list, epoch_step: int = 10):
         self.sweep_lengths = sweep_lengths
         self.epoch_step    = epoch_step
+        self.tolerances    = tolerances
         self.current_epoch = 0
+        self.sweep_epoch   = 0
         self.current_index = 0
+        self.current_tol   = 0
 
         logging.info(f"Sweep lengths: {self.sweep_lengths}, Epoch step: {self.epoch_step}")
 
-    def step(self) -> None:
-        """Advance to the next sweep length."""
+    def step(self, eploss: float = None) -> None:
         self.current_epoch += 1
+
+        if self.tolerances is None:
+            self._step_no_tolerance()
+        else:
+            self._step_with_tolerance(eploss)
+
+    def _step_no_tolerance(self) -> None:
+        """Handle stepping when no tolerances are provided."""
         index = self.current_epoch // self.epoch_step
         old_index = self.current_index
         self.current_index = min(index, len(self.sweep_lengths)-1)
-
         if old_index != self.current_index:
             logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} at epoch {self.current_epoch}")
+
+    def _step_with_tolerance(self, eploss: float = None) -> None:
+        self.sweep_epoch += 1
+        current_tolerance = float(self.tolerances[self.current_tol])
+
+        if self.sweep_epoch >= self.epoch_step or (eploss is not None and eploss < current_tolerance):
+            self._advance_sweep(eploss, current_tolerance)
+
+    def _advance_sweep(self, eploss: float, current_tolerance: float) -> None:
+        self.sweep_epoch = 0
+        self.current_index += 1
+        if self.current_index >= len(self.sweep_lengths):
+            self.current_index = 0
+            if self.current_tol < len(self.tolerances)-1:
+                self.current_tol += 1
+                logging.info(f"Resetting to first sweep length after reaching end of list. Current tolerance {self.tolerances[self.current_tol]}")
+            else:
+                logging.info("Reached end of sweep lengths and tolerances. Stopping sweep.")
+        logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} "
+                     f"at epoch {self.current_epoch} with loss {eploss:.4e} with tolerance {current_tolerance:.4e}")
 
     def get_length(self) -> int:
         return self.sweep_lengths[self.current_index]
@@ -67,7 +97,9 @@ class NODETrainer(TrainerBase):
 
         sweep_lengths = self.config['training'].get('sweep_lengths', [len(self.t)])
         epoch_step = self.config['training'].get('sweep_epoch_step', self.config['training']['n_epochs'])
-        self.schedulers.append(SweepScheduler(sweep_lengths, epoch_step))
+        tolerances = self.config['training'].get('sweep_tolerances', None)
+        self.convergence_tolerance = float(tolerances[-1]) if tolerances is not None else None
+        self.schedulers.append(SweepScheduler(sweep_lengths, tolerances, epoch_step))
 
         # Additional logging
         logging.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
@@ -103,7 +135,7 @@ class NODETrainer(TrainerBase):
         """Train the model for one epoch."""
         self.model.train()
         total_loss = 0.0
-        min_lr = 5e-5
+        min_lr     = 5e-5
 
         for batch in self.train_loader:
             self.optimizer.zero_grad(set_to_none=True)
@@ -111,14 +143,22 @@ class NODETrainer(TrainerBase):
             loss.backward()
             self.optimizer.step()
             total_loss += loss.item()
+        avg_epoch_loss = total_loss / len(self.train_loader)
 
         for scheduler in self.schedulers:
-            scheduler.step()
+            scheduler.step((avg_epoch_loss) if type(scheduler).__name__ == "SweepScheduler" else None)
+
         # Maintain minimum learning rate
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = max(param_group['lr'], min_lr)
 
-        return total_loss / len(self.train_loader)
+        if (self.schedulers[1].current_index == len(self.schedulers[1].sweep_lengths)-1
+            and self.schedulers[1].current_tol == len(self.schedulers[1].tolerances)-1):
+                self.convergence_tolerance_reached = True
+        if self.schedulers[1].current_tol == -1:
+            self.convergence_tolerance_reached = True
+            
+        return avg_epoch_loss
 
     def evaluate(self, dataloader: torch.utils.data.DataLoader) -> float:
         """Evaluate the model on the provided dataloader."""
