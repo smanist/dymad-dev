@@ -7,47 +7,7 @@ from dymad.training import TrainerBase
 
 logger = logging.getLogger(__name__)
 
-class SweepScheduler:
-    """
-    Scheduler to manage sweep lengths during training.
-    Cycles through predefined sweep lengths.
-
-    Args:
-        sweep_lengths (list): List of sweep lengths to cycle through.
-        epoch_step (int): Number of epochs after which to switch to the next sweep length.
-    """
-
-    def __init__(self, sweep_lengths: list, epoch_step: int = 10):
-        self.sweep_lengths = sweep_lengths
-        self.epoch_step    = epoch_step
-        self.current_epoch = 0
-        self.current_index = 0
-
-        logging.info(f"Sweep lengths: {self.sweep_lengths}, Epoch step: {self.epoch_step}")
-
-    def step(self) -> None:
-        """Advance to the next sweep length."""
-        self.current_epoch += 1
-        index = self.current_epoch // self.epoch_step
-        old_index = self.current_index
-        self.current_index = min(index, len(self.sweep_lengths)-1)
-
-        if old_index != self.current_index:
-            logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} at epoch {self.current_epoch}")
-
-    def get_length(self) -> int:
-        return self.sweep_lengths[self.current_index]
-
-    def state_dict(self) -> dict:
-        """Return the state dictionary for saving."""
-        return {
-            'sweep_lengths': self.sweep_lengths,
-            'epoch_step':    self.epoch_step,
-            'current_epoch': self.current_epoch,
-            'current_index': self.current_index
-        }
-
-class NODETrainer(TrainerBase):
+class RollOutTrainer(TrainerBase):
     """
     Trainer using Neural ODE approach.
     """

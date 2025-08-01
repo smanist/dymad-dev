@@ -229,7 +229,7 @@ def predict_discrete(
             - Batch: (batch_size, n_steps, n_controls)
 
     Returns:
-        np.ndarray:
+        torch.Tensor:
             Predicted trajectory(ies)
 
             - Single: (n_steps, n_features)
@@ -239,20 +239,8 @@ def predict_discrete(
         ValueError: If input dimensions don't match requirements
     """
     device = x0.device
-    is_batch = x0.ndim == 2
-
-    if is_batch:
-        if x0.ndim != 2 or us.ndim != 3:
-            raise ValueError(f"Batch mode: x0 must be 2D, us must be 3D. Got x0: {x0.shape}, us: {us.shape}")
-        _x0 = x0.clone().detach().to(device)
-        _us = us.clone().detach().to(device)
-    else:
-        if x0.ndim != 1 or us.ndim != 2:
-            raise ValueError(f"Single mode: x0 must be 1D, us must be 2D. Got x0: {x0.shape}, us: {us.shape}")
-        _x0 = x0.clone().detach().to(device).unsqueeze(0)
-        _us = us.clone().detach().to(device).unsqueeze(0)
-
-    n_steps = _us.shape[-2]
+    # Use _prepare_data for consistency
+    _x0, _, _us, n_steps, is_batch, _ = _prepare_data(x0, None, us, device)
 
     logger.debug(f"predict_discrete: {'Batch' if is_batch else 'Single'} mode")
 
@@ -260,13 +248,10 @@ def predict_discrete(
     u0 = _us[:, 0, :]
     z0 = model.encoder(DynData(_x0, u0))
 
-    # Integrate
-    logger.debug(f"predict_discrete: Starting forward iterations with shape {z0.shape}")
-
     # Discrete-time forward pass
+    logger.debug(f"predict_discrete: Starting forward iterations with shape {z0.shape}")
     z_traj = [z0]
     for k in range(n_steps - 1):
-        # TODO: Shift operator
         x_k = model.decoder(z_traj[-1], None)
         u_k = _us[:, k, :]
         _, z_next, _ = model(DynData(x_k, u_k))
@@ -275,7 +260,6 @@ def predict_discrete(
     logger.debug(f"predict_discrete: Completed integration, trajectory shape: {z_traj.shape}")
 
     x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1]), None).view(n_steps, z_traj.shape[1], -1)
-    x_traj = x_traj.permute(1, 0, 2)  # (batch_size, n_steps, n_features)
     if not is_batch:
         x_traj = x_traj.squeeze(1)
 
