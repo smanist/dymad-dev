@@ -43,7 +43,6 @@ class SweepScheduler:
         index = self.current_epoch // self.epoch_step
         old_index = self.current_index
         self.current_index = min(index, len(self.sweep_lengths)-1)
-        
         if old_index != self.current_index:
             logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} at epoch {self.current_epoch}")
 
@@ -63,7 +62,8 @@ class SweepScheduler:
                 self.current_tol += 1
                 logging.info(f"Resetting to first sweep length after reaching end of list. Current tolerance {self.tolerances[self.current_tol]}")
             else:
-                logging.info("Reached Final Tolerance")                
+                self.current_tol += 1
+                logging.info("Reached Final Tolerance")
         logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} "
                      f"at epoch {self.current_epoch} with loss {eploss:.4e} < tolerance {current_tolerance:.4e}")
 
@@ -156,7 +156,9 @@ class NODETrainer(TrainerBase):
         if (self.schedulers[1].current_index == len(self.schedulers[1].sweep_lengths)-1
             and avg_epoch_loss < self.convergence_tolerance):
                 self.convergence_tolerance_reached = True
-
+        if self.schedulers[1].current_tol == len(self.schedulers[1].tolerances)-1:
+            self.convergence_tolerance_reached = True
+            
         return avg_epoch_loss
 
     def evaluate(self, dataloader: torch.utils.data.DataLoader) -> float:

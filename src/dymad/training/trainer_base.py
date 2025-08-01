@@ -246,7 +246,12 @@ class TrainerBase:
             if self.convergence_tolerance_reached:
                 logger.info(f"Convergence reached at epoch {epoch+1} "
                             f"with validation loss {val_loss:.4e}")
-                break
+                break            
+        if self.rmse == []:
+            train_rmse = self.evaluate_rmse('train', plot=False)
+            val_rmse   = self.evaluate_rmse('validation', plot=False)
+            test_rmse  = self.evaluate_rmse('test', plot=False)
+            self.rmse.append([epoch, train_rmse, val_rmse, test_rmse])
 
         plot_hist(self.hist, epoch+1, self.model_name, prefix=self.results_prefix)
         total_training_time = time.time() - overall_start_time
@@ -259,9 +264,9 @@ class TrainerBase:
         # Process histories of loss and RMSE
         # These are saved in the checkpoint too, but here we process them for easier post-processing
         tmp = np.array(self.hist).T
-        epoch_loss, losses = tmp[0:], tmp[1:]
+        epoch_loss, losses = tmp[0], tmp[1:]
         tmp = np.array(self.rmse).T
-        epoch_rmse, rmses = tmp[0:], tmp[1:]
+        epoch_rmse, rmses = tmp[0], tmp[1:]
 
         # Save summary of training
         # Here we also save the model itself - a lazy approach but more "out-of-the-box" for deployment
