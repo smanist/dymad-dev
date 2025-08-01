@@ -62,10 +62,9 @@ class SweepScheduler:
                 self.current_tol += 1
                 logging.info(f"Resetting to first sweep length after reaching end of list. Current tolerance {self.tolerances[self.current_tol]}")
             else:
-                self.current_tol += 1
-                logging.info("Reached Final Tolerance")
+                logging.info("Reached end of sweep lengths and tolerances. Stopping sweep.")
         logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} "
-                     f"at epoch {self.current_epoch} with loss {eploss:.4e} < tolerance {current_tolerance:.4e}")
+                     f"at epoch {self.current_epoch} with loss {eploss:.4e} with tolerance {current_tolerance:.4e}")
 
     def get_length(self) -> int:
         return self.sweep_lengths[self.current_index]
@@ -154,9 +153,9 @@ class NODETrainer(TrainerBase):
             param_group['lr'] = max(param_group['lr'], min_lr)
 
         if (self.schedulers[1].current_index == len(self.schedulers[1].sweep_lengths)-1
-            and avg_epoch_loss < self.convergence_tolerance):
+            and self.schedulers[1].current_tol == len(self.schedulers[1].tolerances)-1):
                 self.convergence_tolerance_reached = True
-        if self.schedulers[1].current_tol == len(self.schedulers[1].tolerances)-1:
+        if self.schedulers[1].current_tol == -1:
             self.convergence_tolerance_reached = True
             
         return avg_epoch_loss
