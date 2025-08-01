@@ -1,4 +1,3 @@
-import copy
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
@@ -81,7 +80,9 @@ cfgs = [
     ('kbf_node', GKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
     ]
 
-ifdat = 1
+IDX = [0, 1]
+
+ifdat = 0
 iftrn = 1
 ifplt = 1
 ifprd = 1
@@ -96,7 +97,7 @@ if ifdat:
         adj_mat=adj)
 
 if iftrn:
-    for i in [2, 3]:
+    for i in IDX:
         mdl, MDL, Trainer, opt = cfgs[i]
         opt["model"]["name"] = f"ltga_{mdl}"
         setup_logging(config_path, mode='info', prefix='results')
@@ -105,8 +106,6 @@ if iftrn:
         trainer.train()
 
 if ifplt:
-    IDX = [2, 3]
-
     labels = [cfgs[i][0] for i in IDX]
     npz_files = [f'results/ltga_{l}_summary.npz' for l in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
@@ -114,8 +113,6 @@ if ifplt:
     print(f"Epoch time {labels[0]}/{labels[1]}: {npzs[0]['avg_epoch_time']/npzs[1]['avg_epoch_time']}")
 
 if ifprd:
-    IDX = [2, 3]
-
     sampler = TrajectorySampler(f, config='ltga_data.yaml')
     ts, xs, ys = sampler.sample(t_grid, batch=1)
     x_data = np.concatenate([xs[0], xs[0], xs[0]], axis=-1)

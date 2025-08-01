@@ -5,8 +5,7 @@ from typing import Tuple, Dict, Union
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import make_autoencoder, MLP, predict_continuous, predict_continuous_auto, \
-    predict_graph_continuous, predict_graph_continuous_auto
+from dymad.utils import make_autoencoder, MLP, predict_continuous, predict_graph_continuous
 
 class LDM(ModelBase):
     """Latent Dynamics Model (LDM)
@@ -66,10 +65,8 @@ class LDM(ModelBase):
 
         if self.n_total_control_features == 0:
             self.encoder = self._encoder_auto
-            self.predict = self._predict_auto
         else:
             self.encoder = self._encoder_ctrl
-            self.predict = self._predict_ctrl
 
     def diagnostic_info(self) -> str:
         model_info = super(LDM, self).diagnostic_info()
@@ -142,8 +139,8 @@ class LDM(ModelBase):
         x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
 
-    def _predict_ctrl(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
-                      method: str = 'dopri5') -> torch.Tensor:
+    def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
+                method: str = 'dopri5') -> torch.Tensor:
         """
         Predict trajectory using continuous-time integration.
 
@@ -169,36 +166,7 @@ class LDM(ModelBase):
                 - Single: (time_steps, n_total_state_features)
                 - Batch: (time_steps, batch_size, n_total_state_features)
         """
-        return predict_continuous(self, x0, w.u, ts, method=method, order=self.input_order)
-
-    def _predict_auto(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
-                      method: str = 'dopri5') -> torch.Tensor:
-        """
-        Predict trajectory using continuous-time integration.
-
-        Args:
-            x0 (torch.Tensor): Initial state tensor(s):
-
-                - Single: (n_total_state_features,)
-                - Batch: (batch_size, n_total_state_features)
-
-            us (torch.Tensor): Control inputs:
-
-                - Single: (time_steps, n_total_control_features)
-                - Batch: (batch_size, time_steps, n_total_control_features)
-
-                For autonomous systems, use zero-valued controls
-
-            ts (Union[np.ndarray, torch.Tensor]): Time points for prediction
-            method (str): ODE solver method
-
-        Returns:
-            torch.Tensor: Predicted trajectory tensor(s):
-
-                - Single: (time_steps, n_total_state_features)
-                - Batch: (time_steps, batch_size, n_total_state_features)
-        """
-        return predict_continuous_auto(self, x0, ts, method=method)
+        return predict_continuous(self, x0, ts, us=w.u, method=method, order=self.input_order)
 
 class GLDM(ModelBase):
     """Graph Latent Dynamics Model (GLDM).
@@ -266,10 +234,8 @@ class GLDM(ModelBase):
 
         if self.n_total_control_features == 0:
             self.encoder = self._encoder_auto
-            self.predict = self._predict_auto
         else:
             self.encoder = self._encoder_ctrl
-            self.predict = self._predict_ctrl
 
     def diagnostic_info(self) -> str:
         model_info = super(GLDM, self).diagnostic_info()
@@ -306,8 +272,5 @@ class GLDM(ModelBase):
         x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
 
-    def _predict_ctrl(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
-        return predict_graph_continuous(self, x0, w.u, ts, w.edge_index, method=method, order=self.input_order)
-
-    def _predict_auto(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
-        return predict_graph_continuous_auto(self, x0, ts, w.edge_index, method=method, order=self.input_order)
+    def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
+        return predict_graph_continuous(self, x0, ts, w.edge_index, us=w.u, method=method, order=self.input_order)

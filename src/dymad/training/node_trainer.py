@@ -38,7 +38,7 @@ class SweepScheduler:
 
     def get_length(self) -> int:
         return self.sweep_lengths[self.current_index]
-    
+
     def state_dict(self) -> dict:
         """Return the state dictionary for saving."""
         return {
