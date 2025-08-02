@@ -86,7 +86,7 @@ class SweepScheduler(SchedulerBase):
         mode (str): Mode of operation ('full' or 'skip'). Default is 'skip'.
     """
 
-    def __init__(self, sweep_lengths: list = None, sweep_tols: list = None, epoch_step: int = -1, mode: str = 'skip'):
+    def __init__(self, sweep_lengths: list = None, sweep_tols: list = None, epoch_step: int = 10, mode: str = 'skip'):
         assert epoch_step > 0, "epoch_step must be a positive integer."
 
         self.sweep_lengths = sweep_lengths
@@ -123,22 +123,21 @@ class SweepScheduler(SchedulerBase):
         self.current_epoch += 1
 
         flag = False
-        if self._Nlen == 0:
-            self._step_nothing()
-        elif self._Ntol == 0:
-            self._step_no_tolerance()
-        else:
-            self._step_with_tolerance(eploss)
+        if self._Nlen > 0:
+            if self._Ntol == 0:
+                self._step_no_tolerance()
+            elif self._Ntol > 0:
+                self._step_with_tolerance(eploss)
 
-            if (self.current_len == self._Nlen-1 and self.current_tol == self._Ntol-1):
-                if eploss < self.sweep_tols[-1]:
-                    logger.info("Reached the last sweep length and tolerance. Stopping sweep.")
-                    flag = True
+                if (self.current_len == self._Nlen-1 and self.current_tol == self._Ntol-1):
+                    if eploss < self.sweep_tols[-1]:
+                        logger.info("Reached the last sweep length and tolerance. Stopping sweep.")
+                        flag = True
+        else:
+            # Do nothing if no sweep lengths are defined
+            pass
 
         return flag
-
-    def _step_nothing(self) -> None:
-        pass
 
     def _step_no_tolerance(self) -> None:
         """Handle stepping when no tolerances are provided."""

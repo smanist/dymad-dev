@@ -4,6 +4,7 @@ from typing import Dict, Type, Union
 
 from dymad.data import DynData, DynGeoData
 from dymad.training.trainer_base import TrainerBase
+from dymad.utils.scheduler import make_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,11 @@ class RollOutTrainer(TrainerBase):
 
         sweep_lengths = self.config['training'].get('sweep_lengths', [len(self.t)])
         epoch_step = self.config['training'].get('sweep_epoch_step', self.config['training']['n_epochs'])
-        self.schedulers.append(SweepScheduler(sweep_lengths, epoch_step))
+        sweep_tols = self.config['training'].get('sweep_tols', None)
+        sweep_mode = self.config['training'].get('sweep_mode', 'skip')
+        self.schedulers.append(make_scheduler(
+            scheduler_type="sweep", sweep_lengths=sweep_lengths, sweep_tols=sweep_tols, \
+            epoch_step=epoch_step, mode=sweep_mode))
 
         # Additional logging
         logging.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
