@@ -3,87 +3,10 @@ import torch
 from typing import Dict, Type, Union
 
 from dymad.data import DynData, DynGeoData
-from dymad.training import TrainerBase
+from dymad.training.trainer_base import TrainerBase
+from dymad.utils.scheduler import make_scheduler
 
 logger = logging.getLogger(__name__)
-
-class SweepScheduler:
-    """
-    Scheduler to manage sweep lengths during training.
-    Cycles through predefined sweep lengths.
-
-    Args:
-        sweep_lengths (list): List of sweep lengths to cycle through.
-        epoch_step (int): Number of epochs after which to switch to the next sweep length.
-    """
-
-    def __init__(self, sweep_lengths: list, tolerances: list, epoch_step: int = 10):
-        self.sweep_lengths = sweep_lengths
-        self.epoch_step    = epoch_step
-        self.tolerances    = tolerances
-        self.current_epoch = 0
-        self.sweep_epoch   = 0
-        self.current_index = 0
-        self.current_tol   = 0
-
-        logging.info(f"Sweep lengths: {self.sweep_lengths}, Epoch step: {self.epoch_step}")
-
-    def step(self, eploss: float = None) -> None:
-        self.current_epoch += 1
-
-        if self.tolerances is None:
-            self._step_no_tolerance()
-        else:
-            self._step_with_tolerance(eploss)
-
-        flag = False
-        if (self.current_index == len(self.sweep_lengths)-1
-            and self.current_tol == len(self.tolerances)-1):
-                flag = True
-        elif self.current_tol == -1:
-            flag = True
-
-        return flag
-
-    def _step_no_tolerance(self) -> None:
-        """Handle stepping when no tolerances are provided."""
-        index = self.current_epoch // self.epoch_step
-        old_index = self.current_index
-        self.current_index = min(index, len(self.sweep_lengths)-1)
-        if old_index != self.current_index:
-            logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} at epoch {self.current_epoch}")
-
-    def _step_with_tolerance(self, eploss: float = None) -> None:
-        self.sweep_epoch += 1
-        current_tolerance = float(self.tolerances[self.current_tol])
-
-        if self.sweep_epoch >= self.epoch_step or (eploss is not None and eploss < current_tolerance):
-            self._advance_sweep(eploss, current_tolerance)
-
-    def _advance_sweep(self, eploss: float, current_tolerance: float) -> None:
-        self.sweep_epoch = 0
-        self.current_index += 1
-        if self.current_index >= len(self.sweep_lengths):
-            self.current_index = 0
-            if self.current_tol < len(self.tolerances)-1:
-                self.current_tol += 1
-                logging.info(f"Resetting to first sweep length after reaching end of list. Current tolerance {self.tolerances[self.current_tol]}")
-            else:
-                logging.info("Reached end of sweep lengths and tolerances. Stopping sweep.")
-        logging.info(f"Switching to sweep length {self.sweep_lengths[self.current_index]} "
-                     f"at epoch {self.current_epoch} with loss {eploss:.4e} with tolerance {current_tolerance:.4e}")
-
-    def get_length(self) -> int:
-        return self.sweep_lengths[self.current_index]
-
-    def state_dict(self) -> dict:
-        """Return the state dictionary for saving."""
-        return {
-            'sweep_lengths': self.sweep_lengths,
-            'epoch_step':    self.epoch_step,
-            'current_epoch': self.current_epoch,
-            'current_index': self.current_index
-        }
 
 class NODETrainer(TrainerBase):
     """
@@ -104,13 +27,16 @@ class NODETrainer(TrainerBase):
 
         sweep_lengths = self.config['training'].get('sweep_lengths', [len(self.t)])
         epoch_step = self.config['training'].get('sweep_epoch_step', self.config['training']['n_epochs'])
-        tolerances = self.config['training'].get('sweep_tolerances', None)
-        self.convergence_tolerance = float(tolerances[-1]) if tolerances is not None else None
-        self.schedulers.append(SweepScheduler(sweep_lengths, tolerances, epoch_step))
+        sweep_tols = self.config['training'].get('sweep_tols', None)
+        sweep_mode = self.config['training'].get('sweep_mode', 'skip')
+        self.schedulers.append(make_scheduler(
+            scheduler_type="sweep", sweep_lengths=sweep_lengths, sweep_tols=sweep_tols, \
+            epoch_step=epoch_step, mode=sweep_mode))
 
         # Additional logging
-        logging.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
-        logging.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
+        logger.info(f"Added scheduler: {self.schedulers[-1].diagnostic_info()}")
+        logger.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
+        logger.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
 
     def _process_batch(self, batch: Union[DynData, DynGeoData]) -> torch.Tensor:
         """Process a batch and return predictions and ground truth states."""

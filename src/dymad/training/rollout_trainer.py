@@ -3,7 +3,7 @@ import torch
 from typing import Dict, Type, Union
 
 from dymad.data import DynData, DynGeoData
-from dymad.training import TrainerBase
+from dymad.training.trainer_base import TrainerBase
 
 logger = logging.getLogger(__name__)
 

@@ -5,6 +5,7 @@ from dymad.utils.plot import plot_summary, plot_trajectory, plot_hist
 from dymad.utils.prediction import predict_continuous, predict_graph_continuous
 from dymad.utils.weak import generate_weak_weights
 from dymad.utils.sampling import TrajectorySampler
+from dymad.utils.scheduler import make_scheduler
 
 __all__ = [
     "ControlInterpolator",
@@ -16,6 +17,7 @@ __all__ = [
     "load_config",
     "load_model",
     "make_autoencoder",
+    "make_scheduler",
     "MLP",
     "plot_hist",
     "plot_summary",

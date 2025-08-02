@@ -2,7 +2,7 @@ import logging
 import torch
 from typing import Dict, Type
 
-from dymad.training import TrainerBase
+from dymad.training.trainer_base import TrainerBase
 from dymad.losses.weak_form import generate_weak_form_params, weak_form_loss_batch
 
 logger = logging.getLogger(__name__)
