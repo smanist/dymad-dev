@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple, Type
 
 from dymad.data import TrajectoryManager, TrajectoryManagerGraph
 from dymad.losses import prediction_rmse
-from dymad.utils import load_checkpoint, load_config, plot_hist, save_checkpoint
+from dymad.utils import load_checkpoint, load_config, make_scheduler, plot_hist, save_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,9 @@ class TrainerBase:
         logger.info("Optimization settings:")
         logger.info(self.optimizer)
         logger.info(self.criterion)
-        logger.info(f"LR decay: {self.schedulers[0].gamma}")
+        logger.info(f"Scheduler info:")
+        for _s in self.schedulers:
+            logger.info(_s.diagnostic_info())
         logger.info(f"Using device: {self.device}")
         logger.info(f"Double precision: {self.config['data']['double_precision']}")
         logger.info(f"Epochs: {self.config['training']['n_epochs']}, Save interval: {self.config['training']['save_interval']}")
@@ -93,7 +95,9 @@ class TrainerBase:
         _lr = float(self.config['training'].get('learning_rate', 1e-3))
         _gm = float(self.config['training'].get('decay_rate', 0.999))
         self.optimizer  = torch.optim.Adam(self.model.parameters(), lr=_lr)
-        self.schedulers = [torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=_gm)]
+        self.schedulers = [make_scheduler(
+            torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=_gm)
+        )]
         self.criterion  = torch.nn.MSELoss(reduction='mean')
 
     def _load_checkpoint(self) -> Tuple[int, float, List, Dict]:
@@ -225,7 +229,7 @@ class TrainerBase:
             self.save_if_best(val_loss, epoch)
 
             # Periodic checkpoint and evaluation
-            if (epoch + 1) % save_interval == 0:
+            if (epoch + 1) % save_interval == 0 or self.convergence_tolerance_reached:
                 self.save_checkpoint(epoch)
 
                 # Plot loss curves
@@ -243,10 +247,12 @@ class TrainerBase:
                     f"Validation: {val_rmse:.4e}, "
                     f"Test: {test_rmse:.4e}"
                 )
-            if self.convergence_tolerance_reached:
-                logger.info(f"Convergence reached at epoch {epoch+1} "
-                            f"with validation loss {val_loss:.4e}")
-                break            
+
+                if self.convergence_tolerance_reached:
+                    logger.info(f"Convergence reached at epoch {epoch+1} "
+                                f"with validation loss {val_loss:.4e}")
+                    break
+
         if self.rmse == []:
             train_rmse = self.evaluate_rmse('train', plot=False)
             val_rmse   = self.evaluate_rmse('validation', plot=False)

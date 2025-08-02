@@ -30,7 +30,7 @@ def load_checkpoint(model, optimizer, schedulers, ref_checkpoint_path, load_from
         - dict: Metadata about the data.
     """
     mode = "Inference" if inference_mode else "Training"
-    logging.info(f"{mode} mode is enabled.")
+    logger.info(f"{mode} mode is enabled.")
 
     checkpoint_path = None
     if isinstance(load_from_checkpoint, str):
@@ -39,14 +39,14 @@ def load_checkpoint(model, optimizer, schedulers, ref_checkpoint_path, load_from
         checkpoint_path = ref_checkpoint_path
 
     if checkpoint_path is None:
-        logging.info(f"Got load_from_checkpoint={load_from_checkpoint}, resulting in checkpoint_path=None. Starting from scratch.")
+        logger.info(f"Got load_from_checkpoint={load_from_checkpoint}, resulting in checkpoint_path=None. Starting from scratch.")
         return 0, float("inf"), [], [], None
 
     if not os.path.exists(checkpoint_path):
-        logging.info(f"No checkpoint found at {checkpoint_path}. Starting from scratch.")
+        logger.info(f"No checkpoint found at {checkpoint_path}. Starting from scratch.")
         return 0, float("inf"), [], [], None
 
-    logging.info(f"Loading checkpoint from {checkpoint_path}")
+    logger.info(f"Loading checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
 
@@ -77,7 +77,7 @@ def save_checkpoint(model, optimizer, schedulers, epoch, best_loss, hist, rmse, 
         metadata (dict): Metadata about the data.
         checkpoint_path (str): Path to save the checkpoint file.
     """
-    logging.info(f"Saving checkpoint to {checkpoint_path}")
+    # logger.info(f"Saving checkpoint to {checkpoint_path}")
     torch.save({
         "epoch": epoch,
         "model_state_dict": model.state_dict(),

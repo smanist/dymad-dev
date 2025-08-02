@@ -21,4 +21,5 @@ Remove `-E` for incremental build.
 - Extend DynGeoData with subgraph to parallelize batch processing
 - Include edge_attr etc in DynGeoData, see [here](https://pytorch-geometric.readthedocs.io/en/latest/cheatsheet/gnn_cheatsheet.html)
 - Verify the RNN-type training
-- Update the aircraft and double pendulum examples
+- Update the aircraft example
+- Update the double pendulum example

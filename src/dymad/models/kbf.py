@@ -5,8 +5,7 @@ from typing import Dict, Union, Tuple
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import make_autoencoder, predict_continuous, predict_continuous_auto, \
-    predict_graph_continuous, predict_graph_continuous_auto
+from dymad.utils import make_autoencoder, predict_continuous, predict_graph_continuous
 
 class KBF(ModelBase):
     """
@@ -72,10 +71,8 @@ class KBF(ModelBase):
 
         if self.n_total_control_features == 0:
             self.dynamics = self._dynamics_auto
-            self.predict = self._predict_auto
         else:
             self.dynamics = self._dynamics_ctrl
-            self.predict = self._predict_ctrl
 
     def diagnostic_info(self) -> str:
         model_info = super(KBF, self).diagnostic_info()
@@ -129,8 +126,8 @@ class KBF(ModelBase):
         x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
 
-    def _predict_ctrl(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
-                      method: str = 'dopri5') -> torch.Tensor:
+    def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
+                method: str = 'dopri5') -> torch.Tensor:
         """Predict trajectory using continuous-time integration.
 
         Args:
@@ -151,28 +148,7 @@ class KBF(ModelBase):
                 - Single: (time_steps, n_state_features)
                 - Batch: (time_steps, batch_size, n_state_features)
         """
-        return predict_continuous(self, x0, w.u, ts, method=method, order=self.input_order)
-
-    def _predict_auto(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
-                      method: str = 'dopri5') -> torch.Tensor:
-        """Predict trajectory using continuous-time integration.
-        Autonomous case.
-
-        Args:
-            x0: Initial state tensor(s):
-
-                - Single: (n_state_features,)
-
-            ts: Time points for prediction
-            method: ODE solver method (default: 'dopri5')
-
-        Returns:
-            Predicted trajectory tensor(s):
-
-                - Single: (time_steps, n_state_features)
-                - Batch: (time_steps, batch_size, n_state_features)
-        """
-        return predict_continuous_auto(self, x0, ts, method=method)
+        return predict_continuous(self, x0, ts, us=w.u, method=method, order=self.input_order)
 
 class GKBF(ModelBase):
     """Graph Koopman Bilinear Form (GKBF) model - graph-specific version.
@@ -236,10 +212,8 @@ class GKBF(ModelBase):
 
         if self.n_total_control_features == 0:
             self.dynamics = self._dynamics_auto
-            self.predict = self._predict_auto
         else:
             self.dynamics = self._dynamics_ctrl
-            self.predict = self._predict_ctrl
 
     def diagnostic_info(self) -> str:
         model_info = super(GKBF, self).diagnostic_info()
@@ -280,8 +254,5 @@ class GKBF(ModelBase):
         x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
 
-    def _predict_ctrl(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
-        return predict_graph_continuous(self, x0, w.u, ts, w.edge_index, method=method, order=self.input_order)
-
-    def _predict_auto(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
-        return predict_graph_continuous_auto(self, x0, ts, w.edge_index, method=method, order=self.input_order)
+    def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
+        return predict_graph_continuous(self, x0, ts, w.edge_index, us=w.u, method=method, order=self.input_order)
