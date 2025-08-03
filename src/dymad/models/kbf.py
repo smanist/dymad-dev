@@ -5,7 +5,8 @@ from typing import Dict, Union, Tuple
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import make_autoencoder, predict_continuous, predict_graph_continuous
+from dymad.utils import make_autoencoder, predict_continuous, predict_discrete, \
+    predict_graph_continuous, predict_graph_discrete
 
 class KBF(ModelBase):
     """
@@ -150,6 +151,26 @@ class KBF(ModelBase):
         """
         return predict_continuous(self, x0, ts, us=w.u, method=method, order=self.input_order)
 
+class DKBF(KBF):
+    """Discrete Koopman Bilinear Form (DKBF) model - discrete-time version.
+
+    In this case, the forward pass effectively does the following:
+
+    ```
+    z_n = self.encoder(w_n)
+    z_{n+1} = self.dynamics(z_n, w_n)
+    x_hat_n = self.decoder(z_n, w_n)
+    ```
+    """
+    GRAPH = False
+
+    def __init__(self, model_config: Dict, data_meta: Dict):
+        super(DKBF, self).__init__(model_config, data_meta)
+
+    def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
+        """Predict trajectory using discrete-time iterations."""
+        return predict_discrete(self, x0, ts, us=w.u)
+
 class GKBF(ModelBase):
     """Graph Koopman Bilinear Form (GKBF) model - graph-specific version.
     Uses GNN encoder/decoder and KBF operators for dynamics.
@@ -256,3 +277,17 @@ class GKBF(ModelBase):
 
     def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
         return predict_graph_continuous(self, x0, ts, w.edge_index, us=w.u, method=method, order=self.input_order)
+
+class DGKBF(GKBF):
+    """Discrete Graph Koopman Bilinear Form (DGKBF) model - discrete-time version.
+
+    Same idea as DKBF vs KBF.
+    """
+    GRAPH = True
+
+    def __init__(self, model_config: Dict, data_meta: Dict):
+        super(DGKBF, self).__init__(model_config, data_meta)
+
+    def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
+        """Predict trajectory using discrete-time iterations."""
+        return predict_graph_discrete(self, x0, ts, w.edge_index, us=w.u)

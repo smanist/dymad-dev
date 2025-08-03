@@ -1,0 +1,40 @@
+data:
+  path: './data/lti.npz'
+  n_samples: 128
+  n_steps: 501
+  double_precision: false
+
+transform_x:
+  type: "identity"
+
+transform_u:
+  type: "identity"
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 64
+
+model:
+  name: 'lti_dldm'
+  encoder_layers: 0
+  processor_layers: 1
+  decoder_layers: 0
+  latent_dimension: 32
+  activation: "none"
+  weight_init: "xavier_uniform"
+  gain: 0.01
+
+training:
+  n_epochs: 1000
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 1e-3
+  decay_rate: 0.999
+  reconstruction_weight: 0.0
+  dynamics_weight: 1.0
+  chop_mode: "unfold"
+  chop_step: 0.5
+  sweep_lengths: [3, 5, 7]
+  sweep_epoch_step: 200

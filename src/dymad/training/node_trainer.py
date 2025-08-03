@@ -8,6 +8,18 @@ from dymad.utils.scheduler import make_scheduler
 
 logger = logging.getLogger(__name__)
 
+def _determine_chop_step(window: int, step: Union[int, float]) -> int:
+    """
+    Determine the chop step based on the window size and step value.
+    """
+    if isinstance(step, int):
+        return step
+    elif isinstance(step, float):
+        stp = int(window * step)
+        return min(max(stp, 1), window)
+    else:
+        raise ValueError(f"Invalid step type: {type(step)}. Expected int or float.")
+
 class NODETrainer(TrainerBase):
     """
     Trainer using Neural ODE approach.
@@ -22,9 +34,17 @@ class NODETrainer(TrainerBase):
         self.rtol = self.config['training'].get('rtol', 1e-7)
         self.atol = self.config['training'].get('atol', 1e-9)
 
+        # Training weights
         self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
         self.dynamics_weight = self.config['training'].get('dynamics_weight', 1.0)
 
+        # Trajectory chopping
+        self.chop_mode = self.config['training'].get('chop_mode', 'initial')
+        assert self.chop_mode in ['initial', 'unfold'], f"Invalid chop_mode: {self.chop_mode}"
+        self.chop_step = self.config['training'].get('chop_step', 1.0)
+        assert self.chop_step > 0, f"Chop step must be positive. Got: {self.chop_step}"
+
+        # Sweep settings
         sweep_lengths = self.config['training'].get('sweep_lengths', [len(self.t)])
         epoch_step = self.config['training'].get('sweep_epoch_step', self.config['training']['n_epochs'])
         sweep_tols = self.config['training'].get('sweep_tols', None)
@@ -34,15 +54,24 @@ class NODETrainer(TrainerBase):
             epoch_step=epoch_step, mode=sweep_mode))
 
         # Additional logging
-        logger.info(f"Added scheduler: {self.schedulers[-1].diagnostic_info()}")
         logger.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
         logger.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
+        if self.chop_mode == 'initial':
+            logger.info(f"Chop mode: {self.chop_mode}, initial steps only")
+        else:
+            logger.info(f"Chop mode: {self.chop_mode}, window stride: {self.chop_step}")
+        logger.info(f"Added scheduler: {self.schedulers[-1].diagnostic_info()}")
 
     def _process_batch(self, batch: Union[DynData, DynGeoData]) -> torch.Tensor:
         """Process a batch and return predictions and ground truth states."""
         num_steps = self.schedulers[1].get_length()
 
-        B = batch.truncate(num_steps)  # Truncate batch to the current sweep length
+        if self.chop_mode == 'initial':
+            B = batch.truncate(num_steps)
+        else:
+            B = batch.unfold(num_steps, _determine_chop_step(num_steps, self.chop_step))
+
+        # B = batch.truncate(num_steps)  # Truncate batch to the current sweep length
         B = B.to(self.device)
         init_states = B.x[:, 0, :]  # (batch_size, n_total_state_features)
 

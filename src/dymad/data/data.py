@@ -56,6 +56,24 @@ class DynDataImpl:
     def truncate(self, num_step):
         return DynDataImpl(self.x[:, :num_step, :],
                            self.u[:, :num_step, :] if self.u is not None else None)
+    
+    def unfold(self, window: int, stride: int) -> "DynDataImpl":
+        """
+        Unfold the data into overlapping windows.
+
+        Args:
+            window (int): Size of the sliding window.
+            stride (int): Step size for the sliding window.
+
+        Returns:
+            DynDataImpl: A new DynDataImpl instance with unfolded data.
+        """
+        # The array is assumed to be of shape (batch_size, n_steps, n_features)
+        # unfold produces a tensor of shape (batch_size, n_window, n_features, window)
+        # merge the first two dimensions and permute the last two gives (batch_size*n_window, window, n_features)
+        x_unfolded = self.x.unfold(1, window, stride).reshape(-1, self.x.size(-1), window).permute(0, 2, 1)
+        u_unfolded = self.u.unfold(1, window, stride).reshape(-1, self.u.size(-1), window).permute(0, 2, 1) if self.u is not None else None
+        return DynDataImpl(x_unfolded, u_unfolded)
 
 @dataclass
 class DynGeoDataImpl:
@@ -111,3 +129,22 @@ class DynGeoDataImpl:
         return DynGeoDataImpl(self.x[:, :num_step, :],
                               self.u[:, :num_step, :] if self.u is not None else None,
                               self.edge_index)
+
+    def unfold(self, window: int, stride: int) -> "DynGeoDataImpl":
+        """
+        Unfold the data into overlapping windows.
+
+        Args:
+            window (int): Size of the sliding window.
+            stride (int): Step size for the sliding window.
+
+        Returns:
+            DynGeoDataImpl: A new DynGeoDataImpl instance with unfolded data.
+        """
+        x_tmp = self.x.unfold(1, window, stride)
+        n_window = x_tmp.size(1)
+        x_unfolded = x_tmp.reshape(-1, self.x.size(-1), window).permute(0, 2, 1)
+        u_unfolded = self.u.unfold(1, window, stride).reshape(-1, self.u.size(-1), window).permute(0, 2, 1) if self.u is not None else None
+        # Repeat edge_index along the window dimension and reshape
+        e_unfolded = self.edge_index.unsqueeze(1).repeat(1, n_window, 1, 1).reshape(-1, self.edge_index.size(1), self.edge_index.size(2))
+        return DynGeoDataImpl(x_unfolded, u_unfolded, e_unfolded)

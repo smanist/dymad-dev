@@ -219,15 +219,15 @@ The details are provided below.
      - |:white_check_mark:|
      - |:notepad_spiral:|
      - |:notepad_spiral:|
-     - |:building_construction:|
-     - |:building_construction:|
+     - |:white_check_mark:|
+     - |:white_check_mark:|
    * - (Graph) KBF
      - |:white_check_mark:|
      - |:white_check_mark:|
      - |:notepad_spiral:|
      - |:notepad_spiral:|
-     - |:building_construction:|
-     - |:building_construction:|
+     - |:white_check_mark:|
+     - |:white_check_mark:|
    * - (Graph) RNN
      - |:heavy_multiplication_x:|
      - |:heavy_multiplication_x:|
