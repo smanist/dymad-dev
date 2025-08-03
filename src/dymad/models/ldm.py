@@ -5,7 +5,7 @@ from typing import Tuple, Dict, Union
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import make_autoencoder, MLP, predict_continuous, predict_discrete, predict_graph_continuous
+from dymad.utils import make_autoencoder, MLP, predict_continuous, predict_discrete, predict_graph_continuous, predict_graph_discrete
 
 class LDM(ModelBase):
     """Latent Dynamics Model (LDM)
@@ -294,3 +294,17 @@ class GLDM(ModelBase):
 
     def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
         return predict_graph_continuous(self, x0, ts, w.edge_index, us=w.u, method=method, order=self.input_order)
+
+class DGLDM(GLDM):
+    """Discrete Graph Latent Dynamics Model (DGLDM) - discrete-time version.
+
+    Same idea as DKBF vs KBF.
+    """
+    GRAPH = True
+
+    def __init__(self, model_config: Dict, data_meta: Dict):
+        super(DGLDM, self).__init__(model_config, data_meta)
+
+    def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
+        """Predict trajectory using discrete-time iterations."""
+        return predict_graph_discrete(self, x0, ts, w.edge_index, us=w.u)

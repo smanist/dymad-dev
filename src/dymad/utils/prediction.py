@@ -279,3 +279,70 @@ def predict_discrete(
 
     logger.debug(f"predict_discrete: Final trajectory shape {x_traj.shape}")
     return x_traj
+
+def predict_graph_discrete(
+    model,
+    x0: torch.Tensor,
+    ts: Union[np.ndarray, torch.Tensor],
+    edge_index: torch.Tensor,
+    us: torch.Tensor = None,
+    **kwargs
+) -> torch.Tensor:
+    """
+    Predict trajectory(ies) for (graph) models with batch support.
+
+    Args:
+        model: Model with encoder, decoder, and dynamics methods.
+        x0 (torch.Tensor): Initial state(s):
+
+            - Single: (n_features,)
+            - Batch: (batch_size, n_features)
+
+        ts (Union[np.ndarray, torch.Tensor]): Time points (n_steps,).
+        edge_index (torch.Tensor): Edge indices for the graph.
+        us (torch.Tensor, optional): Control trajectory(ies):
+
+            - Single: (n_steps, n_controls)
+            - Batch: (batch_size, n_steps, n_controls)
+
+    Returns:
+        torch.Tensor: Predicted trajectory(ies)
+
+            - Single: (n_steps, n_features)
+            - Batch: (n_steps, batch_size, n_features)
+
+    Raises:
+        ValueError: If input dimensions do not match requirements.
+    """
+    device = x0.device
+    _x0, _, _us, n_steps, is_batch, _ei = _prepare_data(x0, ts, us, device, edge_index=edge_index)
+    _data = DynGeoData(None, None, _ei)
+
+    if _us is not None:
+        logger.debug(f"predict_graph_discrete: {'Batch' if is_batch else 'Single'} mode (controlled)")
+        u0 = _us[:, 0, :]
+        z0 = model.encoder(DynGeoData(_x0, u0, _ei))
+        z_traj = [z0]
+        for k in range(n_steps - 1):
+            x_k = model.decoder(z_traj[-1], _data)
+            u_k = _us[:, k, :]
+            _, z_next, _ = model(DynGeoData(x_k, u_k, _ei))
+            z_traj.append(z_next)
+    else:
+        logger.debug(f"predict_graph_discrete: {'Batch' if is_batch else 'Single'} mode (autonomous)")
+        z0 = model.encoder(DynGeoData(_x0, None, _ei))
+        z_traj = [z0]
+        for k in range(n_steps - 1):
+            x_k = model.decoder(z_traj[-1], _data)
+            _, z_next, _ = model(DynGeoData(x_k, None, _ei))
+            z_traj.append(z_next)
+
+    z_traj = torch.stack(z_traj, dim=0)  # (n_steps, batch_size, z_dim)
+    tmp = z_traj.permute(1, 0, 2)  # (batch_size, n_steps, z_dim)
+    x_traj = model.decoder(tmp, _data).permute(1, 0, 2)
+
+    if not is_batch:
+        x_traj = x_traj.squeeze(1)
+
+    logger.debug(f"predict_graph_discrete: Final trajectory shape {x_traj.shape}")
+    return x_traj
