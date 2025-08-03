@@ -23,8 +23,8 @@ class WeakFormTrainer(TrainerBase):
         self.weak_dyn_param = generate_weak_form_params(self.metadata, dtype, self.device)
 
         # Additional logging
-        logging.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
-        logging.info(f"Weak-form weights generated")
+        logger.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
+        logger.info(f"Weak-form weights generated")
 
     def train_epoch(self) -> float:
         """Train the model for one epoch."""

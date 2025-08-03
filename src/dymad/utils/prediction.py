@@ -24,14 +24,16 @@ def _prepare_data(x0, ts, us, device, edge_index=None):
         _x0 = x0.clone().detach().to(device).unsqueeze(0)
 
     # Time stations
-    if isinstance(ts, np.ndarray):
-        ts = torch.from_numpy(ts).float().to(device)
-    else:
-        ts = ts.float().to(device)
-    n_steps = len(ts)
+    _ts, _Nt = None, None
+    if ts is not None:
+        if isinstance(ts, np.ndarray):
+            _ts = torch.from_numpy(ts).float().to(device)
+        else:
+            _ts = ts.float().to(device)
+        _Nt = _ts.shape[0]
 
     # Inputs
-    _us = None
+    _us, _Nu = None, None
     if us is not None:
         if is_batch:
             if us.ndim != 3:
@@ -41,8 +43,17 @@ def _prepare_data(x0, ts, us, device, edge_index=None):
             if us.ndim != 2:
                 raise ValueError(f"Single mode: us must be 2D. Got us: {us.shape}")
             _us = us.clone().detach().to(device).unsqueeze(0)
-        if _us.shape[1] != n_steps:
-            raise ValueError(f"us time dimension ({_us.shape[1]}) must match time steps ({n_steps})")
+        _Nu = _us.shape[1]  # Time steps from us
+
+    # Check step consistency
+    if _Nt is None:
+        if _Nu is None:
+            raise ValueError("Either ts or us must be provided to determine time steps.")
+        n_steps = _Nu
+    else:
+        if _Nt != _Nu:
+            raise ValueError(f"ts and us must have the same number of time steps. Got ts: {_Nt}, us: {_Nu}")
+        n_steps = _Nt
 
     # Edge indices
     _ei = None
@@ -54,7 +65,7 @@ def _prepare_data(x0, ts, us, device, edge_index=None):
         else:
             raise ValueError(f"edge_index must be 2D or 3D tensor. Got {edge_index.shape}")
 
-    return _x0, ts, _us, n_steps, is_batch, _ei
+    return _x0, _ts, _us, n_steps, is_batch, _ei
 
 # ------------------
 # Continuous-time case
@@ -210,6 +221,7 @@ def predict_graph_continuous(
 def predict_discrete(
     model,
     x0: torch.Tensor,
+    ts: Union[np.ndarray, torch.Tensor],
     us: torch.Tensor,
     **kwargs
 ) -> torch.Tensor:
@@ -223,6 +235,7 @@ def predict_discrete(
             - Single: (n_features,)
             - Batch: (batch_size, n_features)
 
+        ts (Union[np.ndarray, torch.Tensor]): Time points (n_steps,).
         us: Control trajectory(ies):
 
             - Single: (n_steps, n_controls)
@@ -240,7 +253,7 @@ def predict_discrete(
     """
     device = x0.device
     # Use _prepare_data for consistency
-    _x0, _, _us, n_steps, is_batch, _ = _prepare_data(x0, None, us, device)
+    _x0, _, _us, n_steps, is_batch, _ = _prepare_data(x0, ts, us, device)
 
     logger.debug(f"predict_discrete: {'Batch' if is_batch else 'Single'} mode")
 

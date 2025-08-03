@@ -56,6 +56,21 @@ class DynDataImpl:
     def truncate(self, num_step):
         return DynDataImpl(self.x[:, :num_step, :],
                            self.u[:, :num_step, :] if self.u is not None else None)
+    
+    def unfold(self, window: int, stride: int) -> "DynDataImpl":
+        """
+        Unfold the data into overlapping windows.
+
+        Args:
+            window (int): Size of the sliding window.
+            stride (int): Step size for the sliding window.
+
+        Returns:
+            DynDataImpl: A new DynDataImpl instance with unfolded data.
+        """
+        x_unfolded = self.x.unfold(1, window, stride).reshape(-1, self.x.size(-1), window).permute(0, 2, 1)
+        u_unfolded = self.u.unfold(1, window, stride).reshape(-1, self.u.size(-1), window).permute(0, 2, 1) if self.u is not None else None
+        return DynDataImpl(x_unfolded, u_unfolded)
 
 @dataclass
 class DynGeoDataImpl:
@@ -111,3 +126,18 @@ class DynGeoDataImpl:
         return DynGeoDataImpl(self.x[:, :num_step, :],
                               self.u[:, :num_step, :] if self.u is not None else None,
                               self.edge_index)
+
+    def unfold(self, window: int, stride: int) -> "DynGeoDataImpl":
+        """
+        Unfold the data into overlapping windows.
+
+        Args:
+            window (int): Size of the sliding window.
+            stride (int): Step size for the sliding window.
+
+        Returns:
+            DynDataImpl: A new DynDataImpl instance with unfolded data.
+        """
+        x_unfolded = self.x.unfold(1, window, stride).reshape(-1, self.x.size(-1), window).permute(0, 2, 1)
+        u_unfolded = self.u.unfold(1, window, stride).reshape(-1, self.u.size(-1), window).permute(0, 2, 1) if self.u is not None else None
+        return DynGeoDataImpl(x_unfolded, u_unfolded, self.edge_index)
