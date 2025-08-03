@@ -50,7 +50,7 @@ class RollOutTrainer(NODETrainer):
 
         # Additional logging
         if self.chop_mode == 'initial':
-            logger.info(f"Chop mode: {self.chop_mode}, initial steps only)")
+            logger.info(f"Chop mode: {self.chop_mode}, initial steps only")
         else:
             logger.info(f"Chop mode: {self.chop_mode}, window stride: {self.chop_step}")
         logger.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")

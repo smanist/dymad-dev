@@ -223,7 +223,7 @@ def predict_discrete(
     model,
     x0: torch.Tensor,
     ts: Union[np.ndarray, torch.Tensor],
-    us: torch.Tensor,
+    us: torch.Tensor = None,
     **kwargs
 ) -> torch.Tensor:
     """

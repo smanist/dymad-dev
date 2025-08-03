@@ -68,6 +68,9 @@ class DynDataImpl:
         Returns:
             DynDataImpl: A new DynDataImpl instance with unfolded data.
         """
+        # The array is assumed to be of shape (batch_size, n_steps, n_features)
+        # unfold produces a tensor of shape (batch_size, n_window, n_features, window)
+        # merge the first two dimensions and permute the last two gives (batch_size*n_window, window, n_features)
         x_unfolded = self.x.unfold(1, window, stride).reshape(-1, self.x.size(-1), window).permute(0, 2, 1)
         u_unfolded = self.u.unfold(1, window, stride).reshape(-1, self.u.size(-1), window).permute(0, 2, 1) if self.u is not None else None
         return DynDataImpl(x_unfolded, u_unfolded)
