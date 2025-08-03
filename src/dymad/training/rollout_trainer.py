@@ -8,7 +8,7 @@ from dymad.utils.scheduler import make_scheduler
 
 logger = logging.getLogger(__name__)
 
-class NODETrainer(TrainerBase):
+class RollOutTrainer(TrainerBase):
     """
     Trainer using Neural ODE approach.
     """
@@ -34,9 +34,8 @@ class NODETrainer(TrainerBase):
             epoch_step=epoch_step, mode=sweep_mode))
 
         # Additional logging
-        logger.info(f"Added scheduler: {self.schedulers[-1].diagnostic_info()}")
-        logger.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
-        logger.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
+        logging.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
+        logging.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
 
     def _process_batch(self, batch: Union[DynData, DynGeoData]) -> torch.Tensor:
         """Process a batch and return predictions and ground truth states."""
@@ -68,7 +67,7 @@ class NODETrainer(TrainerBase):
         """Train the model for one epoch."""
         self.model.train()
         total_loss = 0.0
-        min_lr     = 5e-5
+        min_lr = 5e-5
 
         for batch in self.train_loader:
             self.optimizer.zero_grad(set_to_none=True)
@@ -76,17 +75,14 @@ class NODETrainer(TrainerBase):
             loss.backward()
             self.optimizer.step()
             total_loss += loss.item()
-        avg_epoch_loss = total_loss / len(self.train_loader)
 
         for scheduler in self.schedulers:
-            flag = scheduler.step(eploss=avg_epoch_loss)
-            self.convergence_tolerance_reached = self.convergence_tolerance_reached or flag
-
+            scheduler.step()
         # Maintain minimum learning rate
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = max(param_group['lr'], min_lr)
 
-        return avg_epoch_loss
+        return total_loss / len(self.train_loader)
 
     def evaluate(self, dataloader: torch.utils.data.DataLoader) -> float:
         """Evaluate the model on the provided dataloader."""
