@@ -136,8 +136,12 @@ class DynGeoDataImpl:
             stride (int): Step size for the sliding window.
 
         Returns:
-            DynDataImpl: A new DynDataImpl instance with unfolded data.
+            DynGeoDataImpl: A new DynGeoDataImpl instance with unfolded data.
         """
-        x_unfolded = self.x.unfold(1, window, stride).reshape(-1, self.x.size(-1), window).permute(0, 2, 1)
+        x_tmp = self.x.unfold(1, window, stride)
+        n_window = x_tmp.size(1)
+        x_unfolded = x_tmp.reshape(-1, self.x.size(-1), window).permute(0, 2, 1)
         u_unfolded = self.u.unfold(1, window, stride).reshape(-1, self.u.size(-1), window).permute(0, 2, 1) if self.u is not None else None
-        return DynGeoDataImpl(x_unfolded, u_unfolded, self.edge_index)
+        # Repeat edge_index along the window dimension and reshape
+        e_unfolded = self.edge_index.unsqueeze(1).repeat(1, n_window, 1, 1).reshape(-1, self.edge_index.size(1), self.edge_index.size(2))
+        return DynGeoDataImpl(x_unfolded, u_unfolded, e_unfolded)

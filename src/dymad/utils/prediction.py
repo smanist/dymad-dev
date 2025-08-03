@@ -51,8 +51,9 @@ def _prepare_data(x0, ts, us, device, edge_index=None):
             raise ValueError("Either ts or us must be provided to determine time steps.")
         n_steps = _Nu
     else:
-        if _Nt != _Nu:
-            raise ValueError(f"ts and us must have the same number of time steps. Got ts: {_Nt}, us: {_Nu}")
+        if _Nu is not None:
+            if _Nt != _Nu:
+                raise ValueError(f"ts and us must have the same number of time steps. Got ts: {_Nt}, us: {_Nu}")
         n_steps = _Nt
 
     # Edge indices

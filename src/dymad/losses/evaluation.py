@@ -44,8 +44,9 @@ def prediction_rmse(model,
         rmse = np.sqrt(np.mean((x_pred - x_truth)**2))
 
         if plot:
+            _us = None if us is None else us.detach().cpu().numpy()
             plot_trajectory(np.array([x_truth, x_pred]), ts, model_name, metadata,
-                            us=us.clone().cpu(), labels=['Truth', 'Prediction'], prefix=prefix)
+                            us=_us, labels=['Truth', 'Prediction'], prefix=prefix)
 
         return rmse
 

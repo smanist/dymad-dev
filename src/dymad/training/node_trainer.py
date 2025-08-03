@@ -57,7 +57,7 @@ class NODETrainer(TrainerBase):
         logger.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
         logger.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
         if self.chop_mode == 'initial':
-            logger.info(f"Chop mode: {self.chop_mode}, initial steps only)")
+            logger.info(f"Chop mode: {self.chop_mode}, initial steps only")
         else:
             logger.info(f"Chop mode: {self.chop_mode}, window stride: {self.chop_step}")
         logger.info(f"Added scheduler: {self.schedulers[-1].diagnostic_info()}")
