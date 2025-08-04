@@ -71,7 +71,6 @@ class NODETrainer(TrainerBase):
         else:
             B = batch.unfold(num_steps, _determine_chop_step(num_steps, self.chop_step))
 
-        # B = batch.truncate(num_steps)  # Truncate batch to the current sweep length
         B = B.to(self.device)
         init_states = B.x[:, 0, :]  # (batch_size, n_total_state_features)
 
@@ -116,15 +115,3 @@ class NODETrainer(TrainerBase):
             param_group['lr'] = max(param_group['lr'], min_lr)
 
         return avg_epoch_loss
-
-    def evaluate(self, dataloader: torch.utils.data.DataLoader) -> float:
-        """Evaluate the model on the provided dataloader."""
-        self.model.eval()
-        total_loss = 0.0
-
-        with torch.no_grad():
-            for batch in dataloader:
-                loss = self._process_batch(batch)
-                total_loss += loss.item()
-
-        return total_loss / len(dataloader)

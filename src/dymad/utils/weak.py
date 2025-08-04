@@ -96,14 +96,10 @@ def compute_newton_cotes_weights(num_points: int, dx: float, order: int) -> np.n
 # ------------------------------------------------------------------------------------
 # Weak Formulation Weight Generation
 # ------------------------------------------------------------------------------------
-'''
-TODO this implementation needs to be updated to work with trajectories with different length (a list of n_steps)
-'''
+
 def generate_weak_weights(
     dt: float,
-    n_steps: int,
     n_integration_points: int,
-    integration_stride: int,
     poly_order: int = 4,
     int_rule_order: int = 4,
 ):
@@ -112,48 +108,39 @@ def generate_weak_weights(
     the number of "windows" K along the time dimension.
 
     Steps:
-        1. Build a time array of size num_time_points given dt and n_steps
-        2. Compute a length scale:
+        1. Compute a length scale:
 
         .. math::
             L = \frac{t_{N-1} - t_0}{2}
 
-        3. Generate Jacobi polynomial basis (P0) and its derivative (P1), each
+        2. Generate Jacobi polynomial basis (P0) and its derivative (P1), each
            with alpha=1, beta=1, on a grid of size n_integration_points in [-1,1].
-        4. Construct weighting arrays for the integrals:
+        3. Construct weighting arrays for the integrals:
 
         .. math::
             w_0 = 1 - h^2,\quad w_1 = -\frac{2h}{L}
 
-        5. Compute Newton-Cotes integration weights on that grid.
-        6. Combine everything to form:
+        4. Compute Newton-Cotes integration weights on that grid.
+        5. Combine everything to form:
 
         .. math::
             C = -(P_1 w_0 + P_0 w_1) w,\quad D = P_0 w_0 w
 
-        7. K = number of segments in time = (len(ts) - (N - dN)) // dN
-
     Args:
         dt (float): Time step size.
-        n_steps (int): Number of time points (Nt).
         n_integration_points (int): Number of integration points (N) in [-1, 1].
-        integration_stride (int): Sub-sampling or stride in the time domain (dN).
         poly_order (int): Order of the Jacobi polynomial basis.
         int_rule_order (int): Order of Newton-Cotes integration rule (1..4).
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, int]:
-            Weights C and D, and number of intervals K:
+        Tuple[np.ndarray, np.ndarray]:
+            Weights C and D:
 
             - C: shape (poly_order, n_integration_points),
-            - D: shape (poly_order, n_integration_points),
-            - K: number of intervals in time after sub-sampling.
+            - D: shape (poly_order, n_integration_points).
     """
-    # Build time array
-    time_array = np.arange(0, n_steps) * dt
-
-    # L = half the (useful) interval length in the time domain
-    L = (time_array[n_integration_points - 1] - time_array[0]) / 2.0
+    # L = half the integral interval length in the time domain
+    L = n_integration_points * dt / 2.0
 
     # Grid in [-1, 1] for the polynomials
     h = np.linspace(-1.0, 1.0, n_integration_points)
@@ -176,7 +163,4 @@ def generate_weak_weights(
     C = -(P1 * w0 + P0 * w1) * w  # shape: (poly_order, N)
     D = P0 * w0 * w               # shape: (poly_order, N)
 
-    # Number of "windows" or segments
-    K = (len(time_array) - (n_integration_points - integration_stride)) // integration_stride
-
-    return C, D, K
+    return C, D

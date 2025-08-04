@@ -113,7 +113,15 @@ class TrainerBase:
 
     def evaluate(self, dataloader: torch.utils.data.DataLoader) -> float:
         """Evaluate the model on the provided dataloader."""
-        raise NotImplementedError("Subclasses must implement evaluate")
+        self.model.eval()
+        total_loss = 0.0
+
+        with torch.no_grad():
+            for batch in dataloader:
+                loss = self._process_batch(batch)
+                total_loss += loss.item()
+
+        return total_loss / len(dataloader)
 
     def get_prediction_rmse_func(self):
         """
