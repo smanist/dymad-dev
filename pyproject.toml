@@ -9,6 +9,10 @@ description     = "Dynamics Modeling and Analysis via Data"
 authors         = [{name = "APUS Lab @ PSU"}]
 readme          = "README.md"
 requires-python = ">=3.12"
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.0",
+]
 
 [project.optional-dependencies]
 docs = [
@@ -18,4 +22,26 @@ docs = [
   "myst-parser",            # optional: Markdown support
   "myst-nb>=1.0",
   "sphinx-autodoc-typehints"
+]
+test = [
+  "pytest>=8",
+]
+
+# pyproject.toml
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = [
+  "-ra",            # show reasons for skips/xpasses
+  "--strict-markers",
+  "--maxfail=1",
+  "-q"
+]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+xfail_strict = true
+log_cli = true
+log_level = "INFO"
+
+markers = [
+  "slow: marks tests as slow"
 ]
