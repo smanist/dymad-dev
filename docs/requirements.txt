@@ -6,6 +6,7 @@ sphinx-autodoc-typehints
 sphinxemoji
 matplotlib
 numpy
+pytest
 scipy
 torch
 torchdiffeq
