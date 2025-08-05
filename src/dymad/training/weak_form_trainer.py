@@ -1,5 +1,4 @@
 import logging
-from importlib_metadata import metadata
 import torch
 from typing import Dict, Type, Union
 
