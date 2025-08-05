@@ -140,7 +140,7 @@ def generate_weak_weights(
             - D: shape (poly_order, n_integration_points).
     """
     # L = half the integral interval length in the time domain
-    L = n_integration_points * dt / 2.0
+    L = (n_integration_points-1) * dt / 2.0
 
     # Grid in [-1, 1] for the polynomials
     h = np.linspace(-1.0, 1.0, n_integration_points)

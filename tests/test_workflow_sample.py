@@ -1,11 +1,12 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
 
-from dymad.utils import setup_logging, TrajectorySampler
-from matplotlib.gridspec import GridSpec
+from dymad.utils import TrajectorySampler
 
-config_path = 'lti_data.yaml'
-# setup_logging(config_path, mode='info')
+HERE = Path(__file__).parent
+
+config_path = HERE/'lti_data.yaml'
 
 B = 128
 N = 501
@@ -76,14 +77,16 @@ ctrls = [ctrl_sin, ctrl_gau, ctrl_chr, ctrl_sph]
 x0s   = [x0_ga1, x0_ga2, x0_uni, x0_grd]
 ttls  = ['Sine+Gaussian1', 'Gaussian+Gaussian2', 'Chirp+Uniform', 'Sphere+Grid']
 
-for j in range(4):
+def sample_case(j):
     config_mod = {
         "control": ctrls[j],
         "x0": x0s[j]
     }
-
     sampler = TrajectorySampler(f, g, config=config_path, config_mod=config_mod)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
+    return ts, xs, us, ys
+
+def plot_samples(ts, xs, us, j):
     x0 = xs[:,0,:].squeeze().T
 
     fig, ax = plt.subplots(nrows=3, ncols=2, figsize=(12, 8), sharex=True,
@@ -111,4 +114,16 @@ for j in range(4):
     ax_ic.set_title('Initial conditions')
     ax_ic.set_aspect('equal', adjustable='box')
 
-plt.show()
+def test_sampling(plot=False):
+    for j in range(len(ctrls)):
+        ts, xs, us, ys = sample_case(j)
+
+        if plot:
+            from matplotlib.gridspec import GridSpec
+            plot_samples(ts, xs, us, j)
+            plt.tight_layout()
+    if plot:
+        plt.show()
+
+if __name__ == "__main__":
+    test_sampling(plot=True)
