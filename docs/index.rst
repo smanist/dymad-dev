@@ -27,7 +27,7 @@ Developers
 
 The package is developed by the `APUS Lab at Penn State <https://apus-lab.github.io/>`_, directed by Dr. Daning Huang.
 
-The lead developer is Dr. Yin Yu, whose PhD thesis is on the topic of data-driven modeling of dynamical systems on graphs.
+The lead developer is Dr. Yin Yu, whose PhD thesis is on the topic of data-driven modeling of dynamical systems on graphs.  Current developers also include Ankur Ghorai.
 
 
 Explore More

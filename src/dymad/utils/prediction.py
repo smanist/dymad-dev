@@ -258,18 +258,30 @@ def predict_discrete(
 
     logger.debug(f"predict_discrete: {'Batch' if is_batch else 'Single'} mode")
 
-    # Initial state preparation
-    u0 = _us[:, 0, :]
-    z0 = model.encoder(DynData(_x0, u0))
+    if _us is not None:
+        # Initial state preparation
+        u0 = _us[:, 0, :]
+        z0 = model.encoder(DynData(_x0, u0))
 
-    # Discrete-time forward pass
-    logger.debug(f"predict_discrete: Starting forward iterations with shape {z0.shape}")
-    z_traj = [z0]
-    for k in range(n_steps - 1):
-        x_k = model.decoder(z_traj[-1], None)
-        u_k = _us[:, k, :]
-        _, z_next, _ = model(DynData(x_k, u_k))
-        z_traj.append(z_next)
+        # Discrete-time forward pass
+        logger.debug(f"predict_discrete: Starting forward iterations with shape {z0.shape}")
+        z_traj = [z0]
+        for k in range(n_steps - 1):
+            x_k = model.decoder(z_traj[-1], None)
+            u_k = _us[:, k, :]
+            _, z_next, _ = model(DynData(x_k, u_k))
+            z_traj.append(z_next)
+    else:
+        # Initial state preparation
+        z0 = model.encoder(DynData(_x0, None))
+
+        # Discrete-time forward pass
+        logger.debug(f"predict_discrete: Starting forward iterations with shape {z0.shape}")
+        z_traj = [z0]
+        for k in range(n_steps - 1):
+            x_k = model.decoder(z_traj[-1], None)
+            _, z_next, _ = model(DynData(x_k, None))
+            z_traj.append(z_next)
     z_traj = torch.stack(z_traj, dim=0)  # (n_steps, batch_size, z_dim)
     logger.debug(f"predict_discrete: Completed integration, trajectory shape: {z_traj.shape}")
 
@@ -318,10 +330,13 @@ def predict_graph_discrete(
     _x0, _, _us, n_steps, is_batch, _ei = _prepare_data(x0, ts, us, device, edge_index=edge_index)
     _data = DynGeoData(None, None, _ei)
 
+    logger.debug(f"predict_graph_discrete: {'Batch' if is_batch else 'Single'} mode")
+
     if _us is not None:
-        logger.debug(f"predict_graph_discrete: {'Batch' if is_batch else 'Single'} mode (controlled)")
         u0 = _us[:, 0, :]
         z0 = model.encoder(DynGeoData(_x0, u0, _ei))
+
+        logger.debug(f"predict_graph_discrete: Starting forward iterations with shape {z0.shape}")
         z_traj = [z0]
         for k in range(n_steps - 1):
             x_k = model.decoder(z_traj[-1], _data)
@@ -329,8 +344,9 @@ def predict_graph_discrete(
             _, z_next, _ = model(DynGeoData(x_k, u_k, _ei))
             z_traj.append(z_next)
     else:
-        logger.debug(f"predict_graph_discrete: {'Batch' if is_batch else 'Single'} mode (autonomous)")
         z0 = model.encoder(DynGeoData(_x0, None, _ei))
+
+        logger.debug(f"predict_graph_discrete: Starting forward iterations with shape {z0.shape}")
         z_traj = [z0]
         for k in range(n_steps - 1):
             x_k = model.decoder(z_traj[-1], _data)

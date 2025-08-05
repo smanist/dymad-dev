@@ -71,7 +71,7 @@ class SweepScheduler(SchedulerBase):
         - No sweep_lengths or sweep_tols: Does nothing.
         - Only sweep_lengths: Change lengths every `epoch_step`.
         - sweep_lengths AND sweep_tols: Change lengths either every `epoch_step` or a tolerance is reached,
-        whichever comes first.  In particular, when the last tolerance is reached,
+          whichever comes first.  In particular, when the last tolerance is reached,
 
             - If mode='full': the scheduler resets to the initial length.
             - If mode='skip': the scheduler keeps using the current length.
