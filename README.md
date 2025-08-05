@@ -16,6 +16,8 @@ sphinx-build -E -b html docs docs/_build/html
 ```
 Remove `-E` for incremental build.
 
+If there are API errors such as some files not found, try deleting the auto-generated `api` folder and try again.
+
 # TODO notes
 
 - Extend DynGeoData with subgraph to parallelize batch processing
