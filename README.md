@@ -10,6 +10,19 @@ pip install -e .
 ```
 so that edits in the source are applied directly.
 
+To run the tests, stay in the root and
+```
+pytest
+```
+For specific test script
+```
+pytest [filename]
+```
+For specific case in specific test script
+```
+pytest [filename]::[casename]
+```
+
 Generate the document by
 ```
 sphinx-build -E -b html docs docs/_build/html
