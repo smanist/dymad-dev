@@ -1,11 +1,9 @@
 """
-Test cases for dynamics with inputs.
+Test cases for autonomous dynamics.
 
-`ct`: Continuous time models, LDM and KBF, with NODE and weak form training.
-`dl`: Continuous time models, LDM and KBF with delay, with NODE and weak form training.
-`dt`: Discrete time models, DLDM and DKBF, with NODE training.  Chop mode included.
-
-Sweep mode included for NODE training.
+`ct`: Continuous time models, GLDM and GKBF, with NODE and weak form training.
+`dt`: Discrete time models, DGLDM and DGKBF, with NODE training.
+`rst`: Restart training from checkpoint.
 """
 
 import os
@@ -15,17 +13,8 @@ from dymad.models import DKBF, DLDM, KBF, LDM
 from dymad.training import WeakFormTrainer, NODETrainer
 from dymad.utils import load_model
 
-trx = [
-    {"type": "Scaler", "mode": "std"},
-    {"type": "delay", "delay": 1}
-]
-tru = {
-    "type": "delay",
-        "delay": 1
-    }
-
 mdl_kb = {
-    "name" : 'lti_model',
+    "name" : 'kp_model',
     "encoder_layers" : 2,
     "decoder_layers" : 2,
     "latent_dimension" : 32,
@@ -33,7 +22,7 @@ mdl_kb = {
     "activation" : "prelu",
     "weight_init" : "xavier_uniform"}
 mdl_ld = {
-    "name": "lti_model",
+    "name": "kp_model",
     "encoder_layers": 0,
     "processor_layers": 2,
     "decoder_layers": 0,
@@ -62,7 +51,7 @@ trn_nd = {
     "decay_rate": 0.999,
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
-    "sweep_lengths": [200, 501],
+    "sweep_lengths": [10, 20],
     "sweep_epoch_step": 5,
     "ode_method": "dopri5",
     "rtol": 1e-7,
@@ -78,8 +67,7 @@ trn_dt = {
     "dynamics_weight": 1.0,
     "sweep_lengths": [3, 5],
     "sweep_epoch_step": 5,
-    "chop_mode": "unfold",
-    "chop_step": 0.5,
+    "chop_mode": "initial"
 }
 
 cfgs = [
@@ -87,47 +75,43 @@ cfgs = [
     ('ldm_node', LDM,  NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
     ('kbf_wf',   KBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
     ('kbf_node', KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
-    ('ldm_nddl', LDM,  NODETrainer,     {"model": mdl_ld, "training" : trn_nd, "transform_x" : trx, "transform_u": tru}),
-    ('kbf_wfdl', KBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf, "transform_x" : trx, "transform_u": tru}),
     ('dldm_nd',  DLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_dt}),
     ('dkbf_nd',  DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
     ]
 
 IDX_CT = [0, 1, 2, 3]
-IDX_DL = [4, 5]
-IDX_DT = [6, 7]
+IDX_DT = [4, 5]
 
-def train_case(idx, data, path):
+def train_case(idx, data, path, chkpt=None):
     _, MDL, Trainer, opt = cfgs[idx]
     opt.update({"data": {"path": data}})
-    config_path = path/'lti_model.yaml'
+    if chkpt is not None:
+        opt["training"]["load_checkpoint"] = path/chkpt
+    config_path = path/'kp_model.yaml'
     trainer = Trainer(config_path, MDL, config_mod=opt)
     trainer.train()
 
-def predict_case(idx, sample, path, ifdl = False):
-    x_data, t_data, u_data = sample
+def predict_case(idx, sample, path):
+    x_data, t_data = sample
     _, MDL, _, opt = cfgs[idx]
-    _, prd_func = load_model(MDL, path/'lti_model.pt', path/'lti_model.yaml', config_mod=opt)
+    _, prd_func = load_model(MDL, path/'kp_model.pt', path/'kp_model.yaml', config_mod=opt)
     with torch.no_grad():
-        if ifdl:
-            prd_func(x_data, u_data, t_data[:-1])
-        else:
-            prd_func(x_data, u_data, t_data)
+        prd_func(x_data, t_data)
 
-def test_lti_ct(lti_data, lti_gau, env_setup):
+def test_kp_ct(kp_data, kp_test, env_setup):
     for _i in IDX_CT:
-        train_case(_i, lti_data, env_setup)
-        predict_case(_i, lti_gau, env_setup)
-    os.remove(env_setup/'lti_model.pt')
+        train_case(_i, kp_data, env_setup)
+        predict_case(_i, kp_test, env_setup)
+    os.remove(env_setup/'kp_model.pt')
 
-def test_lti_dl(lti_data, lti_gau, env_setup):
-    for _i in IDX_DL:
-        train_case(_i, lti_data, env_setup)
-        predict_case(_i, lti_gau, env_setup, ifdl=True)
-    os.remove(env_setup/'lti_model.pt')
-
-def test_lti_dt(lti_data, lti_gau, env_setup):
+def test_kp_dt(kp_data, kp_test, env_setup):
     for _i in IDX_DT:
-        train_case(_i, lti_data, env_setup)
-        predict_case(_i, lti_gau, env_setup)
-    os.remove(env_setup/'lti_model.pt')
+        train_case(_i, kp_data, env_setup)
+        predict_case(_i, kp_test, env_setup)
+    os.remove(env_setup/'kp_model.pt')
+
+def test_kp_rst(kp_data, kp_test, env_setup):
+    train_case(0, kp_data, env_setup)
+    train_case(1, kp_data, env_setup, chkpt='checkpoints/kp_model_checkpoint.pt')
+    predict_case(1, kp_test, env_setup)
+    os.remove(env_setup/'kp_model.pt')

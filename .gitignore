@@ -13,4 +13,5 @@ examples/*/results/*.npz
 scripts/*/data/*.npz
 scripts/*/results/*.npz
 tests/results/*.npz
+tests/*.npz
 .ipynb_checkpoints
