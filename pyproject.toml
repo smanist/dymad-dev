@@ -11,7 +11,12 @@ readme          = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "numpy>=1.26",
-  "pandas>=2.0",
+  "matplotlib",
+  "numpy",
+  "scipy",
+  "torch",
+  "torchdiffeq",
+  "torch-geometric"
 ]
 
 [project.optional-dependencies]
