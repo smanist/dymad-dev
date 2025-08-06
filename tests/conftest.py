@@ -1,6 +1,8 @@
 import numpy as np
+import os
 from pathlib import Path
 import pytest
+import shutil
 
 from dymad.utils import TrajectorySampler
 
@@ -33,6 +35,20 @@ config_gau = {
             "mode": "zoh"}}}
 
 @pytest.fixture(scope='session')
+def env_setup():
+    # ---- runs ONCE before any tests execute ----
+
+    # ---- Interface to the tests ----
+    yield HERE
+
+    # ---- runs ONCE after all tests finish (even on failure) ----
+
+    # --------------------
+    # Clean up
+    shutil.rmtree(HERE/'results', ignore_errors=True)
+    shutil.rmtree(HERE/'checkpoints', ignore_errors=True)
+
+@pytest.fixture(scope='session')
 def lti_data():
     # ---- runs ONCE before any tests execute ----
 
@@ -53,7 +69,6 @@ def lti_data():
 
     # --------------------
     # Clean up
-    import os
     if os.path.exists(HERE/'lti.npz'):
         os.remove(HERE/'lti.npz')
 
@@ -94,6 +109,5 @@ def ltg_data():
 
     # --------------------
     # Clean up
-    import os
     if os.path.exists(HERE/'lti.npz'):
         os.remove(HERE/'lti.npz')

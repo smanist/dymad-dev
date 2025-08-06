@@ -28,11 +28,12 @@ class TrainerBase:
         self.convergence_tolerance_reached = False
 
         # Setup paths
-        os.makedirs('./checkpoints', exist_ok=True)
-        self.checkpoint_path = f'./checkpoints/{self.model_name}_checkpoint.pt'
-        self.best_model_path = f'./{self.model_name}.pt'
-        os.makedirs('./results', exist_ok=True)
-        self.results_prefix = './results'
+        _dir = os.path.dirname(config_path)
+        os.makedirs(f'{_dir}/checkpoints', exist_ok=True)
+        self.checkpoint_path = f'{_dir}/checkpoints/{self.model_name}_checkpoint.pt'
+        self.best_model_path = f'{_dir}/{self.model_name}.pt'
+        os.makedirs(f'{_dir}/results', exist_ok=True)
+        self.results_prefix = f'{_dir}/results'
         # Initialize metadata
         self.metadata = self._init_metadata()
         # Setup data
