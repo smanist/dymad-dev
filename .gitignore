@@ -10,7 +10,7 @@ docs/_build
 docs/api
 examples/*/data/*.npz
 examples/*/results/*.npz
-test*/*/data/*.npz
-test*/results/*.npz
-test*/*/results/*.npz
+scripts/*/data/*.npz
+scripts/*/results/*.npz
+tests/results/*.npz
 .ipynb_checkpoints
