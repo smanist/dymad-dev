@@ -11,9 +11,8 @@ readme          = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "numpy>=2.0",
-  "matplotlib",
-  "numpy",
-  "scipy",
+  "matplotlib>=3.9",
+  "scipy>=1.14",
   "torch>=2.5",
   "torchdiffeq>=0.2.5",
   "torch-geometric>=2.6",
