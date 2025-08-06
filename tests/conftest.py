@@ -100,14 +100,14 @@ def ltg_data():
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
 
     # Pretending a 3-node graph
-    np.savez_compressed(HERE/'lti.npz', t=ts, x=np.concatenate([ys, ys, ys], axis=-1), u=np.concatenate([us, us, us], axis=-1))
+    np.savez_compressed(HERE/'ltg.npz', t=ts, x=np.concatenate([ys, ys, ys], axis=-1), u=np.concatenate([us, us, us], axis=-1))
 
     # ---- Interface to the tests ----
-    yield HERE/'lti.npz'
+    yield HERE/'ltg.npz'
 
     # ---- runs ONCE after all tests finish (even on failure) ----
 
     # --------------------
     # Clean up
-    if os.path.exists(HERE/'lti.npz'):
-        os.remove(HERE/'lti.npz')
+    if os.path.exists(HERE/'ltg.npz'):
+        os.remove(HERE/'ltg.npz')
