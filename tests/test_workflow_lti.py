@@ -21,8 +21,8 @@ trx = [
 ]
 tru = {
     "type": "delay",
-        "delay": 1
-    }
+    "delay": 1
+}
 
 mdl_kb = {
     "name" : 'lti_model',
