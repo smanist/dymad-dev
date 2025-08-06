@@ -44,5 +44,9 @@ def load_config(config_path: str, config_mod: dict = None) -> dict:
     if config_mod is not None:
         if not isinstance(config_mod, dict):
             raise TypeError("config_mod must be a dictionary.")
-        config.update(config_mod)
+        for key, value in config_mod.items():
+            if isinstance(value, dict) and key in config:
+                config[key].update(value)
+            else:
+                config[key] = value
     return config

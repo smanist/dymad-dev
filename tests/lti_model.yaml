@@ -1,0 +1,18 @@
+data:
+  path: './data/lti.npz'
+  n_samples: 128
+  n_steps: 501
+  double_precision: true
+
+transform_x:
+  type: "scaler"
+  mode: "std"
+
+transform_u:
+  type: "identity"
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 128
