@@ -16,7 +16,8 @@ dependencies = [
   "scipy",
   "torch",
   "torchdiffeq",
-  "torch-geometric"
+  "torch-geometric",
+  "yaml"
 ]
 
 [project.optional-dependencies]
