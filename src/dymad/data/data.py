@@ -87,6 +87,52 @@ class DynGeoDataImpl:
     """u (torch.Tensor): Control tensor of shape (batch_size, n_steps, n_controls)."""
     edge_index: torch.Tensor
     """edge_index (torch.Tensor): Edge index tensor for graph structure, shape (2, n_edges)."""
+    n_nodes: int = 0
+    """n_nodes (int): Number of nodes in the graph structure."""
+
+    def __post_init__(self):
+        self.n_nodes = self.edge_index.max().item() + 1
+        if self.x is not None:
+            self.x_reshape = self.x.shape[:-1] + (self.n_nodes, -1)
+        if self.u is not None:
+            self.u_reshape = self.u.shape[:-1] + (self.n_nodes, -1)
+
+    @property
+    def xg(self) -> torch.Tensor:
+        """
+        Get the state tensor with shape (batch_size, n_steps, n_nodes, n_features).
+        """
+        return self.x.reshape(*self.x_reshape)
+
+    @property
+    def ug(self) -> Union[torch.Tensor, None]:
+        """
+        Get the control tensor with shape (batch_size, n_steps, n_nodes, n_controls).
+        Returns None if control tensor is not present.
+        """
+        if self.u is not None:
+            return self.u.reshape(*self.u_reshape)
+        return None
+
+    def g(self, z: torch.Tensor) -> torch.Tensor:
+        """
+        Reshape a tensor to have shape (batch_size, n_steps, n_nodes, -1).
+
+        Args:
+            z (torch.Tensor): Input tensor of shape (batch_size, n_steps, n_nodes * features).
+
+        Returns:
+            torch.Tensor: Reshaped tensor of shape (batch_size, n_steps, n_nodes, features).
+        """
+        out_shape = z.shape[:-1] + (self.n_nodes, -1)
+        return z.reshape(*out_shape)
+    
+    def G(self, z: torch.Tensor) -> torch.Tensor:
+        """
+        The reverse of g()
+        """
+        out_shape = z.shape[:-2] + (-1,)
+        return z.reshape(*out_shape)
 
     def to(self, device: torch.device, non_blocking: bool = False) -> "DynGeoDataImpl":
         """

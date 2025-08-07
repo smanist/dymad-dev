@@ -187,10 +187,6 @@ class GKBF(ModelBase):
         self.koopman_dimension = model_config.get('koopman_dimension', 16)
         self.const_term = model_config.get('const_term', True)
 
-        # Graph specific parameters
-        self.n_nodes = data_meta['config']['data']['n_nodes']
-        self.system_dimension = self.n_nodes * self.koopman_dimension
-
         # Method for input handling
         self.input_order = model_config.get('input_order', 'cubic')
 
@@ -200,7 +196,6 @@ class GKBF(ModelBase):
 
         # Determine other options for GNN layers
         opts = {
-            'n_nodes'        : self.n_nodes,
             'gcl'            : model_config.get('gcl', 'sage'),
             'activation'     : model_config.get('activation', 'prelu'),
             'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
@@ -224,11 +219,11 @@ class GKBF(ModelBase):
 
         # KBF operators for graph system
         tmp = [
-            nn.Linear(self.system_dimension, self.system_dimension, bias=False)
+            nn.Linear(self.koopman_dimension, self.koopman_dimension, bias=False)
             for _ in range(self.n_total_control_features + 1)
         ]
         if self.const_term and self.n_total_control_features > 0:
-            tmp.append(nn.Linear(self.n_total_control_features, self.system_dimension, bias=False))
+            tmp.append(nn.Linear(self.n_total_control_features, self.koopman_dimension, bias=False))
         self.operators = nn.ModuleList(tmp)
 
         if self.n_total_control_features == 0:
@@ -244,30 +239,33 @@ class GKBF(ModelBase):
         return model_info
 
     def encoder(self, w: DynGeoData) -> torch.Tensor:
-        return self.encoder_net(w.x, w.edge_index)
+        return self.encoder_net(w.xg, w.edge_index)
 
     def decoder(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
-        return self.decoder_net(z, w.edge_index)
+        return self.decoder_net(w.g(z), w.edge_index)
 
     def _dynamics_ctrl(self, z: torch.Tensor, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
+        z_reshaped = w.g(z)
+        u_reshaped = w.ug
+
         # Autonomous part: A @ z
-        z_dot = self.operators[0](z)
+        z_dot = self.operators[0](z_reshaped)
 
         # Add control-dependent terms: sum(u_i * B_i @ z)
         for i in range(self.n_total_control_features):
-            control_i = w.u[..., i].unsqueeze(-1)  # Extract control i and add dimension for broadcasting
-            z_dot = z_dot + control_i * self.operators[i + 1](z)
+            control_i = u_reshaped[..., i].unsqueeze(-1)  # Extract control i and add dimension for broadcasting
+            z_dot = z_dot + control_i * self.operators[i + 1](z_reshaped)
 
         # Add constant term if enabled
         if self.const_term:
-            z_dot = z_dot + self.operators[-1](w.u)
+            z_dot = z_dot + self.operators[-1](u_reshaped)
 
-        return z_dot
+        return w.G(z_dot)
 
     def _dynamics_auto(self, z: torch.Tensor, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
         # Autonomous part: A @ z
-        z_dot = self.operators[0](z)
-        return z_dot
+        z_dot = self.operators[0](w.g(z))
+        return w.G(z_dot)
 
     def forward(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         z = self.encoder(w)

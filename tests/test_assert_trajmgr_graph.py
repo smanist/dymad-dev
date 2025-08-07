@@ -19,8 +19,7 @@ def test_trajmgr(ltg_data):
                 "path": ltg_data,
                 "n_samples": 128,
                 "n_steps": 501,
-                "double_precision": False,
-                "n_nodes": 3,},
+                "double_precision": False},
             "transform_x": [
                 {
                 "type": "Scaler",
