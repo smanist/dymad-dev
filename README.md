@@ -43,7 +43,6 @@ If there are API errors such as some files not found, try deleting the auto-gene
 
 # TODO notes
 
-- Extend DynGeoData with subgraph to parallelize batch processing
 - Include edge_attr etc in DynGeoData, see [here](https://pytorch-geometric.readthedocs.io/en/latest/cheatsheet/gnn_cheatsheet.html)
 - Verify the RNN-type training
 - Update the aircraft example

@@ -157,18 +157,28 @@ class DynGeoDataImpl:
         Collate a list of DynGeoData instances into a single DynGeoData instance.
         Needed by DataLoader to stack state and control tensors.
 
+        The operation follows PyGData, that assembles the graphs of each sample
+        into a single large graph, so that the subsequent GNN evaluation operates
+        on a single graph to maximize parallelism.
+
         Args:
             batch_list (List[DynGeoData]): List of DynGeoData instances to collate.
 
         Returns:
             DynGeoData: A single DynGeoData instance with stacked state and control tensors.
         """
-        xs = torch.stack([b.x for b in batch_list], dim=0)
+        xs = torch.concatenate([b.x for b in batch_list], dim=-1).unsqueeze(0)
         if batch_list[0].u is not None:
-            us = torch.stack([b.u for b in batch_list], dim=0)
+            us = torch.concatenate([b.u for b in batch_list], dim=-1).unsqueeze(0)
         else:
             us = None
-        edge_index = torch.stack([b.edge_index for b in batch_list], dim=0)
+
+        n_nodes = [0] + [b.n_nodes for b in batch_list[:-1]]
+        offset = torch.tensor(n_nodes).cumsum(dim=0)
+        edge_index = torch.concatenate([
+            b.edge_index + offset[i] for i, b in enumerate(batch_list)],
+            dim=-1).unsqueeze(0)
+
         return DynGeoDataImpl(xs, us, edge_index)
 
     def truncate(self, num_step):

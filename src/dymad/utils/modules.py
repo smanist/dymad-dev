@@ -397,18 +397,26 @@ class GNN(nn.Module):
 
     def forward(self, x, edge_index, **kwargs):
         """
-        The main bottleneck is that batch operation is only applicable to the same edge_index.
+        Forward pass through the GNN.
 
-        If edge_index is 2D, we can process the entire batch in one go.
+        `x` is of shape (n_batch, ..., n_nodes, n_features).
+        `edge_index` is of shape (n_batch, 2, n_edges).
 
-        The input is reshaped to (N, n_nodes, n_features) where N is the batch size,
-        before passing through the GNN layers.
+        The code returns a tensor of shape (n_batch, ..., n_nodes * n_features).
 
-        The output is reshaped back to (N, n_nodes * n_features).
+        If n_batch=1, we can process the entire batch in one go.
+        Otherwise, we process each edge_index sequentially, which would incur
+        a severe performance degradation.
+
+        Fortunately, the inputs are assumed to come from DynGeoData, which
+        collates batch data into a single large graph, so that here we always
+        have n_batch=1.
         """
         if edge_index.shape[0] == 1:
+            # The usual case, where we have a single edge_index
             return self._forward_single(x, edge_index[0], **kwargs)
         else:
+            # The slow case, where we process multiple edge_indices sequentially
             assert len(x) == len(edge_index), \
                 "Batch size of x and edge_index must match. Got {} and {}.".format(x.shape, edge_index.shape)
             tmp = []
@@ -419,9 +427,6 @@ class GNN(nn.Module):
     def _forward_single(self, x, edge_index, **kwargs):
         """
         Forward pass for one edge_index.
-
-        x should be of shape (..., n_nodes, input_features).
-        The output will be (..., n_nodes*output_features).
         """
         out_shape = x.shape[:-2] + (-1,)
         for layer in self.layers:
