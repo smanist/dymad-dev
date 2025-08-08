@@ -29,6 +29,7 @@ class TrainerBase:
 
         # Setup paths
         _dir = os.path.dirname(config_path)
+        _dir = '.' if _dir == '' else _dir
         os.makedirs(f'{_dir}/checkpoints', exist_ok=True)
         self.checkpoint_path = f'{_dir}/checkpoints/{self.model_name}_checkpoint.pt'
         self.best_model_path = f'{_dir}/{self.model_name}.pt'

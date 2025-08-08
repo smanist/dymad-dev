@@ -28,31 +28,17 @@ class TakeFirst(nn.Module):
     def diagnostic_info(self) -> str:
         return f"m: {self.m}"
 
-class TakeFirstGraph(nn.Module):
+class TakeFirstGraph(TakeFirst):
     """
     Graph version of TakeFirst.
 
-    Args:
-        m (int): Number of entries to take from the last axis.
-        n_nodes (int): Number of nodes in the graph.
+    Input (..., n_nodes, n_features)
+    Output (..., n_nodes*m)
     """
-    def __init__(self, m: int, n_nodes: int):
-        super().__init__()
-        assert m > 0, "m must be a positive integer"
-        self.m = m
-        self.n_nodes = n_nodes
-
     def forward(self, x: torch.Tensor, edge_index, **kwargs) -> torch.Tensor:
         """"""
-        orig_shape = x.shape
-        n_features = orig_shape[-1] // self.n_nodes
-        x = x.reshape(*orig_shape[:-1], self.n_nodes, n_features)
-        x = x[..., :self.m] if x.ndim > 2 else x[:, :self.m]
-        x = x.reshape(*orig_shape[:-1], self.n_nodes * self.m)
-        return x
-
-    def diagnostic_info(self) -> str:
-        return f"m: {self.m}, n_nodes: {self.n_nodes}"
+        out_shape = x.shape[:-2] + (-1,)
+        return x[..., :self.m].reshape(*out_shape) if x.ndim > 1 else x[:self.m]
 
 _ACT_MAP = {
     # common aliases -> canonical class
@@ -340,7 +326,8 @@ class GNN(nn.Module):
 
     Due to the implementation, the GNN is applied sequentially to batch data.
 
-    To interface with other parts of the code, the model assumes concatenated features across nodes.
+    To interface with other parts of the code, the model assumes the input to be node-wise, (..., n_nodes, n_input),
+    but the output is reshaped to concatenate features across nodes, (..., n_nodes * n_output).
     See `forward` method for details.
 
     Args:
@@ -362,7 +349,6 @@ class GNN(nn.Module):
         output_dim: int,
         n_layers: int,
         *,
-        n_nodes: int = 0,
         gcl: Union[str, nn.Module, type] = 'sage',
         activation: Union[str, nn.Module, Callable[[], nn.Module]] = 'prelu',
         weight_init: Union[str, Callable[[torch.Tensor, float], None]] = 'xavier_uniform',
@@ -371,7 +357,6 @@ class GNN(nn.Module):
         end_activation: bool = True,
     ):
         super().__init__()
-        self.n_nodes = n_nodes
         assert n_layers > 0, "n_layers must be a positive integer"
 
         _gcl = _resolve_gcl(gcl)
@@ -412,18 +397,26 @@ class GNN(nn.Module):
 
     def forward(self, x, edge_index, **kwargs):
         """
-        The main bottleneck is that batch operation is only applicable to the same edge_index.
+        Forward pass through the GNN.
 
-        If edge_index is 2D, we can process the entire batch in one go.
+        `x` is of shape (n_batch, ..., n_nodes, n_features).
+        `edge_index` is of shape (n_batch, 2, n_edges).
 
-        The input is reshaped to (N, n_nodes, n_features) where N is the batch size,
-        before passing through the GNN layers.
+        The code returns a tensor of shape (n_batch, ..., n_nodes * n_features).
 
-        The output is reshaped back to (N, n_nodes * n_features).
+        If n_batch=1, we can process the entire batch in one go.
+        Otherwise, we process each edge_index sequentially, which would incur
+        a severe performance degradation.
+
+        Fortunately, the inputs are assumed to come from DynGeoData, which
+        collates batch data into a single large graph, so that here we always
+        have n_batch=1.
         """
         if edge_index.shape[0] == 1:
+            # The usual case, where we have a single edge_index
             return self._forward_single(x, edge_index[0], **kwargs)
         else:
+            # The slow case, where we process multiple edge_indices sequentially
             assert len(x) == len(edge_index), \
                 "Batch size of x and edge_index must match. Got {} and {}.".format(x.shape, edge_index.shape)
             tmp = []
@@ -434,22 +427,14 @@ class GNN(nn.Module):
     def _forward_single(self, x, edge_index, **kwargs):
         """
         Forward pass for one edge_index.
-
-        x should be of shape (..., n_nodes*input_features).  It is reshaped to
-        (..., n_nodes, input_features) before passing through the GNN layers.
-        In the end it is reshaped back to (..., n_nodes*output_features).
         """
-        orig_shape = x.shape
-        feature_dim = orig_shape[-1] // self.n_nodes
-        x = x.reshape(-1, self.n_nodes, feature_dim)
+        out_shape = x.shape[:-2] + (-1,)
         for layer in self.layers:
             if isinstance(layer, MessagePassing):
                 x = layer(x, edge_index, **kwargs)
             else:
                 x = layer(x)
-        # Restore original leading dimensions, but last two are merged as before
-        out = x.reshape(*orig_shape[:-1], -1)
-        return out
+        return x.reshape(*out_shape)
 
 class ResBlockGNN(GNN):
     """
@@ -459,7 +444,6 @@ class ResBlockGNN(GNN):
     """
     def __init__(self, input_dim: int, latent_dim: int, output_dim: int,
                  n_layers: int,
-                 n_nodes: int = 0,
                  gcl: Union[str, nn.Module, type] = 'sage',
                  activation: Union[str, nn.Module, Callable[[], nn.Module]] = 'prelu',
                  weight_init: Union[str, Callable[[torch.Tensor, float], None]] = 'xavier_uniform',
@@ -469,7 +453,6 @@ class ResBlockGNN(GNN):
         assert input_dim == output_dim, "Input and output dimensions must match for ResBlock"
         super().__init__(input_dim, latent_dim, output_dim,
                          n_layers=n_layers,
-                         n_nodes=n_nodes,
                          gcl=gcl,
                          activation=activation,
                          weight_init=weight_init,
@@ -478,7 +461,10 @@ class ResBlockGNN(GNN):
                          end_activation=end_activation)
 
     def forward(self, x, edge_index, **kwargs):
-        return x + super().forward(x, edge_index, **kwargs)
+        inp_shape = x.shape[:-1] + (-1,)
+        out_shape = x.shape[:-2] + (-1,)
+        res = x + super().forward(x, edge_index, **kwargs).reshape(*inp_shape)
+        return res.reshape(*out_shape)
 
 class IdenCatGNN(GNN):
     """
@@ -493,7 +479,6 @@ class IdenCatGNN(GNN):
     """
     def __init__(self, input_dim: int, latent_dim: int, output_dim: int,
                  n_layers: int,
-                 n_nodes: int = 0,
                  gcl: Union[str, nn.Module, type] = 'sage',
                  activation: Union[str, nn.Module, Callable[[], nn.Module]] = 'prelu',
                  weight_init: Union[str, Callable[[torch.Tensor, float], None]] = 'xavier_uniform',
@@ -503,7 +488,6 @@ class IdenCatGNN(GNN):
         assert output_dim > input_dim, "Output dimension must be greater than input dimension"
         super().__init__(input_dim, latent_dim, output_dim-input_dim,
                          n_layers=n_layers,
-                         n_nodes=n_nodes,
                          gcl=gcl,
                          activation=activation,
                          weight_init=weight_init,
@@ -512,20 +496,16 @@ class IdenCatGNN(GNN):
                          end_activation=end_activation)
 
     def forward(self, x, edge_index, **kwargs):
-        orig_shape = x.shape
-        n_dim_x = orig_shape[-1] // self.n_nodes
-        tmp = super().forward(x, edge_index, **kwargs)
-        n_features = tmp.shape[-1] // self.n_nodes
-
-        x_reshaped = x.reshape(*orig_shape[:-1], self.n_nodes, n_dim_x)
-        tmp_reshaped = tmp.reshape(*orig_shape[:-1], self.n_nodes, n_features)
-        out = torch.cat([x_reshaped, tmp_reshaped], dim=-1)
-        return out.reshape(*orig_shape[:-1], self.n_nodes * (n_dim_x + n_features))
+        inp_shape = x.shape[:-1] + (-1,)
+        out_shape = x.shape[:-2] + (-1,)
+        tmp = super().forward(x, edge_index, **kwargs).reshape(*inp_shape)
+        out = torch.cat([x, tmp], dim=-1)
+        return out.reshape(*out_shape)
 
 def make_autoencoder(
         type: str,
         input_dim: int, latent_dim: int, hidden_dim: int, enc_depth: int, dec_depth: int,
-        output_dim: int = None, n_nodes: int = None, **kwargs) -> Tuple[nn.Module, nn.Module]:
+        output_dim: int = None, **kwargs) -> Tuple[nn.Module, nn.Module]:
     """
     Factory function to create preset autoencoder models. Including:
 
@@ -543,8 +523,6 @@ def make_autoencoder(
         enc_depth (int): Number of layers in the encoder.
         dec_depth (int): Number of layers in the decoder.
         output_dim (int, optional): Dimension of the output features, defaults to `input_dim`.
-        n_nodes (int, optional): Number of nodes in the graph. Required for GNN-based autoencoders.
-            In the GNN cases, the input and output dimensions are the **total** dimensions across all nodes.
         **kwargs: Additional keyword arguments passed to the MLP or GNN constructors.
     """
     # Prepare the arguments
@@ -583,14 +561,6 @@ def make_autoencoder(
             decoder = TakeFirst(output_dim)
 
     elif _type[:3] == "gnn":
-        assert n_nodes is not None, "n_nodes must be specified for GNN autoencoder"
-        encoder_args.update(
-            input_dim=input_dim // n_nodes,
-            n_nodes=n_nodes)
-        decoder_args.update(
-            output_dim=output_dim // n_nodes,
-            n_nodes=n_nodes)
-
         if _type == "gnn_smp":
             encoder = GNN(**encoder_args)
             decoder = GNN(**decoder_args)
@@ -601,7 +571,7 @@ def make_autoencoder(
 
         elif _type == "gnn_cat":
             encoder = IdenCatGNN(**encoder_args)
-            decoder = TakeFirstGraph(output_dim // n_nodes, n_nodes)
+            decoder = TakeFirstGraph(output_dim)
 
     if encoder is None or decoder is None:
         raise ValueError(f"Unknown autoencoder type '{type}'.")

@@ -585,11 +585,6 @@ class TrajectoryManagerGraph(TrajectoryManager):
     def __init__(self, metadata: Dict, device: torch.device = torch.device("cpu"), adj: Optional[Union[torch.Tensor, np.ndarray]] = None):
         super().__init__(metadata, device)
         self.adj = adj  # Store the adjacency matrix if provided externally
-        self.n_nodes = self.metadata['config']['data'].get('n_nodes', None)
-
-        if self.n_nodes is None:
-            logging.error("Number of nodes (n_nodes) must be specified in the configuration for graph models.")
-            raise ValueError("Number of nodes (n_nodes) must be specified in the configuration for graph models.")
 
     def load_data(self, path: str) -> None:
         """
@@ -656,11 +651,11 @@ class TrajectoryManagerGraph(TrajectoryManager):
 
         # Bookkeeping metadata for the dataset.
         # The total number of features is the sum of state and control features.
-        self.metadata['n_total_state_features'] = self._data_transform_x._out_dim * self.n_nodes
+        self.metadata['n_total_state_features'] = self._data_transform_x._out_dim
         if self._is_autonomous:
             self.metadata['n_total_control_features'] = 0
         else:
-            self.metadata['n_total_control_features'] = self._data_transform_u._out_dim * self.n_nodes
+            self.metadata['n_total_control_features'] = self._data_transform_u._out_dim
         self.metadata['n_total_features'] = self.metadata['n_total_state_features'] + self.metadata['n_total_control_features']
         self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
 
@@ -708,7 +703,8 @@ class TrajectoryManagerGraph(TrajectoryManager):
         """
         if forward:
             # Reshape from [T, n_nodes * n_features] to [n_nodes, T, n_features]
-            tmp = data.reshape(data.shape[0], self.n_nodes, -1)  # [T, n_nodes, n_features_per_node]
+            n_nodes = self.adj.shape[-1]
+            tmp = data.reshape(data.shape[0], n_nodes, -1)  # [T, n_nodes, n_features_per_node]
             return np.swapaxes(tmp, 0, 1)  # [n_nodes, T, n_features_per_node]
 
         # Reshape from [n_nodes, T, n_features] to [T, n_nodes * n_features]
@@ -737,10 +733,6 @@ class TrajectoryManagerGraph(TrajectoryManager):
             adj = torch.tensor(adj, dtype=self.dtype, device=self.train_set[0].x.device)
         else:
             adj = adj.to(self.train_set[0].x.device)
-
-        # Verify node count matches
-        if adj.size(0) != self.n_nodes or adj.size(1) != self.n_nodes:
-            raise ValueError(f"Adjacency matrix shape {adj.shape} does not match the number of nodes {self.n_nodes}.")
 
         # Convert adjacency matrix to edge_index and edge_attr using PyG
         edge_index, _ = dense_to_sparse(adj)

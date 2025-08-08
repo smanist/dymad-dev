@@ -202,9 +202,6 @@ class GLDM(ModelBase):
         self.n_total_features = data_meta.get('n_total_features')
         self.latent_dimension = model_config.get('latent_dimension', 64)
 
-        # Graph specific parameters
-        self.n_nodes = data_meta['config']['data']['n_nodes']
-
         # Method for input handling
         self.input_order = model_config.get('input_order', 'cubic')
 
@@ -227,7 +224,6 @@ class GLDM(ModelBase):
         }
         opts_gnn = opts_mlp.copy()
         opts_gnn.update({
-            'n_nodes'        : self.n_nodes,
             'gcl'            : model_config.get('gcl', 'sage'),
         })
         aec_type = model_config.get('autoencoder_type', 'smp')
@@ -245,9 +241,9 @@ class GLDM(ModelBase):
         )
 
         self.dynamics_net = MLP(
-            input_dim  = enc_out_dim * self.n_nodes,
+            input_dim  = enc_out_dim,
             latent_dim = self.latent_dimension,
-            output_dim = dec_inp_dim * self.n_nodes,
+            output_dim = dec_inp_dim,
             n_layers   = proc_depth,
             **opts_mlp
         )
@@ -266,25 +262,17 @@ class GLDM(ModelBase):
         return model_info
 
     def _encoder_ctrl(self, w: DynGeoData) -> torch.Tensor:
-        x_shape = w.x.shape[:-1] + (self.n_nodes, -1)
-        u_shape = w.u.shape[:-1] + (self.n_nodes, -1)
-
-        x_reshaped = w.x.view(*x_shape)
-        u_reshaped = w.u.view(*u_shape)
-
-        xu_cat = torch.cat([x_reshaped, u_reshaped], dim=-1)
-        xu_flat = xu_cat.view(*w.x.shape[:-1], self.n_total_state_features + self.n_total_control_features)
-
-        return self.encoder_net(xu_flat, w.edge_index)
+        xu_cat = torch.cat([w.xg, w.ug], dim=-1)
+        return self.encoder_net(xu_cat, w.edge_index)
 
     def _encoder_auto(self, w: DynGeoData) -> torch.Tensor:
-        return self.encoder_net(w.x, w.edge_index)
+        return self.encoder_net(w.xg, w.edge_index)
 
     def decoder(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
-        return self.decoder_net(z, w.edge_index)
+        return self.decoder_net(w.g(z), w.edge_index)
 
     def dynamics(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
-        return self.dynamics_net(z)
+        return w.G(self.dynamics_net(w.g(z)))
 
     def forward(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         z = self.encoder(w)
