@@ -96,9 +96,6 @@ if ifprd:
     t_data = ts[0]
     u_data = np.concatenate([us[0], us[0], us[0]], axis=-1)
 
-    mdl_wf, prd_wf = load_model(MDL, f'ltg_{mdl}_wf.pt', f'ltg_{mdl}_wf.yaml')
-    mdl_nd, prd_nd = load_model(MDL, f'ltg_{mdl}_node.pt', f'ltg_{mdl}_node.yaml')
-
     for cfg in [cfgs[0]]:
         MDL, mdl = cfg
 

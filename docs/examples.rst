@@ -10,3 +10,4 @@ Examples
    examples/1d_oscillator/part3
    examples/2d_koopman/part1
    examples/2d_koopman/part2
+   examples/linear_graph/main
