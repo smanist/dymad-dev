@@ -45,8 +45,10 @@ def prediction_rmse(model,
 
         if plot:
             _us = None if us is None else us.detach().cpu().numpy()
-            plot_trajectory(np.array([x_truth, x_pred]), ts, model_name, metadata,
-                            us=_us, labels=['Truth', 'Prediction'], prefix=prefix)
+            plotting_config = metadata.get('config', {}).get('plotting', {})
+            plot_trajectory(np.array([x_truth, x_pred]), ts, model_name,
+                            us=_us, labels=['Truth', 'Prediction'], prefix=prefix,
+                            **plotting_config)
 
         return rmse
 
@@ -94,7 +96,9 @@ def prediction_rmse_lstm(model,
         rmse = np.sqrt(np.mean((x_pred - x_truth)**2))
 
         if plot:
-            plot_trajectory(np.array([x_pred, x_truth]), ts, model_name, metadata,
-                            us=us.cpu(), labels=['Truth', 'Prediction'])
+            plotting_config = metadata.get('config', {}).get('plotting', {})
+            plot_trajectory(np.array([x_pred, x_truth]), ts, model_name,
+                            us=us.cpu(), labels=['Truth', 'Prediction'],
+                            **plotting_config)
 
         return rmse

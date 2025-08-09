@@ -97,7 +97,7 @@ if ifprd:
             res.append(pred)
 
     plot_trajectory(
-        np.array(res), t_data, "LTI", metadata={'n_state_features': 2},
+        np.array(res), t_data, "LTG",
         us=u_data, labels=['Truth', 'LDM', 'KBF'], ifclose=False)
 
 plt.show()

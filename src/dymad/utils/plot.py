@@ -10,7 +10,9 @@ LINESTY = ["-", "--", "-.", ":"]
 plt_logger = logging.getLogger('matplotlib')
 plt_logger.setLevel(logging.INFO)
 
-def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclose=True, prefix='.'):
+def plot_trajectory(
+        traj, ts, model_name, us=None, labels=None, ifclose=True, prefix='.',
+        xidx=None, uidx=None, grid=None, xscl=None, uscl=None):
     """
     Plot trajectories with optional control inputs and save the figure.
 
@@ -18,11 +20,15 @@ def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclos
         traj (np.ndarray): Trajectory data, shape (n_steps, n_features) or (n_traj, n_steps, n_features)
         ts (np.ndarray): Time points corresponding to the trajectory data, shape (n_steps,)
         model_name (str): Name of the model for the plot title and filename
-        metadata (dict): Metadata containing configuration and state information
         us (np.ndarray, optional): Control inputs, shape (n_steps, n_controls)
         labels (list, optional): Labels for each trajectory, length must match number of trajectories
         ifclose (bool): Whether to close the plot after saving
         prefix (str): Directory prefix for saving the plot
+        xidx (list, optional): Indices of state features to plot
+        uidx (list, optional): Indices of control inputs to plot
+        grid (tuple, optional): Tuple (n_rows, n_cols) for subplot layout
+        xscl (str, optional): Scaling mode for state features ('01', '-11', 'std', or 'none')
+        uscl (str, optional): Scaling mode for control inputs ('01', '-11', 'std', or 'none')
     """
     if traj.ndim == 2:
         traj = np.array([traj])
@@ -32,15 +38,17 @@ def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclos
         "Number of trajectories must match number of labels"
 
     # Plot the first trajectory and create the axes
-    fig, ax = plot_one_trajectory(traj[0], ts, metadata, idx=0, us=us, axes=None, label=labels[0])
+    _, ax = plot_one_trajectory(traj[0], ts, idx=0, us=us, axes=None, label=labels[0],
+                                xidx=xidx, uidx=uidx, grid=grid, xscl=xscl, uscl=uscl)
 
     if Ntrj > 1:
         # Add additional trajectories to the same axes
         for i in range(1, Ntrj):
             rmse = np.linalg.norm(traj[0] - traj[i]) / (traj[0].shape[0] - 1)**0.5
             plot_one_trajectory(
-                traj[i], ts, metadata, idx=i, us=None, axes=ax,
-                label=labels[i]+f" rmse: {rmse:.4f}")
+                traj[i], ts, idx=i, us=None, axes=ax,
+                label=labels[i]+f" rmse: {rmse:.4f}",
+                xidx=xidx, uidx=uidx, grid=grid, xscl=xscl, uscl=uscl)
 
     # Adjust layout and save
     plt.tight_layout()
@@ -51,18 +59,44 @@ def plot_trajectory(traj, ts, model_name, metadata, us=None, labels=None, ifclos
     if ifclose:
         plt.close()
 
-def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=None):
+def _scale_axes(ax, data, scl):
+    if scl is None:
+        return
+    if scl == "01":
+        ax.set_ylim([-0.1, 1.1])  # [0,1] range with small buffer
+    elif scl == "-11":
+        ax.set_ylim([-1.2, 1.2])  # [-1,1] range with buffer
+    elif scl == "std":
+        ax.set_ylim([-3, 3])      # ±3 std devs for standardized data
+    else:  # mode=none
+        ymx = np.max(data)
+        ymn = np.min(data)
+        ax.set_ylim([ymn-0.1*abs(ymn), ymx+0.1*abs(ymx)])  # Use data range with buffer
+
+def plot_one_trajectory(
+        traj, ts, idx=0, us=None, axes=None, label=None,
+        xidx=None, uidx=None, grid=None, xscl=None, uscl=None):
     """
     Used by plot_trajectory to plot a single trajectory.
     """
-    dim_x = traj.shape[1]
+    if xidx is None:
+        dim_x = traj.shape[1]
+        idx_x = np.arange(dim_x)
+    else:
+        idx_x = np.array(xidx)
+        dim_x = len(idx_x)
 
     if us is None:
         dim_u = 0
     else:
         assert traj.shape[0] == us.shape[0], \
             "Trajectory and control input arrays must have the same time dimension"
-        dim_u = us.shape[1]
+        if uidx is None:
+            dim_u = us.shape[1]
+            idx_u = np.arange(dim_u)
+        else:
+            idx_u = np.array(uidx)
+            dim_u = len(idx_u)
 
     # Trim time array if needed
     if len(ts) > traj.shape[0]:
@@ -70,15 +104,13 @@ def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=Non
 
     if axes is None:
         # Set up subplot layout from metadata or use default
-        plotting_config = metadata.get('config', {}).get('plotting', {})
-        if 'n_rows' in plotting_config and 'n_cols' in plotting_config:
-            n_rows = plotting_config['n_rows']
-            n_cols = plotting_config['n_cols']
-            fig_size = (3 * n_cols, 2.5 * n_rows)
-        else:
+        if grid is None:
             # Default: one column with a row per state
             n_rows, n_cols = dim_x + dim_u, 1
             fig_size = (6, n_rows * 2)
+        else:
+            n_rows, n_cols = grid
+            fig_size = (3 * n_cols, 2.5 * n_rows)
 
         # Create subplots
         fig, ax = plt.subplots(n_rows, n_cols, figsize=fig_size, sharex=True)
@@ -93,39 +125,30 @@ def plot_one_trajectory(traj, ts, metadata, idx=0, us=None, axes=None, label=Non
 
     # Plot each state
     for i in range(dim_x):
-        ax[i].plot(ts, traj[:, i], LINESTY[idx%4], color=PALETTE[idx%6], linewidth=2, label=label)
+        ax[i].plot(ts, traj[:, idx_x[i]], LINESTY[idx%4], color=PALETTE[idx%6], linewidth=2, label=label)
         ax[i].set_xlim([0, ts[-1]])
         ax[i].grid(True, alpha=0.3)
 
-        ax[i].set_ylabel(f'State {i+1}', fontsize=10)
+        ax[i].set_ylabel(f'State {idx_x[i]+1}', fontsize=10)
         if i == 0:  # Only show legend on first subplot
             ax[i].legend(loc='best', fontsize=9)
 
+        if axes is None:
+            _scale_axes(ax[i], traj[:, idx_x[i]], xscl)
+
     if axes is None:
-        for i in range(dim_x):
-            # Set y-limits based on scaling mode (for normalized data)
-            if 'scaler' in metadata:
-                mode = metadata['scaler']['mode']
-                if mode == "01":
-                    ax[i].set_ylim([-0.1, 1.1])  # [0,1] range with small buffer
-                elif mode == "-11":
-                    ax[i].set_ylim([-1.2, 1.2])  # [-1,1] range with buffer
-                elif mode == "std":
-                    ax[i].set_ylim([-3, 3])      # ±3 std devs for standardized data
-                else:  # mode=none
-                    ymx = np.max(traj[:, i])
-                    ymn = np.min(traj[:, i])
-                    ax[i].set_ylim([ymn-0.1*abs(ymn), ymx+0.1*abs(ymx)])  # Use data range with buffer
+        if dim_u > 0:
+            # Plot only once as this is from data
+            offset = dim_x
+            for i in range(dim_u):
+                ax[offset + i].plot(ts, us[:, idx_u[i]], '-', color='#3498db', linewidth=2)
+                ax[offset + i].set_xlim([0, ts[-1]])
+                ax[offset + i].grid(True, alpha=0.3)
+                ax[offset + i].set_ylabel(f'Control {i+1}', fontsize=10)
 
-    if axes is None and dim_u > 0:
-        offset = dim_x
-        for i in range(dim_u):
-            ax[offset + i].plot(ts, us[:, i], '-', color='#3498db', linewidth=2)
-            ax[offset + i].set_xlim([0, ts[-1]])
-            ax[offset + i].grid(True, alpha=0.3)
-            ax[offset + i].set_ylabel(f'Control {i+1}', fontsize=10)
+                _scale_axes(ax[offset + i], us[:, idx_u[i]], uscl)
+
     ax[-1].set_xlabel('Time', fontsize=10)
-
     ax[-1].set_xlim([2*ts[0]-ts[1], 2*ts[-1]-ts[-2]])
 
     return fig, ax

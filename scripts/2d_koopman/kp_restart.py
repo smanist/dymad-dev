@@ -141,7 +141,7 @@ if ifprd:
 
     labels = ['Truth'] + [cfgs[i][0] for i in IDX] + [cfgs[IDX[1]][0]+'_rst']
     plot_trajectory(
-        np.array(res), t_data, "KP", metadata={'n_state_features': 2},
+        np.array(res), t_data, "KP",
         labels=labels, ifclose=False)
 
 plt.show()

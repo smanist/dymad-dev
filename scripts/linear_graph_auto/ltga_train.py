@@ -130,7 +130,7 @@ if ifprd:
 
     labels = ['Truth'] + [cfgs[i][0] for i in IDX]
     plot_trajectory(
-        np.array(res), t_data, "KP", metadata={'n_state_features': 2},
+        np.array(res), t_data, "LTGA",
         labels=labels, ifclose=False)
 
 plt.show()

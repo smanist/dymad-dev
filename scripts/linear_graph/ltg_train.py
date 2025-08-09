@@ -107,7 +107,7 @@ if ifprd:
             node_pred = prd_nd(x_data, u_data, t_data, ei=edge_index)
 
         plot_trajectory(
-            np.array([x_data, weak_pred, node_pred]), t_data, "LTI", metadata={'n_state_features': 2},
+            np.array([x_data, weak_pred, node_pred]), t_data, "LTG",
             us=u_data, labels=['Truth', 'Weak Form', 'NODE'], ifclose=False)
 
 plt.show()
