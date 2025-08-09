@@ -102,16 +102,16 @@ def plot_one_trajectory(
     if len(ts) > traj.shape[0]:
         ts = ts[:traj.shape[0]]
 
-    if axes is None:
-        # Set up subplot layout from metadata or use default
-        if grid is None:
-            # Default: one column with a row per state
-            n_rows, n_cols = dim_x + dim_u, 1
-            fig_size = (6, n_rows * 2)
-        else:
-            n_rows, n_cols = grid
-            fig_size = (3 * n_cols, 2.5 * n_rows)
+    # Set up subplot layout from metadata or use default
+    if grid is None:
+        # Default: one column with a row per state
+        n_rows, n_cols = dim_x + dim_u, 1
+        fig_size = (6, n_rows * 2)
+    else:
+        n_rows, n_cols = grid
+        fig_size = (3 * n_cols, 2.5 * n_rows)
 
+    if axes is None:
         # Create subplots
         fig, ax = plt.subplots(n_rows, n_cols, figsize=fig_size, sharex=True)
         if n_rows * n_cols == 1:
@@ -148,8 +148,9 @@ def plot_one_trajectory(
 
                 _scale_axes(ax[offset + i], us[:, idx_u[i]], uscl)
 
-    ax[-1].set_xlabel('Time', fontsize=10)
-    ax[-1].set_xlim([2*ts[0]-ts[1], 2*ts[-1]-ts[-2]])
+    for i in range(n_cols):
+        ax[-i-1].set_xlabel('Time', fontsize=10)
+        ax[-i-1].set_xlim([2*ts[0]-ts[1], 2*ts[-1]-ts[-2]])
 
     return fig, ax
 

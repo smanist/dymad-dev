@@ -1,0 +1,21 @@
+data:
+  path: './data/cylinder.npz'
+  n_samples: 1
+  n_steps: 140
+  double_precision: true
+
+transform_x:
+  type: "scaler"
+  mode: "std"
+
+transform_u:
+  type: "identity"
+
+split:
+  train_frac: 1
+
+dataloader:
+  batch_size: 1
+
+plotting:
+  dim_x: 4
