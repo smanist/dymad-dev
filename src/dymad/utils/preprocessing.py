@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import logging
 import numpy as np
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from dymad.utils.linalg import truncated_svd
 
@@ -394,11 +394,11 @@ class SVD(Transform):
     A class for data reduction by SVD.
 
     Args:
-        order (int): Truncation order.
+        order (int | float): Truncation order.
         ifcen (bool): If center the data.
     """
 
-    def __init__(self, order: int, ifcen: bool = False):
+    def __init__(self, order: Union[int, float] = 1.0, ifcen: bool = False):
         self._order = order
         self._ifcen = ifcen
 

@@ -3,8 +3,11 @@ import numpy as np
 import os
 import torch
 
-from dymad.data import DynData, DynGeoData, make_transform
+# Below avoids looped imports
+from dymad.data.data import DynDataImpl as DynData
+from dymad.data.data import DynGeoDataImpl as DynGeoData
 from dymad.utils.misc import load_config
+from dymad.utils.preprocessing import make_transform
 
 logger = logging.getLogger(__name__)
 
