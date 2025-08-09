@@ -15,7 +15,7 @@ class Transform(ABC):
     of shape (n_samples, n_features).
     """
     def __init__(self, **kwargs):  # Optional
-        pass
+        self.delay = 0  # Default delay is 0 for non-delay transforms.
 
     def fit(self, data: Array) -> None:  # Optional
         """

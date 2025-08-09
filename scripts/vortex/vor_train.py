@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from dymad.models import KBF
+from dymad.models import KBF, DKBF
 from dymad.training import WeakFormTrainer, NODETrainer
 from dymad.utils import load_model, plot_summary, plot_trajectory, setup_logging, TrajectorySampler
 
@@ -12,9 +12,10 @@ mdl_kb = {
     "encoder_layers" : 1,
     "decoder_layers" : 1,
     "latent_dimension" : 32,
-    "koopman_dimension" : 4,
+    "koopman_dimension" : 8,
     "activation" : "none",
-    "weight_init" : "xavier_uniform"}
+    "weight_init" : "xavier_uniform",
+    "gain" : 0.01}
 
 trn_wf = {
     "n_epochs": 400,
@@ -30,27 +31,42 @@ trn_wf = {
         "ordpol": 2,
         "ordint": 2}}
 trn_nd = {
-    "n_epochs": 400,
+    "n_epochs": 500,
     "save_interval": 20,
     "load_checkpoint": False,
     "learning_rate": 5e-3,
     "decay_rate": 0.999,
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
-    "sweep_lengths": [30, 50, 100, 200, 301],
-    "sweep_epoch_step": 400,
+    # "sweep_lengths": [5, 10, 30, 50, 140],
+    "sweep_lengths": [2, 3, 4, 6, 8],
+    "sweep_epoch_step": 100,
+    "chop_mode": "unfold",
+    "chop_step": 1,
     "ode_method": "dopri5",
     "rtol": 1e-7,
-    "atol": 1e-9
-}
+    "atol": 1e-9}
+trn_dt = {
+    "n_epochs": 500,
+    "save_interval": 20,
+    "load_checkpoint": False,
+    "learning_rate": 5e-3,
+    "decay_rate": 0.999,
+    "reconstruction_weight": 1.0,
+    "dynamics_weight": 1.0,
+    "sweep_lengths": [2, 3, 4, 6, 8],
+    "sweep_epoch_step": 100,
+    "chop_mode": "unfold",
+    "chop_step": 1}
 config_path = 'vor_model.yaml'
 
 cfgs = [
-    ('kbf_wf',   KBF, WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
-    ('kbf_node', KBF, NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
+    ('kbf_wf',   KBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
+    ('kbf_node', KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
+    ('dkbf_nd',  DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
     ]
 
-IDX = [0]
+IDX = [2]
 
 ifdat = 0
 iftrn = 1

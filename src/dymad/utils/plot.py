@@ -47,7 +47,7 @@ def plot_trajectory(
             rmse = np.linalg.norm(traj[0] - traj[i]) / (traj[0].shape[0] - 1)**0.5
             plot_one_trajectory(
                 traj[i], ts, idx=i, us=None, axes=ax,
-                label=labels[i]+f" rmse: {rmse:.4f}",
+                label=labels[i]+f" rmse: {rmse:4.3e}",
                 xidx=xidx, uidx=uidx, grid=grid, xscl=xscl, uscl=uscl)
 
     # Adjust layout and save
