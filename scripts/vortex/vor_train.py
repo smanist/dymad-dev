@@ -50,10 +50,10 @@ cfgs = [
     ('kbf_node', KBF, NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
     ]
 
-IDX = [1]
+IDX = [0]
 
 ifdat = 0
-iftrn = 0
+iftrn = 1
 ifplt = 0
 ifprd = 1
 

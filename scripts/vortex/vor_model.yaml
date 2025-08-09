@@ -5,8 +5,9 @@ data:
   double_precision: true
 
 transform_x:
-  type: "scaler"
-  mode: "std"
+  type: "svd"
+  ifcen: true
+  order: 8
 
 transform_u:
   type: "identity"

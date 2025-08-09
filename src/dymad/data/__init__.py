@@ -1,5 +1,5 @@
 from dymad.data.data import DynDataImpl, DynGeoDataImpl
-from dymad.data.preprocessing import Compose, DelayEmbedder, Identity, make_transform, Scaler
+from dymad.data.preprocessing import Compose, DelayEmbedder, Identity, make_transform, Scaler, SVD
 from dymad.data.trajectory_manager import TrajectoryManager, TrajectoryManagerGraph
 
 DynData = DynDataImpl
@@ -13,6 +13,7 @@ __all__ = [
     "Identity",
     "make_transform",
     "Scaler",
+    "SVD",
     "TrajectoryManager",
     "TrajectoryManagerGraph"
 ]

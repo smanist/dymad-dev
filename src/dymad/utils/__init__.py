@@ -1,4 +1,5 @@
 from dymad.utils.checkpoint import load_checkpoint, load_model, save_checkpoint
+from dymad.utils.linalg import truncated_svd
 from dymad.utils.misc import load_config, setup_logging
 from dymad.utils.modules import ControlInterpolator, GNN, IdenCatGNN, IdenCatMLP, make_autoencoder, MLP, ResBlockGNN, ResBlockMLP
 from dymad.utils.plot import plot_summary, plot_trajectory, plot_hist
@@ -30,5 +31,6 @@ __all__ = [
     "ResBlockMLP",
     "save_checkpoint",
     "setup_logging",
-    "TrajectorySampler"
+    "TrajectorySampler",
+    "truncated_svd"
 ]

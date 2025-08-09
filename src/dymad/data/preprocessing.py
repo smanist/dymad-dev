@@ -3,6 +3,8 @@ import logging
 import numpy as np
 from typing import Any, Dict, List, Optional
 
+from dymad.utils.linalg import truncated_svd
+
 Array = List[np.ndarray]
 
 logger = logging.getLogger(__name__)
@@ -386,11 +388,85 @@ class DelayEmbedder(Transform):
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
 
+
+class SVD(Transform):
+    """
+    A class for data reduction by SVD.
+
+    Args:
+        order (int): Truncation order.
+        ifcen (bool): If center the data.
+    """
+
+    def __init__(self, order: int, ifcen: bool = False):
+        self._order = order
+        self._ifcen = ifcen
+
+    def __str__(self):
+        return "svd"
+
+    def fit(self, X: Array) -> None:
+        """"""
+        X_combined    = np.vstack(X)
+        self._inp_dim = X_combined.shape[-1]
+
+        if self._ifcen:
+            self._off = np.mean(X_combined, axis=0)
+            X_combined -= self._off
+        else:
+            self._off = np.zeros(self._inp_dim,)
+        _, _, _V = truncated_svd(X_combined, self._order)
+        self._C = _V.T
+        self._P = _V.conj()
+
+        self._out_dim = len(self._C)
+        logging.info(f"SVD: Fitted SVD with {self._out_dim} components.")
+
+    def transform(self, X: Array) -> Array:
+        """"""
+        logging.info(f"SVD: Applying SVD with order={self._order}, center={self._ifcen}.")
+        if self._P is None:
+            raise ValueError("SVD parameters are not initialized. Call `fit` first.")
+
+        return [(trajectory-self._off).dot(self._P) for trajectory in X]
+
+    def inverse_transform(self, X: Array) -> Array:
+        """"""
+        logging.info(f"SVD: Applying projection with order={self._order}, center={self._ifcen}.")
+        if self._C is None:
+            raise ValueError("SVD parameters are not initialized. Call `fit` first.")
+
+        return [trajectory.dot(self._C) + self._off for trajectory in X]
+
+    def state_dict(self) -> dict[str, Any]:
+        """"""
+        return {
+            "order":  self._order,
+            "ifcen":  self._ifcen,
+            "inp":    self._inp_dim,
+            "out":    self._out_dim,
+            "C":      self._C,
+            "P":      self._P,
+            "off":    self._off
+            }
+
+    def load_state_dict(self, d) -> None:
+        """"""
+        logging.info(f"SVD: Loading parameters from checkpoint :{d}")
+        self._order = d["order"]
+        self._ifcen = d["ifcen"]
+        self._inp_dim = d["inp"]
+        self._out_dim = d["out"]
+        self._C     = d["C"]
+        self._P     = d["P"]
+        self._off   = d["off"]
+
 _TRN_MAP = {
     str(Compose()):       Compose,
     str(DelayEmbedder()): DelayEmbedder,
     str(Identity()):      Identity,
     str(Scaler()):        Scaler,
+    str(SVD()):           SVD,
 }
 
 def make_transform(config: List[Dict[str, Any]]) -> Transform:
