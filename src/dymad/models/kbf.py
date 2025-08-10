@@ -5,7 +5,7 @@ from typing import Dict, Union, Tuple
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import make_autoencoder, predict_continuous, predict_discrete, \
+from dymad.utils import FlexLinear, make_autoencoder, predict_continuous, predict_discrete, \
     predict_graph_continuous, predict_graph_discrete
 
 class KBF(ModelBase):
@@ -63,17 +63,19 @@ class KBF(ModelBase):
         )
 
         # Create KBF operators: first for autonomous dynamics (A) then one per control (B_i)
-        tmp = [
-            nn.Linear(self.koopman_dimension, self.koopman_dimension, bias=False)
-            for _ in range(self.n_total_control_features + 1)]
-        if self.const_term and self.n_total_control_features > 0:
-            tmp.append(nn.Linear(self.n_total_control_features, self.koopman_dimension, bias=False))
-        self.operators = nn.ModuleList(tmp)
+        if self.n_total_control_features > 0:
+            if self.const_term:
+                dyn_dim = self.koopman_dimension * (self.n_total_control_features + 1) + self.n_total_control_features
+            else:
+                dyn_dim = self.koopman_dimension * (self.n_total_control_features + 1)
+        else:
+            dyn_dim = self.koopman_dimension
+        self.dynamics_net = FlexLinear(dyn_dim, self.koopman_dimension, bias=False)
 
         if self.n_total_control_features == 0:
-            self.dynamics = self._dynamics_auto
+            self._zu_cat = self._zu_cat_auto
         else:
-            self.dynamics = self._dynamics_ctrl
+            self._zu_cat = self._zu_cat_ctrl
 
     def diagnostic_info(self) -> str:
         model_info = super(KBF, self).diagnostic_info()
@@ -88,30 +90,22 @@ class KBF(ModelBase):
 
     def decoder(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
         """Decode from Koopman space back to state space."""
-        # Apply decoder layers (now nn.Sequential or nn.Identity/nn.Linear)
         return self.decoder_net(z)
 
-    def _dynamics_ctrl(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+    def dynamics(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
         """Compute dynamics in Koopman space using bilinear form."""
-        # Autonomous part: A @ z
-        z_dot = self.operators[0](z)
+        return self.dynamics_net(self._zu_cat(z, w))
 
-        # Add control-dependent terms: sum(u_i * B_i @ z)
-        for i in range(self.n_total_control_features):
-            control_i = w.u[..., i].unsqueeze(-1)  # Extract control i and add dimension for broadcasting
-            z_dot = z_dot + control_i * self.operators[i + 1](z)
-
-        # Add constant term if enabled
+    def _zu_cat_ctrl(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+        """Concatenate state and control inputs."""
+        z_u = (z.unsqueeze(-1) * w.u.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
         if self.const_term:
-            z_dot = z_dot + self.operators[-1](w.u)
+            return torch.cat([z, z_u, w.u], dim=-1)
+        return torch.cat([z, z_u], dim=-1)
 
-        return z_dot
-
-    def _dynamics_auto(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
-        """Compute dynamics in Koopman space using bilinear form. Autonomous case."""
-        # Autonomous part: A @ z
-        z_dot = self.operators[0](z)
-        return z_dot
+    def _zu_cat_auto(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+        """Concatenate state and control inputs."""
+        return z
 
     def forward(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass for KBF model.
@@ -166,6 +160,26 @@ class DKBF(KBF):
 
     def __init__(self, model_config: Dict, data_meta: Dict):
         super(DKBF, self).__init__(model_config, data_meta)
+
+    def linear_features(self, w: DynData) -> torch.Tensor:
+        """Compute linear features for training."""
+        z = self.encoder(w)
+        return self._zu_cat(z, w)[..., :-1, :]
+
+    def linear_targets(self, w: DynData) -> torch.Tensor:
+        """Compute linear targets for training."""
+        z = self.encoder(w)
+        return z[..., 1:, :]
+
+    def linear_eval(self, z: torch.Tensor) -> torch.Tensor:
+        """Evaluate linear features using the learned weights."""
+        return self.dynamics_net(z)
+
+    def set_linear_weights(self, W: torch.Tensor) -> None:
+        """Set weights for the dynamics network."""
+        if W.shape != self.dynamics_net.weight.shape:
+            raise ValueError(f"Weight shape mismatch: expected {self.dynamics_net.weight.shape}, got {W.shape}")
+        self.dynamics_net.weight.data = W
 
     def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""

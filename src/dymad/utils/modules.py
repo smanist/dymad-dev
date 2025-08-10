@@ -1,6 +1,7 @@
 from scipy.interpolate import interp1d
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 try:
     from torch_geometric.nn.conv import MessagePassing
     from torch_geometric.nn import ChebConv, SAGEConv
@@ -39,6 +40,88 @@ class TakeFirstGraph(TakeFirst):
         """"""
         out_shape = x.shape[:-2] + (-1,)
         return x[..., :self.m].reshape(*out_shape) if x.ndim > 1 else x[:self.m]
+
+class FlexLinear(nn.Module):
+    """
+    A linear layer that can store weights either as a full matrix (MxN)
+    or as low-rank factors (U, V) with efficient matvec operations.
+
+    In the low-rank mode, the weight matrix is represented as:
+        W = U @ V^T
+    where U is (M x r) and V is (N x r).
+    """
+    def __init__(self, in_features, out_features, bias=True):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+
+        # Full weight params
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
+        self.bias = nn.Parameter(torch.zeros(out_features)) if bias else None
+
+        # Low-rank params
+        self.U = nn.Parameter(torch.empty(0, 0), requires_grad=False)
+        self.V = nn.Parameter(torch.empty(0, 0), requires_grad=False)
+
+        self.mode = "full"
+        self.rank = None
+
+    def _init_linear(
+            self, 
+            weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
+            bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+            gain: float = 1.0) -> None:
+        if self.mode == "full":
+            weight_init(self.weight, gain)
+        else:
+            weight_init(self.U, gain)
+            weight_init(self.V, gain)
+        if self.bias is not None:
+            bias_init(self.bias)
+
+    @torch.no_grad()
+    def set_full(self, W: torch.Tensor, b: torch.Tensor | None):
+        """Switch to full mode and copy parameters."""
+        assert W.shape == (self.out_features, self.in_features)
+        self.mode = "full"
+        self.rank = None
+        # release low-rank
+        self.U.requires_grad_(False)
+        self.V.requires_grad_(False)
+        self.U = nn.Parameter(torch.empty(0, 0, device=W.device), requires_grad=False)
+        self.V = nn.Parameter(torch.empty(0, 0, device=W.device), requires_grad=False)
+        # set full
+        self.weight.data.copy_(W)
+        if self.bias is not None and b is not None:
+            self.bias.data.copy_(b)
+
+    @torch.no_grad()
+    def set_lora(self, U: torch.Tensor, V: torch.Tensor, b: torch.Tensor | None):
+        """Switch to lowrank mode and copy factors. U: out*r, V: in*r."""
+        assert U.shape[0] == self.out_features and V.shape[0] == self.in_features
+        assert U.shape[1] == V.shape[1]
+        self.rank = U.shape[1]
+        self.mode = "lora"
+
+        # freeze full weight (not used in forward)
+        self.weight.requires_grad_(False)
+
+        # (re)allocate factors with grad
+        self.U = nn.Parameter(U.clone(), requires_grad=True)
+        self.V = nn.Parameter(V.clone(), requires_grad=True)
+
+        if self.bias is not None and b is not None:
+            self.bias.data.copy_(b)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.mode == "full":
+            return F.linear(x, self.weight, self.bias)
+        else:
+            # Efficient matvec-only: (x @ V) @ U^T + b
+            y = (x @ self.V) @ self.U.T
+            if self.bias is not None:
+                y = y + self.bias
+            return y
 
 _ACT_MAP = {
     # common aliases -> canonical class

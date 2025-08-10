@@ -133,7 +133,7 @@ class Compose(Transform):
 
     def load_state_dict(self, d) -> None:
         """"""
-        logging.info(f"Compose: Loading parameters from checkpoint")
+        logger.info(f"Compose: Loading parameters from checkpoint")
         self._T_names = d["names"]
         self.T = []
         for name, sd in zip(self._T_names, d["children"]):
@@ -172,7 +172,7 @@ class Identity(Transform):
 
     def load_state_dict(self, d) -> None:
         """"""
-        logging.info(f"Identity: Loading parameters from checkpoint :{d}")
+        logger.info(f"Identity: Loading parameters from checkpoint :{d}")
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
 
@@ -226,7 +226,7 @@ class Scaler(Transform):
 
     def transform(self, X: Array) -> Array:
         """"""
-        logging.info(f"Scaler: Applying scaling with offset={self._off}, scale={self._scl}.")
+        logger.info(f"Scaler: Applying scaling with offset={self._off}, scale={self._scl}.")
         if self._off is None or self._scl is None:
             raise ValueError("Scaler parameters are not initialized. Call `fit` first.")
 
@@ -234,7 +234,7 @@ class Scaler(Transform):
 
     def inverse_transform(self, X: Array) -> Array:
         """"""
-        logging.info(f"Scaler: Applying un-scaling with offset={self._off}, scale={self._scl}.")
+        logger.info(f"Scaler: Applying un-scaling with offset={self._off}, scale={self._scl}.")
         if self._off is None or self._scl is None:
             raise ValueError("Scaler parameters are not initialized. Call `fit` first.")
 
@@ -252,7 +252,7 @@ class Scaler(Transform):
 
     def load_state_dict(self, d) -> None:
         """"""
-        logging.info(f"Scaler: Loading parameters from checkpoint :{d}")
+        logger.info(f"Scaler: Loading parameters from checkpoint :{d}")
         self._mode = d["mode"].lower()
         self._off  = d["off"]
         self._scl  = d["scl"]
@@ -359,7 +359,7 @@ class DelayEmbedder(Transform):
             list[np.ndarray]: List of delay-embedded arrays, each of shape
                               (seq_length - delay, features * (delay + 1)).
         """
-        logging.info(f"DelayEmbedder: Applying delay embedding with delay={self.delay}.")
+        logger.info(f"DelayEmbedder: Applying delay embedding with delay={self.delay}.")
         delayed_sequences = []
         for sequence in X:
             delayed_sequences.append(self._delay(sequence))
@@ -367,7 +367,7 @@ class DelayEmbedder(Transform):
 
     def inverse_transform(self, X: Array) -> Array:
         """"""
-        logging.info(f"DelayEmbedder: Unrolling the data.")
+        logger.info(f"DelayEmbedder: Unrolling the data.")
         unrolled_sequences = []
         for sequence in X:
             unrolled_sequences.append(self._unroll(sequence))
@@ -383,7 +383,7 @@ class DelayEmbedder(Transform):
 
     def load_state_dict(self, d) -> None:
         """"""
-        logging.info(f"DelayEmbedder: Loading parameters from checkpoint :{d}")
+        logger.info(f"DelayEmbedder: Loading parameters from checkpoint :{d}")
         self.delay    = d["delay"]
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
@@ -420,11 +420,11 @@ class SVD(Transform):
         self._P = _V.conj()
 
         self._out_dim = len(self._C)
-        logging.info(f"SVD: Fitted SVD with {self._out_dim} components.")
+        logger.info(f"SVD: Fitted SVD with {self._out_dim} components.")
 
     def transform(self, X: Array) -> Array:
         """"""
-        logging.info(f"SVD: Applying SVD with order={self._order}, center={self._ifcen}.")
+        logger.info(f"SVD: Applying SVD with order={self._order}, center={self._ifcen}.")
         if self._P is None:
             raise ValueError("SVD parameters are not initialized. Call `fit` first.")
 
@@ -432,7 +432,7 @@ class SVD(Transform):
 
     def inverse_transform(self, X: Array) -> Array:
         """"""
-        logging.info(f"SVD: Applying projection with order={self._order}, center={self._ifcen}.")
+        logger.info(f"SVD: Applying projection with order={self._order}, center={self._ifcen}.")
         if self._C is None:
             raise ValueError("SVD parameters are not initialized. Call `fit` first.")
 
@@ -452,7 +452,7 @@ class SVD(Transform):
 
     def load_state_dict(self, d) -> None:
         """"""
-        logging.info(f"SVD: Loading parameters from checkpoint :{d}")
+        logger.info(f"SVD: Loading parameters from checkpoint :{d}")
         self._order = d["order"]
         self._ifcen = d["ifcen"]
         self._inp_dim = d["inp"]
