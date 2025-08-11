@@ -3,7 +3,7 @@ import logging
 import numpy as np
 from typing import Any, Dict, List, Optional, Union
 
-from dymad.utils.linalg import truncated_svd
+from dymad.numerics.linalg import truncated_svd
 
 Array = List[np.ndarray]
 

@@ -3,8 +3,8 @@ import torch
 from typing import Dict, Type, Union
 
 from dymad.data import DynData, DynGeoData
+from dymad.numerics.weak import generate_weak_weights
 from dymad.training.trainer_base import TrainerBase
-from dymad.utils.weak import generate_weak_weights
 
 logger = logging.getLogger(__name__)
 

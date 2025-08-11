@@ -4,8 +4,8 @@ import torch
 from typing import Dict, Type, Union
 
 from dymad.data import DynData, DynGeoData
+from dymad.numerics.linalg import truncated_lstsq
 from dymad.training.trainer_base import TrainerBase
-from dymad.utils.linalg import truncated_lstsq
 
 logger = logging.getLogger(__name__)
 
