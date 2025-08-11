@@ -34,6 +34,9 @@ class ModelBase(nn.Module, ABC):
     - linear_targets = dynamics = W @ linear_features(z, u)
     - and fits W only
     """
+    GRAPH = None   # True for graph compatible models
+    CONT  = None   # True for continuous-time models, otherwise discrete-time
+
     def __init__(self):
         super(ModelBase, self).__init__()
 
@@ -62,12 +65,6 @@ class ModelBase(nn.Module, ABC):
         raise NotImplementedError("This is the base class.")
 
     def linear_features(self, w: Data) -> torch.Tensor:
-        raise NotImplementedError("This is the base class.")
-
-    def linear_targets(self, w: Data) -> torch.Tensor:
-        raise NotImplementedError("This is the base class.")
-
-    def linear_eval(self, z: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
     def set_linear_weights(self, W: torch.Tensor) -> None:

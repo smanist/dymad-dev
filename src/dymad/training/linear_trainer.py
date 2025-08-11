@@ -28,6 +28,17 @@ class LinearTrainer(TrainerBase):
         if self.method not in ['full', 'truncated']:
             raise ValueError(f"Unsupported method: {self.method}. Supported methods are 'full' and 'truncated'.")
 
+        if model_class.CONT:
+            logger.info("Using continuous-time model for linear training.")
+            self._comp_linear_features = self._comp_linear_features_ct
+            self._comp_linear_targets  = self._comp_linear_targets_ct
+            self._comp_linear_predict  = self._comp_linear_predict_ct
+        else:
+            logger.info("Using discrete-time model for linear training.")
+            self._comp_linear_features = self._comp_linear_features_dt
+            self._comp_linear_targets  = self._comp_linear_targets_dt
+            self._comp_linear_predict  = self._comp_linear_predict_dt
+
         # Training weights
         self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
         self.dynamics_weight = self.config['training'].get('dynamics_weight', 1.0)
@@ -43,18 +54,45 @@ class LinearTrainer(TrainerBase):
         Only used in `evaluation` in this Trainer.
         """
         B  = batch.to(self.device)
-        _A = self.model.linear_features(B)
-        _b = self.model.linear_targets(B)
-        AW = self.model.linear_eval(_A)
-        linear_loss = self.criterion(AW, _b)
+        z, z_dot, x_hat = self.model(B)
+        _b = self._comp_linear_targets(z)
+        _p = self._comp_linear_predict(z_dot)
+        linear_loss = self.criterion(_p, _b)
 
         if self.recon_weight > 0:
             # Add reconstruction loss
-            _, _, x_hat = self.model(B)
             recon_loss = self.criterion(B.x, x_hat)
             return self.dynamics_weight * linear_loss + self.recon_weight * recon_loss
         else:
             return linear_loss
+
+    def _comp_linear_features_dt(self, batch: DynData | DynGeoData) -> torch.Tensor:
+        """Compute linear features for discrete-time models."""
+        f = self.model.linear_features(batch)
+        return f[..., :-1, :]
+
+    def _comp_linear_targets_dt(self, z: torch.Tensor) -> torch.Tensor:
+        """Compute linear targets for discrete-time models."""
+        return z[..., 1:, :]
+
+    def _comp_linear_predict_dt(self, z_dot: torch.Tensor) -> torch.Tensor:
+        """Compute predicted targets for discrete-time models.
+        z_dot really means z_next here.
+        """
+        return z_dot[..., :-1, :]
+
+    def _comp_linear_features_ct(self, batch: DynData | DynGeoData) -> torch.Tensor:
+        """Compute linear features for continuous-time models."""
+        f = self.model.linear_features(batch)
+        return f
+
+    def _comp_linear_targets_ct(self, z: torch.Tensor) -> torch.Tensor:
+        """Compute linear targets for continuous-time models."""
+        raise NotImplementedError("Continuous-time linear targets not implemented.")
+
+    def _comp_linear_predict_ct(self, z_dot: torch.Tensor) -> torch.Tensor:
+        """Compute predicted targets for continuous-time models."""
+        return z_dot
 
     def train_epoch(self) -> float:
         """Train the model for one epoch."""
@@ -64,8 +102,9 @@ class LinearTrainer(TrainerBase):
             # Assemble the linear system
             A, b = [], []
             for batch in self.train_loader:
-                _A = self.model.linear_features(batch)
-                _b = self.model.linear_targets(batch)
+                z, _, _ = self.model(batch)
+                _A = self._comp_linear_features(batch)
+                _b = self._comp_linear_targets(z)
                 A.append(_A)
                 b.append(_b)
             A = torch.cat(A, dim=0).cpu().numpy()

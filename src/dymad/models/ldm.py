@@ -13,6 +13,7 @@ class LDM(ModelBase):
     The encoder, dynamics, and decoder networks are implemented as MLPs.
     """
     GRAPH = False
+    CONT  = True
 
     def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(LDM, self).__init__()
@@ -182,6 +183,7 @@ class DLDM(LDM):
     ```
     """
     GRAPH = False
+    CONT  = False
 
     def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(DLDM, self).__init__(model_config, data_meta, dtype=dtype, device=device)
@@ -196,6 +198,7 @@ class GLDM(ModelBase):
     Uses GNN for encoder/decoder and MLP for dynamics.
     """
     GRAPH = True
+    CONT  = True
 
     def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(GLDM, self).__init__()
@@ -293,6 +296,7 @@ class DGLDM(GLDM):
     Same idea as DKBF vs KBF.
     """
     GRAPH = True
+    CONT  = False
 
     def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(DGLDM, self).__init__(model_config, data_meta, dtype=dtype, device=device)

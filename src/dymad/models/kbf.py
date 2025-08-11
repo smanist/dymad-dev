@@ -18,6 +18,7 @@ class KBF(ModelBase):
     - x_hat = decoder(z)
     """
     GRAPH = False
+    CONT  = True
 
     def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(KBF, self).__init__()
@@ -149,6 +150,11 @@ class KBF(ModelBase):
         """
         return predict_continuous(self, x0, ts, us=w.u, method=method, order=self.input_order)
 
+    def linear_features(self, w: DynData) -> torch.Tensor:
+        """Compute linear features for training."""
+        z = self.encoder(w)
+        return self._zu_cat(z, w)
+
 class DKBF(KBF):
     """Discrete Koopman Bilinear Form (DKBF) model - discrete-time version.
 
@@ -161,23 +167,10 @@ class DKBF(KBF):
     ```
     """
     GRAPH = False
+    CONT  = False
 
     def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(DKBF, self).__init__(model_config, data_meta, dtype=dtype, device=device)
-
-    def linear_features(self, w: DynData) -> torch.Tensor:
-        """Compute linear features for training."""
-        z = self.encoder(w)
-        return self._zu_cat(z, w)[..., :-1, :]
-
-    def linear_targets(self, w: DynData) -> torch.Tensor:
-        """Compute linear targets for training."""
-        z = self.encoder(w)
-        return z[..., 1:, :]
-
-    def linear_eval(self, z: torch.Tensor) -> torch.Tensor:
-        """Evaluate linear features using the learned weights."""
-        return self.dynamics_net(z)
 
     def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""
@@ -190,6 +183,7 @@ class GKBF(ModelBase):
     Koopman dimension is defined per node.
     """
     GRAPH = True
+    CONT  = True
 
     def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(GKBF, self).__init__()
@@ -296,6 +290,7 @@ class DGKBF(GKBF):
     Same idea as DKBF vs KBF.
     """
     GRAPH = True
+    CONT  = False
 
     def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(DGKBF, self).__init__(model_config, data_meta, dtype=dtype, device=device)
