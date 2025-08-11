@@ -14,7 +14,7 @@ class LDM(ModelBase):
     """
     GRAPH = False
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(LDM, self).__init__()
         self.n_total_state_features = data_meta.get('n_total_state_features')
         self.n_total_control_features = data_meta.get('n_total_control_features')
@@ -39,7 +39,9 @@ class LDM(ModelBase):
             'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
             'bias_init'      : model_config.get('bias_init', 'zeros'),
             'gain'           : model_config.get('gain', 1.0),
-            'end_activation' : model_config.get('end_activation', True)
+            'end_activation' : model_config.get('end_activation', True),
+            'dtype'          : dtype,
+            'device'         : device
         }
         aec_type = model_config.get('autoencoder_type', 'smp')
 
@@ -181,8 +183,8 @@ class DLDM(LDM):
     """
     GRAPH = False
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
-        super(DLDM, self).__init__(model_config, data_meta)
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
+        super(DLDM, self).__init__(model_config, data_meta, dtype=dtype, device=device)
 
     def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""
@@ -195,7 +197,7 @@ class GLDM(ModelBase):
     """
     GRAPH = True
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(GLDM, self).__init__()
         self.n_total_state_features = data_meta.get('n_total_state_features')
         self.n_total_control_features = data_meta.get('n_total_control_features')
@@ -220,7 +222,9 @@ class GLDM(ModelBase):
             'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
             'bias_init'      : model_config.get('bias_init', 'zeros'),
             'gain'           : model_config.get('gain', 1.0),
-            'end_activation' : model_config.get('end_activation', True)
+            'end_activation' : model_config.get('end_activation', True),
+            'dtype'          : dtype,
+            'device'         : device
         }
         opts_gnn = opts_mlp.copy()
         opts_gnn.update({
@@ -290,8 +294,8 @@ class DGLDM(GLDM):
     """
     GRAPH = True
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
-        super(DGLDM, self).__init__(model_config, data_meta)
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
+        super(DGLDM, self).__init__(model_config, data_meta, dtype=dtype, device=device)
 
     def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""

@@ -50,18 +50,18 @@ class FlexLinear(nn.Module):
         W = U @ V^T
     where U is (M x r) and V is (N x r).
     """
-    def __init__(self, in_features, out_features, bias=True):
+    def __init__(self, in_features, out_features, bias=True, dtype=None, device=None):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
 
         # Full weight params
-        self.weight = nn.Parameter(torch.empty(out_features, in_features))
-        self.bias = nn.Parameter(torch.zeros(out_features)) if bias else None
+        self.weight = nn.Parameter(torch.empty(out_features, in_features, dtype=dtype, device=device))
+        self.bias = nn.Parameter(torch.zeros(out_features, dtype=dtype, device=device)) if bias else None
 
         # Low-rank params
-        self.U = nn.Parameter(torch.empty(0, 0), requires_grad=False)
-        self.V = nn.Parameter(torch.empty(0, 0), requires_grad=False)
+        self.U = nn.Parameter(torch.empty(0, 0, dtype=dtype, device=device), requires_grad=False)
+        self.V = nn.Parameter(torch.empty(0, 0, dtype=dtype, device=device), requires_grad=False)
 
         self.mode = "full"
         self.rank = None
@@ -88,8 +88,8 @@ class FlexLinear(nn.Module):
         # release low-rank
         self.U.requires_grad_(False)
         self.V.requires_grad_(False)
-        self.U = nn.Parameter(torch.empty(0, 0, device=W.device), requires_grad=False)
-        self.V = nn.Parameter(torch.empty(0, 0, device=W.device), requires_grad=False)
+        self.U = nn.Parameter(torch.empty(0, 0, dtype=W.dtype, device=W.device), requires_grad=False)
+        self.V = nn.Parameter(torch.empty(0, 0, dtype=W.dtype, device=W.device), requires_grad=False)
         # set full
         self.weight.data.copy_(W)
         if self.bias is not None and b is not None:
@@ -113,6 +113,18 @@ class FlexLinear(nn.Module):
         if self.bias is not None and b is not None:
             self.bias.data.copy_(b)
 
+    @torch.no_grad()
+    def set_weights(
+        self,
+        W: torch.Tensor | None = None, b: torch.Tensor | None = None,
+        U: torch.Tensor | None = None, V: torch.Tensor | None = None):
+        if W is not None:
+            self.set_full(W, b)
+        elif U is not None and V is not None:
+            self.set_lora(U, V, b)
+        else:
+            raise ValueError("Must provide either full weights (W) or low-rank factors (U, V).")
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.mode == "full":
             return F.linear(x, self.weight, self.bias)
@@ -122,6 +134,34 @@ class FlexLinear(nn.Module):
             if self.bias is not None:
                 y = y + self.bias
             return y
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict,
+        missing_keys, unexpected_keys, error_msgs,
+    ):
+        # If checkpoint contains factors, re-init U,V to the saved shapes before loading
+        u_key = prefix + "U"
+        v_key = prefix + "V"
+        has_u = u_key in state_dict
+        has_v = v_key in state_dict
+
+        if has_u and has_v:
+            U_ckpt = state_dict[u_key]
+            V_ckpt = state_dict[v_key]
+            if self.U.shape != U_ckpt.shape or self.V.shape != V_ckpt.shape:
+                # re-register parameters with correct shapes
+                device = self.weight.device
+                self.U = nn.Parameter(torch.empty_like(U_ckpt, dtype=U_ckpt.dtype, device=device), requires_grad=True)
+                self.V = nn.Parameter(torch.empty_like(V_ckpt, dtype=V_ckpt.dtype, device=device), requires_grad=True)
+
+        self.mode = "lora" if has_u and has_v else "full"
+        self.rank = self.U.shape[1] if has_u else None
+
+        # Now let the default loader copy tensors
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict,
+            missing_keys, unexpected_keys, error_msgs
+        )
 
 _ACT_MAP = {
     # common aliases -> canonical class
@@ -277,6 +317,7 @@ class MLP(nn.Module):
         bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
         gain: Optional[float] = 1.0,
         end_activation: bool = True,
+        dtype=None, device=None
     ):
         super().__init__()
 
@@ -290,16 +331,16 @@ class MLP(nn.Module):
         elif n_layers == 1:
             if end_activation:
                 self.net = nn.Sequential(
-                    nn.Linear(input_dim, output_dim),
+                    nn.Linear(input_dim, output_dim, dtype=dtype, device=device),
                     _act()
                 )
             else:
-                self.net = nn.Linear(input_dim, output_dim)
+                self.net = nn.Linear(input_dim, output_dim, dtype=dtype, device=device)
         else:
-            layers = [nn.Linear(input_dim, latent_dim), _act()]
+            layers = [nn.Linear(input_dim, latent_dim, dtype=dtype, device=device), _act()]
             for _ in range(n_layers - 2):
-                layers += [nn.Linear(latent_dim, latent_dim), _act()]
-            layers.append(nn.Linear(latent_dim, output_dim))
+                layers += [nn.Linear(latent_dim, latent_dim, dtype=dtype, device=device), _act()]
+            layers.append(nn.Linear(latent_dim, output_dim, dtype=dtype, device=device))
             if end_activation:
                 layers.append(_act())
             self.net = nn.Sequential(*layers)
@@ -341,7 +382,8 @@ class ResBlockMLP(MLP):
                  weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
                  bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
                  gain: Optional[float] = 1.0,
-                 end_activation: bool = True
+                 end_activation: bool = True,
+                 dtype=None, device=None
                  ):
         assert input_dim == output_dim, "Input and output dimensions must match for ResBlock"
         super().__init__(input_dim, latent_dim, output_dim,
@@ -350,7 +392,9 @@ class ResBlockMLP(MLP):
                          weight_init=weight_init,
                          bias_init=bias_init,
                          gain=gain,
-                         end_activation=end_activation)
+                         end_activation=end_activation,
+                         dtype=dtype,
+                         device=device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -381,7 +425,8 @@ class IdenCatMLP(MLP):
                  weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
                  bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
                  gain: Optional[float] = 1.0,
-                 end_activation: bool = True):
+                 end_activation: bool = True,
+                 dtype=None, device=None):
         assert output_dim > input_dim, "Output dimension must be greater than input dimension"
         super().__init__(input_dim, latent_dim, output_dim-input_dim,
                          n_layers=n_layers,
@@ -389,7 +434,9 @@ class IdenCatMLP(MLP):
                          weight_init=weight_init,
                          bias_init=bias_init,
                          gain=gain,
-                         end_activation=end_activation)
+                         end_activation=end_activation,
+                         dtype=dtype,
+                         device=device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -438,6 +485,7 @@ class GNN(nn.Module):
         bias_init: Union[str, Callable[[torch.Tensor], None]] = 'zeros',
         gain: float = 1.0,
         end_activation: bool = True,
+        dtype=None, device=None
     ):
         super().__init__()
         assert n_layers > 0, "n_layers must be a positive integer"
@@ -456,7 +504,7 @@ class GNN(nn.Module):
             in_dim = input_dim if i == 0 else latent_dim
             out_dim = output_dim if i == n_layers - 1 else latent_dim
             # Each GCL layer can be a new instance
-            gcl_layer = _gcl(in_dim, out_dim)
+            gcl_layer = _gcl(in_dim, out_dim, dtype=dtype, device=device)
             layers.append(gcl_layer)
             # Only add activation if not last layer or end_activation is True
             if i < n_layers - 1 or end_activation:
@@ -532,7 +580,8 @@ class ResBlockGNN(GNN):
                  weight_init: Union[str, Callable[[torch.Tensor, float], None]] = 'xavier_uniform',
                  bias_init: Callable[[torch.Tensor], None] = 'zeros',
                  gain: float = 1.0,
-                 end_activation: bool = True):
+                 end_activation: bool = True,
+                 dtype=None, device=None):
         assert input_dim == output_dim, "Input and output dimensions must match for ResBlock"
         super().__init__(input_dim, latent_dim, output_dim,
                          n_layers=n_layers,
@@ -541,7 +590,9 @@ class ResBlockGNN(GNN):
                          weight_init=weight_init,
                          bias_init=bias_init,
                          gain=gain,
-                         end_activation=end_activation)
+                         end_activation=end_activation,
+                         dtype=dtype,
+                         device=device)
 
     def forward(self, x, edge_index, **kwargs):
         inp_shape = x.shape[:-1] + (-1,)
@@ -567,7 +618,8 @@ class IdenCatGNN(GNN):
                  weight_init: Union[str, Callable[[torch.Tensor, float], None]] = 'xavier_uniform',
                  bias_init: Callable[[torch.Tensor], None] = 'zeros',
                  gain: float = 1.0,
-                 end_activation: bool = True):
+                 end_activation: bool = True,
+                 dtype=None, device=None):
         assert output_dim > input_dim, "Output dimension must be greater than input dimension"
         super().__init__(input_dim, latent_dim, output_dim-input_dim,
                          n_layers=n_layers,
@@ -576,7 +628,9 @@ class IdenCatGNN(GNN):
                          weight_init=weight_init,
                          bias_init=bias_init,
                          gain=gain,
-                         end_activation=end_activation)
+                         end_activation=end_activation,
+                         dtype=dtype,
+                         device=device)
 
     def forward(self, x, edge_index, **kwargs):
         inp_shape = x.shape[:-1] + (-1,)

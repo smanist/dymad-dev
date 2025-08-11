@@ -76,6 +76,7 @@ class TrainerBase:
         self.dataloaders, self.datasets, self.metadata = tm.process_all()
         self.train_loader, self.validation_loader, self.test_loader = self.dataloaders
         self.train_set, self.validation_set, self.test_set = self.datasets
+        self.dtype = tm.dtype
         self.t = torch.tensor(tm.t[0])  # TODO: check trajectory of different lengths
 
     def _create_trajectory_manager(self):
@@ -88,7 +89,7 @@ class TrainerBase:
 
     def _setup_model(self) -> None:
         """Setup model, optimizer, scheduler and criterion."""
-        self.model = self.model_class(self.config['model'], self.metadata).to(self.device)
+        self.model = self.model_class(self.config['model'], self.metadata, dtype=self.dtype, device=self.device).to(self.device)
         if self.config['data']['double_precision']:
             self.model = self.model.double()
 

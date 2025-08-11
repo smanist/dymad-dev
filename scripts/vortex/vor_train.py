@@ -4,15 +4,15 @@ import numpy as np
 import torch
 
 from dymad.models import KBF, DKBF
-from dymad.training import WeakFormTrainer, NODETrainer
-from dymad.utils import load_model, plot_summary, plot_trajectory, setup_logging, TrajectorySampler
+from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
+from dymad.utils import load_model, plot_summary, plot_trajectory, setup_logging
 
 mdl_kb = {
     "name" : 'vor_model',
-    "encoder_layers" : 1,
-    "decoder_layers" : 1,
+    "encoder_layers" : 0,
+    "decoder_layers" : 0,
     "latent_dimension" : 32,
-    "koopman_dimension" : 8,
+    "koopman_dimension" : 12,
     "activation" : "none",
     "weight_init" : "xavier_uniform",
     "gain" : 0.01}
@@ -58,15 +58,24 @@ trn_dt = {
     "sweep_epoch_step": 100,
     "chop_mode": "unfold",
     "chop_step": 1}
+trn_ln = {
+    "n_epochs": 500,
+    "save_interval": 20,
+    "load_checkpoint": False,
+    "method": "truncated",
+    "params": 8}
+trans = {"type": "identity"}
 config_path = 'vor_model.yaml'
 
 cfgs = [
     ('kbf_wf',   KBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
     ('kbf_node', KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
     ('dkbf_nd',  DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
+    ('dkbf_ln',  DKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
+    # ('dkbf_ln',  DKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln, "transform_x": trans}),
     ]
 
-IDX = [2]
+IDX = [3]
 
 ifdat = 0
 iftrn = 1
@@ -104,14 +113,15 @@ if ifplt:
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
 
 if ifprd:
-    dat = np.load('./data/test.npz')
+    # dat = np.load('./data/test.npz')
+    dat = np.load('./data/cylinder.npz')
     x_data, t_data = dat['x'], dat['t']
 
     res = [x_data]
     for i in IDX:
         mdl, MDL, Trainer, opt = cfgs[i]
         opt["model"]["name"] = f"kp_{mdl}"
-        _, prd_func = load_model(MDL, f'kp_{mdl}.pt', f'vor_model.yaml', config_mod=opt)
+        model, prd_func = load_model(MDL, f'kp_{mdl}.pt', f'vor_model.yaml', config_mod=opt)
         with torch.no_grad():
             pred = prd_func(x_data, t_data)
         res.append(pred)

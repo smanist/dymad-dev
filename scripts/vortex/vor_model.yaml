@@ -7,7 +7,7 @@ data:
 transform_x:
   type: "svd"
   ifcen: true
-  order: 8
+  order: 12
 
 split:
   train_frac: 1

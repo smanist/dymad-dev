@@ -5,6 +5,7 @@ from typing import Dict, Type, Union
 
 from dymad.data import DynData, DynGeoData
 from dymad.training.trainer_base import TrainerBase
+from dymad.utils.linalg import truncated_lstsq
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +23,17 @@ class LinearTrainer(TrainerBase):
             self.config['training']['n_epochs'] = 1
             self.config['training']['save_interval'] = 1
 
+        self.method = self.config['training'].get('method', 'full')
+        self.params = self.config['training'].get('params', None)
+        if self.method not in ['full', 'truncated']:
+            raise ValueError(f"Unsupported method: {self.method}. Supported methods are 'full' and 'truncated'.")
+
         # Training weights
         self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
         self.dynamics_weight = self.config['training'].get('dynamics_weight', 1.0)
 
         # Additional logging
+        logger.info(f"Using method: {self.method} with params: {self.params}")
         logger.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
 
     def _process_batch(self, batch: Union[DynData, DynGeoData]) -> torch.Tensor:
@@ -67,10 +74,17 @@ class LinearTrainer(TrainerBase):
             b = b.reshape(-1, b.shape[-1])
 
             # Solve the linear system
-            W = np.linalg.lstsq(A, b, rcond=None)[0]
-            self.model.set_linear_weights(torch.tensor(W, dtype=batch.x.dtype, device=self.device))
+            if self.method == 'full':
+                W = np.linalg.lstsq(A, b, rcond=None)[0]
+                Wt = torch.tensor(W, dtype=batch.x.dtype, device=self.device)
+                self.model.set_linear_weights(Wt)
+                avg_epoch_loss = np.linalg.norm(A @ W - b) / A.shape[0]
 
-            # Bookkeeping
-            avg_epoch_loss = np.linalg.norm(A @ W - b) / A.shape[0]
+            elif self.method == 'truncated':
+                _V, _U = truncated_lstsq(A, b, tsvd=8)
+                self.model.set_linear_weights(
+                    U=torch.tensor(_U, dtype=batch.x.dtype, device=self.device),
+                    V=torch.tensor(_V, dtype=batch.x.dtype, device=self.device))
+                avg_epoch_loss = np.linalg.norm((A @ _V) @ _U.T - b) / A.shape[0]
 
         return avg_epoch_loss

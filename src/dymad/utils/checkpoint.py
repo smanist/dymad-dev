@@ -115,7 +115,7 @@ def load_model(model_class, checkpoint_path, config_path, config_mod=None):
     # Model
     model = model_class(config['model'], md)
     model.load_state_dict(chkpt['model_state_dict'])
-    dtype = next(model.parameters()).dtype
+    dtype = torch.double if md['config']['data'].get('double_precision', False) else torch.float
 
     # Check if autonomous
     _is_autonomous = md.get('transform_u_state', None) is None

@@ -14,12 +14,12 @@ class KBF(ModelBase):
     Uses MLP encoder/decoder and KBF operators for dynamics.
 
     - z = encoder(x)
-    - z_dot = Az + sum(B_i * u_i * z)
+    - z_dot = Az + sum(B_i * u_i * z) + Bu
     - x_hat = decoder(z)
     """
     GRAPH = False
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(KBF, self).__init__()
         self.n_total_state_features = data_meta.get('n_total_state_features')
         self.n_total_control_features = data_meta.get('n_total_control_features')
@@ -46,7 +46,9 @@ class KBF(ModelBase):
             'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
             'bias_init'      : model_config.get('bias_init', 'zeros'),
             'gain'           : model_config.get('gain', 1.0),
-            'end_activation' : model_config.get('end_activation', True)
+            'end_activation' : model_config.get('end_activation', True),
+            'dtype'          : dtype,
+            'device'         : device
         }
         aec_type = model_config.get('autoencoder_type', 'smp')
 
@@ -70,12 +72,14 @@ class KBF(ModelBase):
                 dyn_dim = self.koopman_dimension * (self.n_total_control_features + 1)
         else:
             dyn_dim = self.koopman_dimension
-        self.dynamics_net = FlexLinear(dyn_dim, self.koopman_dimension, bias=False)
+        self.dynamics_net = FlexLinear(dyn_dim, self.koopman_dimension, bias=False, dtype=dtype, device=device)
 
         if self.n_total_control_features == 0:
             self._zu_cat = self._zu_cat_auto
         else:
             self._zu_cat = self._zu_cat_ctrl
+
+        self.set_linear_weights = self.dynamics_net.set_weights
 
     def diagnostic_info(self) -> str:
         model_info = super(KBF, self).diagnostic_info()
@@ -158,8 +162,8 @@ class DKBF(KBF):
     """
     GRAPH = False
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
-        super(DKBF, self).__init__(model_config, data_meta)
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
+        super(DKBF, self).__init__(model_config, data_meta, dtype=dtype, device=device)
 
     def linear_features(self, w: DynData) -> torch.Tensor:
         """Compute linear features for training."""
@@ -175,12 +179,6 @@ class DKBF(KBF):
         """Evaluate linear features using the learned weights."""
         return self.dynamics_net(z)
 
-    def set_linear_weights(self, W: torch.Tensor) -> None:
-        """Set weights for the dynamics network."""
-        if W.shape != self.dynamics_net.weight.shape:
-            raise ValueError(f"Weight shape mismatch: expected {self.dynamics_net.weight.shape}, got {W.shape}")
-        self.dynamics_net.weight.data = W
-
     def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""
         return predict_discrete(self, x0, ts, us=w.u)
@@ -193,7 +191,7 @@ class GKBF(ModelBase):
     """
     GRAPH = True
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(GKBF, self).__init__()
         self.n_total_state_features = data_meta.get('n_total_state_features')
         self.n_total_control_features = data_meta.get('n_total_control_features')
@@ -215,7 +213,9 @@ class GKBF(ModelBase):
             'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
             'bias_init'      : model_config.get('bias_init', 'zeros'),
             'gain'           : model_config.get('gain', 1.0),
-            'end_activation' : model_config.get('end_activation', True)
+            'end_activation' : model_config.get('end_activation', True),
+            'dtype'          : dtype,
+            'device'         : device
         }
         aec_type = model_config.get('autoencoder_type', 'smp')
 
@@ -233,11 +233,11 @@ class GKBF(ModelBase):
 
         # KBF operators for graph system
         tmp = [
-            nn.Linear(self.koopman_dimension, self.koopman_dimension, bias=False)
+            nn.Linear(self.koopman_dimension, self.koopman_dimension, bias=False, dtype=dtype, device=device)
             for _ in range(self.n_total_control_features + 1)
         ]
         if self.const_term and self.n_total_control_features > 0:
-            tmp.append(nn.Linear(self.n_total_control_features, self.koopman_dimension, bias=False))
+            tmp.append(nn.Linear(self.n_total_control_features, self.koopman_dimension, bias=False, dtype=dtype, device=device))
         self.operators = nn.ModuleList(tmp)
 
         if self.n_total_control_features == 0:
@@ -297,8 +297,8 @@ class DGKBF(GKBF):
     """
     GRAPH = True
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
-        super(DGKBF, self).__init__(model_config, data_meta)
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
+        super(DGKBF, self).__init__(model_config, data_meta, dtype=dtype, device=device)
 
     def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""
