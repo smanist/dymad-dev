@@ -139,23 +139,21 @@ class FlexLinear(nn.Module):
         self, state_dict, prefix, local_metadata, strict,
         missing_keys, unexpected_keys, error_msgs,
     ):
-        # If checkpoint contains factors, re-init U,V to the saved shapes before loading
-        u_key = prefix + "U"
-        v_key = prefix + "V"
-        has_u = u_key in state_dict
-        has_v = v_key in state_dict
+        # There is always U and V in the state_dict.
+        # They are empty if full mode, otherwise they are low-rank factors.
+        U_ckpt = state_dict[prefix + "U"]
+        V_ckpt = state_dict[prefix + "V"]
+        is_lowrank = U_ckpt.shape[0] > 0 and V_ckpt.shape[0] > 0
 
-        if has_u and has_v:
-            U_ckpt = state_dict[u_key]
-            V_ckpt = state_dict[v_key]
+        if is_lowrank:
             if self.U.shape != U_ckpt.shape or self.V.shape != V_ckpt.shape:
                 # re-register parameters with correct shapes
                 device = self.weight.device
                 self.U = nn.Parameter(torch.empty_like(U_ckpt, dtype=U_ckpt.dtype, device=device), requires_grad=True)
                 self.V = nn.Parameter(torch.empty_like(V_ckpt, dtype=V_ckpt.dtype, device=device), requires_grad=True)
 
-        self.mode = "lora" if has_u and has_v else "full"
-        self.rank = self.U.shape[1] if has_u else None
+        self.mode = "lora" if is_lowrank else "full"
+        self.rank = self.U.shape[1] if is_lowrank else None
 
         # Now let the default loader copy tensors
         super()._load_from_state_dict(
@@ -332,17 +330,17 @@ class MLP(nn.Module):
             if end_activation:
                 self.net = nn.Sequential(
                     nn.Linear(input_dim, output_dim, dtype=dtype, device=device),
-                    _act()
+                    _act(dtype=dtype, device=device)
                 )
             else:
                 self.net = nn.Linear(input_dim, output_dim, dtype=dtype, device=device)
         else:
-            layers = [nn.Linear(input_dim, latent_dim, dtype=dtype, device=device), _act()]
+            layers = [nn.Linear(input_dim, latent_dim, dtype=dtype, device=device), _act(dtype=dtype, device=device)]
             for _ in range(n_layers - 2):
-                layers += [nn.Linear(latent_dim, latent_dim, dtype=dtype, device=device), _act()]
+                layers += [nn.Linear(latent_dim, latent_dim, dtype=dtype, device=device), _act(dtype=dtype, device=device)]
             layers.append(nn.Linear(latent_dim, output_dim, dtype=dtype, device=device))
             if end_activation:
-                layers.append(_act())
+                layers.append(_act(dtype=dtype, device=device))
             self.net = nn.Sequential(*layers)
 
         # Cache init kwargs for later use in self.apply
@@ -504,12 +502,12 @@ class GNN(nn.Module):
             in_dim = input_dim if i == 0 else latent_dim
             out_dim = output_dim if i == n_layers - 1 else latent_dim
             # Each GCL layer can be a new instance
-            gcl_layer = _gcl(in_dim, out_dim, dtype=dtype, device=device)
+            gcl_layer = _gcl(in_dim, out_dim)
             layers.append(gcl_layer)
             # Only add activation if not last layer or end_activation is True
             if i < n_layers - 1 or end_activation:
                 # Each activation can be a new instance
-                layers.append(_act())
+                layers.append(_act(dtype=dtype, device=device))
         self.layers = nn.ModuleList(layers)
 
         self.apply(self._init_gcl)

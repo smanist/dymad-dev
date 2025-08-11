@@ -111,11 +111,11 @@ def load_model(model_class, checkpoint_path, config_path, config_mod=None):
     config = load_config(config_path, config_mod)
     chkpt = torch.load(checkpoint_path, weights_only=False)
     md = chkpt['metadata']
+    dtype = torch.double if md['config']['data'].get('double_precision', False) else torch.float
 
     # Model
-    model = model_class(config['model'], md)
+    model = model_class(config['model'], md, dtype=dtype)
     model.load_state_dict(chkpt['model_state_dict'])
-    dtype = torch.double if md['config']['data'].get('double_precision', False) else torch.float
 
     # Check if autonomous
     _is_autonomous = md.get('transform_u_state', None) is None
