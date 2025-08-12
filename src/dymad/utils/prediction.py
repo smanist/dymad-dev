@@ -208,7 +208,7 @@ def predict_graph_continuous(
     z_traj = odeint(ode_func, z0, ts, method=method)
     logger.debug(f"predict_graph_continuous: Completed integration, trajectory shape: {z_traj.shape}")
 
-    tmp = z_traj.permute(1, 0, 2)  # (batch_size, n_steps, n_features)
+    tmp = z_traj.permute(1, 0, 2, 3)  # (batch_size, n_steps, node, z_dim)
     x_traj = model.decoder(tmp, _data).permute(1, 0, 2)
 
     if not is_batch:
@@ -355,8 +355,8 @@ def predict_graph_discrete(
             _, z_next, _ = model(DynGeoData(x_k, None, _ei))
             z_traj.append(z_next)
 
-    z_traj = torch.stack(z_traj, dim=0)  # (n_steps, batch_size, z_dim)
-    tmp = z_traj.permute(1, 0, 2)  # (batch_size, n_steps, z_dim)
+    z_traj = torch.stack(z_traj, dim=0)  # (n_steps, batch_size, node, z_dim)
+    tmp = z_traj.permute(1, 0, 2, 3)  # (batch_size, n_steps, node, z_dim)
     x_traj = model.decoder(tmp, _data).permute(1, 0, 2)
 
     if not is_batch:

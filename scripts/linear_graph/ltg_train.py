@@ -44,7 +44,15 @@ config_gau = {
             "dt":   0.2,
             "mode": "zoh"}}}
 
-cfgs = [(GLDM, 'ldm'), (GKBF, 'kbf')]
+cases = [
+    {"name": "ldm_wf",   "model" : GLDM, "trainer": WeakFormTrainer, "config": 'ltg_ldm_wf.yaml'},
+    {"name": "ldm_node", "model" : GLDM, "trainer": NODETrainer,     "config": 'ltg_ldm_node.yaml'},
+    {"name": "kbf_wf",   "model" : GKBF, "trainer": WeakFormTrainer, "config": 'ltg_kbf_wf.yaml'},
+    {"name": "kbf_node", "model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'}
+]
+# IDX = [0, 1]
+IDX = [2, 3]
+labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0
 iftrn = 1
@@ -61,15 +69,7 @@ if ifdat:
         adj_mat=adj)
 
 if iftrn:
-    cases = [
-        {"model" : GLDM, "trainer": WeakFormTrainer, "config": 'ltg_ldm_wf.yaml'},
-        {"model" : GLDM, "trainer": NODETrainer,     "config": 'ltg_ldm_node.yaml'},
-        {"model" : GKBF, "trainer": WeakFormTrainer, "config": 'ltg_kbf_wf.yaml'},
-        {"model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'}
-    ]
-
-    for _i in [0, 1]:
-    # for _i in [2, 3]:
+    for _i in IDX:
         Model = cases[_i]['model']
         Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']
@@ -80,12 +80,10 @@ if iftrn:
         trainer.train()
 
 if ifplt:
-    for cfg in [cfgs[0]]:
-        MDL, mdl = cfg
-        npz_files = [f'results/ltg_{mdl}_node_summary.npz', f'results/ltg_{mdl}_wf_summary.npz']
-        npzs = plot_summary(npz_files, labels = [f'{mdl}/NODE', f'{mdl}/WF'], ifclose=False)
-
-        print("Epoch time NODE/WF:", npzs[0]['avg_epoch_time']/npzs[1]['avg_epoch_time'])
+    npz_files = [f'results/ltg_{mdl}_summary.npz' for mdl in labels]
+    npzs = plot_summary(npz_files, labels = labels, ifclose=False)
+    for lbl, npz in zip(labels, npzs):
+        print(f"Epoch time: {lbl} - {npz['avg_epoch_time']}")
 
 if ifprd:
     sampler = TrajectorySampler(f, g, config='ltg_data.yaml', config_mod=config_gau)
@@ -96,18 +94,17 @@ if ifprd:
     t_data = ts[0]
     u_data = np.concatenate([us[0], us[0], us[0]], axis=-1)
 
-    for cfg in [cfgs[0]]:
-        MDL, mdl = cfg
-
-        mdl_wf, prd_wf = load_model(MDL, f'ltg_{mdl}_wf.pt', f'ltg_{mdl}_wf.yaml')
-        mdl_nd, prd_nd = load_model(MDL, f'ltg_{mdl}_node.pt', f'ltg_{mdl}_node.yaml')
+    res = [x_data]
+    for _i in IDX:
+        mdl, MDL = cases[_i]['name'], cases[_i]['model']
+        _, prd_func = load_model(MDL, f'ltg_{mdl}.pt', f'ltg_{mdl}.yaml')
 
         with torch.no_grad():
-            weak_pred = prd_wf(x_data, u_data, t_data, ei=edge_index)
-            node_pred = prd_nd(x_data, u_data, t_data, ei=edge_index)
+            _pred = prd_func(x_data, u_data, t_data, ei=edge_index)
+        res.append(_pred)
 
-        plot_trajectory(
-            np.array([x_data, weak_pred, node_pred]), t_data, "LTG",
-            us=u_data, labels=['Truth', 'Weak Form', 'NODE'], ifclose=False)
+    plot_trajectory(
+        np.array(res), t_data, "LTG",
+        us=u_data, labels=['Truth']+labels, ifclose=False)
 
 plt.show()

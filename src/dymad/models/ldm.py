@@ -270,16 +270,16 @@ class GLDM(ModelBase):
 
     def _encoder_ctrl(self, w: DynGeoData) -> torch.Tensor:
         xu_cat = torch.cat([w.xg, w.ug], dim=-1)
-        return self.encoder_net(xu_cat, w.edge_index)
+        return w.g(self.encoder_net(xu_cat, w.edge_index))
 
     def _encoder_auto(self, w: DynGeoData) -> torch.Tensor:
-        return self.encoder_net(w.xg, w.edge_index)
+        return w.g(self.encoder_net(w.xg, w.edge_index))
 
     def decoder(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
-        return self.decoder_net(w.g(z), w.edge_index)
+        return self.decoder_net(z, w.edge_index)
 
     def dynamics(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
-        return w.G(self.dynamics_net(w.g(z)))
+        return self.dynamics_net(z)
 
     def forward(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         z = self.encoder(w)

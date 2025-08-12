@@ -250,24 +250,28 @@ class GKBF(ModelBase):
         return model_info
 
     def encoder(self, w: DynGeoData) -> torch.Tensor:
-        return self.encoder_net(w.xg, w.edge_index)
+        # The GNN implementation outputs flattened features
+        # Here internal dynamics are node-wise, so we need to reshape
+        # the features to node*features_per_node again
+        return w.g(self.encoder_net(w.xg, w.edge_index))
 
     def decoder(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
-        return self.decoder_net(w.g(z), w.edge_index)
+        # Since the decoder outputs to the original space,
+        # which is assumed to be flattened, we can use the GNN decoder directly
+        # Note: the input, though, is still node-wise
+        return self.decoder_net(z, w.edge_index)
 
     def dynamics(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
         """Compute dynamics in Koopman space using bilinear form."""
-        return w.G(self.dynamics_net(w.g(self._zu_cat(z, w))))
+        return self.dynamics_net(self._zu_cat(z, w))
 
     def _zu_cat_ctrl(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
         """Concatenate state and control inputs."""
-        # z_reshaped = w.g(z)
-        z_reshaped = z
         u_reshaped = w.ug
-        z_u = (z_reshaped.unsqueeze(-1) * u_reshaped.unsqueeze(-2)).reshape(*z_reshaped.shape[:-1], -1)
+        z_u = (z.unsqueeze(-1) * u_reshaped.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
         if self.const_term:
-            return w.G(torch.cat([z_reshaped, z_u, u_reshaped], dim=-1))
-        return w.G(torch.cat([z_reshaped, z_u], dim=-1))
+            return torch.cat([z, z_u, u_reshaped], dim=-1)
+        return torch.cat([z, z_u], dim=-1)
 
     def _zu_cat_auto(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
         """Concatenate state and control inputs."""
