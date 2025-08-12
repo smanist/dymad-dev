@@ -65,7 +65,7 @@ class KBF(ModelBase):
             **opts
         )
 
-        # Create KBF operators: first for autonomous dynamics (A) then one per control (B_i)
+        # Create KBF operators, concatenated
         if self.n_total_control_features > 0:
             if self.const_term:
                 dyn_dim = self.koopman_dimension * (self.n_total_control_features + 1) + self.n_total_control_features
@@ -225,19 +225,22 @@ class GKBF(ModelBase):
             **opts
         )
 
-        # KBF operators for graph system
-        tmp = [
-            nn.Linear(self.koopman_dimension, self.koopman_dimension, bias=False, dtype=dtype, device=device)
-            for _ in range(self.n_total_control_features + 1)
-        ]
-        if self.const_term and self.n_total_control_features > 0:
-            tmp.append(nn.Linear(self.n_total_control_features, self.koopman_dimension, bias=False, dtype=dtype, device=device))
-        self.operators = nn.ModuleList(tmp)
+        # Create KBF operators, concatenated
+        if self.n_total_control_features > 0:
+            if self.const_term:
+                dyn_dim = self.koopman_dimension * (self.n_total_control_features + 1) + self.n_total_control_features
+            else:
+                dyn_dim = self.koopman_dimension * (self.n_total_control_features + 1)
+        else:
+            dyn_dim = self.koopman_dimension
+        self.dynamics_net = FlexLinear(dyn_dim, self.koopman_dimension, bias=False, dtype=dtype, device=device)
 
         if self.n_total_control_features == 0:
-            self.dynamics = self._dynamics_auto
+            self._zu_cat = self._zu_cat_auto
         else:
-            self.dynamics = self._dynamics_ctrl
+            self._zu_cat = self._zu_cat_ctrl
+
+        self.set_linear_weights = self.dynamics_net.set_weights
 
     def diagnostic_info(self) -> str:
         model_info = super(GKBF, self).diagnostic_info()
@@ -252,28 +255,23 @@ class GKBF(ModelBase):
     def decoder(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
         return self.decoder_net(w.g(z), w.edge_index)
 
-    def _dynamics_ctrl(self, z: torch.Tensor, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
-        z_reshaped = w.g(z)
+    def dynamics(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
+        """Compute dynamics in Koopman space using bilinear form."""
+        return w.G(self.dynamics_net(w.g(self._zu_cat(z, w))))
+
+    def _zu_cat_ctrl(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
+        """Concatenate state and control inputs."""
+        # z_reshaped = w.g(z)
+        z_reshaped = z
         u_reshaped = w.ug
-
-        # Autonomous part: A @ z
-        z_dot = self.operators[0](z_reshaped)
-
-        # Add control-dependent terms: sum(u_i * B_i @ z)
-        for i in range(self.n_total_control_features):
-            control_i = u_reshaped[..., i].unsqueeze(-1)  # Extract control i and add dimension for broadcasting
-            z_dot = z_dot + control_i * self.operators[i + 1](z_reshaped)
-
-        # Add constant term if enabled
+        z_u = (z_reshaped.unsqueeze(-1) * u_reshaped.unsqueeze(-2)).reshape(*z_reshaped.shape[:-1], -1)
         if self.const_term:
-            z_dot = z_dot + self.operators[-1](u_reshaped)
+            return w.G(torch.cat([z_reshaped, z_u, u_reshaped], dim=-1))
+        return w.G(torch.cat([z_reshaped, z_u], dim=-1))
 
-        return w.G(z_dot)
-
-    def _dynamics_auto(self, z: torch.Tensor, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Autonomous part: A @ z
-        z_dot = self.operators[0](w.g(z))
-        return w.G(z_dot)
+    def _zu_cat_auto(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
+        """Concatenate state and control inputs."""
+        return z
 
     def forward(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         z = self.encoder(w)
@@ -283,6 +281,11 @@ class GKBF(ModelBase):
 
     def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
         return predict_graph_continuous(self, x0, ts, w.edge_index, us=w.u, method=method, order=self.input_order)
+
+    def linear_features(self, w: DynGeoData) -> torch.Tensor:
+        """Compute linear features for training."""
+        z = self.encoder(w)
+        return self._zu_cat(z, w)
 
 class DGKBF(GKBF):
     """Discrete Graph Koopman Bilinear Form (DGKBF) model - discrete-time version.

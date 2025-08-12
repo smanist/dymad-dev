@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from dymad.models import DKBF, DLDM
-from dymad.training import NODETrainer
+from dymad.training import NODETrainer, LinearTrainer
 from dymad.utils import load_model, plot_summary, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 128
@@ -38,9 +38,12 @@ config_gau = {
             "mode": "zoh"}}}
 
 cases = [
-    {"name" : "dldm", "model" : DLDM, "config": 'lti_dldm.yaml'},
-    {"name" : "dkbf", "model" : DKBF, "config": 'lti_dkbf.yaml'}
+    {"name" : "dldm", "model" : DLDM, "trainer": NODETrainer,   "config": 'lti_dldm.yaml'},
+    {"name" : "dkbf", "model" : DKBF, "trainer": NODETrainer,   "config": 'lti_dkbf.yaml'},
+    {"name" : "dkbl", "model" : DKBF, "trainer": LinearTrainer, "config": 'lti_dkbl.yaml'}
 ]
+IDX = [2]
+labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0
 iftrn = 1
@@ -53,17 +56,17 @@ if ifdat:
     np.savez_compressed('./data/lti.npz', t=ts, x=ys, u=us)
 
 if iftrn:
-    for _i in [0, 1]:
+    for _i in IDX:
         Model = cases[_i]['model']
+        Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']
 
         setup_logging(config_path, mode='info', prefix='results')
         logging.info(f"Config: {config_path}")
-        trainer = NODETrainer(config_path, Model)
+        trainer = Trainer(config_path, Model)
         trainer.train()
 
 if ifplt:
-    labels = [case['name'] for case in cases]
     npz_files = [f'results/lti_{mdl}_summary.npz' for mdl in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
 
@@ -76,8 +79,8 @@ if ifprd:
     u_data = us[0]
 
     res = [x_data]
-    for case in cases:
-        MDL, mdl = case['model'], case['name']
+    for i in IDX:
+        MDL, mdl = cases[i]['model'], cases[i]['name']
         _, prd_func = load_model(MDL, f'lti_{mdl}.pt', f'lti_{mdl}.yaml')
 
         with torch.no_grad():
@@ -86,6 +89,6 @@ if ifprd:
 
     plot_trajectory(
         np.array(res), t_data, "LTI",
-        us=u_data, labels=['Truth', 'LDM', 'KBF'], ifclose=False)
+        us=u_data, labels=['Truth']+labels, ifclose=False)
 
 plt.show()

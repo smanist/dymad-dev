@@ -29,15 +29,17 @@ class LinearTrainer(TrainerBase):
             raise ValueError(f"Unsupported method: {self.method}. Supported methods are 'full' and 'truncated'.")
 
         if model_class.CONT:
-            logger.info("Using continuous-time model for linear training.")
+            self.dt = self.metadata["dt_and_n_steps"][0][0]
             self._comp_linear_features = self._comp_linear_features_ct
             self._comp_linear_targets  = self._comp_linear_targets_ct
             self._comp_linear_predict  = self._comp_linear_predict_ct
+            logger.info(f"Using continuous-time model for linear training, dt={self.dt}.")
         else:
-            logger.info("Using discrete-time model for linear training.")
+            self.dt = None
             self._comp_linear_features = self._comp_linear_features_dt
             self._comp_linear_targets  = self._comp_linear_targets_dt
             self._comp_linear_predict  = self._comp_linear_predict_dt
+            logger.info("Using discrete-time model for linear training.")
 
         # Training weights
         self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
@@ -88,7 +90,8 @@ class LinearTrainer(TrainerBase):
 
     def _comp_linear_targets_ct(self, z: torch.Tensor) -> torch.Tensor:
         """Compute linear targets for continuous-time models."""
-        raise NotImplementedError("Continuous-time linear targets not implemented.")
+        dz = np.gradient(z.cpu().numpy(), self.dt, axis=1, edge_order=2)
+        return torch.tensor(dz, dtype=z.dtype, device=z.device)
 
     def _comp_linear_predict_ct(self, z_dot: torch.Tensor) -> torch.Tensor:
         """Compute predicted targets for continuous-time models."""
@@ -116,11 +119,11 @@ class LinearTrainer(TrainerBase):
             if self.method == 'full':
                 W = np.linalg.lstsq(A, b, rcond=None)[0]
                 Wt = torch.tensor(W, dtype=batch.x.dtype, device=self.device)
-                self.model.set_linear_weights(Wt)
+                self.model.set_linear_weights(Wt.T)
                 avg_epoch_loss = np.linalg.norm(A @ W - b) / A.shape[0]
 
             elif self.method == 'truncated':
-                _V, _U = truncated_lstsq(A, b, tsvd=8)
+                _V, _U = truncated_lstsq(A, b, tsvd=self.params)
                 self.model.set_linear_weights(
                     U=torch.tensor(_U, dtype=batch.x.dtype, device=self.device),
                     V=torch.tensor(_V, dtype=batch.x.dtype, device=self.device))

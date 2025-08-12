@@ -16,6 +16,15 @@ mdl_kb = {
     "activation" : "none",
     "weight_init" : "xavier_uniform",
     "gain" : 0.01}
+mdl_kf = {
+    "name" : 'vor_model',
+    "encoder_layers" : 0,
+    "decoder_layers" : 0,
+    "latent_dimension" : 32,
+    "koopman_dimension" : 89351,
+    "activation" : "none",
+    "weight_init" : "xavier_uniform",
+    "gain" : 0.01}
 
 trn_wf = {
     "n_epochs": 400,
@@ -65,17 +74,22 @@ trn_ln = {
     "method": "truncated",
     "params": 8}
 trans = {"type": "identity"}
+plots = {
+    "xidx": [10000, 15000, 20000, 30000, 40000, 45000],
+    "grid": (3, 2)}
+
 config_path = 'vor_model.yaml'
 
 cfgs = [
     ('kbf_wf',   KBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
     ('kbf_node', KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
     ('dkbf_nd',  DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
+    ('kbf_ln',   KBF,  LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
     ('dkbf_ln',  DKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
-    # ('dkbf_ln',  DKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln, "transform_x": trans}),
+    ('dkbf_lf',  DKBF, LinearTrainer,   {"model": mdl_kf, "training" : trn_ln, "transform_x": trans, "plotting": plots}),
     ]
 
-IDX = [3]
+IDX = [4]
 
 ifdat = 0
 iftrn = 1
