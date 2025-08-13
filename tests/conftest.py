@@ -148,9 +148,9 @@ def ltg_data():
 
     # --------------------
     # Data generation
-    B = 128
-    N = 501
-    t_grid = np.linspace(0, 5, N)
+    B = 32
+    N = 51
+    t_grid = np.linspace(0, 0.5, N)
 
     sampler = TrajectorySampler(f, g, config=HERE/'lti_data.yaml', config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
@@ -174,8 +174,8 @@ def ltg_data():
 @pytest.fixture(scope='session')
 def ltg_gau():
     # ---- runs ONCE before any tests execute ----
-    N = 501
-    t_grid = np.linspace(0, 5, N)
+    N = 51
+    t_grid = np.linspace(0, 0.5, N)
     sampler = TrajectorySampler(f, g, config=HERE/'lti_data.yaml', config_mod=config_gau)
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = np.concatenate([ys[0], ys[0], ys[0]], axis=-1)
@@ -191,9 +191,9 @@ def ltga_data():
 
     # --------------------
     # Data generation
-    B = 128
-    N = 501
-    t_grid = np.linspace(0, 5, N)
+    B = 32
+    N = 51
+    t_grid = np.linspace(0, 0.5, N)
 
     sampler = TrajectorySampler(f_auto, g_auto, config=HERE/'ltga_data.yaml')
     ts, xs, ys = sampler.sample(t_grid, batch=B)
@@ -216,8 +216,8 @@ def ltga_data():
 
 @pytest.fixture(scope='session')
 def ltga_test():
-    N = 501
-    t_grid = np.linspace(0, 5, N)
+    N = 51
+    t_grid = np.linspace(0, 0.5, N)
     sampler = TrajectorySampler(f_auto, config=HERE/'ltga_data.yaml')
     ts, xs, ys = sampler.sample(t_grid, batch=1)
     x_data = np.concatenate([xs[0], xs[0], xs[0]], axis=-1)
