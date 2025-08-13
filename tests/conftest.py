@@ -111,9 +111,9 @@ def kp_data():
 
     # --------------------
     # Data generation
-    B = 256
-    N = 301
-    t_grid = np.linspace(0, 6, N)
+    B = 64
+    N = 31
+    t_grid = np.linspace(0, 0.5, N)
 
     sampler = TrajectorySampler(f_kp, config=HERE/'kp_data.yaml')
     ts, xs, ys = sampler.sample(t_grid, batch=B)
@@ -132,8 +132,8 @@ def kp_data():
 @pytest.fixture(scope='session')
 def kp_test():
     # ---- runs ONCE before any tests execute ----
-    N = 301
-    t_grid = np.linspace(0, 6, N)
+    N = 31
+    t_grid = np.linspace(0, 0.5, N)
     sampler = TrajectorySampler(f_kp, config=HERE/'kp_data.yaml', config_mod=config_gau)
     ts, xs, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]

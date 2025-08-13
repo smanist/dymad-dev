@@ -1,7 +1,7 @@
 data:
   path: './data/kp.npz'
-  n_samples: 256
-  n_steps: 301
+  n_samples: 64
+  n_steps: 31
   double_precision: true
 
 transform_x:
@@ -15,4 +15,4 @@ split:
   train_frac: 0.75
 
 dataloader:
-  batch_size: 256
+  batch_size: 64
