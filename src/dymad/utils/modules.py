@@ -140,11 +140,13 @@ class FlexLinear(nn.Module):
         self, state_dict, prefix, local_metadata, strict,
         missing_keys, unexpected_keys, error_msgs,
     ):
-        # There is always U and V in the state_dict.
-        # They are empty if full mode, otherwise they are low-rank factors.
-        U_ckpt = state_dict[prefix + "U"]
-        V_ckpt = state_dict[prefix + "V"]
-        is_lowrank = U_ckpt.shape[0] > 0 and V_ckpt.shape[0] > 0
+        # U and V, if exist, are empty if full mode, otherwise they are low-rank factors.
+        U_ckpt = state_dict.get(prefix + "U", None)
+        V_ckpt = state_dict.get(prefix + "V", None)
+        if U_ckpt is None or V_ckpt is None:
+            is_lowrank = False
+        else:
+            is_lowrank = U_ckpt.shape[0] > 0 and V_ckpt.shape[0] > 0
 
         if is_lowrank:
             if self.U.shape != U_ckpt.shape or self.V.shape != V_ckpt.shape:
