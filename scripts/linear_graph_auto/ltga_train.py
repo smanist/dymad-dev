@@ -5,7 +5,7 @@ import torch
 from torch_geometric.utils import dense_to_sparse
 
 from dymad.models import GLDM, GKBF
-from dymad.training import WeakFormTrainer, NODETrainer
+from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
 from dymad.utils import load_model, plot_summary, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 128
@@ -43,6 +43,16 @@ mdl_ld = {
     "activation": "none",
     "gcl" : "sage",
     "weight_init": "xavier_uniform"}
+mdl_kl = {
+    "name" : 'ltga_model',
+    "encoder_layers" : 1,
+    "decoder_layers" : 1,
+    "latent_dimension" : 32,
+    "koopman_dimension" : 4,
+    "activation" : "none",
+    "autoencoder_type" : "cat",
+    "gcl" : "sage",
+    "weight_init" : "xavier_uniform"}
 
 trn_wf = {
     "n_epochs": 500,
@@ -69,8 +79,17 @@ trn_nd = {
     "sweep_epoch_step": 100,
     "ode_method": "dopri5",
     "rtol": 1e-7,
-    "atol": 1e-9
-}
+    "atol": 1e-9}
+trn_ln = {
+    "n_epochs": 1,
+    "save_interval": 1,
+    "load_checkpoint": False,
+    "learning_rate": 1e-2,
+    "decay_rate": 0.999,
+    "reconstruction_weight": 1.0,
+    "dynamics_weight": 1.0,
+    "method": "truncated",
+    "params": 2}
 config_path = 'ltga_model.yaml'
 
 cfgs = [
@@ -78,9 +97,12 @@ cfgs = [
     ('ldm_node', GLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
     ('kbf_wf',   GKBF, WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
     ('kbf_node', GKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
+    ('kbf_ln',   GKBF, LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
     ]
 
-IDX = [0, 1]
+# IDX = [0, 1]
+IDX = [4]
+labels = [cfgs[i][0] for i in IDX]
 
 ifdat = 0
 iftrn = 1
@@ -106,11 +128,11 @@ if iftrn:
         trainer.train()
 
 if ifplt:
-    labels = [cfgs[i][0] for i in IDX]
     npz_files = [f'results/ltga_{l}_summary.npz' for l in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
 
-    print(f"Epoch time {labels[0]}/{labels[1]}: {npzs[0]['avg_epoch_time']/npzs[1]['avg_epoch_time']}")
+    for lbl, npz in zip(labels, npzs):
+        print(f"Epoch time {lbl}: {npz['avg_epoch_time']}")
 
 if ifprd:
     sampler = TrajectorySampler(f, config='ltga_data.yaml')
@@ -128,9 +150,8 @@ if ifprd:
             pred = prd_func(x_data, t_data, ei=edge_index)
         res.append(pred)
 
-    labels = ['Truth'] + [cfgs[i][0] for i in IDX]
     plot_trajectory(
         np.array(res), t_data, "LTGA",
-        labels=labels, ifclose=False)
+        labels=['Truth'] + labels, ifclose=False)
 
 plt.show()

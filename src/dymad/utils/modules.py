@@ -202,7 +202,7 @@ _INIT_MAP_B = {
     "ones":  nn.init.ones_,
 }
 
-def _resolve_activation(spec) -> nn.Module:
+def _resolve_activation(spec, dtype, device) -> nn.Module:
     """
     Turn a user-supplied activation *specification* into an nn.Module.
     `spec` can be a string, an activation class, or a constructed module.
@@ -213,6 +213,9 @@ def _resolve_activation(spec) -> nn.Module:
         if key not in _ACT_MAP:
             raise ValueError(f"Unknown activation string '{spec}'. "
                              f"Valid keys are {sorted(_ACT_MAP.keys())}.")
+        if key == "prelu":
+            # dtype of the slope
+            return lambda x=None: _ACT_MAP[key](dtype=dtype, device=device)
         return _ACT_MAP[key]
 
     # case 2 ─ activation *class* (subclass of nn.Module)
@@ -319,7 +322,7 @@ class MLP(nn.Module):
     ):
         super().__init__()
 
-        _act = _resolve_activation(activation)
+        _act = _resolve_activation(activation, dtype, device)
 
         if n_layers == 0:
             if input_dim == output_dim:
@@ -330,17 +333,17 @@ class MLP(nn.Module):
             if end_activation:
                 self.net = nn.Sequential(
                     nn.Linear(input_dim, output_dim, dtype=dtype, device=device),
-                    _act(dtype=dtype, device=device)
+                    _act()
                 )
             else:
                 self.net = nn.Linear(input_dim, output_dim, dtype=dtype, device=device)
         else:
-            layers = [nn.Linear(input_dim, latent_dim, dtype=dtype, device=device), _act(dtype=dtype, device=device)]
+            layers = [nn.Linear(input_dim, latent_dim, dtype=dtype, device=device), _act()]
             for _ in range(n_layers - 2):
-                layers += [nn.Linear(latent_dim, latent_dim, dtype=dtype, device=device), _act(dtype=dtype, device=device)]
+                layers += [nn.Linear(latent_dim, latent_dim, dtype=dtype, device=device), _act()]
             layers.append(nn.Linear(latent_dim, output_dim, dtype=dtype, device=device))
             if end_activation:
-                layers.append(_act(dtype=dtype, device=device))
+                layers.append(_act())
             self.net = nn.Sequential(*layers)
 
         # Cache init kwargs for later use in self.apply
@@ -489,7 +492,7 @@ class GNN(nn.Module):
         assert n_layers > 0, "n_layers must be a positive integer"
 
         _gcl = _resolve_gcl(gcl)
-        _act = _resolve_activation(activation)
+        _act = _resolve_activation(activation, dtype, device)
         self._weight_init = _resolve_init(weight_init, _INIT_MAP_W)
         self._bias_init = _resolve_init(bias_init, _INIT_MAP_B)
 
@@ -507,7 +510,7 @@ class GNN(nn.Module):
             # Only add activation if not last layer or end_activation is True
             if i < n_layers - 1 or end_activation:
                 # Each activation can be a new instance
-                layers.append(_act(dtype=dtype, device=device))
+                layers.append(_act())
         self.layers = nn.ModuleList(layers)
 
         self.apply(self._init_gcl)

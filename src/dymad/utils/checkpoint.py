@@ -112,6 +112,7 @@ def load_model(model_class, checkpoint_path, config_path, config_mod=None):
     chkpt = torch.load(checkpoint_path, weights_only=False)
     md = chkpt['metadata']
     dtype = torch.double if md['config']['data'].get('double_precision', False) else torch.float
+    torch.set_default_dtype(dtype)   # GNNs use the default dtype, so we need to set it here
 
     # Model
     model = model_class(config['model'], md, dtype=dtype)
