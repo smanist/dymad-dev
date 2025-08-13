@@ -2,7 +2,7 @@ data:
   path: './data/ltg.npz'
   n_samples: 128
   n_steps: 501
-  double_precision: false
+  double_precision: double
 
 transform_x:
   type: "identity"

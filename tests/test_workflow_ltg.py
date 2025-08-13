@@ -4,6 +4,8 @@ Test cases for dynamics with inputs on graph.
 `ct`: Continuous time models, GLDM and GKBF, with NODE and weak form training.
 `dt`: Discrete time models, DGLDM and DGKBF, with NODE training.
 
+Also GKBF/DGKBF with linear training.
+
 Sweep mode included for NODE training.
 """
 
@@ -11,7 +13,7 @@ import os
 import torch
 
 from dymad.models import DGKBF, DGLDM, GKBF, GLDM
-from dymad.training import WeakFormTrainer, NODETrainer
+from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
 from dymad.utils import load_model
 
 mdl_kb = {
@@ -63,8 +65,7 @@ trn_nd = {
     "sweep_epoch_step": 5,
     "ode_method": "dopri5",
     "rtol": 1e-7,
-    "atol": 1e-9
-}
+    "atol": 1e-9}
 trn_dt = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -75,20 +76,30 @@ trn_dt = {
     "dynamics_weight": 1.0,
     "sweep_lengths": [3, 5],
     "sweep_epoch_step": 5,
-    "chop_mode": "initial"
-}
+    "chop_mode": "initial"}
+trn_ln = {
+    "n_epochs": 1,
+    "save_interval": 1,
+    "load_checkpoint": False,
+    "learning_rate": 5e-3,
+    "decay_rate": 0.999,
+    "reconstruction_weight": 1.0,
+    "dynamics_weight": 1.0,
+    "method": "truncated",
+    "params": 2}
 
 cfgs = [
     ('ldm_wf',   GLDM,  WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
     ('ldm_node', GLDM,  NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
     ('kbf_wf',   GKBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
     ('kbf_node', GKBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
+    ('kbf_ln',   GKBF,  LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
     ('dldm_nd',  DGLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_dt}),
     ('dkbf_nd',  DGKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
-    ]
+    ('dkbf_ln',  DGKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),]
 
-IDX_CT = [0, 1, 2, 3]
-IDX_DT = [4, 5]
+IDX_CT = [0, 1, 2, 3, 4]
+IDX_DT = [5, 6, 7]
 
 def train_case(idx, data, path):
     _, MDL, Trainer, opt = cfgs[idx]
