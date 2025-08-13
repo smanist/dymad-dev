@@ -1,3 +1,4 @@
+from functools import partial
 from scipy.interpolate import interp1d
 import torch
 import torch.nn as nn
@@ -215,7 +216,7 @@ def _resolve_activation(spec, dtype, device) -> nn.Module:
                              f"Valid keys are {sorted(_ACT_MAP.keys())}.")
         if key == "prelu":
             # dtype of the slope
-            return lambda x=None: _ACT_MAP[key](dtype=dtype, device=device)
+            return partial(_ACT_MAP[key], dtype=dtype, device=device)
         return _ACT_MAP[key]
 
     # case 2 ─ activation *class* (subclass of nn.Module)

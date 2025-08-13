@@ -87,7 +87,7 @@ trn_ln = {
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
     "method": "truncated",
-    "params": 8}
+    "params": 2}
 
 cfgs = [
     ('ldm_wf',   LDM,  WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
