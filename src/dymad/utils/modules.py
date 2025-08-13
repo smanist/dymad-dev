@@ -143,9 +143,18 @@ class FlexLinear(nn.Module):
         self, state_dict, prefix, local_metadata, strict,
         missing_keys, unexpected_keys, error_msgs,
     ):
+        # Check if U and V exists - they should always appear in pair.
+        # Depending on the running environment (e.g., GitHub CI), the keys may be prefixed differently.
+        if prefix+"U" in state_dict:
+            U_ckpt = state_dict[prefix + "U"]
+            V_ckpt = state_dict[prefix + "V"]
+        elif prefix+"net.0.U" in state_dict:
+            U_ckpt = state_dict[prefix + "net.0.U"]
+            V_ckpt = state_dict[prefix + "net.0.V"]
+        else:
+            U_ckpt, V_ckpt = None, None
+
         # U and V, if exist, are empty if full mode, otherwise they are low-rank factors.
-        U_ckpt = state_dict.get(prefix + "U", None)
-        V_ckpt = state_dict.get(prefix + "V", None)
         if U_ckpt is None or V_ckpt is None:
             is_lowrank = False
         else:
