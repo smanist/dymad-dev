@@ -118,6 +118,8 @@ def load_model(model_class, checkpoint_path, config_path, config_mod=None):
     model = model_class(config['model'], md, dtype=dtype)
     model.load_state_dict(chkpt['model_state_dict'])
 
+    logger.info(f"{chkpt['model_state_dict']}")
+
     # Check if autonomous
     _is_autonomous = md.get('transform_u_state', None) is None
 
