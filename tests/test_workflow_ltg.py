@@ -63,7 +63,7 @@ trn_nd = {
     "dynamics_weight": 1.0,
     "sweep_lengths": [10, 20],
     "sweep_epoch_step": 5,
-    "ode_method": "euler"}
+    "ode_method": "dopri5"}
 trn_dt = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -83,8 +83,7 @@ trn_ln = {
     "decay_rate": 0.999,
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
-    "method": "truncated",
-    "params": 2}
+    "method": "full"}
 
 cfgs = [
     ('ldm_wf',   GLDM,  WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
