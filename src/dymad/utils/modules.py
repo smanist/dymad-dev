@@ -143,8 +143,9 @@ class FlexLinear(nn.Module):
         self, state_dict, prefix, local_metadata, strict,
         missing_keys, unexpected_keys, error_msgs,
     ):
-        # Check if U and V exists - they should always appear in pair.
         # Depending on the running environment (e.g., GitHub CI), the keys may be prefixed differently.
+
+        # Check if U and V exists - they should always appear in pair.
         if prefix+"U" in state_dict:
             U_ckpt = state_dict[prefix + "U"]
             V_ckpt = state_dict[prefix + "V"]
@@ -153,6 +154,22 @@ class FlexLinear(nn.Module):
             V_ckpt = state_dict[prefix + "net.0.V"]
         else:
             U_ckpt, V_ckpt = None, None
+
+        # Check if weights exist.
+        if prefix+"weight" in state_dict:
+            W_ckpt = state_dict[prefix + "weight"]
+        elif prefix+"net.0.weight" in state_dict:
+            W_ckpt = state_dict[prefix + "net.0.weight"]
+        else:
+            W_ckpt = None
+
+        # bias should always exist, but might prefixed differently.
+        if prefix+"bias" in state_dict:
+            b_ckpt = state_dict[prefix + "bias"]
+        elif prefix+"net.0.bias" in state_dict:
+            b_ckpt = state_dict[prefix + "net.0.bias"]
+        else:
+            b_ckpt = None
 
         # U and V, if exist, are empty if full mode, otherwise they are low-rank factors.
         if U_ckpt is None or V_ckpt is None:
@@ -167,6 +184,13 @@ class FlexLinear(nn.Module):
                 self.U = nn.Parameter(torch.empty_like(U_ckpt, dtype=U_ckpt.dtype, device=device), requires_grad=True)
                 self.V = nn.Parameter(torch.empty_like(V_ckpt, dtype=V_ckpt.dtype, device=device), requires_grad=True)
 
+        _dict = {
+            prefix + "weight": W_ckpt,
+            prefix + "bias": b_ckpt,
+            prefix + "U": U_ckpt,
+            prefix + "V": V_ckpt,
+        }
+
         self.mode = "lora" if is_lowrank else "full"
         self.rank = self.U.shape[1] if is_lowrank else None
 
@@ -176,7 +200,7 @@ class FlexLinear(nn.Module):
 
         # Now let the default loader copy tensors
         super()._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict,
+            _dict, prefix, local_metadata, False,
             missing_keys, unexpected_keys, error_msgs
         )
 
