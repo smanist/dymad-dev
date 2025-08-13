@@ -63,9 +63,7 @@ trn_nd = {
     "dynamics_weight": 1.0,
     "sweep_lengths": [10, 20],
     "sweep_epoch_step": 5,
-    "ode_method": "dopri5",
-    "rtol": 1e-7,
-    "atol": 1e-9}
+    "ode_method": "rk4"}
 trn_dt = {
     "n_epochs": 10,
     "save_interval": 5,
