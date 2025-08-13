@@ -5,7 +5,7 @@ import torch
 from torch_geometric.utils import dense_to_sparse
 
 from dymad.models import GLDM, GKBF
-from dymad.training import WeakFormTrainer, NODETrainer
+from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
 from dymad.utils import load_model, plot_summary, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 128
@@ -48,10 +48,12 @@ cases = [
     {"name": "ldm_wf",   "model" : GLDM, "trainer": WeakFormTrainer, "config": 'ltg_ldm_wf.yaml'},
     {"name": "ldm_node", "model" : GLDM, "trainer": NODETrainer,     "config": 'ltg_ldm_node.yaml'},
     {"name": "kbf_wf",   "model" : GKBF, "trainer": WeakFormTrainer, "config": 'ltg_kbf_wf.yaml'},
-    {"name": "kbf_node", "model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'}
+    {"name": "kbf_node", "model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'},
+    {"name": "kbf_ln",   "model" : GKBF, "trainer": LinearTrainer,   "config": 'ltg_kbf_ln.yaml'}
 ]
 # IDX = [0, 1]
-IDX = [2, 3]
+# IDX = [2, 3]
+IDX = [4]
 labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0

@@ -150,10 +150,28 @@ class KBF(ModelBase):
         """
         return predict_continuous(self, x0, ts, us=w.u, method=method, order=self.input_order)
 
-    def linear_features(self, w: DynData) -> torch.Tensor:
-        """Compute linear features for training."""
+    def linear_features(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute linear features, f, and outputs, dz, for (D)KBF model.
+
+        dz = Af
+
+        For KBF, f contains the bilinear terms, z, z*u, u;
+        dz is the output of KBF dynamics, z_dot for cont-time, z_next for disc-time.
+        """
         z = self.encoder(w)
-        return self._zu_cat(z, w)
+        return self._zu_cat(z, w), z
+
+    def linear_eval(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute linear evaluation, dz, and states, z, for (D)KBF model.
+
+        dz = Af
+
+        For KBF, dz is the output of KBF dynamics.
+        z is the encoded state, which will be used to compute the expected output.
+        """
+        z = self.encoder(w)
+        z_dot = self.dynamics(z, w)
+        return z_dot, z
 
 class DKBF(KBF):
     """Discrete Koopman Bilinear Form (DKBF) model - discrete-time version.
@@ -286,10 +304,25 @@ class GKBF(ModelBase):
     def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
         return predict_graph_continuous(self, x0, ts, w.edge_index, us=w.u, method=method, order=self.input_order)
 
-    def linear_features(self, w: DynGeoData) -> torch.Tensor:
-        """Compute linear features for training."""
+    def linear_features(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute linear features, f, and outputs, dz, for (D)GKBF model.
+
+        Main difference with KBF: the middle two dimensions are permuted, so that
+        the time dimension is the second last dimension, this is needed in
+        linear trainer to match the expected shape.
+        """
         z = self.encoder(w)
-        return self._zu_cat(z, w)
+        f = self._zu_cat(z, w)
+        return f.permute(0, 2, 1, 3), z.permute(0, 2, 1, 3)
+
+    def linear_eval(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute linear evaluation, dz, and states, z, for (D)GKBF model.
+
+        Same idea as in linear_features about the permutation.
+        """
+        z = self.encoder(w)
+        z_dot = self.dynamics(z, w)
+        return z_dot.permute(0, 2, 1, 3), z.permute(0, 2, 1, 3)
 
 class DGKBF(GKBF):
     """Discrete Graph Koopman Bilinear Form (DGKBF) model - discrete-time version.

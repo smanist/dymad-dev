@@ -89,7 +89,7 @@ cfgs = [
     ('dkbf_lf',  DKBF, LinearTrainer,   {"model": mdl_kf, "training" : trn_ln, "transform_x": trans, "plotting": plots}),
     ]
 
-IDX = [4]
+IDX = [3, 4]
 
 ifdat = 0
 iftrn = 1

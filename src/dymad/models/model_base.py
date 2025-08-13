@@ -64,7 +64,10 @@ class ModelBase(nn.Module, ABC):
     def forward(self, w: Data) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         raise NotImplementedError("This is the base class.")
 
-    def linear_features(self, w: Data) -> torch.Tensor:
+    def linear_features(self, w: Data) -> Tuple[torch.Tensor, torch.Tensor]:
+        raise NotImplementedError("This is the base class.")
+
+    def linear_eval(self, w: Data) -> Tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError("This is the base class.")
 
     def set_linear_weights(self, W: torch.Tensor) -> None:

@@ -1,5 +1,5 @@
 data:
-  path: './data/ltg.npz'
+  path: './data/lti.npz'
   n_samples: 128
   n_steps: 501
   double_precision: false
@@ -17,14 +17,13 @@ dataloader:
   batch_size: 64
 
 model:
-  name: 'ltg_dkbl'
+  name: 'lti_kbf_ln'
   encoder_layers: 1
   decoder_layers: 1
   latent_dimension: 32
-  koopman_dimension: 12
+  koopman_dimension: 4
   const_term: true
   autoencoder_type: "cat"
-  gcl: "sage"
   activation: "none"
   weight_init: "xavier_uniform"
   input_order: "cubic"
@@ -37,5 +36,4 @@ training:
   decay_rate: 0.999
   reconstruction_weight: 1.0
   dynamics_weight: 1.0 
-  method: "truncated"
-  params: 4
+  method: "full"

@@ -9,6 +9,15 @@ from dymad.training.trainer_base import TrainerBase
 
 logger = logging.getLogger(__name__)
 
+def _dt_target(z: torch.Tensor) -> torch.Tensor:
+    """Compute discrete-time targets."""
+    return z[..., 1:, :]
+
+def _ct_target(z: torch.Tensor, dt) -> torch.Tensor:
+    """Compute linear targets for continuous-time models."""
+    dz = np.gradient(z.cpu().numpy(), dt, axis=-2, edge_order=2)
+    return torch.tensor(dz, dtype=z.dtype, device=z.device)
+
 class LinearTrainer(TrainerBase):
     """
     Trainer using Linear approach.
@@ -31,14 +40,12 @@ class LinearTrainer(TrainerBase):
         if model_class.CONT:
             self.dt = self.metadata["dt_and_n_steps"][0][0]
             self._comp_linear_features = self._comp_linear_features_ct
-            self._comp_linear_targets  = self._comp_linear_targets_ct
-            self._comp_linear_predict  = self._comp_linear_predict_ct
+            self._comp_linear_eval     = self._comp_linear_eval_ct
             logger.info(f"Using continuous-time model for linear training, dt={self.dt}.")
         else:
             self.dt = None
             self._comp_linear_features = self._comp_linear_features_dt
-            self._comp_linear_targets  = self._comp_linear_targets_dt
-            self._comp_linear_predict  = self._comp_linear_predict_dt
+            self._comp_linear_eval     = self._comp_linear_eval_dt
             logger.info("Using discrete-time model for linear training.")
 
         # Training weights
@@ -52,17 +59,16 @@ class LinearTrainer(TrainerBase):
     def _process_batch(self, batch: Union[DynData, DynGeoData]) -> torch.Tensor:
         """
         Process a batch and return predictions and ground truth states.
-        
+
         Only used in `evaluation` in this Trainer.
         """
-        B  = batch.to(self.device)
-        z, z_dot, x_hat = self.model(B)
-        _b = self._comp_linear_targets(z)
-        _p = self._comp_linear_predict(z_dot)
+        B = batch.to(self.device)
+        _p, _b = self._comp_linear_eval(B)
         linear_loss = self.criterion(_p, _b)
 
         if self.recon_weight > 0:
             # Add reconstruction loss
+            _, _, x_hat = self.model(B)
             recon_loss = self.criterion(B.x, x_hat)
             return self.dynamics_weight * linear_loss + self.recon_weight * recon_loss
         else:
@@ -70,32 +76,28 @@ class LinearTrainer(TrainerBase):
 
     def _comp_linear_features_dt(self, batch: DynData | DynGeoData) -> torch.Tensor:
         """Compute linear features for discrete-time models."""
-        f = self.model.linear_features(batch)
-        return f[..., :-1, :]
+        A, z = self.model.linear_features(batch)
+        _A = A[..., :-1, :]
+        _z = _dt_target(z)
+        return _A.reshape(-1, _A.shape[-1]), _z.reshape(-1, _z.shape[-1])
 
-    def _comp_linear_targets_dt(self, z: torch.Tensor) -> torch.Tensor:
-        """Compute linear targets for discrete-time models."""
-        return z[..., 1:, :]
-
-    def _comp_linear_predict_dt(self, z_dot: torch.Tensor) -> torch.Tensor:
+    def _comp_linear_eval_dt(self, batch: DynData | DynGeoData) -> torch.Tensor:
         """Compute predicted targets for discrete-time models.
         z_dot really means z_next here.
         """
-        return z_dot[..., :-1, :]
+        z_dot, z = self.model.linear_eval(batch)
+        return z_dot[..., :-1, :], _dt_target(z)
 
     def _comp_linear_features_ct(self, batch: DynData | DynGeoData) -> torch.Tensor:
         """Compute linear features for continuous-time models."""
-        f = self.model.linear_features(batch)
-        return f
+        A, z = self.model.linear_features(batch)
+        _z = _ct_target(z, self.dt)
+        return A.reshape(-1, A.shape[-1]), _z.reshape(-1, _z.shape[-1])
 
-    def _comp_linear_targets_ct(self, z: torch.Tensor) -> torch.Tensor:
-        """Compute linear targets for continuous-time models."""
-        dz = np.gradient(z.cpu().numpy(), self.dt, axis=1, edge_order=2)
-        return torch.tensor(dz, dtype=z.dtype, device=z.device)
-
-    def _comp_linear_predict_ct(self, z_dot: torch.Tensor) -> torch.Tensor:
+    def _comp_linear_eval_ct(self, batch: DynData | DynGeoData) -> torch.Tensor:
         """Compute predicted targets for continuous-time models."""
-        return z_dot
+        z_dot, z = self.model.linear_eval(batch)
+        return z_dot, _ct_target(z, self.dt)
 
     def train_epoch(self) -> float:
         """Train the model for one epoch."""
@@ -105,15 +107,11 @@ class LinearTrainer(TrainerBase):
             # Assemble the linear system
             A, b = [], []
             for batch in self.train_loader:
-                z, _, _ = self.model(batch)
-                _A = self._comp_linear_features(batch)
-                _b = self._comp_linear_targets(z)
+                _A, _b = self._comp_linear_features(batch)
                 A.append(_A)
                 b.append(_b)
             A = torch.cat(A, dim=0).cpu().numpy()
             b = torch.cat(b, dim=0).cpu().numpy()
-            A = A.reshape(-1, A.shape[-1])
-            b = b.reshape(-1, b.shape[-1])
 
             # Solve the linear system
             if self.method == 'full':
