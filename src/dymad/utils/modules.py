@@ -11,9 +11,6 @@ except:
     ChebConv, SAGEConv = None, None
 from typing import Callable, Optional, Union, Tuple
 
-import logging
-logger = logging.getLogger(__name__)
-
 class TakeFirst(nn.Module):
     """
     Pass-through layer that returns the first `m` entries in the last axis.
@@ -206,9 +203,6 @@ class FlexLinear(nn.Module):
 
         self.mode = "lora" if is_lowrank else "full"
         self.rank = self.U.shape[1] if is_lowrank else None
-
-        logger.info(f"{state_dict}")
-        logger.info(f"{prefix}")
 
 _ACT_MAP = {
     # common aliases -> canonical class
