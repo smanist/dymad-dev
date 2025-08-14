@@ -50,7 +50,7 @@ cases = [
     {"name" : "dkbl", "model" : DGKBF, "trainer": LinearTrainer, "config": 'ltg_dkbl.yaml'}
 ]
 
-IDX = [2]
+IDX = [1, 2]
 labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0

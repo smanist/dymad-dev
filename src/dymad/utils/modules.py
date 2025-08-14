@@ -177,32 +177,38 @@ class FlexLinear(nn.Module):
         else:
             is_lowrank = U_ckpt.shape[0] > 0 and V_ckpt.shape[0] > 0
 
+        # Set the parameters
         if is_lowrank:
             if self.U.shape != U_ckpt.shape or self.V.shape != V_ckpt.shape:
                 # re-register parameters with correct shapes
                 device = self.weight.device
                 self.U = nn.Parameter(torch.empty_like(U_ckpt, dtype=U_ckpt.dtype, device=device), requires_grad=True)
                 self.V = nn.Parameter(torch.empty_like(V_ckpt, dtype=V_ckpt.dtype, device=device), requires_grad=True)
+            self.U.data.copy_(U_ckpt)
+            self.V.data.copy_(V_ckpt)
+        else:
+            if self.weight.shape != W_ckpt.shape:
+                # re-register parameters with correct shapes
+                device = self.weight.device
+                self.weight = nn.Parameter(torch.empty_like(W_ckpt, dtype=W_ckpt.dtype, device=device))
+            self.weight.data.copy_(W_ckpt)
 
-        _dict = {
-            prefix + "weight": W_ckpt,
-            prefix + "bias": b_ckpt,
-            prefix + "U": U_ckpt,
-            prefix + "V": V_ckpt,
-        }
+        if b_ckpt is not None:
+            if self.bias is None:
+                # re-register bias parameter
+                device = self.weight.device
+                self.bias = nn.Parameter(torch.empty_like(b_ckpt, dtype=b_ckpt.dtype, device=device))
+            elif self.bias.shape != b_ckpt.shape:
+                # re-register bias parameter with correct shape
+                device = self.bias.device
+                self.bias = nn.Parameter(torch.empty_like(b_ckpt, dtype=b_ckpt.dtype, device=device))
+            self.bias.data.copy_(b_ckpt)
 
         self.mode = "lora" if is_lowrank else "full"
         self.rank = self.U.shape[1] if is_lowrank else None
 
         logger.info(f"{state_dict}")
         logger.info(f"{prefix}")
-        logger.info(f"{strict}")
-
-        # Now let the default loader copy tensors
-        super()._load_from_state_dict(
-            _dict, prefix, local_metadata, False,
-            missing_keys, unexpected_keys, error_msgs
-        )
 
 _ACT_MAP = {
     # common aliases -> canonical class
