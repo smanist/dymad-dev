@@ -116,4 +116,5 @@ def predict_case(idx, sample, path):
 def test_ltg(ltg_data, ltg_gau, env_setup, idx):
     train_case(idx, ltg_data, env_setup)
     predict_case(idx, ltg_gau, env_setup)
-    os.remove(env_setup/'ltg_model.pt')
+    if os.path.exists(env_setup/'ltg_model.pt'):
+        os.remove(env_setup/'ltg_model.pt')

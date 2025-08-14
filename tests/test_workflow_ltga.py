@@ -118,4 +118,5 @@ def predict_case(idx, sample, path):
 def test_ltga(ltga_data, ltga_test, env_setup, idx):
     train_case(idx, ltga_data, env_setup)
     predict_case(idx, ltga_test, env_setup)
-    os.remove(env_setup/'ltga_model.pt')
+    if os.path.exists(env_setup/'ltga_model.pt'):
+        os.remove(env_setup/'ltga_model.pt')

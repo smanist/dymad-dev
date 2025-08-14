@@ -140,4 +140,5 @@ def test_lti(lti_data, lti_gau, env_setup, idx):
     ifdl = idx in IDX_DL
     train_case(idx, lti_data, env_setup)
     predict_case(idx, lti_gau, env_setup, ifdl=ifdl)
-    os.remove(env_setup/'lti_model.pt')
+    if os.path.exists(env_setup/'lti_model.pt'):
+        os.remove(env_setup/'lti_model.pt')

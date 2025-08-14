@@ -38,7 +38,7 @@ minversion = "8.0"
 addopts = [
   "-ra",            # show reasons for skips/xpasses
   "--strict-markers",
-  "--maxfail=100",
+  "--maxfail=0",
   "-q"
 ]
 testpaths = ["tests"]

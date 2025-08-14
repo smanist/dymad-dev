@@ -123,10 +123,12 @@ def predict_case(idx, sample, path):
 def test_kp(kp_data, kp_test, env_setup, idx):
     train_case(idx, kp_data, env_setup)
     predict_case(idx, kp_test, env_setup)
-    os.remove(env_setup/'kp_model.pt')
+    if os.path.exists(env_setup/'kp_model.pt'):
+        os.remove(env_setup/'kp_model.pt')
 
 def test_kp_rst(kp_data, kp_test, env_setup):
     train_case(0, kp_data, env_setup)
     train_case(1, kp_data, env_setup, chkpt='checkpoints/kp_model_checkpoint.pt')
     predict_case(1, kp_test, env_setup)
-    os.remove(env_setup/'kp_model.pt')
+    if os.path.exists(env_setup/'kp_model.pt'):
+        os.remove(env_setup/'kp_model.pt')
