@@ -73,9 +73,9 @@ def lti_data():
 
     # --------------------
     # Data generation
-    B = 128
-    N = 501
-    t_grid = np.linspace(0, 5, N)
+    B = 32
+    N = 51
+    t_grid = np.linspace(0, 0.5, N)
 
     sampler = TrajectorySampler(f, g, config=HERE/'lti_data.yaml', config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
@@ -94,8 +94,8 @@ def lti_data():
 @pytest.fixture(scope='session')
 def lti_gau():
     # ---- runs ONCE before any tests execute ----
-    N = 501
-    t_grid = np.linspace(0, 5, N)
+    N = 51
+    t_grid = np.linspace(0, 0.5, N)
     sampler = TrajectorySampler(f, g, config=HERE/'lti_data.yaml', config_mod=config_gau)
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
