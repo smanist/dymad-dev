@@ -27,7 +27,8 @@ mdl_kb = {
     "gcl": "sage",
     "activation": "none",
     "weight_init": "xavier_uniform",
-    "input_order": "cubic"}
+    "input_order": "cubic",
+    "gain": 0.01}
 mdl_ld = {
     "name": "ltg_model",
     "encoder_layers": 1,
@@ -38,7 +39,8 @@ mdl_ld = {
     "gcl": "sage",
     "activation": "none",
     "weight_init": "xavier_uniform",
-    "input_order": "cubic"}
+    "input_order": "cubic",
+    "gain": 0.01}
 
 trn_wf = {
     "n_epochs": 10,
