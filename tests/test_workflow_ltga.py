@@ -10,6 +10,7 @@ Sweep mode included for NODE training.
 """
 
 import os
+import pytest
 import torch
 
 from dymad.models import DGKBF, DGLDM, GKBF, GLDM
@@ -99,9 +100,6 @@ cfgs = [
     ('dkbf_ln',  DGKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
 ]
 
-IDX_CT = [0, 1, 2, 3, 4]
-IDX_DT = [5, 6, 7]
-
 def train_case(idx, data, path):
     _, MDL, Trainer, opt = cfgs[idx]
     opt.update({"data": {"path": data}})
@@ -116,14 +114,8 @@ def predict_case(idx, sample, path):
     with torch.no_grad():
         prd_func(x_data, t_data, ei=edge_index)
 
-def test_ltga_ct(ltga_data, ltga_test, env_setup):
-    for _i in IDX_CT:
-        train_case(_i, ltga_data, env_setup)
-        predict_case(_i, ltga_test, env_setup)
-    os.remove(env_setup/'ltga_model.pt')
-
-def test_ltga_dt(ltga_data, ltga_test, env_setup):
-    for _i in IDX_DT:
-        train_case(_i, ltga_data, env_setup)
-        predict_case(_i, ltga_test, env_setup)
+@pytest.mark.parametrize("idx", range(len(cfgs)))
+def test_ltga(ltga_data, ltga_test, env_setup, idx):
+    train_case(idx, ltga_data, env_setup)
+    predict_case(idx, ltga_test, env_setup)
     os.remove(env_setup/'ltga_model.pt')

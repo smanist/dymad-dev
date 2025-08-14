@@ -9,6 +9,7 @@ Also KBF/DKBF with linear training.
 """
 
 import os
+import pytest
 import torch
 
 from dymad.models import DKBF, DLDM, KBF, LDM
@@ -102,9 +103,6 @@ cfgs = [
     ('dkbf_ln',  DKBF, LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
     ]
 
-IDX_CT = [0, 1, 2, 3]
-IDX_DT = [5, 6, 7]
-
 def train_case(idx, data, path, chkpt=None):
     _, MDL, Trainer, opt = cfgs[idx]
     opt.update({"data": {"path": data}})
@@ -121,22 +119,10 @@ def predict_case(idx, sample, path):
     with torch.no_grad():
         prd_func(x_data, t_data)
 
-def test_kp_ct(kp_data, kp_test, env_setup):
-    for _i in IDX_CT:
-        train_case(_i, kp_data, env_setup)
-        predict_case(_i, kp_test, env_setup)
-    os.remove(env_setup/'kp_model.pt')
-
-def test_kp_ln(kp_data, kp_test, env_setup):
-    for _i in [4]:
-        train_case(_i, kp_data, env_setup)
-        predict_case(_i, kp_test, env_setup)
-    os.remove(env_setup/'kp_model.pt')
-
-def test_kp_dt(kp_data, kp_test, env_setup):
-    for _i in IDX_DT:
-        train_case(_i, kp_data, env_setup)
-        predict_case(_i, kp_test, env_setup)
+@pytest.mark.parametrize("idx", range(len(cfgs)))
+def test_kp(kp_data, kp_test, env_setup, idx):
+    train_case(idx, kp_data, env_setup)
+    predict_case(idx, kp_test, env_setup)
     os.remove(env_setup/'kp_model.pt')
 
 def test_kp_rst(kp_data, kp_test, env_setup):

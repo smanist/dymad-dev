@@ -11,6 +11,7 @@ Sweep mode included for NODE training.
 """
 
 import os
+import pytest
 import torch
 
 from dymad.models import DKBF, DLDM, KBF, LDM
@@ -115,9 +116,7 @@ cfgs = [
     ('dkbf_ln',  DKBF, LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
     ]
 
-IDX_CT = [0, 1, 2, 3]
 IDX_DL = [5, 6]
-IDX_DT = [7, 8, 9]
 
 def train_case(idx, data, path):
     _, MDL, Trainer, opt = cfgs[idx]
@@ -136,26 +135,9 @@ def predict_case(idx, sample, path, ifdl = False):
         else:
             prd_func(x_data, u_data, t_data)
 
-def test_lti_ct(lti_data, lti_gau, env_setup):
-    for _i in IDX_CT:
-        train_case(_i, lti_data, env_setup)
-        predict_case(_i, lti_gau, env_setup)
-    os.remove(env_setup/'lti_model.pt')
-
-def test_lti_ln(lti_data, lti_gau, env_setup):
-    for _i in [4]:
-        train_case(_i, lti_data, env_setup)
-        predict_case(_i, lti_gau, env_setup)
-    os.remove(env_setup/'lti_model.pt')
-
-def test_lti_dl(lti_data, lti_gau, env_setup):
-    for _i in IDX_DL:
-        train_case(_i, lti_data, env_setup)
-        predict_case(_i, lti_gau, env_setup, ifdl=True)
-    os.remove(env_setup/'lti_model.pt')
-
-def test_lti_dt(lti_data, lti_gau, env_setup):
-    for _i in IDX_DT:
-        train_case(_i, lti_data, env_setup)
-        predict_case(_i, lti_gau, env_setup)
+@pytest.mark.parametrize("idx", range(len(cfgs)))
+def test_lti(lti_data, lti_gau, env_setup, idx):
+    ifdl = idx in IDX_DL
+    train_case(idx, lti_data, env_setup)
+    predict_case(idx, lti_gau, env_setup, ifdl=ifdl)
     os.remove(env_setup/'lti_model.pt')

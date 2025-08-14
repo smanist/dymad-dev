@@ -10,6 +10,7 @@ Sweep mode included for NODE training.
 """
 
 import os
+import pytest
 import torch
 
 from dymad.models import DGKBF, DGLDM, GKBF, GLDM
@@ -97,9 +98,6 @@ cfgs = [
     ('dkbf_nd',  DGKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
     ('dkbf_ln',  DGKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),]
 
-IDX_CT = [0, 1, 2, 3]
-IDX_DT = [5, 6]
-
 def train_case(idx, data, path):
     _, MDL, Trainer, opt = cfgs[idx]
     opt.update({"data": {"path": data}})
@@ -114,44 +112,8 @@ def predict_case(idx, sample, path):
     with torch.no_grad():
         prd_func(x_data, u_data, t_data, ei=edge_index)
 
-def test_ltg_ct0(ltg_data, ltg_gau, env_setup):
-    for _i in [0]:
-        train_case(_i, ltg_data, env_setup)
-        predict_case(_i, ltg_gau, env_setup)
-    os.remove(env_setup/'ltg_model.pt')
-
-def test_ltg_ct1(ltg_data, ltg_gau, env_setup):
-    for _i in [1]:
-        train_case(_i, ltg_data, env_setup)
-        predict_case(_i, ltg_gau, env_setup)
-    os.remove(env_setup/'ltg_model.pt')
-
-def test_ltg_ct2(ltg_data, ltg_gau, env_setup):
-    for _i in [2]:
-        train_case(_i, ltg_data, env_setup)
-        predict_case(_i, ltg_gau, env_setup)
-    os.remove(env_setup/'ltg_model.pt')
-
-def test_ltg_ct3(ltg_data, ltg_gau, env_setup):
-    for _i in [3]:
-        train_case(_i, ltg_data, env_setup)
-        predict_case(_i, ltg_gau, env_setup)
-    os.remove(env_setup/'ltg_model.pt')
-
-def test_ltg_ctl(ltg_data, ltg_gau, env_setup):
-    for _i in [4]:
-        train_case(_i, ltg_data, env_setup)
-        predict_case(_i, ltg_gau, env_setup)
-    os.remove(env_setup/'ltg_model.pt')
-
-def test_ltg_dt(ltg_data, ltg_gau, env_setup):
-    for _i in IDX_DT:
-        train_case(_i, ltg_data, env_setup)
-        predict_case(_i, ltg_gau, env_setup)
-    os.remove(env_setup/'ltg_model.pt')
-
-def test_ltg_dtl(ltg_data, ltg_gau, env_setup):
-    for _i in [7]:
-        train_case(_i, ltg_data, env_setup)
-        predict_case(_i, ltg_gau, env_setup)
+@pytest.mark.parametrize("idx", range(len(cfgs)))
+def test_ltg(ltg_data, ltg_gau, env_setup, idx):
+    train_case(idx, ltg_data, env_setup)
+    predict_case(idx, ltg_gau, env_setup)
     os.remove(env_setup/'ltg_model.pt')
