@@ -31,7 +31,7 @@ mdl_kb = {
     "name" : 'lti_model',
     "encoder_layers" : 2,
     "decoder_layers" : 2,
-    "latent_dimension" : 32,
+    "latent_dimension" : 8,
     "koopman_dimension" : 4,
     "activation" : "prelu",
     "weight_init" : "xavier_uniform",
