@@ -13,8 +13,9 @@ class LDM(ModelBase):
     The encoder, dynamics, and decoder networks are implemented as MLPs.
     """
     GRAPH = False
+    CONT  = True
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(LDM, self).__init__()
         self.n_total_state_features = data_meta.get('n_total_state_features')
         self.n_total_control_features = data_meta.get('n_total_control_features')
@@ -39,7 +40,9 @@ class LDM(ModelBase):
             'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
             'bias_init'      : model_config.get('bias_init', 'zeros'),
             'gain'           : model_config.get('gain', 1.0),
-            'end_activation' : model_config.get('end_activation', True)
+            'end_activation' : model_config.get('end_activation', True),
+            'dtype'          : dtype,
+            'device'         : device
         }
         aec_type = model_config.get('autoencoder_type', 'smp')
 
@@ -180,9 +183,10 @@ class DLDM(LDM):
     ```
     """
     GRAPH = False
+    CONT  = False
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
-        super(DLDM, self).__init__(model_config, data_meta)
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
+        super(DLDM, self).__init__(model_config, data_meta, dtype=dtype, device=device)
 
     def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""
@@ -194,8 +198,9 @@ class GLDM(ModelBase):
     Uses GNN for encoder/decoder and MLP for dynamics.
     """
     GRAPH = True
+    CONT  = True
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(GLDM, self).__init__()
         self.n_total_state_features = data_meta.get('n_total_state_features')
         self.n_total_control_features = data_meta.get('n_total_control_features')
@@ -220,7 +225,9 @@ class GLDM(ModelBase):
             'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
             'bias_init'      : model_config.get('bias_init', 'zeros'),
             'gain'           : model_config.get('gain', 1.0),
-            'end_activation' : model_config.get('end_activation', True)
+            'end_activation' : model_config.get('end_activation', True),
+            'dtype'          : dtype,
+            'device'         : device
         }
         opts_gnn = opts_mlp.copy()
         opts_gnn.update({
@@ -263,16 +270,16 @@ class GLDM(ModelBase):
 
     def _encoder_ctrl(self, w: DynGeoData) -> torch.Tensor:
         xu_cat = torch.cat([w.xg, w.ug], dim=-1)
-        return self.encoder_net(xu_cat, w.edge_index)
+        return w.g(self.encoder_net(xu_cat, w.edge_index))
 
     def _encoder_auto(self, w: DynGeoData) -> torch.Tensor:
-        return self.encoder_net(w.xg, w.edge_index)
+        return w.g(self.encoder_net(w.xg, w.edge_index))
 
     def decoder(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
-        return self.decoder_net(w.g(z), w.edge_index)
+        return self.decoder_net(z, w.edge_index)
 
     def dynamics(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
-        return w.G(self.dynamics_net(w.g(z)))
+        return self.dynamics_net(z)
 
     def forward(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         z = self.encoder(w)
@@ -289,9 +296,10 @@ class DGLDM(GLDM):
     Same idea as DKBF vs KBF.
     """
     GRAPH = True
+    CONT  = False
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
-        super(DGLDM, self).__init__(model_config, data_meta)
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
+        super(DGLDM, self).__init__(model_config, data_meta, dtype=dtype, device=device)
 
     def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""

@@ -1,6 +1,6 @@
 import numpy as np
 
-from dymad.utils.weak import generate_weak_weights
+from dymad.numerics.weak import generate_weak_weights
 
 ref = [
     ([1.1692428919931415],

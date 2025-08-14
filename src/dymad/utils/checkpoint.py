@@ -3,8 +3,11 @@ import numpy as np
 import os
 import torch
 
-from dymad.data import DynData, DynGeoData, make_transform
+# Below avoids looped imports
+from dymad.data.data import DynDataImpl as DynData
+from dymad.data.data import DynGeoDataImpl as DynGeoData
 from dymad.utils.misc import load_config
+from dymad.utils.preprocessing import make_transform
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +111,12 @@ def load_model(model_class, checkpoint_path, config_path, config_mod=None):
     config = load_config(config_path, config_mod)
     chkpt = torch.load(checkpoint_path, weights_only=False)
     md = chkpt['metadata']
+    dtype = torch.double if md['config']['data'].get('double_precision', False) else torch.float
+    torch.set_default_dtype(dtype)   # GNNs use the default dtype, so we need to set it here
 
     # Model
-    model = model_class(config['model'], md)
+    model = model_class(config['model'], md, dtype=dtype)
     model.load_state_dict(chkpt['model_state_dict'])
-    dtype = next(model.parameters()).dtype
 
     # Check if autonomous
     _is_autonomous = md.get('transform_u_state', None) is None

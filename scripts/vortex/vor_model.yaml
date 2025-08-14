@@ -1,0 +1,16 @@
+data:
+  path: './data/cylinder.npz'
+  n_samples: 1
+  n_steps: 140
+  double_precision: true
+
+transform_x:
+  type: "svd"
+  ifcen: true
+  order: 12
+
+split:
+  train_frac: 1
+
+dataloader:
+  batch_size: 1

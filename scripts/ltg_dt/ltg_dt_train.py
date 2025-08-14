@@ -5,7 +5,7 @@ import torch
 from torch_geometric.utils import dense_to_sparse
 
 from dymad.models import DGLDM, DGKBF
-from dymad.training import NODETrainer
+from dymad.training import NODETrainer, LinearTrainer
 from dymad.utils import load_model, plot_summary, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 128
@@ -45,13 +45,17 @@ config_gau = {
             "mode": "zoh"}}}
 
 cases = [
-    {"name" : "dldm", "model" : DGLDM, "trainer": NODETrainer, "config": 'ltg_dldm.yaml'},
-    {"name" : "dkbf", "model" : DGKBF, "trainer": NODETrainer, "config": 'ltg_dkbf.yaml'}
+    {"name" : "dldm", "model" : DGLDM, "trainer": NODETrainer,   "config": 'ltg_dldm.yaml'},
+    {"name" : "dkbf", "model" : DGKBF, "trainer": NODETrainer,   "config": 'ltg_dkbf.yaml'},
+    {"name" : "dkbl", "model" : DGKBF, "trainer": LinearTrainer, "config": 'ltg_dkbl.yaml'}
 ]
+
+IDX = [1, 2]
+labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0
 iftrn = 1
-ifplt = 1
+ifplt = 0
 ifprd = 1
 
 if ifdat:
@@ -64,17 +68,17 @@ if ifdat:
         adj_mat=adj)
 
 if iftrn:
-    for _i in [0, 1]:
+    for _i in IDX:
         Model = cases[_i]['model']
+        Trainer = cases[_i]['trainer']
         config_path = cases[_i]['config']
 
         setup_logging(config_path, mode='info', prefix='results')
         logging.info(f"Config: {config_path}")
-        trainer = NODETrainer(config_path, Model)
+        trainer = Trainer(config_path, Model)
         trainer.train()
 
 if ifplt:
-    labels = [case['name'] for case in cases]
     npz_files = [f'results/ltg_{mdl}_summary.npz' for mdl in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
 
@@ -88,8 +92,8 @@ if ifprd:
     u_data = np.concatenate([us[0], us[0], us[0]], axis=-1)
 
     res = [x_data]
-    for case in cases:
-        MDL, mdl = case['model'], case['name']
+    for i in IDX:
+        MDL, mdl = cases[i]['model'], cases[i]['name']
         _, prd_func = load_model(MDL, f'ltg_{mdl}.pt', f'ltg_{mdl}.yaml')
 
         with torch.no_grad():
@@ -97,7 +101,7 @@ if ifprd:
             res.append(pred)
 
     plot_trajectory(
-        np.array(res), t_data, "LTI", metadata={'n_state_features': 2},
-        us=u_data, labels=['Truth', 'LDM', 'KBF'], ifclose=False)
+        np.array(res), t_data, "LTG",
+        us=u_data, labels=['Truth']+labels, ifclose=False)
 
 plt.show()

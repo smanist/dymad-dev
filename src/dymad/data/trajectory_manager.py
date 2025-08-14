@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 from typing import Optional, Union, Tuple, Dict, List
 
-from dymad.data import make_transform
+from dymad.utils.preprocessing import make_transform
 # Below avoids looped imports
 from dymad.data.data import DynDataImpl as DynData
 from dymad.data.data import DynGeoDataImpl as DynGeoData

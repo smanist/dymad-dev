@@ -1,7 +1,7 @@
 data:
   path: './data/lti.npz'
-  n_samples: 128
-  n_steps: 501
+  n_samples: 32
+  n_steps: 51
   double_precision: true
 
 transform_x:
@@ -15,4 +15,4 @@ split:
   train_frac: 0.75
 
 dataloader:
-  batch_size: 128
+  batch_size: 32

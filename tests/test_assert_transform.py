@@ -1,6 +1,6 @@
 import numpy as np
 
-from dymad.data import Compose, DelayEmbedder, Identity, make_transform, Scaler
+from dymad.utils import Compose, DelayEmbedder, Identity, make_transform, Scaler
 
 def check_data(out, ref, label=''):
     for _s, _t in zip(out, ref):

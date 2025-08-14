@@ -98,7 +98,7 @@ if ifprd:
 
     labels = ['Truth'] + [f"dt{i+1}" for i in IDX]
     plot_trajectory(
-        np.array(res), t_data, "KP", metadata={'n_state_features': 2},
+        np.array(res), t_data, "KP",
         labels=labels, ifclose=False)
 
 plt.show()

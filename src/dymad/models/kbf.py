@@ -5,7 +5,7 @@ from typing import Dict, Union, Tuple
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import make_autoencoder, predict_continuous, predict_discrete, \
+from dymad.utils import FlexLinear, make_autoencoder, predict_continuous, predict_discrete, \
     predict_graph_continuous, predict_graph_discrete
 
 class KBF(ModelBase):
@@ -14,12 +14,13 @@ class KBF(ModelBase):
     Uses MLP encoder/decoder and KBF operators for dynamics.
 
     - z = encoder(x)
-    - z_dot = Az + sum(B_i * u_i * z)
+    - z_dot = Az + sum(B_i * u_i * z) + Bu
     - x_hat = decoder(z)
     """
     GRAPH = False
+    CONT  = True
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(KBF, self).__init__()
         self.n_total_state_features = data_meta.get('n_total_state_features')
         self.n_total_control_features = data_meta.get('n_total_control_features')
@@ -46,7 +47,9 @@ class KBF(ModelBase):
             'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
             'bias_init'      : model_config.get('bias_init', 'zeros'),
             'gain'           : model_config.get('gain', 1.0),
-            'end_activation' : model_config.get('end_activation', True)
+            'end_activation' : model_config.get('end_activation', True),
+            'dtype'          : dtype,
+            'device'         : device
         }
         aec_type = model_config.get('autoencoder_type', 'smp')
 
@@ -62,18 +65,22 @@ class KBF(ModelBase):
             **opts
         )
 
-        # Create KBF operators: first for autonomous dynamics (A) then one per control (B_i)
-        tmp = [
-            nn.Linear(self.koopman_dimension, self.koopman_dimension, bias=False)
-            for _ in range(self.n_total_control_features + 1)]
-        if self.const_term and self.n_total_control_features > 0:
-            tmp.append(nn.Linear(self.n_total_control_features, self.koopman_dimension, bias=False))
-        self.operators = nn.ModuleList(tmp)
+        # Create KBF operators, concatenated
+        if self.n_total_control_features > 0:
+            if self.const_term:
+                dyn_dim = self.koopman_dimension * (self.n_total_control_features + 1) + self.n_total_control_features
+            else:
+                dyn_dim = self.koopman_dimension * (self.n_total_control_features + 1)
+        else:
+            dyn_dim = self.koopman_dimension
+        self.dynamics_net = FlexLinear(dyn_dim, self.koopman_dimension, bias=False, dtype=dtype, device=device)
 
         if self.n_total_control_features == 0:
-            self.dynamics = self._dynamics_auto
+            self._zu_cat = self._zu_cat_auto
         else:
-            self.dynamics = self._dynamics_ctrl
+            self._zu_cat = self._zu_cat_ctrl
+
+        self.set_linear_weights = self.dynamics_net.set_weights
 
     def diagnostic_info(self) -> str:
         model_info = super(KBF, self).diagnostic_info()
@@ -88,30 +95,22 @@ class KBF(ModelBase):
 
     def decoder(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
         """Decode from Koopman space back to state space."""
-        # Apply decoder layers (now nn.Sequential or nn.Identity/nn.Linear)
         return self.decoder_net(z)
 
-    def _dynamics_ctrl(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+    def dynamics(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
         """Compute dynamics in Koopman space using bilinear form."""
-        # Autonomous part: A @ z
-        z_dot = self.operators[0](z)
+        return self.dynamics_net(self._zu_cat(z, w))
 
-        # Add control-dependent terms: sum(u_i * B_i @ z)
-        for i in range(self.n_total_control_features):
-            control_i = w.u[..., i].unsqueeze(-1)  # Extract control i and add dimension for broadcasting
-            z_dot = z_dot + control_i * self.operators[i + 1](z)
-
-        # Add constant term if enabled
+    def _zu_cat_ctrl(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+        """Concatenate state and control inputs."""
+        z_u = (z.unsqueeze(-1) * w.u.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
         if self.const_term:
-            z_dot = z_dot + self.operators[-1](w.u)
+            return torch.cat([z, z_u, w.u], dim=-1)
+        return torch.cat([z, z_u], dim=-1)
 
-        return z_dot
-
-    def _dynamics_auto(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
-        """Compute dynamics in Koopman space using bilinear form. Autonomous case."""
-        # Autonomous part: A @ z
-        z_dot = self.operators[0](z)
-        return z_dot
+    def _zu_cat_auto(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+        """Concatenate state and control inputs."""
+        return z
 
     def forward(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass for KBF model.
@@ -151,6 +150,29 @@ class KBF(ModelBase):
         """
         return predict_continuous(self, x0, ts, us=w.u, method=method, order=self.input_order)
 
+    def linear_features(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute linear features, f, and outputs, dz, for (D)KBF model.
+
+        dz = Af
+
+        For KBF, f contains the bilinear terms, z, z*u, u;
+        dz is the output of KBF dynamics, z_dot for cont-time, z_next for disc-time.
+        """
+        z = self.encoder(w)
+        return self._zu_cat(z, w), z
+
+    def linear_eval(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute linear evaluation, dz, and states, z, for (D)KBF model.
+
+        dz = Af
+
+        For KBF, dz is the output of KBF dynamics.
+        z is the encoded state, which will be used to compute the expected output.
+        """
+        z = self.encoder(w)
+        z_dot = self.dynamics(z, w)
+        return z_dot, z
+
 class DKBF(KBF):
     """Discrete Koopman Bilinear Form (DKBF) model - discrete-time version.
 
@@ -163,9 +185,10 @@ class DKBF(KBF):
     ```
     """
     GRAPH = False
+    CONT  = False
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
-        super(DKBF, self).__init__(model_config, data_meta)
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
+        super(DKBF, self).__init__(model_config, data_meta, dtype=dtype, device=device)
 
     def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""
@@ -178,8 +201,9 @@ class GKBF(ModelBase):
     Koopman dimension is defined per node.
     """
     GRAPH = True
+    CONT  = True
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
         super(GKBF, self).__init__()
         self.n_total_state_features = data_meta.get('n_total_state_features')
         self.n_total_control_features = data_meta.get('n_total_control_features')
@@ -201,7 +225,9 @@ class GKBF(ModelBase):
             'weight_init'    : model_config.get('weight_init', 'xavier_uniform'),
             'bias_init'      : model_config.get('bias_init', 'zeros'),
             'gain'           : model_config.get('gain', 1.0),
-            'end_activation' : model_config.get('end_activation', True)
+            'end_activation' : model_config.get('end_activation', True),
+            'dtype'          : dtype,
+            'device'         : device
         }
         aec_type = model_config.get('autoencoder_type', 'smp')
 
@@ -217,19 +243,22 @@ class GKBF(ModelBase):
             **opts
         )
 
-        # KBF operators for graph system
-        tmp = [
-            nn.Linear(self.koopman_dimension, self.koopman_dimension, bias=False)
-            for _ in range(self.n_total_control_features + 1)
-        ]
-        if self.const_term and self.n_total_control_features > 0:
-            tmp.append(nn.Linear(self.n_total_control_features, self.koopman_dimension, bias=False))
-        self.operators = nn.ModuleList(tmp)
+        # Create KBF operators, concatenated
+        if self.n_total_control_features > 0:
+            if self.const_term:
+                dyn_dim = self.koopman_dimension * (self.n_total_control_features + 1) + self.n_total_control_features
+            else:
+                dyn_dim = self.koopman_dimension * (self.n_total_control_features + 1)
+        else:
+            dyn_dim = self.koopman_dimension
+        self.dynamics_net = FlexLinear(dyn_dim, self.koopman_dimension, bias=False, dtype=dtype, device=device)
 
         if self.n_total_control_features == 0:
-            self.dynamics = self._dynamics_auto
+            self._zu_cat = self._zu_cat_auto
         else:
-            self.dynamics = self._dynamics_ctrl
+            self._zu_cat = self._zu_cat_ctrl
+
+        self.set_linear_weights = self.dynamics_net.set_weights
 
     def diagnostic_info(self) -> str:
         model_info = super(GKBF, self).diagnostic_info()
@@ -239,33 +268,32 @@ class GKBF(ModelBase):
         return model_info
 
     def encoder(self, w: DynGeoData) -> torch.Tensor:
-        return self.encoder_net(w.xg, w.edge_index)
+        # The GNN implementation outputs flattened features
+        # Here internal dynamics are node-wise, so we need to reshape
+        # the features to node*features_per_node again
+        return w.g(self.encoder_net(w.xg, w.edge_index))
 
     def decoder(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
-        return self.decoder_net(w.g(z), w.edge_index)
+        # Since the decoder outputs to the original space,
+        # which is assumed to be flattened, we can use the GNN decoder directly
+        # Note: the input, though, is still node-wise
+        return self.decoder_net(z, w.edge_index)
 
-    def _dynamics_ctrl(self, z: torch.Tensor, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
-        z_reshaped = w.g(z)
+    def dynamics(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
+        """Compute dynamics in Koopman space using bilinear form."""
+        return self.dynamics_net(self._zu_cat(z, w))
+
+    def _zu_cat_ctrl(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
+        """Concatenate state and control inputs."""
         u_reshaped = w.ug
-
-        # Autonomous part: A @ z
-        z_dot = self.operators[0](z_reshaped)
-
-        # Add control-dependent terms: sum(u_i * B_i @ z)
-        for i in range(self.n_total_control_features):
-            control_i = u_reshaped[..., i].unsqueeze(-1)  # Extract control i and add dimension for broadcasting
-            z_dot = z_dot + control_i * self.operators[i + 1](z_reshaped)
-
-        # Add constant term if enabled
+        z_u = (z.unsqueeze(-1) * u_reshaped.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
         if self.const_term:
-            z_dot = z_dot + self.operators[-1](u_reshaped)
+            return torch.cat([z, z_u, u_reshaped], dim=-1)
+        return torch.cat([z, z_u], dim=-1)
 
-        return w.G(z_dot)
-
-    def _dynamics_auto(self, z: torch.Tensor, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Autonomous part: A @ z
-        z_dot = self.operators[0](w.g(z))
-        return w.G(z_dot)
+    def _zu_cat_auto(self, z: torch.Tensor, w: DynGeoData) -> torch.Tensor:
+        """Concatenate state and control inputs."""
+        return z
 
     def forward(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         z = self.encoder(w)
@@ -276,15 +304,36 @@ class GKBF(ModelBase):
     def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
         return predict_graph_continuous(self, x0, ts, w.edge_index, us=w.u, method=method, order=self.input_order)
 
+    def linear_features(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute linear features, f, and outputs, dz, for (D)GKBF model.
+
+        Main difference with KBF: the middle two dimensions are permuted, so that
+        the time dimension is the second last dimension, this is needed in
+        linear trainer to match the expected shape.
+        """
+        z = self.encoder(w)
+        f = self._zu_cat(z, w)
+        return f.permute(0, 2, 1, 3), z.permute(0, 2, 1, 3)
+
+    def linear_eval(self, w: DynGeoData) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute linear evaluation, dz, and states, z, for (D)GKBF model.
+
+        Same idea as in linear_features about the permutation.
+        """
+        z = self.encoder(w)
+        z_dot = self.dynamics(z, w)
+        return z_dot.permute(0, 2, 1, 3), z.permute(0, 2, 1, 3)
+
 class DGKBF(GKBF):
     """Discrete Graph Koopman Bilinear Form (DGKBF) model - discrete-time version.
 
     Same idea as DKBF vs KBF.
     """
     GRAPH = True
+    CONT  = False
 
-    def __init__(self, model_config: Dict, data_meta: Dict):
-        super(DGKBF, self).__init__(model_config, data_meta)
+    def __init__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
+        super(DGKBF, self).__init__(model_config, data_meta, dtype=dtype, device=device)
 
     def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""

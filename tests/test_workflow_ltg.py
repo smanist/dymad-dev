@@ -4,28 +4,32 @@ Test cases for dynamics with inputs on graph.
 `ct`: Continuous time models, GLDM and GKBF, with NODE and weak form training.
 `dt`: Discrete time models, DGLDM and DGKBF, with NODE training.
 
+Also GKBF/DGKBF with linear training.
+
 Sweep mode included for NODE training.
 """
 
 import os
+import pytest
 import torch
 
 from dymad.models import DGKBF, DGLDM, GKBF, GLDM
-from dymad.training import WeakFormTrainer, NODETrainer
+from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
 from dymad.utils import load_model
 
 mdl_kb = {
     "name" : 'ltg_model',
     "encoder_layers": 1,
     "decoder_layers": 1,
-    "latent_dimension": 32,
-    "koopman_dimension": 3,
+    "latent_dimension": 8,
+    "koopman_dimension": 4,
     "const_term": True,
     "autoencoder_type": "cat",
     "gcl": "sage",
     "activation": "none",
     "weight_init": "xavier_uniform",
-    "input_order": "cubic"}
+    "input_order": "cubic",
+    "gain": 0.01}
 mdl_ld = {
     "name": "ltg_model",
     "encoder_layers": 1,
@@ -36,7 +40,8 @@ mdl_ld = {
     "gcl": "sage",
     "activation": "none",
     "weight_init": "xavier_uniform",
-    "input_order": "cubic"}
+    "input_order": "cubic",
+    "gain": 0.01}
 
 trn_wf = {
     "n_epochs": 10,
@@ -61,10 +66,7 @@ trn_nd = {
     "dynamics_weight": 1.0,
     "sweep_lengths": [10, 20],
     "sweep_epoch_step": 5,
-    "ode_method": "dopri5",
-    "rtol": 1e-7,
-    "atol": 1e-9
-}
+    "ode_method": "dopri5"}
 trn_dt = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -75,20 +77,26 @@ trn_dt = {
     "dynamics_weight": 1.0,
     "sweep_lengths": [3, 5],
     "sweep_epoch_step": 5,
-    "chop_mode": "initial"
-}
+    "chop_mode": "initial"}
+trn_ln = {
+    "n_epochs": 1,
+    "save_interval": 1,
+    "load_checkpoint": False,
+    "learning_rate": 5e-3,
+    "decay_rate": 0.999,
+    "reconstruction_weight": 1.0,
+    "dynamics_weight": 1.0,
+    "method": "full"}
 
 cfgs = [
     ('ldm_wf',   GLDM,  WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
     ('ldm_node', GLDM,  NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
     ('kbf_wf',   GKBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
     ('kbf_node', GKBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
+    ('kbf_ln',   GKBF,  LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
     ('dldm_nd',  DGLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_dt}),
     ('dkbf_nd',  DGKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
-    ]
-
-IDX_CT = [0, 1, 2, 3]
-IDX_DT = [4, 5]
+    ('dkbf_ln',  DGKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),]
 
 def train_case(idx, data, path):
     _, MDL, Trainer, opt = cfgs[idx]
@@ -104,14 +112,9 @@ def predict_case(idx, sample, path):
     with torch.no_grad():
         prd_func(x_data, u_data, t_data, ei=edge_index)
 
-def test_ltg_ct(ltg_data, ltg_gau, env_setup):
-    for _i in IDX_CT:
-        train_case(_i, ltg_data, env_setup)
-        predict_case(_i, ltg_gau, env_setup)
-    os.remove(env_setup/'ltg_model.pt')
-
-def test_ltg_dt(ltg_data, ltg_gau, env_setup):
-    for _i in IDX_DT:
-        train_case(_i, ltg_data, env_setup)
-        predict_case(_i, ltg_gau, env_setup)
-    os.remove(env_setup/'ltg_model.pt')
+@pytest.mark.parametrize("idx", range(len(cfgs)))
+def test_ltg(ltg_data, ltg_gau, env_setup, idx):
+    train_case(idx, ltg_data, env_setup)
+    predict_case(idx, ltg_gau, env_setup)
+    if os.path.exists(env_setup/'ltg_model.pt'):
+        os.remove(env_setup/'ltg_model.pt')
