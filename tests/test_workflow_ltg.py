@@ -97,7 +97,7 @@ cfgs = [
     ('dkbf_nd',  DGKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
     ('dkbf_ln',  DGKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),]
 
-IDX_CT = [0, 1, 2, 3, 4]
+IDX_CT = [0, 1, 2, 3]
 IDX_DT = [5, 6, 7]
 
 def train_case(idx, data, path):
@@ -116,6 +116,12 @@ def predict_case(idx, sample, path):
 
 def test_ltg_ct(ltg_data, ltg_gau, env_setup):
     for _i in IDX_CT:
+        train_case(_i, ltg_data, env_setup)
+        predict_case(_i, ltg_gau, env_setup)
+    os.remove(env_setup/'ltg_model.pt')
+
+def test_ltg_ln(ltg_data, ltg_gau, env_setup):
+    for _i in [4]:
         train_case(_i, ltg_data, env_setup)
         predict_case(_i, ltg_gau, env_setup)
     os.remove(env_setup/'ltg_model.pt')

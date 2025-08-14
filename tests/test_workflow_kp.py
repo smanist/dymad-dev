@@ -102,7 +102,7 @@ cfgs = [
     ('dkbf_ln',  DKBF, LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
     ]
 
-IDX_CT = [0, 1, 2, 3, 4]
+IDX_CT = [0, 1, 2, 3]
 IDX_DT = [5, 6, 7]
 
 def train_case(idx, data, path, chkpt=None):
@@ -123,6 +123,12 @@ def predict_case(idx, sample, path):
 
 def test_kp_ct(kp_data, kp_test, env_setup):
     for _i in IDX_CT:
+        train_case(_i, kp_data, env_setup)
+        predict_case(_i, kp_test, env_setup)
+    os.remove(env_setup/'kp_model.pt')
+
+def test_kp_ln(kp_data, kp_test, env_setup):
+    for _i in [4]:
         train_case(_i, kp_data, env_setup)
         predict_case(_i, kp_test, env_setup)
     os.remove(env_setup/'kp_model.pt')
