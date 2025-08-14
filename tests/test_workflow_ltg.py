@@ -114,11 +114,17 @@ def predict_case(idx, sample, path):
     with torch.no_grad():
         prd_func(x_data, u_data, t_data, ei=edge_index)
 
-# def test_ltg_ct(ltg_data, ltg_gau, env_setup):
-#     for _i in IDX_CT:
-#         train_case(_i, ltg_data, env_setup)
-#         predict_case(_i, ltg_gau, env_setup)
-#     os.remove(env_setup/'ltg_model.pt')
+def test_ltg_ct0(ltg_data, ltg_gau, env_setup):
+    for _i in [0]:
+        train_case(_i, ltg_data, env_setup)
+        predict_case(_i, ltg_gau, env_setup)
+    os.remove(env_setup/'ltg_model.pt')
+
+def test_ltg_ct1(ltg_data, ltg_gau, env_setup):
+    for _i in [1]:
+        train_case(_i, ltg_data, env_setup)
+        predict_case(_i, ltg_gau, env_setup)
+    os.remove(env_setup/'ltg_model.pt')
 
 def test_ltg_ct2(ltg_data, ltg_gau, env_setup):
     for _i in [2]:
