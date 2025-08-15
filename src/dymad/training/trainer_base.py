@@ -118,13 +118,15 @@ class TrainerBase:
             )
             self._ls_update_interval = self.config['training']['ls_update'].get('interval', 10)
             self._ls_update_times    = self.config['training']['ls_update'].get('times', 10)
+            self._start_w_ls         = self.config['training'].get('start_with_ls', True)
 
             self._param_to_name = {param: name for name, param in self.model.named_parameters()}
         else:
             self._ls = None
             self._ls_update_interval = None
-            self._ls_update_times = None
-            self._param_to_name = None
+            self._ls_update_times    = None
+            self._param_to_name      = None
+            self._start_w_ls         = None
 
     def _load_checkpoint(self) -> Tuple[int, float, List, Dict]:
         """Load checkpoint if it exists."""
@@ -245,6 +247,10 @@ class TrainerBase:
             # Partial LS update if specified
             if self._ls is not None:
                 if epoch % self._ls_update_interval == 0:
+                    if epoch == self.start_epoch:
+                        if not self._start_w_ls:
+                            logger.info("Skipping LS update at the start epoch as per configuration.")
+                            continue
                     _ls_count += 1
                     if _ls_count == self._ls_update_times+1:
                         logger.info(f"LS update performed {self._ls_update_times} times, stopping further LS updates.")

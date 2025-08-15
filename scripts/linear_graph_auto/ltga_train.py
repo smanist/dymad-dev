@@ -88,8 +88,10 @@ trn_ln = {
     "decay_rate": 0.999,
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
-    "method": "truncated",
-    "params": 2}
+    "ls_update": {
+        "method": "truncated",
+        "params": 2}
+}
 config_path = 'ltga_model.yaml'
 
 cfgs = [
