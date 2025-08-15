@@ -8,6 +8,7 @@ Test cases for autonomous dynamics.
 Also KBF/DKBF with linear training.
 """
 
+import copy
 import os
 import pytest
 import torch
@@ -44,6 +45,11 @@ mdl_kl = {
     "autoencoder_type" : "cat",
     "weight_init" : "xavier_uniform"}
 
+ls_opt = {
+    "method": "truncated",
+    "params": 2,
+    "interval": 3,
+    "times": 2}
 trn_wf = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -57,6 +63,8 @@ trn_wf = {
         "dN": 2,
         "ordpol": 2,
         "ordint": 2}}
+trn_wfls = copy.deepcopy(ls_opt)
+trn_wfls.update(trn_wf)
 trn_nd = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -70,6 +78,8 @@ trn_nd = {
     "ode_method": "dopri5",
     "rtol": 1e-7,
     "atol": 1e-9}
+trn_ndls = copy.deepcopy(ls_opt)
+trn_ndls.update(trn_nd)
 trn_dt = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -81,6 +91,8 @@ trn_dt = {
     "sweep_lengths": [3, 5],
     "sweep_epoch_step": 5,
     "chop_mode": "initial"}
+trn_dtls = copy.deepcopy(ls_opt)
+trn_dtls.update(trn_dt)
 trn_ln = {
     "n_epochs": 1,
     "save_interval": 1,
@@ -89,18 +101,23 @@ trn_ln = {
     "decay_rate": 0.999,
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
-    "method": "truncated",
-    "params": 2}
+    "ls_update": {
+        "method": "truncated",
+        "params": 2
+    }}
 
 cfgs = [
-    ('ldm_wf',   LDM,  WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
-    ('ldm_node', LDM,  NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
-    ('kbf_wf',   KBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
-    ('kbf_node', KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
-    ('kbf_ln',   KBF,  LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
-    ('dldm_nd',  DLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_dt}),
-    ('dkbf_nd',  DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
-    ('dkbf_ln',  DKBF, LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
+    ('ldm_wf',    LDM,  WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
+    ('ldm_node',  LDM,  NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
+    ('kbf_wf',    KBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
+    ('kbf_node',  KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
+    ('kbf_wfls',  KBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wfls}),
+    ('kbf_ndls',  KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_ndls}),
+    ('kbf_ln',    KBF,  LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
+    ('dldm_nd',   DLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_dt}),
+    ('dkbf_nd',   DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
+    ('dkbf_ndls', DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dtls}),
+    ('dkbf_ln',   DKBF, LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
     ]
 
 def train_case(idx, data, path, chkpt=None):
