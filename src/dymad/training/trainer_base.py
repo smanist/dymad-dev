@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple, Type
 
 from dymad.data import TrajectoryManager, TrajectoryManagerGraph
 from dymad.losses import prediction_rmse
+from dymad.training.ls_update import LSUpdater
 from dymad.utils import load_checkpoint, load_config, make_scheduler, plot_hist, save_checkpoint
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,9 @@ class TrainerBase:
         self._setup_model()
         # Training history
         self.start_epoch, self.best_loss, self.hist, self.rmse, _ = self._load_checkpoint()
+
+        # Setup least squares updater if specified
+        self._setup_ls()
 
         # Summary of information
         logger.info("Trainer Initialized:")
@@ -102,6 +106,25 @@ class TrainerBase:
             torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=_gm)
         )]
         self.criterion  = torch.nn.MSELoss(reduction='mean')
+
+    def _setup_ls(self) -> None:
+        """Setup least squares updater if specified in the config."""
+        if self.config['training'].get('ls_update', False):
+            self._ls = LSUpdater(
+                method=self.config['training']['ls_update'].get('method', 'full'),
+                model=self.model,
+                dt=self.metadata["dt_and_n_steps"][0][0],
+                params=self.config['training']['ls_update'].get('params', None)
+            )
+            self._ls_update_interval = self.config['training']['ls_update'].get('interval', 10)
+            self._ls_update_times    = self.config['training']['ls_update'].get('times', 10)
+
+            self._param_to_name = {param: name for name, param in self.model.named_parameters()}
+        else:
+            self._ls = None
+            self._ls_update_interval = None
+            self._ls_update_times = None
+            self._param_to_name = None
 
     def _load_checkpoint(self) -> Tuple[int, float, List, Dict]:
         """Load checkpoint if it exists."""
@@ -210,12 +233,33 @@ class TrainerBase:
         self.convergence_epoch = None
         self.epoch_times = []
 
+        _ls_count = 0
+
         overall_start_time = time.time()
         for epoch in range(self.start_epoch, self.start_epoch + n_epochs):
             # Training and evaluation
             # Only timing the train and validation phases
             # since test loss is only for reference
             epoch_start_time = time.time()
+
+            # Partial LS update if specified
+            if self._ls is not None:
+                if epoch % self._ls_update_interval == 0:
+                    _ls_count += 1
+                    if _ls_count == self._ls_update_times+1:
+                        logger.info(f"LS update performed {self._ls_update_times} times, stopping further LS updates.")
+                    elif _ls_count <= self._ls_update_times:
+                        logger.info(f"Performing LS update {_ls_count} of {self._ls_update_times} times at epoch {epoch+1}")
+                        _, params = self._ls.update(self.model, self.train_loader)
+
+                        # Remove optimizer state for parameters updated by LS
+                        target_names = [self._param_to_name.get(p, "<unnamed>") for p in params]
+                        for _p, _n in zip(params, target_names):
+                            for param_group in self.optimizer.param_groups:
+                                param_names = [self._param_to_name.get(_q, "<unnamed>") for _q in param_group['params']]
+                                if _n in param_names:
+                                    self.optimizer.state.pop(_p, None)
+                                    logger.info(f"Removed optimizer state for {_n} after LS update.")
 
             train_loss = self.train_epoch()
             val_loss = self.evaluate(self.validation_loader)

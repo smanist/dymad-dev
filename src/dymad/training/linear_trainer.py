@@ -23,18 +23,14 @@ class LinearTrainer(TrainerBase):
             self.config['training']['n_epochs'] = 1
             self.config['training']['save_interval'] = 1
 
-        self._ls = LSUpdater(
-            method=self.config['training'].get('method', 'full'),
-            model=self.model,
-            dt=self.metadata["dt_and_n_steps"][0][0],
-            params=self.config['training'].get('params', None)
-        )
+        self._ls_update_times = 0
 
         # Training weights
         self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
         self.dynamics_weight = self.config['training'].get('dynamics_weight', 1.0)
 
         # Additional logging
+        logger.info(f"LinearTrainer: method {self._ls.method}, params {self._ls.params}")
         logger.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
 
     def _process_batch(self, batch: Union[DynData, DynGeoData]) -> torch.Tensor:
@@ -56,5 +52,5 @@ class LinearTrainer(TrainerBase):
 
     def train_epoch(self) -> float:
         """Train the model for one epoch."""
-        avg_epoch_loss = self._ls.update(self.model, self.train_loader)
+        avg_epoch_loss, _ = self._ls.update(self.model, self.train_loader)
         return avg_epoch_loss

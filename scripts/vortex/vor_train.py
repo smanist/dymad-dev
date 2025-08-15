@@ -18,10 +18,10 @@ mdl_kb = {
     "gain" : 0.01}
 mdl_kf = {
     "name" : 'vor_model',
-    "encoder_layers" : 0,
-    "decoder_layers" : 0,
+    "encoder_layers" : 1,
+    "decoder_layers" : 1,
     "latent_dimension" : 32,
-    "koopman_dimension" : 89351,
+    "koopman_dimension" : 12,
     "activation" : "none",
     "weight_init" : "xavier_uniform",
     "gain" : 0.01}
@@ -38,7 +38,13 @@ trn_wf = {
         "N": 13,
         "dN": 2,
         "ordpol": 2,
-        "ordint": 2}}
+        "ordint": 2},
+    "ls_update": {
+        "method": "full",
+        # "params": 8,
+        "interval": 50,
+        "times": 4}
+    }
 trn_nd = {
     "n_epochs": 500,
     "save_interval": 20,
@@ -54,7 +60,12 @@ trn_nd = {
     "chop_step": 1,
     "ode_method": "dopri5",
     "rtol": 1e-7,
-    "atol": 1e-9}
+    "atol": 1e-9,
+    "ls_update": {
+        "method": "full",
+        "interval": 50,
+        "times": 2}
+    }
 trn_dt = {
     "n_epochs": 500,
     "save_interval": 20,
@@ -66,17 +77,20 @@ trn_dt = {
     "sweep_lengths": [2, 3, 4, 6, 8],
     "sweep_epoch_step": 100,
     "chop_mode": "unfold",
-    "chop_step": 1}
+    "chop_step": 1,
+    "ls_update": {
+        "method": "full",
+        "interval": 50,
+        "times": 2}
+    }
 trn_ln = {
     "n_epochs": 500,
     "save_interval": 20,
     "load_checkpoint": False,
-    "method": "truncated",
-    "params": 8}
-trans = {"type": "identity"}
-plots = {
-    "xidx": [10000, 15000, 20000, 30000, 40000, 45000],
-    "grid": (3, 2)}
+    "ls_update": {
+        "method": "truncated",
+        "params": 8}
+    }
 
 config_path = 'vor_model.yaml'
 
@@ -86,14 +100,14 @@ cfgs = [
     ('dkbf_nd',  DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
     ('kbf_ln',   KBF,  LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
     ('dkbf_ln',  DKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
-    ('dkbf_lf',  DKBF, LinearTrainer,   {"model": mdl_kf, "training" : trn_ln, "transform_x": trans, "plotting": plots}),
     ]
 
 IDX = [3, 4]
+# IDX = [5]
 
 ifdat = 0
 iftrn = 1
-ifplt = 0
+ifplt = 1
 ifprd = 1
 
 if ifdat:

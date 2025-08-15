@@ -118,11 +118,13 @@ class FlexLinear(nn.Module):
     def set_weights(
         self,
         W: torch.Tensor | None = None, b: torch.Tensor | None = None,
-        U: torch.Tensor | None = None, V: torch.Tensor | None = None):
+        U: torch.Tensor | None = None, V: torch.Tensor | None = None) -> Tuple[torch.Tensor, torch.Tensor]:
         if W is not None:
             self.set_full(W, b)
+            return self.weight, self.bias
         elif U is not None and V is not None:
             self.set_lora(U, V, b)
+            return self.U, self.V, self.bias
         else:
             raise ValueError("Must provide either full weights (W) or low-rank factors (U, V).")
 
@@ -410,6 +412,8 @@ class MLP(nn.Module):
         if isinstance(m, nn.Linear):
             self._weight_init(m.weight, self._gain)
             self._bias_init(m.bias)
+        if isinstance(m, FlexLinear):
+            m._init_linear(self._weight_init, self._bias_init, self._gain)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)

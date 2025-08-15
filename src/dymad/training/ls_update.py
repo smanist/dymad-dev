@@ -71,7 +71,7 @@ class LSUpdater:
         self.dt     = dt
 
         if not check_linear_impl(model):
-            raise ValueError("Model does not implement linear_features and linear_eval methods required for LS updates.")
+            raise ValueError(f"{model} does not implement linear_features and linear_eval methods required for LS updates.")
 
         if self.method not in ['full', 'truncated']:
             raise ValueError(f"Unsupported method: {self.method}. Supported methods are 'full' and 'truncated'.")
@@ -118,14 +118,14 @@ class LSUpdater:
             if self.method == 'full':
                 W = np.linalg.lstsq(A, b, rcond=None)[0]
                 Wt = torch.tensor(W, dtype=dtype, device=device)
-                model.set_linear_weights(Wt.T)
+                params = model.set_linear_weights(Wt.T)
                 avg_epoch_loss = np.linalg.norm(A @ W - b) / A.shape[0]
 
             elif self.method == 'truncated':
                 _V, _U = truncated_lstsq(A, b, tsvd=self.params)
-                model.set_linear_weights(
+                params = model.set_linear_weights(
                     U=torch.tensor(_U, dtype=dtype, device=device),
                     V=torch.tensor(_V, dtype=dtype, device=device))
                 avg_epoch_loss = np.linalg.norm((A @ _V) @ _U.T - b) / A.shape[0]
 
-        return avg_epoch_loss
+        return avg_epoch_loss, params
