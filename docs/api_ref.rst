@@ -12,5 +12,6 @@ Below you'll find the complete public API, grouped by module.
    dymad.data
    dymad.losses
    dymad.models
+   dymad.numerics
    dymad.training
    dymad.utils
