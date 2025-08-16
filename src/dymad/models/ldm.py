@@ -143,7 +143,7 @@ class LDM(ModelBase):
         return z, z_dot, x_hat
 
     def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
-                method: str = 'dopri5') -> torch.Tensor:
+                method: str = 'dopri5', **kwargs) -> torch.Tensor:
         """
         Predict trajectory using continuous-time integration.
 
@@ -169,7 +169,7 @@ class LDM(ModelBase):
                 - Single: (time_steps, n_total_state_features)
                 - Batch: (time_steps, batch_size, n_total_state_features)
         """
-        return predict_continuous(self, x0, ts, us=w.u, method=method, order=self.input_order)
+        return predict_continuous(self, x0, ts, us=w.u, method=method, order=self.input_order, **kwargs)
 
 class DLDM(LDM):
     """Discrete Latent Dynamics Model (DLDM) - discrete-time version.
@@ -287,8 +287,8 @@ class GLDM(ModelBase):
         x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
 
-    def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5') -> torch.Tensor:
-        return predict_graph_continuous(self, x0, ts, w.edge_index, us=w.u, method=method, order=self.input_order)
+    def predict(self, x0: torch.Tensor, w: DynGeoData, ts: Union[np.ndarray, torch.Tensor], method: str = 'dopri5', **kwargs) -> torch.Tensor:
+        return predict_graph_continuous(self, x0, ts, w.edge_index, us=w.u, method=method, order=self.input_order, **kwargs)
 
 class DGLDM(GLDM):
     """Discrete Graph Latent Dynamics Model (DGLDM) - discrete-time version.

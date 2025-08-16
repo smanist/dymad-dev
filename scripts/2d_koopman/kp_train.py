@@ -55,7 +55,8 @@ trn_wf = {
         "N": 13,
         "dN": 2,
         "ordpol": 2,
-        "ordint": 2}}
+        "ordint": 2},
+    }
 trn_nd = {
     "n_epochs": 2000,
     "save_interval": 20,
@@ -67,8 +68,14 @@ trn_nd = {
     "sweep_lengths": [30, 50, 100, 200, 301],
     "sweep_epoch_step": 400,
     "ode_method": "dopri5",
-    "rtol": 1e-7,
-    "atol": 1e-9}
+    "ode_args": {
+        "rtol": 1.e-7,
+        "atol": 1.e-9},
+    "ls_update": {
+        "method": "full",
+        "interval": 200,
+        "times": 4}
+    }
 trn_ln = {
     "n_epochs": 1,
     "save_interval": 1,
@@ -77,8 +84,10 @@ trn_ln = {
     "decay_rate": 0.999,
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
-    "method": "truncated",
-    "params": 8}
+    "ls_update": {
+        "method": "truncated",
+        "params": 8}
+    }
 config_path = 'kp_model.yaml'
 
 cfgs = [
@@ -91,12 +100,12 @@ cfgs = [
 
 # IDX = [0, 1]
 # IDX = [2, 3]
-IDX = [4]
+IDX = [2]
 labels = [cfgs[i][0] for i in IDX]
 
 ifdat = 0
 iftrn = 1
-ifplt = 0
+ifplt = 1
 ifprd = 1
 
 if ifdat:

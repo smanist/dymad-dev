@@ -30,6 +30,9 @@ class TakeFirst(nn.Module):
     def diagnostic_info(self) -> str:
         return f"m: {self.m}"
 
+    def __repr__(self) -> str:
+        return f"TakeFirst(m={self.m})"
+
 class TakeFirstGraph(TakeFirst):
     """
     Graph version of TakeFirst.
@@ -41,6 +44,9 @@ class TakeFirstGraph(TakeFirst):
         """"""
         out_shape = x.shape[:-2] + (-1,)
         return x[..., :self.m].reshape(*out_shape) if x.ndim > 1 else x[:self.m]
+
+    def __repr__(self) -> str:
+        return f"TakeFirstGraph(m={self.m})"
 
 class FlexLinear(nn.Module):
     """
@@ -66,6 +72,10 @@ class FlexLinear(nn.Module):
 
         self.mode = "full"
         self.rank = None
+
+    def __repr__(self) -> str:
+        return f"FlexLinear(in_features={self.in_features}, out_features={self.out_features}, " + \
+               f"mode={self.mode}, rank={self.rank})"
 
     def _init_linear(
             self, 
@@ -118,11 +128,13 @@ class FlexLinear(nn.Module):
     def set_weights(
         self,
         W: torch.Tensor | None = None, b: torch.Tensor | None = None,
-        U: torch.Tensor | None = None, V: torch.Tensor | None = None):
+        U: torch.Tensor | None = None, V: torch.Tensor | None = None) -> Tuple[torch.Tensor, torch.Tensor]:
         if W is not None:
             self.set_full(W, b)
+            return self.weight, self.bias
         elif U is not None and V is not None:
             self.set_lora(U, V, b)
+            return self.U, self.V, self.bias
         else:
             raise ValueError("Must provide either full weights (W) or low-rank factors (U, V).")
 
@@ -410,6 +422,8 @@ class MLP(nn.Module):
         if isinstance(m, nn.Linear):
             self._weight_init(m.weight, self._gain)
             self._bias_init(m.bias)
+        if isinstance(m, FlexLinear):
+            m._init_linear(self._weight_init, self._bias_init, self._gain)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)

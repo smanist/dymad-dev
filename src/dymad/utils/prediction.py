@@ -133,7 +133,7 @@ def predict_continuous(
             return z_dot
 
     logger.debug(f"predict_continuous: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order if _us is not None else 'N/A'}")
-    z_traj = odeint(ode_func, z0, ts, method=method)
+    z_traj = odeint(ode_func, z0, ts, method=method, **kwargs)
     logger.debug(f"predict_continuous: Completed integration, trajectory shape: {z_traj.shape}")
 
     x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1]), None).view(n_steps, z_traj.shape[1], -1)
@@ -205,7 +205,7 @@ def predict_graph_continuous(
             return z_dot
 
     logger.debug(f"predict_graph_continuous: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order if _us is not None else 'N/A'}")
-    z_traj = odeint(ode_func, z0, ts, method=method)
+    z_traj = odeint(ode_func, z0, ts, method=method, **kwargs)
     logger.debug(f"predict_graph_continuous: Completed integration, trajectory shape: {z_traj.shape}")
 
     tmp = z_traj.permute(1, 0, 2, 3)  # (batch_size, n_steps, node, z_dim)

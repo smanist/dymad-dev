@@ -47,4 +47,3 @@ If there are API errors such as some files not found, try deleting the auto-gene
 - Verify the RNN-type training
 - Update the aircraft example
 - Update the double pendulum example
-- Make ODE options more systematic

@@ -9,6 +9,7 @@ Also GKBF/DGKBF with linear training.
 Sweep mode included for NODE training.
 """
 
+import copy
 import os
 import pytest
 import torch
@@ -41,6 +42,10 @@ mdl_ld = {
     "weight_init": "xavier_uniform",
     "input_order": "cubic"}
 
+ls_opt = {
+    "method": "full",
+    "interval": 3,
+    "times": 2}
 trn_wf = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -54,6 +59,8 @@ trn_wf = {
         "dN": 2,
         "ordpol": 2,
         "ordint": 2}}
+trn_wfls = copy.deepcopy(ls_opt)
+trn_wfls.update(trn_wf)
 trn_nd = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -65,8 +72,11 @@ trn_nd = {
     "sweep_lengths": [10, 20],
     "sweep_epoch_step": 5,
     "ode_method": "dopri5",
-    "rtol": 1e-7,
-    "atol": 1e-9}
+    "ode_args": {
+        "rtol": 1.e-7,
+        "atol": 1.e-9}}
+trn_ndls = copy.deepcopy(ls_opt)
+trn_ndls.update(trn_nd)
 trn_dt = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -78,6 +88,8 @@ trn_dt = {
     "sweep_lengths": [3, 5],
     "sweep_epoch_step": 5,
     "chop_mode": "initial"}
+trn_dtls = copy.deepcopy(ls_opt)
+trn_dtls.update(trn_dt)
 trn_ln = {
     "n_epochs": 1,
     "save_interval": 1,
@@ -86,19 +98,22 @@ trn_ln = {
     "decay_rate": 0.999,
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
+    "ls_update": {
     "method": "truncated",
-    "params": 2}
+    "params": 2}}
 
 cfgs = [
-    ('ldm_wf',   GLDM,  WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
-    ('ldm_node', GLDM,  NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
-    ('kbf_wf',   GKBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
-    ('kbf_node', GKBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
-    ('kbf_ln',   GKBF,  LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
-    ('dldm_nd',  DGLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_dt}),
-    ('dkbf_nd',  DGKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
-    ('dkbf_ln',  DGKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
-]
+    ('ldm_wf',    GLDM,  WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
+    ('ldm_node',  GLDM,  NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
+    ('kbf_wf',    GKBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
+    ('kbf_node',  GKBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
+    ('kbf_wfls',  GKBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wfls}),
+    ('kbf_ndls',  GKBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_ndls}),
+    ('kbf_ln',    GKBF,  LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
+    ('dldm_nd',   DGLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_dt}),
+    ('dkbf_nd',   DGKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
+    ('dkbf_ndls', DGKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dtls}),
+    ('dkbf_ln',   DGKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),]
 
 def train_case(idx, data, path):
     _, MDL, Trainer, opt = cfgs[idx]

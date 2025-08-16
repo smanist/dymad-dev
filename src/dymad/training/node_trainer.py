@@ -31,8 +31,7 @@ class NODETrainer(TrainerBase):
 
         # ODE solver settings from config
         self.ode_method = self.config['training'].get('ode_method', 'dopri5')
-        self.rtol = self.config['training'].get('rtol', 1e-7)
-        self.atol = self.config['training'].get('atol', 1e-9)
+        self.ode_args   = self.config['training'].get('ode_args', {})
 
         # Training weights
         self.recon_weight = self.config['training'].get('reconstruction_weight', 1.0)
@@ -54,7 +53,7 @@ class NODETrainer(TrainerBase):
             epoch_step=epoch_step, mode=sweep_mode))
 
         # Additional logging
-        logger.info(f"ODE method: {self.ode_method}, rtol: {self.rtol}, atol: {self.atol}")
+        logger.info(f"ODE method: {self.ode_method}, Options: {self.ode_args}")
         logger.info(f"Weights: Dynamics {self.dynamics_weight}, Reconstruction {self.recon_weight}")
         if self.chop_mode == 'initial':
             logger.info(f"Chop mode: {self.chop_mode}, initial steps only")
@@ -77,7 +76,7 @@ class NODETrainer(TrainerBase):
         # Use the actual time points from trajectory manager
         ts = self.t[:num_steps].to(self.device)
         # Use native batch prediction
-        predictions = self.model.predict(init_states, B, ts, method=self.ode_method)
+        predictions = self.model.predict(init_states, B, ts, method=self.ode_method, **self.ode_args)
         # predictions shape: (time_steps, batch_size, n_total_state_features)
         # We need: (batch_size, time_steps, n_total_state_features)
         predictions = predictions.permute(1, 0, 2)
