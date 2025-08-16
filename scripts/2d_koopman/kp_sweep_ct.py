@@ -36,8 +36,9 @@ trn_ref = {
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
     "ode_method": "dopri5",
-    "rtol": 1e-7,
-    "atol": 1e-9,
+    "ode_args": {
+        "rtol": 1.e-7,
+        "atol": 1.e-9},
     "sweep_epoch_step": 100,
     "sweep_lengths": [10, 20, 30, 50],
 }

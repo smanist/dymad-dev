@@ -78,8 +78,9 @@ trn_nd = {
     "sweep_lengths": [50, 100, 200, 300, 501],
     "sweep_epoch_step": 100,
     "ode_method": "dopri5",
-    "rtol": 1e-7,
-    "atol": 1e-9}
+    "ode_args": {
+        "rtol": 1e-7,
+        "atol": 1e-9}}
 trn_ln = {
     "n_epochs": 1,
     "save_interval": 1,

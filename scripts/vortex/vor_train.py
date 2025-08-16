@@ -59,8 +59,9 @@ trn_nd = {
     "chop_mode": "unfold",
     "chop_step": 1,
     "ode_method": "dopri5",
-    "rtol": 1e-7,
-    "atol": 1e-9,
+    "ode_args": {
+        "rtol": 1.e-7,
+        "atol": 1.e-9},
     "ls_update": {
         "method": "full",
         "interval": 50,

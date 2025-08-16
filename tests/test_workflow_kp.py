@@ -76,8 +76,10 @@ trn_nd = {
     "sweep_lengths": [10, 20],
     "sweep_epoch_step": 5,
     "ode_method": "dopri5",
-    "rtol": 1e-7,
-    "atol": 1e-9}
+    "ode_args": {
+        "rtol": 1.e-7,
+        "atol": 1.e-9}
+    }
 trn_ndls = copy.deepcopy(ls_opt)
 trn_ndls.update(trn_nd)
 trn_dt = {

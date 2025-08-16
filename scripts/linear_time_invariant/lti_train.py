@@ -44,7 +44,7 @@ cases = [
     {"name": "kbf_node", "model" : KBF, "trainer": NODETrainer,     "config": 'lti_kbf_node.yaml'},
     {"name": "kbf_ln",   "model" : KBF, "trainer": LinearTrainer,   "config": 'lti_kbf_ln.yaml'}
 ]
-IDX = [4]
+IDX = [1]
 labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0
