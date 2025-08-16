@@ -30,6 +30,9 @@ class TakeFirst(nn.Module):
     def diagnostic_info(self) -> str:
         return f"m: {self.m}"
 
+    def __repr__(self) -> str:
+        return f"TakeFirst(m={self.m})"
+
 class TakeFirstGraph(TakeFirst):
     """
     Graph version of TakeFirst.
@@ -41,6 +44,9 @@ class TakeFirstGraph(TakeFirst):
         """"""
         out_shape = x.shape[:-2] + (-1,)
         return x[..., :self.m].reshape(*out_shape) if x.ndim > 1 else x[:self.m]
+
+    def __repr__(self) -> str:
+        return f"TakeFirstGraph(m={self.m})"
 
 class FlexLinear(nn.Module):
     """
@@ -66,6 +72,10 @@ class FlexLinear(nn.Module):
 
         self.mode = "full"
         self.rank = None
+
+    def __repr__(self) -> str:
+        return f"FlexLinear(in_features={self.in_features}, out_features={self.out_features}, " + \
+               f"mode={self.mode}, rank={self.rank})"
 
     def _init_linear(
             self, 
