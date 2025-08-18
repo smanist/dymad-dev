@@ -1,45 +1,35 @@
-"""
-@package sako
-
-The implementation of the spectral analysis algorithms for Koopman operators
-from Colbrook et al.
-
-@author Dr. Daning Huang
-@date 10/27/22
-"""
+import logging
 import numpy as np
 import scipy.linalg as spl
-from .utils import disc2cont, genCoef, truncatedSVD, cmpMat
+from typing import Tuple, Union
+
+from dymad.numerics import generate_coef
+
+logger = logging.getLogger(__name__)
 
 class SAKO:
     """
     Spectral Analysis for Koopman Operators
 
+    The implementation of the spectral analysis algorithms for Koopman operators
+    from Colbrook et al.
+
     The formulation is based on the following convention:
     Psi_0 A = Psi_1
     where A is the finite-dimensional approximation of Koopman operator,
     Psi's are data matrices with each row containing one time step.
-    """
-    def __init__(self, P0, P1, W, dt=1.0, reps=1e-10, order=None, verbose=True):
-        """
-        Initialize the instance.
 
-        @param P0: Psi_0
-        @param P1: Psi_1
-        @param W: Weights for integral in inner products
-        @param dt: Time step size.
-        @param reps: Threshold for imaginary part of residual.  Default 1e-10
-        @param order: Generic parameter for order truncation.  Unused in base class.
-        @param verbose: If print out processing information.
-        """
+    Args:
+        P0 (np.ndarray): Psi_0
+        P1 (np.ndarray): Psi_1
+        W (np.ndarray): Weights for the inner product, default is identity matrix
+        reps (float): Threshold for the imaginary part of the residual, default is 1e-10
+    """
+    def __init__(self, P0: np.ndarray, P1: np.ndarray, W: np.ndarray = None, reps: float = 1e-10):
         self._P0 = P0
         self._P1 = P1
-        _, self._Nobs = self._P0.shape
-        self._W  = np.array(W)
-        self._dt = dt
+        self._W  = np.array(W) if W is not None else np.eye(len(P0))
         self._reps = reps
-        self._order = order
-        self._verbose = verbose
 
         # The inner product matrices
         # M_ij = Psi_i^H W Psi_j
@@ -63,12 +53,14 @@ class SAKO:
 
         self._M0 = self._M00
         self._M1 = self._M01
- 
-    def estimate_residual(self, ls, gs):
+
+    def estimate_residual(self, ls: np.ndarray, gs: np.ndarray) -> np.ndarray:
         """
         Wrapper of _residual_G and _residual_r for a batch of eigenpairs
-        @param ls: Array of eigenvalues
-        @param gs: Array of right eigenvectors, column wise
+
+        Args:
+            ls (np.ndarray): Array of eigenvalues
+            gs (np.ndarray): Array of right eigenvectors, column wise
         """
         _N = len(ls)
         _r = np.zeros(_N,)
@@ -76,15 +68,18 @@ class SAKO:
             _r[_i] = self._residual_r(gs[:,_i], self._residual_G(ls[_i]))
         return _r
 
-    def estimate_measure(self, fobs, order, eps, thetas=101):
+    def estimate_measure(
+            self, fobs: np.ndarray, order: int, eps: float,
+            thetas: Union[int, np.ndarray] = 101) -> Tuple[np.ndarray, np.ndarray]:
         """
         Estimate the spectral measure associated with a given scalar observable using
         a kernel of rational function.
 
-        @param fobs: Observable function evaluated at X0.  Assuming 1D array
-        @param order: Order of the rational kernel
-        @param eps: Smoothing parameter of the rational kernel
-        @param thetas: The thetas at which to evaluate the measure; if int, a uniform grid is generated.
+        Args:
+            fobs (np.ndarray): Observable function evaluated at X0.  Assuming 1D array
+            order (int): Order of the rational kernel
+            eps (float): Smoothing parameter of the rational kernel
+            thetas (Union[int, np.ndarray]): The thetas at which to evaluate the measure; if int, a uniform grid is generated.
         """
         if isinstance(thetas, int):
             _th = np.linspace(-np.pi, np.pi, thetas)
@@ -106,7 +101,7 @@ class SAKO:
         _v3 = _S.conj().T.dot(_Q.conj().T.dot(_a))
 
         # Kernel coefficients
-        _, _zs, _cs, _ds = genCoef(order, eps)
+        _, _zs, _cs, _ds = generate_coef(order, eps)
 
         # Loop over theta
         _ex = np.exp(1j * _th)
@@ -120,28 +115,32 @@ class SAKO:
                     _ds[_j] * _v3.conj().dot(_I))
         return _th, _nu / (-2*np.pi)
 
-    def _residual_G(self, l):
+    def _residual_G(self, l: Union[float, complex]) -> np.ndarray:
         """
         The core math device in SAKO - Part I
-        @param l: Eigenvalue, or eigenvalue-like
+
+        Args:
+            l (Union[float, complex]): Eigenvalue, or eigenvalue-like
         """
         _G = self._M11 - l*self._M10 - np.conj(l)*self._M01 + np.abs(l)**2 * self._M00
         # Enforce the hermitianity of the G matrix
         return 0.5 * (_G + _G.conj().T)
 
-    def _residual_r(self, g, G):
+    def _residual_r(self, g: np.ndarray, G: np.ndarray) -> float:
         """
         The core math device in SAKO - Part II
-        @param g: Eigenvector, or eigenvector-like
-        @param G: Output from _residual_G
+
+        Args:
+            g (np.ndarray): Eigenvector, or eigenvector-like
+            G (np.ndarray): Output from _residual_G
         """
         _r = g.conj().T.dot(G).dot(g) / g.conj().T.dot(self._M00).dot(g)
         if np.abs(_r.imag) > self._reps:
-            print(f"    SAKO Warning: Imaginary part of residual {_r.imag:5.4e} exceeds " \
-                f"threshold {self._reps:3.2e}; real part {_r.real:5.4e}")
+            logger.info(f"SAKO Warning: Imaginary part of residual {_r.imag:5.4e} exceeds " \
+                        f"threshold {self._reps:3.2e}; real part {_r.real:5.4e}")
         return np.sqrt(np.abs(_r))
 
-    def _ps_point(self, z, return_vec):
+    def _ps_point(self, z: Union[float, complex], return_vec: bool = False) -> Union[float, Tuple[float, np.ndarray]]:
         """
         Compute the resolvent norm at given complex point for pseudospectrum.
         The matrices involved are hermitian, so a GEP is solved instead of a
@@ -159,8 +158,9 @@ class SAKO:
         one should convert the truncated disc-time Koopman operator to cont-time and then
         perform the resolvent analysis.  This should be done with DMD.
 
-        @param z: The point at which to evaluate the resolvent norm
-        @param return_vec: If return singular vector
+        Args:
+            z (Union[float, complex]): The point at which to evaluate the resolvent norm
+            return_vec (bool): If return singular vector
         """
         _G = self._residual_G(z)
         if return_vec:
@@ -169,7 +169,7 @@ class SAKO:
             _e = spl.eigh(_G, self._M00, subset_by_index=[0, 0], driver='gvx', eigvals_only=True)
             _v = None
         if not _e >= 0:
-            print(f"    SAKO Warning: Non-positive norm {_e[0]:4.3e} found for {z:4.3e}")
+            logger.info(f"SAKO Warning: Non-positive norm {_e[0]:4.3e} found for {z:4.3e}")
             _e = np.array([1e-16])
         if return_vec:
             return 1/np.sqrt(_e), _v.reshape(-1)
