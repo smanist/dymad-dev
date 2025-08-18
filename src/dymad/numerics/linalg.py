@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.linalg as spl
 from typing import Tuple
 
 def truncated_svd(X, order):
@@ -55,6 +56,105 @@ def truncated_lstsq(A, B, tsvd=None):
     _Ur, _Sr, _Vr = truncated_svd(A, tsvd)
     _B = (_Ur.conj().T @ B) / _Sr.reshape(-1, 1)
     return _Vr, _B.T
+
+def check_direction(v1, v2):
+    if len(v1.shape) == 1:
+        # Just one vector
+        return _check_direction(v1, v2)
+    _, _N = v1.shape
+    _d = np.zeros(_N,)
+    for _i in range(_N):
+        _d[_i] = _check_direction(v1[:,_i], v2[:,_i])
+    return _d
+
+def _check_direction(v1, v2):
+    """
+    Expecting the angle between v1 and v2 is zero, i.e., aligned.
+    """
+    _v1 = v1.reshape(-1)
+    _v2 = v2.reshape(-1)
+    _cc = _v1.conj().dot(_v2) / (np.linalg.norm(_v1)*np.linalg.norm(_v2))
+    return np.abs(_cc)
+
+def check_orthogonality(U, V, M=None):
+    """
+    Expecting U.H * M * V = I
+    """
+    _n, _m = U.shape
+    if M is None:
+        _M = np.eye(_n)
+    else:
+        _M = np.array(M)
+    _L = U.conj().T.dot(_M).dot(V)
+    _err = np.mean(np.abs(_L-np.eye(_m)))
+    return _L, _err
+
+def scaled_eig(A, B=None):
+    """
+    Suppose
+    A U = B U L, V^H A = L V^H B
+    Ideally one should have double diagonalization (for non-degenerate case):
+    V^H B U = I and V^H A U = L
+    but by default each column of U and V is normalized by the length, and the
+    double diagonalization is not satisfied.
+    Here we scale both U and V so that they are approximately orthonormal to each other
+    (w.r.t. B); also the scaling is such that the norms of u_i and v_i are equal.
+
+    However, if one needs to project quantities to, e.g., U, use pseudo-inverse of U
+    instead of V for numerical robustness.
+    """
+    _wd, _vl, _vr = spl.eig(A, b=B, left=True, right=True)
+    if B is None:
+        _scl = np.diag(_vl.conj().T.dot(_vr))
+    else:
+        _scl = np.diag(_vl.conj().T.dot(B).dot(_vr))
+    _sr = np.sqrt(_scl)
+    _sl = _sr.conj()
+    _vr = _vr / _sr.reshape(1,-1)
+    _vl = _vl / _sl.reshape(1,-1)
+    return _wd, _vl, _vr
+
+def truncate_sequence(seq, order):
+    """
+    Truncation of scalar sequence.
+
+    Possible order parameters
+
+    - Float: Max value to retain
+    - Integer: Keep first N values
+    - 'full': Retain all pairs
+    """
+    _idx = np.argsort(seq)
+    if isinstance(order, float):
+        msk = seq[_idx] <= order
+        idx = _idx[msk]
+    elif isinstance(order, int):
+        idx = _idx[:order]
+    elif order.lower() == 'full':
+        idx = _idx
+    else:
+        raise NotImplementedError(f"Undefined threshold for order={order}")
+    return idx
+
+def make_random_matrix(Ndim, Nrnk, zrng, wrng, dt=-1):
+    """
+    Random (Ndim x Ndim) matrix of rank Nrnk, with randomized eigenvalues
+    ranged in `zrng` and `wrng`.  If dt>0 is given, the eigenvalues will be
+    mapped to discrete-time.
+    The eigenpairs are always assumed to be conjugate.
+    """
+    _Nr = Nrnk//2
+    _U = np.random.rand(Ndim, _Nr) + 1j * np.random.rand(Ndim, _Nr)
+    U0 = np.hstack([_U, _U.conj()])
+    V0 = np.linalg.pinv(U0).conj().T
+    z0 = np.random.rand(_Nr) * (zrng[1]-zrng[0]) + zrng[0]
+    w0 = np.random.rand(_Nr) * (wrng[1]-wrng[0]) + wrng[0]
+    _L = z0 + 1j*w0
+    if dt > 0:
+        _L = np.exp(_L*dt)
+    L0 = np.hstack([_L, _L.conj()])
+    A  = U0.dot(np.diag(L0)).dot(V0.conj().T)
+    return A, (L0, U0, V0)
 
 def real_lowrank_from_eigpairs(
     lam: np.ndarray,          # shape (r,), complex eigenvalues
