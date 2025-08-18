@@ -1,114 +1,55 @@
-"""
-@package base
-
-The basic interfaces of DMD class and the implementation
-of some algorithm-independent functionalities.
-
-@author Dr. Daning Huang
-@date 06/18/23
-"""
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
-from .pipeline.pipeline import Pipeline
-from .rals import estimatePSpec, RALowRank
-from .utils import cpGrid, cpMap, disc2cont, chkOrth, scaledEig, truncateSeq
 
-class DMDBase:
+from dymad.numerics import check_orthogonality, complex_grid, complex_map, disc2cont, scaled_eig, truncate_sequence
+from dymad.sako.interface import SAInterface
+from dymad.sako.rals import estimate_pseudospectrum, RALowRank
+from dymad.sako.sako import SAKO
+
+logger = logging.getLogger(__name__)
+
+class SpectralAnalysis:
     """
-    The base class for DMD.  It processes the inputs and makes predictions
-    assuming that the eigensystem is available.
+    The base class for Spectral Analysis based on Koopman operator theory.
 
     The formulation is based on the following convention:
     Psi_0 A = Psi_1
     where A is the finite-dimensional approximation of Koopman operator,
     Psi's are data matrices with each row containing one time step.
-    """
-    def __init__(self, order=0.98, dt=1.0, verbose=True):
-        """
-        Initialize the instance.
 
-        @param trans: List of tuples defining the Transform objects.
-        @param order: Thresholds to trim the system.  Algorithm-dependent.
-        @param dt: Time step size.
-        @param verbose: If print out processing information.
-        """
-        self._type = 'none'
+    Args:
+        order: Thresholds to trim the system.  Algorithm-dependent.
+        dt: Time step size.
+    """
+    def __init__(self, order=0.98, dt=1.0, reps=1e-10):
         self._order = order
         self._dt = dt
-        self._verbose = verbose
         self._reset()
 
-    def fit(self, Xs, trans=[], **kwargs):
-        """
-        The wrapper function to process multiple trajectories and perform the DMD prediction.
-        """
-        print(f"{self._type}")
-        _fil = " "*3
-        print(f"{_fil} Started")
-        self._reset()
-        if trans is None:
-            self._data = Pipeline(Xs, [('iden',{})])
-        elif isinstance(trans, list):
-            self._data = Pipeline(Xs, trans)
-        elif isinstance(trans, Pipeline):
-            self._data = trans
-            self._data.update(Xs)
-        else:
-            raise ValueError(f"Unknown data Transform object {trans}")
-        self._batch_obs()
-        self._solve_ls()
-        print(f"{_fil} Orthonormality violation: {chkOrth(self._vl, self._vr)[1]:4.3e}")
+        self._ctx = SAInterface()
+
+        self._solve_eigs()
+        logger.info(f"Orthonormality violation: {check_orthogonality(self._vl, self._vr)[1]:4.3e}")
         self._proc_eigs()
+        self._sako = SAKO(self._ctx._P0, self._ctx._P1, None, reps=reps)
         self._rals = RALowRank(self._vr, np.diag(self._wc.conj()), self._vl, dt=self._dt)
-        self._is_fitted = True
-        print(f"{_fil} Done")
 
     def predict(self, x0, tseries, return_obs=False):
         """
         Make time-domain prediction.
 
-        @param x0: Initial states
-        @param tseries: Time series at which to evaluate the solutions.
-        @param return_obs: If return observables over time as well
+        Args:
+            x0: Initial states
+            tseries: Time series at which to evaluate the solutions.
+            return_obs: If return observables over time as well
         """
-        if not self._is_fitted:
-            raise ValueError("DMD problem not solved yet!")
-
         _ts = tseries - tseries[0]
-        _p0 = self._data.EN(x0).reshape(-1)
+        _p0 = self._ctx.encode(x0).reshape(-1)
         _b  = self._proj.dot(_p0)
         _ls = np.exp(self._wc.conj().reshape(-1,1) * _ts)
         _pt = (self._vl*_b).dot(_ls).T
-        _xt = self._data.DE(_pt)
-        if return_obs:
-            return _xt, _pt
-        return _xt
-
-    def predict_wp(self, x0, tseries, return_obs=False):
-        """
-        Make time-domain prediction, with autoencoder every step.
-
-        @param x0: Initial states
-        @param tseries: Time series at which to evaluate the solutions.
-        @param return_obs: If return observables over time as well
-        """
-        if not self._is_fitted:
-            raise ValueError("DMD problem not solved yet!")
-
-        _Nt = len(tseries)
-        _p0 = self._data.EN(x0).reshape(-1)
-        _xt, _pt = [x0], [_p0]
-        for _i in range(_Nt-1):
-            _dt = tseries[_i+1] - tseries[_i]
-            _b  = self._proj.dot(_pt[_i])
-            _ls = np.exp(self._wc.conj() * _dt)
-            _p1 = (self._vl*_b).dot(_ls).reshape(1,-1)
-            _x1 = self._data.DE(_p1)
-            _p1 = self._data.EN(_x1).reshape(-1)
-            _xt.append(_x1)
-            _pt.append(_p1)
-        _xt = np.vstack(_xt)
-        _pt = np.vstack(_pt)
+        _xt = self._ctx.decode(_pt)
         if return_obs:
             return _xt, _pt
         return _xt
@@ -117,15 +58,17 @@ class DMDBase:
         """
         Map new trajectory data to the observer space.
         """
-        return self._data.EN(X)
+        return self._ctx.encode(X)
 
     def apply_obs(self, fobs):
         """
         Apply a generic observable to the data.
-        @param fobs: Observable function.  Assuming 2D array input with each row as one step.
-                     The output should be a 1D array, whose ith entry corresponds to the ith step.
+
+        Args:
+            fobs: Observable function.  Assuming 2D array input with each row as one step.
+                The output should be a 1D array, whose ith entry corresponds to the ith step.
         """
-        return self._data.apply_obs(fobs).reshape(-1)
+        return self._ctx.apply_obs(fobs).reshape(-1)
 
     def eval_eigfun(self, X, idx):
         """
@@ -138,7 +81,7 @@ class DMDBase:
         """
         Evaluate the eigenfunctions at given locations in embedded space
         """
-        _P = self._data.EN(X, rng)
+        _P = self._ctx.encode(X, rng)
         return _P.dot(self._vr[:,idx])
 
     def eval_eigfun_par(self, par, idx, func):
@@ -154,29 +97,28 @@ class DMDBase:
         Consider eigendecomposition: J = W * L * V^H
         locally a principal eigenfunction is approximately phi_i(x) = v_i^H x
         """
-        _wl, _vl, _vr = scaledEig(J)
+        _wl, _vl, _vr = scaled_eig(J)
         _N = len(J)
         assert len(_wl) <= len(self._wc)   # Insufficient Koopman dimensions
         _idx = []
         _sgn = []
         _eps = 1e-6
-        print("Computing conjugacy map:")
+        logger.info("Computing conjugacy map:")
         for _j, _w in enumerate(_wl):
             # Identify the principal eigenfunction
             _d = np.abs(self._wc-_w)
             _i = np.argmin(_d)
-            print("    EV: Jacobian {0:5.4e}, Koopman {1:5.4e}, diff {2:5.4e}".format(
+            logger.info("EV: Jacobian {0:5.4e}, Koopman {1:5.4e}, diff {2:5.4e}".format(
                 _w, self._wc[_i], np.abs(_d[_i]/self._wc[_i])
             ))
             _idx.append(_i)
             # Check the sign by evaluating along w_i, and v_i^H w_i = +/- 1
             _f1 = self.eval_eigfun(_eps*_vr[:,_j].reshape(1,-1), _i)
             _f0 = self.eval_eigfun(np.zeros((1,_N)), _i)   # Supposed to be 0
-            print(_f0)
             _vw =  (_f1-_f0) / _eps
             _sgn.append(np.sign(_vw.real))
         _sgn = np.array(_sgn).reshape(-1)
-        print(f"    Flipping: {_sgn}")
+        logger.info(f"Flipping: {_sgn}")
         _T = _vr * _sgn
         # The mappings
         self.mapto_cnj = lambda X, I=_idx, W=_T: self.eval_eigfun(X, I).dot(W.T)
@@ -196,7 +138,7 @@ class DMDBase:
         self._vr_full = self._vr_full[:,_msk]
 
         # Truncated set
-        idx = truncateSeq(self._res_full, order)
+        idx = truncate_sequence(self._res_full, order)
         jdx = []  # Ensure all conjugates appear simultaneously
         for _i in idx:
             if _i not in jdx:
@@ -204,7 +146,7 @@ class DMDBase:
                 _w = self._wd_full[_i]
                 _j = np.argmin(np.abs(self._wd_full-_w.conj()))
                 if _j not in idx:
-                    print(f"    Adding missing conjugate {_j}: {self._wd_full[_j]:5.4e}")
+                    logger.info(f"Adding missing conjugate {_j}: {self._wd_full[_j]:5.4e}")
                 if _j not in jdx:
                     jdx.append(_j)
         self._res = self._res_full[jdx]
@@ -225,15 +167,15 @@ class DMDBase:
         In `cont` mode, the grid is assumed to be on continuous-time complex plane;
         the estimator should perform continuous-time resolvent analysis
 
-        @param grid: Mode disc: points on discrete-time plane (Re, Im)
-                     Mode cont: points on continuous-time plane (zeta, omega)
-        @param return_vec: If return I/O modes
-        @param mode: 'cont' or 'disc'
-        @param verbose: Whether to print info.
+        Args:
+            grid: Mode disc: points on discrete-time plane (Re, Im)
+                Mode cont: points on continuous-time plane (zeta, omega)
+            return_vec: If return I/O modes
+            mode: 'cont' or 'disc'
         """
-        print(f"{self._type} Mode:{mode} Method:{method}")
-        _g = cpGrid(grid)
-        res = estimatePSpec(_g, self.resolvent_analysis, verbose=self._verbose, return_vec=return_vec, \
+        logger.info(f"Estimating PS: {self._type} Mode:{mode} Method:{method}")
+        _g = complex_grid(grid)
+        res = estimate_pseudospectrum(_g, self.resolvent_analysis, return_vec=return_vec, \
             **{'mode':mode, 'method':method})
         return _g, res
 
@@ -241,20 +183,17 @@ class DMDBase:
         """
         Perform resolvent analysis of the DMD operator.
 
-        @param method: 'standard' - The projected approach where I/O modes are all in DMD mode space,
-                       which is true for a low-rank DMD operator.
+        Args:
+            method: 'standard' - The projected approach where I/O modes are all in DMD mode space,
+                    which is true for a low-rank DMD operator.
         """
         if method.lower() != 'standard':
-            raise ValueError(f"    Method {method} unknown for resolvent analysis in {self._type}")
+            raise ValueError(f"Method {method} unknown for resolvent analysis in {self._type}")
         return self._rals(z, return_vec, mode)
 
     def _reset(self):
-        self._is_fitted = False
         # Dimensions
         self._Nrank = None
-        # Data
-        self._P0 = np.array([])    # Psi_0
-        self._P1 = np.array([])    # Psi_1 = Psi_0 A
         # Raw eigensystem quantities
         self._wd_full = np.array([])    # Eigenvalues (discrete)
         self._wc_full = np.array([])    # Eigenvalues (continuous)
@@ -273,19 +212,10 @@ class DMDBase:
         self.mapto_cnj = None      # Conjugate mapping for systems with equilibrium point, to original Jacobian
         self.mapto_nrm = None      # Conjugate mapping for systems with equilibrium point, to orthogonal space
 
-    def _batch_obs(self):
-        """
-        Convert a list of trajectories to observables, and align to the Psi_0 and Psi_1 format.
-        """
-        self._P0, self._P1 = self._data.get_data()
-
-    def _solve_ls(self):
-        """
-        Solve the least-squares problem and produce the eigensystem of the operator A.
-
-        This function should produce the discrete eigensystem: wd, vl, vr.
-        """
-        raise NotImplementedError("_solve_ls needs to be defined in derived classes.")
+    def _solve_eigs(self):
+        # self._ctx.get_weights()
+        # Compute vr, wd, vl, etc.
+        pass
 
     def _proc_eigs(self):
         """
@@ -325,7 +255,7 @@ class DMDBase:
 
     def plot_pred_x(self, x0s, ts, ref=None, idx='all', figsize=(6,8)):
         if idx == 'all':
-            _idx = np.arange(self._data._Ninp, dtype=int)
+            _idx = np.arange(self._ctx._Ninp, dtype=int)
         elif isinstance(idx, int):
             _idx = np.arange(idx, dtype=int)
         else:
@@ -352,7 +282,7 @@ class DMDBase:
 
     def plot_pred_psi(self, x0s, ts, ref=None, idx='all', ncols=1, figsize=(6,8)):
         if isinstance(idx, str) and idx == 'all':
-            _idx = np.arange(self._data._Nout)
+            _idx = np.arange(self._ctx._Nout)
         elif isinstance(idx, int):
             _idx = np.arange(idx)
         else:
@@ -403,7 +333,7 @@ class DMDBase:
             _fun = self.eval_eigfun_em(_tmp, _idx, space)
 
         # Plotting
-        _func = cpMap[mode]
+        _func = complex_map[mode]
         _Np = len(_idx)
         _nr = _Np // ncols + _Np % ncols
         f, ax = plt.subplots(nrows=_nr, ncols=ncols, sharex=True, sharey=True, figsize=figsize)
@@ -431,7 +361,7 @@ class DMDBase:
             raise ValueError(f"Unknown quantity to plot: {which}")
 
         # Plotting
-        _fs = [cpMap[_m] for _m in modes]
+        _fs = [complex_map[_m] for _m in modes]
         _Np = len(_idx)
         _nr = _Np // ncols + _Np % ncols
         f, ax = plt.subplots(nrows=_nr, ncols=ncols, sharex=True, sharey=True, figsize=figsize)
