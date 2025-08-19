@@ -92,15 +92,15 @@ def save_checkpoint(model, optimizer, schedulers, epoch, best_loss, hist, rmse, 
         "metadata": metadata,
     }, checkpoint_path)
 
-def load_model(model_class, checkpoint_path, config_path, config_mod=None):
+def load_model(model_class, checkpoint_path, config_path=None, config_mod=None):
     """
     Load a model from a checkpoint file.
 
     Args:
         model_class (torch.nn.Module): The class of the model to load.
         checkpoint_path (str): Path to the checkpoint file.
-        config_path (str): Path to the configuration file.
-        config_mod (dict, optional): Dictionary to merge into the config.
+        config_path (str, optional): Path to the configuration file, used as backup.  Deprecated.
+        config_mod (dict, optional): Dictionary to merge into the config.  Deprecated.
 
     Returns:
         tuple: A tuple containing the model and a prediction function.
@@ -108,14 +108,18 @@ def load_model(model_class, checkpoint_path, config_path, config_mod=None):
         - nn.Module: The loaded model.
         - callable: A function to predict trajectories in data space.
     """
-    config = load_config(config_path, config_mod)
     chkpt = torch.load(checkpoint_path, weights_only=False)
     md = chkpt['metadata']
     dtype = torch.double if md['config']['data'].get('double_precision', False) else torch.float
     torch.set_default_dtype(dtype)   # GNNs use the default dtype, so we need to set it here
 
     # Model
-    model = model_class(config['model'], md, dtype=dtype)
+    if config_path is not None:
+        config = load_config(config_path, config_mod)
+        model_config = md['config'].get('model', config['model'])
+    else:
+        model_config = md['config'].get('model', None)
+    model = model_class(model_config, md, dtype=dtype)
     model.load_state_dict(chkpt['model_state_dict'])
 
     # Check if autonomous

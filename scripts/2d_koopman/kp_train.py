@@ -154,9 +154,8 @@ if ifprd:
 
     res = [x_data]
     for i in IDX:
-        mdl, MDL, Trainer, opt = cfgs[i]
-        opt["model"]["name"] = f"kp_{mdl}"
-        _, prd_func = load_model(MDL, f'kp_{mdl}.pt', f'kp_model.yaml', config_mod=opt)
+        mdl, MDL, _, _ = cfgs[i]
+        _, prd_func = load_model(MDL, f'kp_{mdl}.pt')
         with torch.no_grad():
             pred = prd_func(x_data, t_data)
         res.append(pred)
