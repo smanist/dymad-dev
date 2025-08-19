@@ -187,9 +187,38 @@ class SpectralAnalysis:
             method: 'standard' - The projected approach where I/O modes are all in DMD mode space,
                     which is true for a low-rank DMD operator.
         """
-        if method.lower() != 'standard':
-            raise ValueError(f"Method {method} unknown for resolvent analysis in {self._type}")
-        return self._rals(z, return_vec, mode)
+        _method = method.lower()
+        _ifcont = mode.lower() == 'cont'
+
+        if _method == 'sako':
+            if _ifcont:
+                # In continuous mode, the inquiry point will be on continuous complex plane
+                # But the SAKO formulation is always for discrete time.
+                _z = np.exp(z*self._dt)
+            else:
+                _z = z
+            if return_vec:
+                _e, _v = self._sako._ps_point(_z, True)
+                # _v is the output mode, then recover the input mode by
+                # u=(K-zI)v
+                _b  = self._proj.dot(_v)
+                _ls = self._wd.conj().reshape(-1,1)
+                _u = (self._vl*_b).dot(_ls).reshape(-1)
+                _u -= _z*_v
+            else:
+                _e = self._sako._ps_point(_z, False)
+            if _ifcont:
+                # The gain is in discrete time, and we convert it back
+                _e *= self._dt
+            if return_vec:
+                return _e, _v, _u
+            return _e
+
+        elif _method == 'standard':
+            return self._rals(z, return_vec, mode)
+
+        else:
+            raise ValueError(f"Method {_method} unknown for resolvent analysis in {self._type}")
 
     def _reset(self):
         # Dimensions
@@ -213,9 +242,30 @@ class SpectralAnalysis:
         self.mapto_nrm = None      # Conjugate mapping for systems with equilibrium point, to orthogonal space
 
     def _solve_eigs(self):
-        # self._ctx.get_weights()
-        # Compute vr, wd, vl, etc.
-        pass
+        weights = self._ctx.get_weights()
+
+        if len(weights) == 2:
+            _Vr, _B = weights
+            _At = _B.dot(_Vr)
+            self._wd, _vl, _vr = scaled_eig(_At)
+            self._vl = _B.conj().T.dot(_vl) / self._wd.conj().reshape(1,-1)
+            self._vr = _Vr.dot(_vr)
+        elif len(weights) == 1:
+            _W = weights[0]
+            self._wd, self._vl, self._vr = scaled_eig(_W)
+
+        # For data member consistency
+        self._wd_full = self._wd
+        self._vl_full = self._vl
+        self._vr_full = self._vr
+
+        # Unsure yet whether GEP is needed:
+
+        # _M0 = self._sako._M0
+        # _M1 = self._sako._M1
+        # ## Generalized eigenvalue problem
+        # self._wd_full, _vl_full, self._vr_full = scaled_eig(_M1, _M0)
+        # self._vl_full = _M0.conj().T.dot(_vl_full)
 
     def _proc_eigs(self):
         """
