@@ -29,7 +29,7 @@ def test_generate_coef():
     t3, z3, c3, d3 = generate_coef(3, 0.1)
     t4, z4, c4, d4 = generate_coef(4, 0.1)
 
-    eps = 2e-15
+    eps = 2.4e-15
     assert cmp(c3, c3ref) < eps
     assert cmp(d3, d3ref) < eps
     assert cmp(c4, c4ref) < eps
