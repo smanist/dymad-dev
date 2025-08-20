@@ -1,6 +1,8 @@
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
+from typing import Type
 
 from dymad.numerics import check_orthogonality, complex_grid, complex_map, disc2cont, scaled_eig, truncate_sequence
 from dymad.sako.interface import SAInterface
@@ -19,21 +21,23 @@ class SpectralAnalysis:
     Psi's are data matrices with each row containing one time step.
 
     Args:
-        order: Thresholds to trim the system.  Algorithm-dependent.
         dt: Time step size.
     """
-    def __init__(self, order=0.98, dt=1.0, reps=1e-10):
-        self._order = order
+    def __init__(self,
+                 model_class: Type[torch.nn.Module], checkpoint_path: str,
+                 forder='full', dt: float = 1.0, reps: float = 1e-10):
         self._dt = dt
         self._reset()
 
-        self._ctx = SAInterface()
+        self._ctx = SAInterface(model_class, checkpoint_path)
 
         self._solve_eigs()
         logger.info(f"Orthonormality violation: {check_orthogonality(self._vl, self._vr)[1]:4.3e}")
         self._proc_eigs()
         self._sako = SAKO(self._ctx._P0, self._ctx._P1, None, reps=reps)
         self._rals = RALowRank(self._vr, np.diag(self._wc.conj()), self._vl, dt=self._dt)
+
+        self.filter_spectrum(forder)
 
     def predict(self, x0, tseries, return_obs=False):
         """
@@ -124,11 +128,11 @@ class SpectralAnalysis:
         self.mapto_cnj = lambda X, I=_idx, W=_T: self.eval_eigfun(X, I).dot(W.T)
         self.mapto_nrm = lambda X, I=_idx, S=_sgn: self.eval_eigfun(X, I) * S
 
-    def filter_spectrum(self, sako, order='full'):
+    def filter_spectrum(self, order='full'):
         """
         Apply SAKO to the identified eigenpairs to compute the corresponding residuals
         """
-        self._res_full = sako.estimate_residual(self._wd_full, self._vr_full)
+        self._res_full = self._sako.estimate_residual(self._wd_full, self._vr_full)
 
         # Full set
         _msk = np.argsort(self._res_full)
@@ -173,7 +177,7 @@ class SpectralAnalysis:
             return_vec: If return I/O modes
             mode: 'cont' or 'disc'
         """
-        logger.info(f"Estimating PS: {self._type} Mode:{mode} Method:{method}")
+        logger.info(f"Estimating PS: Mode:{mode} Method:{method}")
         _g = complex_grid(grid)
         res = estimate_pseudospectrum(_g, self.resolvent_analysis, return_vec=return_vec, \
             **{'mode':mode, 'method':method})
@@ -247,12 +251,17 @@ class SpectralAnalysis:
         if len(weights) == 2:
             _Vr, _B = weights
             _At = _B.dot(_Vr)
-            self._wd, _vl, _vr = scaled_eig(_At)
-            self._vl = _B.conj().T.dot(_vl) / self._wd.conj().reshape(1,-1)
+            _w, _vl, _vr = scaled_eig(_At)
+            self._vl = _B.conj().T.dot(_vl) / _w.conj().reshape(1,-1)
             self._vr = _Vr.dot(_vr)
         elif len(weights) == 1:
             _W = weights[0]
-            self._wd, self._vl, self._vr = scaled_eig(_W)
+            _w, self._vl, self._vr = scaled_eig(_W)
+
+        if self._ctx.model.CONT:
+            self._wd = np.exp(_w * self._dt)
+        else:
+            self._wd = _w
 
         # For data member consistency
         self._wd_full = self._wd

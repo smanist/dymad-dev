@@ -28,7 +28,7 @@ class SAKO:
     def __init__(self, P0: np.ndarray, P1: np.ndarray, W: np.ndarray = None, reps: float = 1e-10):
         self._P0 = P0
         self._P1 = P1
-        self._W  = np.array(W) if W is not None else np.eye(len(P0))
+        self._W  = np.array(W) if W is not None else np.ones(len(P0),)
         self._reps = reps
 
         # The inner product matrices

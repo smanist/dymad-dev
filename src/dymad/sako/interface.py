@@ -4,7 +4,7 @@ import torch
 import os
 from typing import Callable, Optional, Tuple, Type
 
-from dymad.data import TrajectoryManager
+from dymad.data import DynData, TrajectoryManager
 from dymad.models import KBF, DKBF
 from dymad.utils import load_model
 
@@ -33,8 +33,7 @@ class SAInterface:
         # Load model and data
         self._setup_data(checkpoint_path)
 
-        mdl, _ = load_model(model_class, checkpoint_path)
-        self._trans_x, self._trans_u, self.model = mdl
+        self.model, _ = load_model(model_class, checkpoint_path)
 
         self._setup_sa_terms()
 
@@ -57,17 +56,20 @@ class SAInterface:
         self.dtype = tm.dtype
         self.t = torch.tensor(tm.t[0])
 
+        self._trans_x = tm._data_transform_x
+        self._trans_u = tm._data_transform_u
+
     def _setup_sa_terms(self):
         P0, P1 = [], []
         for batch in self.train_loader:
-            _P = self.model.encoder(batch, None)
+            _P = self.encode(batch.x.cpu().numpy())
             _P0, _P1 = _P[..., :-1, :], _P[..., 1:, :]
             _P0 = _P0.reshape(-1, _P0.shape[-1])
             _P1 = _P1.reshape(-1, _P1.shape[-1])
             P0.append(_P0)
             P1.append(_P1)
-        self.P0 = torch.cat(P0, dim=0).cpu().numpy()
-        self.P1 = torch.cat(P1, dim=0).cpu().numpy()
+        self._P0 = np.concatenate(P0, axis=0)
+        self._P1 = np.concatenate(P1, axis=0)
 
         self._Ninp = self.model.n_total_state_features
         self._Nout = self.model.koopman_dimension
@@ -87,7 +89,7 @@ class SAInterface:
         if rng is None:
             _X = self._trans_x.transform([X])[0]
             _X = torch.tensor(_X, dtype=self.dtype).to(self.device)
-            _Z = self.model.encoder(_X, None).cpu().numpy()
+            _Z = self.model.encoder(DynData(_X, None)).cpu().numpy()
             return _Z
         raise NotImplementedError("Encoding with a range is not implemented yet.")
 
@@ -112,7 +114,7 @@ class SAInterface:
         """
         F = []
         for batch in self.train_loader:
-            B = batch.cpu().numpy()
+            B = batch.x.cpu().numpy()[..., :-1, :]
             B = B.reshape(-1, B.shape[-1])
             F.append(fobs(B))
-        return np.vstack(F)
+        return np.hstack(F)
