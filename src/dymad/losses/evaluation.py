@@ -35,8 +35,13 @@ def prediction_rmse(model,
         x0 = truth.x[0]
         us = truth.u
 
-        # Make prediction
-        x_pred = model.predict(x0, truth, ts, method=method)
+
+        if model.__class__.__name__ in ['RNN']:
+            seq_len = model.time_delay
+            x0_seq = x_truth[:,:seq_len,:].squeeze(0)  if x_truth.dim() == 3 else x_truth[:seq_len]
+            x_pred = model.predict(x0_seq, truth, ts, method=method)
+        else:
+            x_pred = model.predict(x0, truth, ts, method=method)
 
         x_truth = x_truth.detach().cpu().numpy()
         x_pred = x_pred.detach().cpu().numpy()
@@ -45,8 +50,10 @@ def prediction_rmse(model,
 
         if plot:
             _us = None if us is None else us.detach().cpu().numpy()
+            x_truth=x_truth.squeeze(0) if x_truth.ndim == 3 else x_truth
+            _us=_us.squeeze(0) if _us is not None and _us.ndim == 3 else _us
             plot_trajectory(np.array([x_truth, x_pred]), ts, model_name, metadata,
-                            us=_us, labels=['Truth', 'Prediction'], prefix=prefix)
+                    us=_us, labels=['Truth', 'Prediction'], prefix=prefix)
 
         return rmse
 

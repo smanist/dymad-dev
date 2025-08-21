@@ -46,9 +46,11 @@ class DynDataImpl:
         Returns:
             DynData: A single DynData instance with stacked state and control tensors.
         """
-        xs = torch.stack([b.x for b in batch_list], dim=0)
+        xs = [b.x.squeeze(0) if b.x.dim() == 3 and b.x.shape[0] == 1 else b.x for b in batch_list]
+        xs = torch.stack(xs, dim=0)
         if batch_list[0].u is not None:
-            us = torch.stack([b.u for b in batch_list], dim=0)
+            us = [b.u.squeeze(0) if b.u.dim() == 3 and b.u.shape[0] == 1 else b.u for b in batch_list]
+            us = torch.stack(us, dim=0)
         else:
             us = None
         return DynDataImpl(xs, us)
