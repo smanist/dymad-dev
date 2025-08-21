@@ -1,0 +1,18 @@
+data:
+  path: './data/sa.npz'
+  n_samples: 400
+  n_steps: 41
+  double_precision: true
+
+transform_x:
+  type: "scaler"
+  mode: "-11"
+
+transform_u:
+  type: "identity"
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 300

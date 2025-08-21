@@ -1,6 +1,5 @@
 import logging
 import numpy as np
-import scipy.interpolate as sp_inter
 import torch
 from torchdiffeq import odeint
 from typing import Union
@@ -8,6 +7,7 @@ from typing import Union
 # Below avoids looped imports
 from dymad.data.data import DynDataImpl as DynData
 from dymad.data.data import DynGeoDataImpl as DynGeoData
+from dymad.numerics import expm_low_rank, expm_full_rank
 from dymad.utils import ControlInterpolator
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,52 @@ def predict_continuous(
         x_traj = x_traj.squeeze(1)
 
     logger.debug(f"predict_continuous: Final trajectory shape {x_traj.shape}")
+    return x_traj
+
+def predict_continuous_exp(
+    model,
+    x0: torch.Tensor,
+    ts: Union[np.ndarray, torch.Tensor],
+    **kwargs
+) -> torch.Tensor:
+    """
+    Predict trajectory(ies) for regular (non-graph) models with batch support.
+
+    Autonomous case using matrix exponential.  In continuous-time, we compute exp(A*dt).
+
+    Currently only for KBF-type models with linear dynamics.
+
+    Raises:
+        ValueError: If input dimensions do not match requirements.
+    """
+    device = x0.device
+    _x0, ts, _, n_steps, is_batch, _ = _prepare_data(x0, ts, None, device)
+
+    # Get the system matrix
+    if model.dynamics_net.mode == "full":
+        W = (model.dynamics_net.weight, )
+    else:
+        U = model.dynamics_net.U
+        V = model.dynamics_net.V
+        W = (U, V)
+
+    logger.debug(f"predict_continuous_exp: {'Batch' if is_batch else 'Single'} mode (autonomous)")
+    z0 = model.encoder(DynData(_x0, None))
+
+    logger.debug(f"predict_continuous_exp: Starting ODE integration with shape {z0.shape}")
+    dt = ts - ts[0]  # (n_steps,)
+    if len(W) == 1:
+        z_traj = expm_full_rank(W[0].T, dt, z0)
+    elif len(W) == 2:
+        # Low-rank case: use a specialized function to exponentiate in reduced space
+        z_traj = expm_low_rank(W[1], W[0], dt, z0)
+    logger.debug(f"predict_continuous_exp: Completed integration, trajectory shape: {z_traj.shape}")
+
+    x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1]), None).view(n_steps, z_traj.shape[1], -1)
+    if not is_batch:
+        x_traj = x_traj.squeeze(1)
+
+    logger.debug(f"predict_continuous_exp: Final trajectory shape {x_traj.shape}")
     return x_traj
 
 def predict_graph_continuous(
@@ -292,6 +338,48 @@ def predict_discrete(
         x_traj = x_traj.squeeze(1)
 
     logger.debug(f"predict_discrete: Final trajectory shape {x_traj.shape}")
+    return x_traj
+
+def predict_discrete_exp(
+    model,
+    x0: torch.Tensor,
+    ts: Union[np.ndarray, torch.Tensor],
+    **kwargs
+) -> torch.Tensor:
+    """
+    Predict trajectory(ies) for regular (non-graph) models with batch support.
+
+    Autonomous case using matrix exponential.  In discrete-time, this is equivalent to
+    repeated application of the dynamics.
+
+    Currently only for KBF-type models with linear dynamics.
+
+    Raises:
+        ValueError: If input dimensions don't match requirements
+    """
+    device = x0.device
+    # Use _prepare_data for consistency
+    _x0, _, _, n_steps, is_batch, _ = _prepare_data(x0, ts, None, device)
+
+    logger.debug(f"predict_discrete: {'Batch' if is_batch else 'Single'} mode")
+
+    # Initial state preparation
+    z0 = model.encoder(DynData(_x0, None))
+
+    # Discrete-time forward pass
+    logger.debug(f"predict_discrete_exp: Starting forward iterations with shape {z0.shape}")
+    z_traj = [z0]
+    for k in range(n_steps - 1):
+        z_next = model.dynamics(z_traj[-1], None)
+        z_traj.append(z_next)
+    z_traj = torch.stack(z_traj, dim=0)  # (n_steps, batch_size, z_dim)
+    logger.debug(f"predict_discrete_exp: Completed integration, trajectory shape: {z_traj.shape}")
+
+    x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1]), None).view(n_steps, z_traj.shape[1], -1)
+    if not is_batch:
+        x_traj = x_traj.squeeze(1)
+
+    logger.debug(f"predict_discrete_exp: Final trajectory shape {x_traj.shape}")
     return x_traj
 
 def predict_graph_discrete(

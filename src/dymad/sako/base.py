@@ -250,9 +250,9 @@ class SpectralAnalysis:
 
         if len(weights) == 2:
             _Vr, _B = weights
-            _At = _B.dot(_Vr)
+            _At = _B.conj().T.dot(_Vr)
             _w, _vl, _vr = scaled_eig(_At)
-            self._vl = _B.conj().T.dot(_vl) / _w.conj().reshape(1,-1)
+            self._vl = _B.dot(_vl) / _w.conj().reshape(1,-1)
             self._vr = _Vr.dot(_vr)
         elif len(weights) == 1:
             _W = weights[0]

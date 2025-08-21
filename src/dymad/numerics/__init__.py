@@ -1,5 +1,5 @@
 from dymad.numerics.complex import disc2cont, complex_grid, complex_map, complex_plot
-from dymad.numerics.linalg import check_direction, check_orthogonality, make_random_matrix, scaled_eig, truncate_sequence, truncated_svd
+from dymad.numerics.linalg import check_direction, check_orthogonality, expm_full_rank, expm_low_rank, make_random_matrix, scaled_eig, truncate_sequence, truncated_svd
 from dymad.numerics.spectrum import generate_coef, rational_kernel
 from dymad.numerics.weak import generate_weak_weights
 
@@ -10,6 +10,8 @@ __all__ = [
     "complex_map",
     "complex_plot",
     "disc2cont",
+    "expm_full_rank",
+    "expm_low_rank",
     "generate_coef",
     "generate_weak_weights",
     "make_random_matrix",

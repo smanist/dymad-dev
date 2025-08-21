@@ -5,7 +5,8 @@ from typing import Dict, Union, Tuple
 
 from dymad.data import DynData, DynGeoData
 from dymad.models import ModelBase
-from dymad.utils import FlexLinear, make_autoencoder, predict_continuous, predict_discrete, \
+from dymad.utils import FlexLinear, make_autoencoder, predict_continuous, predict_continuous_exp, \
+    predict_discrete, predict_discrete_exp, \
     predict_graph_continuous, predict_graph_discrete
 
 class KBF(ModelBase):
@@ -27,6 +28,11 @@ class KBF(ModelBase):
         self.latent_dimension = model_config.get('latent_dimension', 64)
         self.koopman_dimension = model_config.get('koopman_dimension', 16)
         self.const_term = model_config.get('const_term', True)
+
+        self._predictor_type = model_config.get('predictor_type', 'ode')
+        if self.n_total_control_features > 0:
+            if self._predictor_type == "exp":
+                raise ValueError("Exponential predictor is not supported for KBF with control inputs.")
 
         # Method for input handling
         self.input_order = model_config.get('input_order', 'cubic')
@@ -148,6 +154,8 @@ class KBF(ModelBase):
                 - Single: (time_steps, n_state_features)
                 - Batch: (time_steps, batch_size, n_state_features)
         """
+        if self._predictor_type == "exp":
+            return predict_continuous_exp(self, x0, ts, **kwargs)
         return predict_continuous(self, x0, ts, us=w.u, method=method, order=self.input_order, **kwargs)
 
     def linear_features(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -192,6 +200,8 @@ class DKBF(KBF):
 
     def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""
+        if self._predictor_type == "exp":
+            return predict_discrete_exp(self, x0, ts, **kwargs)
         return predict_discrete(self, x0, ts, us=w.u)
 
 class GKBF(ModelBase):

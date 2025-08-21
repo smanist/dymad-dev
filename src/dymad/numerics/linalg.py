@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.linalg as spl
+import torch
 from typing import Tuple
 
 def truncated_svd(X, order):
@@ -260,7 +261,125 @@ def real_lowrank_from_eigpairs(
 
     return U_real, B, V_real
 
-
 def reconstruct_from_real_blocks(U_real: np.ndarray, B: np.ndarray, V_real: np.ndarray) -> np.ndarray:
     """A = U_real @ B @ V_real.T"""
     return U_real @ B @ V_real.T
+
+def _phiS(U: torch.Tensor, V: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+    """
+    Compute a batch of phi_1(s_i * S) where S = V^T U, using block matrix exponentials.
+    Inputs:
+      U: (n, r)
+      V: (n, r)
+      s: (m,) or (m, 1) real scalars (can be any float dtype)
+    Returns:
+      phi: (m, r, r) with phi[i] = phi_1(s[i] * S)
+    Complexity:
+      One-time S = V^T U: O(n r^2); then per s_i a matrix exp of size (2r x 2r).
+      This is exact and stable even if S is singular.
+    """
+    _, r = U.shape
+    m = s.numel()
+
+    # S = V^T U  (r x r)
+    S = V.transpose(0, 1) @ U  # (r, r)
+
+    # Batch the scaled matrices: X_i = s_i * S
+    X = s.view(m, 1, 1) * S.unsqueeze(0)  # (m, r, r)
+
+    # Build block matrices [[X_i, I],[0, 0]] of size (2r x 2r), batched over m
+    Z = torch.zeros((m, 2*r, 2*r), dtype=U.dtype, device=U.device)
+    Z[:, :r, :r] = X
+    I_r = torch.eye(r, dtype=U.dtype, device=U.device).expand(m, r, r)
+    Z[:, :r, r:] = I_r  # top-right block = I
+
+    # Exponential of each block; top-right block is phi_1(X_i)
+    EZ = torch.matrix_exp(Z)              # (m, 2r, 2r)
+    phi = EZ[:, :r, r:]                   # (m, r, r)
+
+    return phi
+
+def expm_low_rank(U: torch.Tensor,
+                  V: torch.Tensor,
+                  s: torch.Tensor,
+                  b: torch.Tensor) -> torch.Tensor:
+    """
+    Compute B_i = b @ exp(s_i * U V^T) for i=1..m, in batch.
+
+    Uses the identity: exp(sA) = I + U [s * phi_1(s S)] V^T,  S = V^T U.
+    So: b @ exp(sA) = b + (bU) [s * phi_1(s S)] V^T.
+
+    Inputs:
+      U: (n, r)
+      V: (n, r)
+      s: (m,) list/1D tensor of scalars
+      b: (batch, n)  rows are left-multipliers
+
+    Returns:
+      out: (m, batch, n) where out[i] = b @ exp(s[i] * U V^T)
+    """
+    # Ensure shapes
+    assert U.ndim == 2 and V.ndim == 2
+    n, r = U.shape
+    assert V.shape == (n, r)
+    assert b.ndim == 2 and b.shape[1] == n
+
+    device, dtype = U.device, U.dtype
+
+    # Cast s and b to match U/V
+    s = s.reshape(-1).to(device=device, dtype=dtype)   # (m,)
+    b = b.to(device=device, dtype=dtype)               # (batch, n)
+
+    # Get phi_1(s_i * S) for all s_i: (m, r, r)
+    phi = _phiS(U, V, s)
+
+    # Precompute invariants
+    BU = b @ U                                        # (batch, r)
+    Vt = V.transpose(0, 1)                            # (r, n)
+
+    # Build M_i = s_i * phi_1(s_i * S): (m, r, r)
+    M = s.view(-1, 1, 1) * phi
+
+    # (m, batch, r) = (m, 1, r, r) @ (1, batch, r, 1) style via bmm
+    # Use batched matmul: (m, batch, r) = (m, batch, r) @ (m, r, r)
+    BU_expanded = BU.unsqueeze(0).expand(M.shape[0], -1, -1)  # (m, batch, r)
+    tmp = torch.bmm(BU_expanded, M)                           # (m, batch, r)
+
+    # Final update: (m, batch, n) = (m, batch, r) @ (r, n)
+    update = torch.matmul(tmp, Vt)                            # (m, batch, n)
+
+    # Add the identity contribution b: broadcast to (m, batch, n)
+    out = b.unsqueeze(0) + update
+    return out
+
+def expm_full_rank(W: torch.Tensor,
+                   s: torch.Tensor,
+                   b: torch.Tensor) -> torch.Tensor:
+    """
+    Compute B_i = b @ exp(s_i * W) for i=1..m, in batch.
+
+    Args:
+       W: (n, n) full rank matrix
+       s: (m,) list/1D tensor of scalars
+       b: (batch, n)  rows are left-multipliers
+
+    Returns:
+       out: (m, batch, n) where out[i] = b @ exp(s[i] * W)
+    """
+    assert W.ndim == 2 and W.shape[0] == W.shape[1]
+    n = W.shape[0]
+    assert b.ndim == 2 and b.shape[1] == n
+
+    device, dtype = W.device, W.dtype
+    s = s.reshape(-1).to(device=device, dtype=dtype)   # (m,)
+    m = s.shape[0]
+    b = b.to(device=device, dtype=dtype)               # (batch, n)
+
+    # Batch compute matrix exponentials: (m, n, n)
+    W_batch = s[:, None, None] * W[None, :, :]         # (m, n, n)
+    expW = torch.matrix_exp(W_batch)                   # (m, n, n)
+    # Batch multiply: (m, batch, n) = (m, batch, n) @ (m, n, n)
+    b_expanded = b.unsqueeze(0).expand(m, -1, -1)      # (m, batch, n)
+    out = torch.bmm(b_expanded, expW)                  # (m, batch, n)
+
+    return out

@@ -89,7 +89,7 @@ class SAInterface:
         if rng is None:
             _X = self._trans_x.transform([X])[0]
             _X = torch.tensor(_X, dtype=self.dtype).to(self.device)
-            _Z = self.model.encoder(DynData(_X, None)).cpu().numpy()
+            _Z = self.model.encoder(DynData(_X, None)).cpu().detach().numpy()
             return _Z
         raise NotImplementedError("Encoding with a range is not implemented yet.")
 
@@ -99,7 +99,7 @@ class SAInterface:
         """
         if rng is None:
             _X = torch.tensor(X, dtype=self.dtype).to(self.device)
-            _Z = self.model.decoder(_X).cpu().numpy()
+            _Z = self.model.decoder(_X).cpu().detach().numpy()
             _Z = self._trans_x.transform([_Z])[0]
             return _Z
         raise NotImplementedError("Decoding with a range is not implemented yet.")

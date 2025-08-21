@@ -3,69 +3,78 @@
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.integrate as spi
 import scipy.linalg as spl
 import torch
 
 from dymad.models import DKBF, KBF
 from dymad.numerics import complex_plot
-from dymad.sako import estimate_pseudospectrum, resolvent_analysis, SpectralAnalysis
+from dymad.sako import SpectralAnalysis
 from dymad.training import NODETrainer
 from dymad.utils import load_model, plot_trajectory, setup_logging, TrajectorySampler
 
-B = 64
-N = 21
-t_grid = np.linspace(0, 10, N)
+B = 400
+N = 41
+t_grid = np.linspace(0, 4, N)
 dt = t_grid[1] - t_grid[0]
 
-# prf = 'lti_har'
-# A = np.array([
-#     [0.0, 1.0],
-#     [-4.0, 0.0]])
-prf = 'lti_dmp'
-A = np.array([
-    [0.0, 1.0],
-    [-4.0, -1.0]])
-# prf = 'lti_dgn'
-# A = 0.5*np.array([
-#     [-1.0,-0.9],
-#     [0.0, -1.0]])
-
+mu = 0.1
 def f(t, x):
-    return (x @ A.T)
+    _x, _y = x
+    dx = np.array([
+        _y,
+        mu * (1-_x**2)*_y - _x
+    ])
+    return dx
 g = lambda t, x: x
 
-# True eigenvalues
-wa = np.exp(np.linalg.eig(A)[0]*dt)
-w0 = np.linalg.eig(A)[0]
+# Reference frequencies
+_Nt, _T = 161, 40.0
+_ts = np.linspace(0, _T, 8*_Nt)
+_dt = _ts[1]
+_res = spi.solve_ivp(f, [0,_T], [2,2], t_eval=_ts)
+_tmp = _res.y[0,-4*_Nt:]
+sp = np.fft.fft(_tmp)
+fr = np.fft.fftfreq(4*_Nt)/_dt*(2*np.pi)
+ii = np.argmax(np.abs(sp))
+w0 = np.abs(fr[ii])
+wa = np.exp(np.array([-5,-4,-3,-2,-1,1,2,3,4,5]) * (1j*w0*dt))
 
 mdl_kb = {
     "name" : 'sa_model',
-    "encoder_layers" : 0,
-    "decoder_layers" : 0,
-    "koopman_dimension" : 2,
-    "activation" : "none",
+    "encoder_layers" : 2,
+    "decoder_layers" : 2,
+    "latent_dimension" : 32,
+    "koopman_dimension" : 31,
+    "activation" : "tanh",
+    "autoencoder_type" : "cat",
     "weight_init" : "xavier_uniform",
-    "predictor_type" : "exp",
-    }
+    "predictor_type" : "exp",}
 
 trn_nd = {
-    "n_epochs": 300,
+    "n_epochs": 2000,
     "save_interval": 10,
     "load_checkpoint": False,
-    "learning_rate": 1e-2,
+    "learning_rate": 1e-3,
     "decay_rate": 0.999,
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
-    "sweep_lengths": [2, 4],
-    "sweep_epoch_step": 100,
+    # "sweep_lengths": [2, 4, 6, 8],
+    # "sweep_epoch_step": 800,
+    "sweep_lengths": [2, 11, 21, 41],
+    "sweep_epoch_step": 400,
     "ode_method": "dopri5",
     "ode_args": {
         "rtol": 1e-7,
         "atol": 1e-9},
+    "chop_mode": "unfold",
+    "chop_step": 0.5,
     "ls_update": {
-        "method": "full",
+        "method": "truncated",
+        "params": 15,
         "interval": 50,
-        "times": 1}
+        "times": 2,
+        "start_with_ls": False}
         }
 config_path = 'sa_model.yaml'
 
@@ -77,14 +86,17 @@ cfgs = [
 IDX = [0, 1]
 labels = [cfgs[i][0] for i in IDX]
 
-ifdat = 1
-iftrn = 1
-ifprd = 1
+ifdat = 0
+iftrn = 0
+ifprd = 0
 ifint = 1
 
 if ifdat:
     sampler = TrajectorySampler(f, g, config='sa_data.yaml')
     ts, xs, ys = sampler.sample(t_grid, batch=B, save='./data/sa.npz')
+
+    for i in range(B):
+        plt.plot(xs[i, :, 0], xs[i, :, 1])
 
 if iftrn:
     for i in IDX:
@@ -117,7 +129,7 @@ if ifint:
     sadt = SpectralAnalysis(DKBF, 'sa_dkbf_nd.pt', dt=dt, reps=1e-10)
     sact = SpectralAnalysis(KBF,  'sa_kbf_nd.pt',  dt=dt, reps=1e-10)
 
-    ifeig, ifeic, ifpsp, ifres = 1, 1, 1, 0
+    ifeig, ifeic, ifpsp, ifres = 1, 1, 0, 0
     ifspe, ifegf = 1, 1
 
     if ifeig:
@@ -143,16 +155,10 @@ if ifint:
             grid, psrs = sadt.estimate_ps(gg, mode='disc', method='standard', return_vec=False)
             # CT
             grid, psed = sact.estimate_ps(gg, mode='disc', method='standard', return_vec=False)
-            # Exact
-            psrf = estimate_pseudospectrum(
-                grid, resolvent_analysis, return_vec=False,
-                A=spl.expm(A*dt), B=None, ord=1)
 
             f, ax[0] = complex_plot(grid, 1/psrd, rng, fig=(f, ax[0]), mode='line', lwid=1)
             f, ax[0] = complex_plot(grid, 1/psrs, rng, fig=(f, ax[0]), mode='line', lsty='dotted')
-            f, ax[0] = complex_plot(grid, 1/psrf, rng, fig=(f, ax[0]), mode='line', lwid=1, lsty='dashed')
-            f, ax[1] = complex_plot(grid, 1/psed, rng, fig=(f, ax[1]), mode='line', lsty='dotted')
-            f, ax[1] = complex_plot(grid, 1/psrf, rng, fig=(f, ax[1]), mode='line', lwid=1, lsty='dashed')
+            f, ax[1] = complex_plot(grid, 1/psed, rng, fig=(f, ax[1]), mode='line')
 
         for _i in range(2):
             ax[_i].set_xlim([-0.1, 1.3])
@@ -182,19 +188,13 @@ if ifint:
             grid, psrs = sadt.estimate_ps(gg, mode='cont', method='standard', return_vec=False)
             # CT
             grid, psed = sact.estimate_ps(gg, mode='cont', method='standard', return_vec=False)
-            # Exact
-            psrf = estimate_pseudospectrum(
-                grid, resolvent_analysis, return_vec=False,
-                A=A, B=None, ord=1)
 
             f, ax[0] = complex_plot(grid, 1/psrd, rng, fig=(f, ax[0]), mode='line', lwid=1)
             f, ax[0] = complex_plot(grid, 1/psrs, rng, fig=(f, ax[0]), mode='line', lsty='dotted')
-            f, ax[0] = complex_plot(grid, 1/psrf, rng, fig=(f, ax[0]), mode='line', lwid=1, lsty='dashed')
-            f, ax[1] = complex_plot(grid, 1/psed, rng, fig=(f, ax[1]), mode='line', lsty='dotted')
-            f, ax[1] = complex_plot(grid, 1/psrf, rng, fig=(f, ax[1]), mode='line', lwid=1, lsty='dashed')
+            f, ax[1] = complex_plot(grid, 1/psed, rng, fig=(f, ax[1]), mode='line')
 
-        for _i in range(2):
-            ax[_i].set_xlim([-1.0, 0.5])
+        # for _i in range(2):
+        #     ax[_i].set_xlim([-1.0, 0.5])
 #         ax[_i].set_ylim([-3.0, 3.0])
 
     if ifres:
@@ -220,10 +220,11 @@ if ifint:
         _amp = np.max(vg1)
 
         f = plt.figure()
-        plt.plot(th1, vg1, 'b-', label='DT')
-        plt.plot(th2, vg2, 'r-', label='CT')
+        plt.plot(th1, vg1, 'b-',  label='DT')
+        plt.plot(th2, vg2, 'r--', label='CT')
         plt.plot([_arg[0], _arg[0]], [0, _amp], 'k:', label='System frequency')
-        plt.plot([_arg[1], _arg[1]], [0, _amp], 'k:')
+        for _a in _arg[1:]:
+            plt.plot([_a, _a], [0, _amp], 'k:')
         plt.legend()
         plt.xlabel('Angle, rad')
         plt.ylabel('Spectral measure')
@@ -232,8 +233,24 @@ if ifint:
         ## Eigenfunctions
         rngs = [[-np.pi/2.5, np.pi/2.5], [-1.4, 1.4]]
         Ns = [101, 121]
-        md = 'real'
-        sadt.plot_eigfun_2d(rngs, Ns, 2, mode=md, ncols=2, figsize=(10,6))
-        sact.plot_eigfun_2d(rngs, Ns, 2, mode=md, ncols=2, figsize=(10,6))
+        md = 'abs'
+        sadt.plot_eigfun_2d(rngs, Ns, 6, mode=md, ncols=2, figsize=(10,6))
+        sact.plot_eigfun_2d(rngs, Ns, 6, mode=md, ncols=2, figsize=(10,6))
 
 plt.show()
+
+
+
+
+"""
+Limit Cycle Oscillations, which should consist of only point spectrum.
+
+Rule of thumb:
+1. All methods do not perform well in predicting transient responses.
+2. ResDMD and K-ResDMD should perform similarly, with K-ResDMD slightly better in prediction and spectrum.
+3. EDMD gives reasonable eigenfunctions regardless of data type; others do well for transient data (as trajs cover more space)
+
+@author Dr. Daning Huang
+@date 07/06/24
+"""
+
