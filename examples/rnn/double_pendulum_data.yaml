@@ -1,0 +1,31 @@
+dims:
+  states: 2
+  inputs: 1
+  observations: 2
+
+control:
+  kind: sine
+  params:
+    num_components: 1
+    freq_range:
+    - 0.1
+    - 1
+    amp_range:
+    - 0.0
+    - 0.01
+    phase_range:
+    - 0
+    - 360
+
+x0:
+  kind: uniform
+  params:
+    bounds: [[-0.5, 0.5],   
+             [-0.5, 0.5]]    
+            #  [0.0, 0.0],    
+            #  [0.0, 0.0]]    
+
+solver:
+  method: RK45
+  rtol: 1.0e-5
+  atol: 1.0e-5

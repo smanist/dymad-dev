@@ -1,0 +1,41 @@
+data:
+  path: './data/dp_data.npz'
+  n_samples: 500
+  n_steps: 501
+  double_precision: false
+
+transform_x:
+  type: "identity"
+
+transform_u:
+  type: "identity"
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 128
+
+model:
+  name: 'dp_rnn'
+  encoder_layers: 2     
+  processor_layers: 2   
+  decoder_layers: 2     
+  latent_dimension: 32  
+  activation: "prelu"  
+  weight_init: "xavier_uniform"
+  input_order: "cubic"
+  time_delay: 10         
+
+training:
+  n_epochs: 750        
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 1e-3   
+  decay_rate: 0.999     
+  reconstruction_weight: .5  
+  dynamics_weight: .5
+  sweep_lengths: [100,200,300,400,500]
+  sweep_epoch_step: 150  
+  rtol: 1e-6  
+  atol: 1e-8  
