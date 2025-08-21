@@ -388,7 +388,6 @@ class DelayEmbedder(Transform):
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
 
-
 class SVD(Transform):
     """
     A class for data reduction by SVD.
