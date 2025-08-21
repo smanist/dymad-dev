@@ -6,8 +6,8 @@ import torch
 # Below avoids looped imports
 from dymad.data.data import DynDataImpl as DynData
 from dymad.data.data import DynGeoDataImpl as DynGeoData
+from dymad.transform import make_transform
 from dymad.utils.misc import load_config
-from dymad.utils.preprocessing import make_transform
 
 logger = logging.getLogger(__name__)
 
