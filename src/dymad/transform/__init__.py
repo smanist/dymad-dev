@@ -1,4 +1,4 @@
-from dymad.transform.preprocessing import Compose, DelayEmbedder, Identity, make_transform, Scaler, SVD
+from dymad.transform.base import Compose, DelayEmbedder, Identity, make_transform, Scaler, SVD
 
 __all__ = [
     "Compose",
