@@ -4,7 +4,7 @@ import torch
 from torch_geometric.utils import dense_to_sparse
 
 from dymad.data import DynGeoData, TrajectoryManagerGraph
-from dymad.utils import make_transform
+from dymad.transform import make_transform
 
 def check_data(out, ref, label=''):
     for _s, _t in zip(out, ref):

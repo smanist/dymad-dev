@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 
 from dymad.data import DynData, TrajectoryManager
-from dymad.utils import make_transform
+from dymad.transform import make_transform
 
 HERE = Path(__file__).parent
 
