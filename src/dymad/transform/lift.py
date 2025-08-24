@@ -80,7 +80,7 @@ def _cross(ps):
     _Ns = [_p.shape[0] for _p in ps]
     return _p1
 
-def poly_cross(x, Ks):
+def poly_cross(x, Ks=None):
     assert x.shape[1] == len(Ks), "Input dimension does not match the number of powers"
     _Np = len(Ks)
     _ps = []
@@ -88,7 +88,7 @@ def poly_cross(x, Ks):
         _ps.append(psi_monomial(x[:,i], np.arange(Ks[i])))
     return _cross(_ps)
 
-def poly_inverse(Z, Ks):
+def poly_inverse(Z, Ks=None):
     """Inverse of poly_cross, given the poly order in each component."""
     assert Z.shape[1] == np.prod(Ks), "Input dimension does not match the number of features"
     _Nx = Z.shape[0]
@@ -116,7 +116,7 @@ def _get_slice(z, i, N):
     idx[i] = slice(None)
     return z[(slice(None), *idx)].T
 
-def mixed_cross(x, opts):
+def mixed_cross(x, opts=None):
     """
     opts = list of tuples (index, type, K)
 
@@ -141,7 +141,7 @@ def mixed_cross(x, opts):
             _ps[_i] = PSI_MAP[_t][0](x[:,_i], np.arange(_k))
     return _cross(_ps)
 
-def mixed_inverse(Z, opts):
+def mixed_inverse(Z, opts=None):
     """Inverse of mixed_cross, given the options."""
     _idx = _collect_index(opts)
     Ks = np.zeros((len(_idx),), dtype=int)

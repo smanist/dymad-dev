@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 import logging
 import numpy as np
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from dymad.numerics.linalg import truncated_svd
+from dymad.transform.lift import poly_cross, poly_inverse, mixed_cross, mixed_inverse
 
 Array = List[np.ndarray]
 
@@ -259,6 +260,71 @@ class Scaler(Transform):
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
 
+class Lift(Transform):
+    """
+    Lifting into higher-dimensional space by hand-crafted features
+    """
+    def __init__(self, fobs: str | Callable = None, finv: str | Callable | None = None, **kwargs):
+        if fobs == 'poly':
+            self._fobs = poly_cross
+            self._finv = poly_inverse
+        elif fobs == 'mixed':
+            self._fobs = mixed_cross
+            self._finv = mixed_inverse
+        elif callable(fobs):
+            self._fobs = fobs
+            if callable(finv):
+                self._finv = finv
+            else:
+                self._finv = self._pseudo_inv
+        else:
+            self._fobs = None
+            self._finv = None
+        self._fargs = kwargs
+
+    def __str__(self):
+        return "lift"
+
+    def fit(self, X: Array) -> None:
+        """"""
+        self._inp_dim = X[0].shape[-1]
+
+        _Z = self._fobs(X[0], **self._fargs)  # To check if fobs works
+        self._out_dim = _Z.shape[-1]
+
+        if self._finv == self._pseudo_inv:
+            _Zs = [self._fobs(_X, **self._fargs) for _X in X]
+            self._C = np.linalg.lstsq(np.vstack(_Zs), np.vstack(X), rcond=None)[0]
+        else:
+            self._C = None
+
+    def transform(self, X: Array) -> Array:
+        return [self._fobs(_X.reshape(-1,self._inp_dim), **self._fargs) for _X in X]
+
+    def inverse_transform(self, X: Array) -> Array:
+        return [self._finv(_X.reshape(-1,self._out_dim), **self._fargs) for _X in X]
+
+    def _pseudo_inv(self, Z):
+        return Z.dot(self._C)
+
+    def state_dict(self) -> dict[str, Any]:
+        """"""
+        return {
+            "inp": self._inp_dim,
+            "out": self._out_dim,
+            "C": self._C,
+            "fobs": self._fobs,
+            "finv": self._finv,
+            "fargs": self._fargs,
+        }
+
+    def load_state_dict(self, d) -> None:
+        """"""
+        self._inp_dim = d["inp"]
+        self._out_dim = d["out"]
+        self._C = d["C"]
+        self.__init__(d["fobs"], d["finv"], **d["fargs"])
+
 class DelayEmbedder(Transform):
     """
     A class to perform delay embedding on sequences of data.
@@ -464,6 +530,7 @@ _TRN_MAP = {
     str(Compose()):       Compose,
     str(DelayEmbedder()): DelayEmbedder,
     str(Identity()):      Identity,
+    str(Lift()):          Lift,
     str(Scaler()):        Scaler,
     str(SVD()):           SVD,
 }
