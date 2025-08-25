@@ -1,0 +1,18 @@
+# 2D Koopman example
+
+dims:
+  states: 2
+  inputs: 0
+  observations: 2
+
+x0:
+  kind: uniform
+  params:
+    bounds:
+      - [-1.0, 1.0]
+      - [-1.0, 1.0]
+
+solver:
+  method: RK45
+  rtol: 1.0e-6
+  atol: 1.0e-6

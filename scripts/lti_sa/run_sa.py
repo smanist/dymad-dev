@@ -9,7 +9,7 @@ import torch
 from dymad.models import DKBF, KBF
 from dymad.numerics import complex_plot
 from dymad.sako import estimate_pseudospectrum, resolvent_analysis, SpectralAnalysis
-from dymad.training import NODETrainer
+from dymad.training import LinearTrainer, NODETrainer
 from dymad.utils import load_model, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 64
@@ -48,6 +48,19 @@ mdl_kb = {
     "predictor_type" : "exp",
     }
 
+mdl_kl = {
+    "name" : 'sa_model',
+    "encoder_layers" : 0,
+    "decoder_layers" : 0,
+    "koopman_dimension" : 4,
+    "activation" : "none",
+    "weight_init" : "xavier_uniform",
+    "predictor_type" : "exp",}
+trn_kl = [
+        {"type": "scaler", "mode": "-11"},
+        {"type": "lift", "fobs": "poly", "Ks": [2, 2]}
+    ]
+
 trn_nd = {
     "n_epochs": 300,
     "save_interval": 10,
@@ -67,19 +80,29 @@ trn_nd = {
         "interval": 50,
         "times": 1}
         }
+trn_ln = {
+    "n_epochs": 1,
+    "save_interval": 1,
+    "load_checkpoint": False,
+    "ls_update": {
+        "method": "sako",
+        "params": 2}
+    }
 config_path = 'sa_model.yaml'
 
 cfgs = [
     ('kbf_nd',  KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
-    ('dkbf_nd', DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_nd})
+    ('dkbf_nd', DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
+    ('dkbf_ln', DKBF, LinearTrainer,   {"model": mdl_kl, "transform_x" : trn_kl, "training" : trn_ln}),
     ]
 
-IDX = [0, 1]
+# IDX = [0, 1]
+IDX = [2]
 labels = [cfgs[i][0] for i in IDX]
 
-ifdat = 1
-iftrn = 1
-ifprd = 1
+ifdat = 0
+iftrn = 0
+ifprd = 0
 ifint = 1
 
 if ifdat:
@@ -117,7 +140,7 @@ if ifint:
     sadt = SpectralAnalysis(DKBF, 'sa_dkbf_nd.pt', dt=dt, reps=1e-10)
     sact = SpectralAnalysis(KBF,  'sa_kbf_nd.pt',  dt=dt, reps=1e-10)
 
-    ifeig, ifeic, ifpsp, ifres = 1, 1, 1, 0
+    ifeig, ifeic, ifpsp, ifres = 1, 1, 1, 1
     ifspe, ifegf = 1, 1
 
     if ifeig:

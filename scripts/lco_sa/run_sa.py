@@ -4,21 +4,20 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate as spi
-import scipy.linalg as spl
 import torch
 
 from dymad.models import DKBF, KBF
 from dymad.numerics import complex_plot
 from dymad.sako import SpectralAnalysis
-from dymad.training import NODETrainer
+from dymad.training import LinearTrainer, NODETrainer
 from dymad.utils import load_model, plot_trajectory, setup_logging, TrajectorySampler
 
 B = 400
-N = 41
-t_grid = np.linspace(0, 4, N)
+N = 61
+t_grid = np.linspace(0, 6, N)
 dt = t_grid[1] - t_grid[0]
 
-mu = 0.1
+mu = 1.0
 def f(t, x):
     _x, _y = x
     dx = np.array([
@@ -45,11 +44,24 @@ mdl_kb = {
     "encoder_layers" : 2,
     "decoder_layers" : 2,
     "latent_dimension" : 32,
-    "koopman_dimension" : 31,
+    "koopman_dimension" : 32,
     "activation" : "tanh",
-    "autoencoder_type" : "cat",
+    # "autoencoder_type" : "cat",
     "weight_init" : "xavier_uniform",
     "predictor_type" : "exp",}
+
+mdl_kl = {
+    "name" : 'sa_model',
+    "encoder_layers" : 0,
+    "decoder_layers" : 0,
+    "koopman_dimension" : 64,
+    "activation" : "none",
+    "weight_init" : "xavier_uniform",
+    "predictor_type" : "exp",}
+trn_kl = [
+        {"type": "scaler", "mode": "-11"},
+        {"type": "lift", "fobs": "poly", "Ks": [8, 8]}
+    ]
 
 trn_nd = {
     "n_epochs": 2000,
@@ -59,40 +71,42 @@ trn_nd = {
     "decay_rate": 0.999,
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
-    # "sweep_lengths": [2, 4, 6, 8],
-    # "sweep_epoch_step": 800,
     "sweep_lengths": [2, 11, 21, 41],
     "sweep_epoch_step": 400,
-    "ode_method": "dopri5",
-    "ode_args": {
-        "rtol": 1e-7,
-        "atol": 1e-9},
     "chop_mode": "unfold",
     "chop_step": 0.5,
     "ls_update": {
-        "method": "truncated",
-        "params": 15,
-        "interval": 50,
+        "method": "sako",
+        "params": 9,
+        "interval": 100,
         "times": 2,
         "start_with_ls": False}
         }
+trn_ln = {
+    "n_epochs": 1,
+    "save_interval": 1,
+    "load_checkpoint": False,
+    "ls_update": {
+        "method": "sako",
+        "params": 0.2}
+    }
 config_path = 'sa_model.yaml'
 
 cfgs = [
     ('kbf_nd',  KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
-    ('dkbf_nd', DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_nd})
+    ('dkbf_nd', DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
+    ('dkbf_ln', DKBF, LinearTrainer,   {"model": mdl_kl, "transform_x" : trn_kl, "training" : trn_ln}),
     ]
 
-IDX = [0, 1]
+IDX = [2]
 labels = [cfgs[i][0] for i in IDX]
 
 ifdat = 0
-iftrn = 0
-ifprd = 0
+iftrn = 1
 ifint = 1
 
 if ifdat:
-    sampler = TrajectorySampler(f, g, config='sa_data.yaml')
+    sampler = TrajectorySampler(f, g, config='sa_data.yaml', config_mod={'postprocess': {'n_skip': 20}})
     ts, xs, ys = sampler.sample(t_grid, batch=B, save='./data/sa.npz')
 
     for i in range(B):
@@ -107,7 +121,6 @@ if iftrn:
         trainer = Trainer(config_path, MDL, config_mod=opt)
         trainer.train()
 
-if ifprd:
     sampler = TrajectorySampler(f, config='sa_data.yaml')
     ts, xs, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
@@ -126,10 +139,11 @@ if ifprd:
         labels=['Truth'] + labels, ifclose=False)
 
 if ifint:
-    sadt = SpectralAnalysis(DKBF, 'sa_dkbf_nd.pt', dt=dt, reps=1e-10)
+    # sadt = SpectralAnalysis(DKBF, 'sa_dkbf_nd.pt', dt=dt, reps=1e-10)
+    sadt = SpectralAnalysis(DKBF, 'sa_dkbf_ln.pt', dt=dt, reps=1e-10)
     sact = SpectralAnalysis(KBF,  'sa_kbf_nd.pt',  dt=dt, reps=1e-10)
 
-    ifeig, ifeic, ifpsp, ifres = 1, 1, 0, 0
+    ifeig, ifeic, ifpsp, ifres = 1, 1, 1, 1
     ifspe, ifegf = 1, 1
 
     if ifeig:
@@ -234,8 +248,9 @@ if ifint:
         rngs = [[-np.pi/2.5, np.pi/2.5], [-1.4, 1.4]]
         Ns = [101, 121]
         md = 'abs'
-        sadt.plot_eigfun_2d(rngs, Ns, 6, mode=md, ncols=2, figsize=(10,6))
-        sact.plot_eigfun_2d(rngs, Ns, 6, mode=md, ncols=2, figsize=(10,6))
+        sadt.plot_eigfun_2d(rngs, Ns, 3, mode=md, ncols=3, figsize=(10,6))
+        sadt.plot_eigfun_2d(rngs, Ns, 3, mode='angle', ncols=3, figsize=(10,6))
+        sact.plot_eigfun_2d(rngs, Ns, 3, mode=md, ncols=3, figsize=(10,6))
 
 plt.show()
 
