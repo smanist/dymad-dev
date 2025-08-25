@@ -6,7 +6,8 @@ from torch.utils.data import DataLoader
 from typing import Union
 
 from dymad.data import DynData, DynGeoData
-from dymad.numerics.linalg import truncated_lstsq
+from dymad.numerics.linalg import real_lowrank_from_eigpairs, scaled_eig, truncated_lstsq
+from dymad.sako import filter_spectrum, SAKO
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +74,12 @@ class LSUpdater:
         if not check_linear_impl(model):
             raise ValueError(f"{model} does not implement linear_features and linear_eval methods required for LS updates.")
 
-        if self.method not in ['full', 'truncated']:
-            raise ValueError(f"Unsupported method: {self.method}. Supported methods are 'full' and 'truncated'.")
+        if self.method not in ['full', 'truncated', 'sako']:
+            raise ValueError(f"Unsupported method: {self.method}. Supported methods are 'full', 'truncated', and 'sako'.")
 
         if model.CONT:
+            if self.method == 'sako':
+                logger.warning("SAKO is designed for discrete-time systems.")
             self._comp_linear_features = _comp_linear_features_ct
             self._comp_linear_eval     = _comp_linear_eval_ct
             logger.info(f"Using continuous-time model for linear updates, dt={self.dt}.")
@@ -123,6 +126,25 @@ class LSUpdater:
 
             elif self.method == 'truncated':
                 _V, _U = truncated_lstsq(A, b, tsvd=self.params)
+                params = model.set_linear_weights(
+                    U=torch.tensor(_U, dtype=dtype, device=device),
+                    V=torch.tensor(_V, dtype=dtype, device=device))
+                avg_epoch_loss = np.linalg.norm((A @ _V) @ _U.T - b) / A.shape[0]
+
+            elif self.method == 'sako':
+                W = np.linalg.lstsq(A, b, rcond=None)[0]
+                _w, _vl, _vr = scaled_eig(W)
+                sako = SAKO(A, b, reps=1e-10)
+                eigs, _, res = filter_spectrum(sako, (_w, _vl, _vr), order=self.params)
+                logger.info(f"SAKO filtered {len(_w)-len(eigs)} out of {len(_w)} eigenvalues. Max residual: {max(res[0]):3.1e}")
+
+                _B, _R, _S = real_lowrank_from_eigpairs(*eigs)
+                # S @ B @ R.T = _vr @ _w @ _vl^H = W by linalg
+                # W = V @ U^T for FlexLinear
+                # So 
+                _V = _S @ _B
+                _U = _R
+
                 params = model.set_linear_weights(
                     U=torch.tensor(_U, dtype=dtype, device=device),
                     V=torch.tensor(_V, dtype=dtype, device=device))

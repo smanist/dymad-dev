@@ -62,7 +62,7 @@ class SAInterface:
     def _setup_sa_terms(self):
         P0, P1 = [], []
         for batch in self.train_loader:
-            _P = self.encode(batch.x.cpu().numpy())
+            _P = self.model.encoder(DynData(batch.x, None)).cpu().detach().numpy()
             _P0, _P1 = _P[..., :-1, :], _P[..., 1:, :]
             _P0 = _P0.reshape(-1, _P0.shape[-1])
             _P1 = _P1.reshape(-1, _P1.shape[-1])
@@ -100,7 +100,7 @@ class SAInterface:
         if rng is None:
             _X = torch.tensor(X, dtype=self.dtype).to(self.device)
             _Z = self.model.decoder(_X).cpu().detach().numpy()
-            _Z = self._trans_x.transform([_Z])[0]
+            _Z = self._trans_x.inverse_transform([_Z])[0]
             return _Z
         raise NotImplementedError("Decoding with a range is not implemented yet.")
 

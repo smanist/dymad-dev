@@ -158,86 +158,71 @@ def make_random_matrix(Ndim, Nrnk, zrng, wrng, dt=-1):
     return A, (L0, U0, V0)
 
 def real_lowrank_from_eigpairs(
-    lam: np.ndarray,          # shape (r,), complex eigenvalues
-    V: np.ndarray,            # shape (n, r), right eigenvectors (columns)
-    W: np.ndarray = None,     # shape (m, r), left eigenvectors (columns), optional
-    normalize_biorth: bool = True,
+    lam: np.ndarray,
+    U: np.ndarray,
+    V: np.ndarray,
     tol: float = 1e-12,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Construct a real low-rank factorization U_real @ B @ V_real.T from (possibly complex)
-    eigenpairs of a real matrix A such that A ≈ sum_i lam_i * v_i * w_i^T.
+    Construct a real low-rank factorization V_real @ B @ U_real.T from (possibly complex)
+    eigenpairs of a real matrix A = sum_i lam_i * v_i * u_i^H.
 
-    If W is None, we assume a square matrix and compute W from eigenvectors of A.T
-    (you must pass the original A in that case via closure or adapt as needed).
+    Args:
+        lam:    (r,) eigenvalues
+        U:      (n, r) left eigenvectors
+        V:      (n, r) right eigenvectors
+        tol:    tolerance to identify real vs complex eigenvalues
 
     Returns:
-        U_real: (m, r_real)
         B:      (r_real, r_real) block-diagonal (1x1 for real, 2x2 for conjugate pairs)
+        U_real: (m, r_real)
         V_real: (n, r_real)
     """
     r = lam.shape[0]
-    n = V.shape[0]
-    if W is None:
-        raise ValueError("Left eigenvectors W must be provided (or compute them externally).")
-
-    # Optional: biorthonormalize so that w_i^T v_j = delta_ij
-    if normalize_biorth:
-        for i in range(r):
-            denom = W[:, i].T @ V[:, i]
-            if np.abs(denom) < tol:
-                continue
-            V[:, i] = V[:, i] / denom
 
     used = np.zeros(r, dtype=bool)
-    # Worst case: all pairs are complex -> real rank doubles; allocate generously then trim.
     U_blocks = []
     V_blocks = []
     B_blocks = []
 
+    scl = np.sqrt(2)
     for i in range(r):
         if used[i]:
             continue
-        λ = lam[i]
+        l = lam[i]
         v = V[:, i]
-        w = W[:, i]
-        if np.abs(λ.imag) <= tol:  # real eigenvalue
-            # 1x1 block: contribution = λ * v * w^T  (real)
-            # Ensure real numerically:
-            U_blocks.append(np.real(w).reshape(-1, 1))
+        u = U[:, i]
+        if np.abs(l.imag) <= tol:  # real eigenvalue
+            # 1x1 block: contribution = l * v * u^T  (real)
+            U_blocks.append(np.real(u).reshape(-1, 1))
             V_blocks.append(np.real(v).reshape(-1, 1))
-            B_blocks.append(np.array([[np.real(λ)]]))
+            B_blocks.append(np.array([[np.real(l)]]))
             used[i] = True
         else:
-            # find its conjugate partner
-            # match by value; in practice you may want a more robust pairing
+            # find its conjugate partner by matching values
             conj_idx = None
             for j in range(i+1, r):
                 if used[j]:
                     continue
-                if np.abs(lam[j] - np.conj(λ)) <= 1e-10 * (1.0 + np.abs(λ)):
+                if np.abs(lam[j] - np.conj(l)) <= 1e-10 * (1.0 + np.abs(l)):
                     conj_idx = j
                     break
             if conj_idx is None:
                 raise RuntimeError("Could not find conjugate partner for eigenvalue index {}".format(i))
 
             # Use only the 'positive imag' representative to build a 2x2 real block
-            if λ.imag < 0:
+            if l.imag < 0:
                 # swap to always use the positive imaginary one
                 i, conj_idx = conj_idx, i
-                λ = lam[i]; v = V[:, i]; w = W[:, i]
+                l = lam[i]; v = V[:, i]; u = U[:, i]
 
-            a, b = np.real(λ), np.imag(λ)
-            # Decompose vectors into real/imag parts
-            p, q = np.real(v), np.imag(v)     # right vec v = p + i q
-            rL, sL = np.real(w), np.imag(w)   # left vec w = rL + i sL
-
-            # As derived: for the conjugate pair sum,
-            #   S_pair = λ v w^T + λ̄ v̄ w̄^T = U_block @ C @ V_block^T
-            # with U_block = [rL, sL], V_block = [p, -q],
-            # and C = [[a, b], [-b, a]]
-            U_block = np.stack([rL, sL], axis=1)   # shape (m, 2)
-            V_block = np.stack([p, -q], axis=1)    # shape (n, 2)
+            # For the conjugate pair sum,
+            #   S_pair = l v u^T + l̄ v̄ ū^T = 2 V_block @ C @ U_block^T
+            #   with C = [[a, b], [-b, a]]
+            # We scale each block by sqrt(2)
+            U_block = scl*np.stack([np.real(u), np.imag(u)], axis=1)
+            V_block = scl*np.stack([np.real(v), np.imag(v)], axis=1)
+            a, b = np.real(l), np.imag(l)
             C_block = np.array([[a, b],
                                 [-b, a]], dtype=float)
 
@@ -248,8 +233,8 @@ def real_lowrank_from_eigpairs(
             used[conj_idx] = True
 
     # Concatenate blocks
-    U_real = np.concatenate(U_blocks, axis=1) if U_blocks else np.zeros((W.shape[0], 0))
-    V_real = np.concatenate(V_blocks, axis=1) if V_blocks else np.zeros((V.shape[0], 0))
+    U_real = np.concatenate(U_blocks, axis=1)
+    V_real = np.concatenate(V_blocks, axis=1)
     # Build block-diagonal B
     sizes = [B.shape[0] for B in B_blocks]
     B = np.zeros((sum(sizes), sum(sizes)))
@@ -259,11 +244,7 @@ def real_lowrank_from_eigpairs(
         B[ofs:ofs+k, ofs:ofs+k] = Bi
         ofs += k
 
-    return U_real, B, V_real
-
-def reconstruct_from_real_blocks(U_real: np.ndarray, B: np.ndarray, V_real: np.ndarray) -> np.ndarray:
-    """A = U_real @ B @ V_real.T"""
-    return U_real @ B @ V_real.T
+    return B, U_real, V_real
 
 def _phiS(U: torch.Tensor, V: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
     """

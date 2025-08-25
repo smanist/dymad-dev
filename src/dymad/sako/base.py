@@ -11,6 +11,39 @@ from dymad.sako.sako import SAKO
 
 logger = logging.getLogger(__name__)
 
+def filter_spectrum(sako, eigs, order='full'):
+    """
+    Apply SAKO to the identified eigenpairs to compute the corresponding residuals
+    """
+    wd, vl, vr = eigs
+    res = sako.estimate_residual(wd, vr)
+
+    # Full set
+    _msk = np.argsort(res)
+    res_full = res[_msk]
+    wd_full = wd[_msk]
+    vl_full = vl[:,_msk]
+    vr_full = vr[:,_msk]
+
+    # Truncated set
+    idx = truncate_sequence(res_full, order)
+    jdx = []  # Ensure all conjugates appear simultaneously
+    for _i in idx:
+        if _i not in jdx:
+            jdx.append(_i)
+            _w = wd_full[_i]
+            _j = np.argmin(np.abs(wd_full-_w.conj()))
+            if _j not in idx:
+                logger.info(f"Adding missing conjugate {_j}: {wd_full[_j]:5.4e}")
+            if _j not in jdx:
+                jdx.append(_j)
+    res = res_full[jdx]
+    wd = wd_full[jdx]
+    vl = vl_full[:,jdx]
+    vr = vr_full[:,jdx]
+
+    return (wd, vl, vr), (wd_full, vl_full, vr_full), (res, res_full)
+
 class SpectralAnalysis:
     """
     The base class for Spectral Analysis based on Koopman operator theory.
@@ -132,32 +165,14 @@ class SpectralAnalysis:
         """
         Apply SAKO to the identified eigenpairs to compute the corresponding residuals
         """
-        self._res_full = self._sako.estimate_residual(self._wd_full, self._vr_full)
+        eigs, eigs_full, res = filter_spectrum(
+            self._sako, (self._wd_full, self._vl_full, self._vr_full), order)
 
-        # Full set
-        _msk = np.argsort(self._res_full)
-        self._res_full = self._res_full[_msk]
-        self._wd_full = self._wd_full[_msk]
-        self._vl_full = self._vl_full[:,_msk]
-        self._vr_full = self._vr_full[:,_msk]
+        self._wd, self._vl, self._vr = eigs
+        self._wd_full, self._vl_full, self._vr_full = eigs_full
+        self._res, self._res_full = res
 
-        # Truncated set
-        idx = truncate_sequence(self._res_full, order)
-        jdx = []  # Ensure all conjugates appear simultaneously
-        for _i in idx:
-            if _i not in jdx:
-                jdx.append(_i)
-                _w = self._wd_full[_i]
-                _j = np.argmin(np.abs(self._wd_full-_w.conj()))
-                if _j not in idx:
-                    logger.info(f"Adding missing conjugate {_j}: {self._wd_full[_j]:5.4e}")
-                if _j not in jdx:
-                    jdx.append(_j)
-        self._res = self._res_full[jdx]
-        self._wd = self._wd_full[jdx]
-        self._vl = self._vl_full[:,jdx]
-        self._vr = self._vr_full[:,jdx]
-        self._Nrank = len(jdx)
+        self._Nrank = len(self._wd)
 
         # Redo the eigenvalue processing
         self._proc_eigs()

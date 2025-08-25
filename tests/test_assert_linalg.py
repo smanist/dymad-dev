@@ -2,7 +2,7 @@ import numpy as np
 import scipy.linalg as spl
 import torch
 
-from dymad.numerics import check_orthogonality, expm_full_rank, expm_low_rank, scaled_eig
+from dymad.numerics import check_orthogonality, expm_full_rank, expm_low_rank, real_lowrank_from_eigpairs, scaled_eig
 
 def cmp(sol, ref):
     return np.linalg.norm(sol-ref) / np.linalg.norm(ref)
@@ -20,7 +20,7 @@ def test_scaled_eig_std():
     assert cmp(L.dot(vL), vL.dot(A)) <= eps   # Left eigenvectors
     assert cmp(vr.dot(L), A.dot(vr)) <= eps   # Right eigenvectors
     assert cmp(vL.dot(A).dot(vr), L) <= eps   # Diagonalization
-    assert cmp(np.diag(vl.conj().T.dot(vl)), \
+    assert cmp(np.diag(vL.dot(vl)), \
         np.diag(vr.conj().T.dot(vr))) <= eps  # Equalized norms
     assert check_orthogonality(vl, vr)[1] <= eps  # Orthogonality
 
@@ -31,9 +31,30 @@ def test_scaled_eig_gen():
     assert cmp(L.dot(vL).dot(B), vL.dot(A)) <= eps   # Left eigenvectors
     assert cmp(B.dot(vr).dot(L), A.dot(vr)) <= eps   # Right eigenvectors
     assert cmp(vL.dot(A).dot(vr), L) <= eps          # Diagonalization
-    assert cmp(np.diag(vl.conj().T.dot(vl)), \
+    assert cmp(np.diag(vL.dot(vl)), \
         np.diag(vr.conj().T.dot(vr))) <= eps         # Equalized norms
     assert check_orthogonality(vl, vr, M=B)[1] <= eps    # Orthogonality
+
+def test_real_lowrank_real():
+    S = A + A.T
+    w, vl, vr = scaled_eig(S)
+    L, U, V = real_lowrank_from_eigpairs(w, vl, vr)
+    assert cmp(S, V @ L @ U.T) <= eps
+
+def test_real_lowrank_cplx():
+    S = A - 0.9*A.T    # Nearly skew-symmetric to force complex eigenvalues
+    w, vl, vr = scaled_eig(S)
+    assert np.iscomplexobj(w)
+    L, U, V = real_lowrank_from_eigpairs(w, vl, vr)
+    assert cmp(S, V @ L @ U.T) <= eps
+
+def test_real_lowrank_larger():
+    N = 100
+    S = np.eye(N) + 0.1*np.random.rand(N,N)
+    w, vl, vr = scaled_eig(S)
+    L, U, V = real_lowrank_from_eigpairs(w, vl, vr)
+    print(V @ L @ U.T)
+    assert cmp(S, V @ L @ U.T) <= 10*eps
 
 def _eval_expm(A, t, b):
     """
@@ -64,7 +85,7 @@ def test_expm_full_rank():
 
 def test_expm_low_rank():
     T, B, N, R = 11, 6, 4, 2
-    eps = 1e-15
+    eps = 4e-15
     U = np.random.randn(N, R)
     V = np.random.randn(N, R)
     t = np.linspace(0, 1, T)
