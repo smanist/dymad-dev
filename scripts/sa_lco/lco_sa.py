@@ -49,7 +49,7 @@ mdl_kb = {
     "name" : 'sa_model',
     "encoder_layers" : 2,
     "decoder_layers" : 2,
-    "latent_dimension" : 64,
+    "hidden_dimension" : 64,
     "koopman_dimension" : 3,
     "activation" : "prelu",
     "weight_init" : "xavier_uniform",

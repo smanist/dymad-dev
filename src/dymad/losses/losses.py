@@ -112,7 +112,7 @@ class VPTLoss(nn.Module):
 
         return loss
 
-
+#: Mapping of loss names to loss classes.
 LOSS_MAP = {
     "mse": torch.nn.MSELoss,
     "mae": torch.nn.L1Loss,

@@ -4,10 +4,10 @@ import numpy as np
 import scipy.linalg as spl
 import torch
 from torch.utils.data import DataLoader
-from typing import Tuple, Union
+from typing import Tuple
 
 from dymad.io import DynData
-from dymad.numerics.linalg import logm_low_rank, real_lowrank_from_eigpairs, scaled_eig, truncated_lstsq
+from dymad.numerics.linalg import logm_low_rank, real_lowrank_from_eigpairs, truncated_lstsq
 from dymad.sako import filter_spectrum, SAKO
 
 logger = logging.getLogger(__name__)
@@ -205,6 +205,7 @@ def _ct_raw(dataloader, model, dt, params=None, **kwargs):
     W, r = model.linear_solve(A, b, **_p)
     return (W,), r
 
+#: Mapping of linear solver methods
 SOL_MAP = {
     'dt_full'      : _dt_full,
     'dt_truncated' : _dt_truncated,

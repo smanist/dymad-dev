@@ -46,10 +46,9 @@ class OptLinear(OptBase):
         loss_list = [linear_loss]
 
         # Other criteria
-        x_hat = None
-        if "recon" in self.criteria_names:
-            _, _, x_hat = self.model(B)
-        _list = self._additional_criteria_evaluation(x_hat, None, B)
+        # x_hat and predictions are computed inside criteria evaluation if needed
+        x_hat, preds = None, None
+        _list = self._additional_criteria_evaluation(x_hat, preds, B)
         loss_list.extend(_list)
 
         return loss_list

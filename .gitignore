@@ -1,4 +1,5 @@
 .DS_Store
+.VSCodeCounter
 **/__pycache__/
 **/*.log
 **/*.png
@@ -19,3 +20,4 @@ tests/*.npz
 .ipynb_checkpoints
 *.MAT
 *.mp4
+*.viz

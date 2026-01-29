@@ -167,8 +167,8 @@ def sphere_control(*,
         return _int(t_grid)
     return _sampler
 
-# Collection of samplers
-_CTRL_MAP = {
+#: Mapping of control sampler names to functions.
+CTRL_MAP = {
     "chirp"    : chirp_control,
     "gaussian" : gaussian_control,
     "sine"     : sine_control,
@@ -317,7 +317,8 @@ def perturb_x0(*,
         return _ref[_j] + _rng.uniform(low=bounds[0], high=bounds[1], size=(dim,))
     return _sampler
 
-_X0_MAP = {
+#: Mapping of initial condition sampler names to functions.
+X0_MAP = {
     "gaussian" : gaussian_x0,
     "grid"     : grid_x0,
     "perturb"  : perturb_x0,
@@ -439,13 +440,13 @@ class TrajectorySampler:
         if isinstance(u_spec, dict):
             # Defined by a dictionary
             kind = u_spec["kind"].lower()
-            if kind not in _CTRL_MAP:
-                raise KeyError(f"Unknown control kind '{kind}'. Available: {list(_CTRL_MAP)}")
+            if kind not in CTRL_MAP:
+                raise KeyError(f"Unknown control kind '{kind}'. Available: {list(CTRL_MAP)}")
             params = u_spec.get("params", {})
             params.update({
                 "dim": self.dims[1],
                 "rng": self.rng})
-            u_func = _CTRL_MAP[kind](**params)
+            u_func = CTRL_MAP[kind](**params)
             u_call = lambda t, i=traj_idx: u_func(t, i)
             U_vec = u_call(t_grid)
             return u_call, U_vec.reshape(-1, self.dims[1])
@@ -471,13 +472,13 @@ class TrajectorySampler:
         if isinstance(x0_spec, dict):
             # Defined by a dictionary
             kind = x0_spec["kind"].lower()
-            if kind not in _X0_MAP:
-                raise KeyError(f"Unknown {pref} kind '{kind}'. Available: {list(_X0_MAP)}")
+            if kind not in X0_MAP:
+                raise KeyError(f"Unknown {pref} kind '{kind}'. Available: {list(X0_MAP)}")
             params = x0_spec.get("params", {})
             params.update({
                 "dim": dims,
                 "rng": self.rng})
-            x0_func = _X0_MAP[kind](**params)
+            x0_func = X0_MAP[kind](**params)
             return np.asarray(
                 [x0_func(_i) for _i in range(traj_num)])
 

@@ -2,7 +2,7 @@ data:
   path: './data/ltg.npz'
   n_samples: 32
   n_steps: 101
-  double_precision: false
+  double_precision: true
 
 transform_x:
   type: "identity"
@@ -26,8 +26,9 @@ model:
   kernel:
     type: "sc_rbf"
     input_dim: 2
-    lengthscale_init: 1.0
-  ridge_init: 1.e-4
+    lengthscale_init: 20.0
+  ridge_init: 1.e-8
+  jitter: 0.0
 
 criterion:
   dynamics:

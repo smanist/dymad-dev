@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 from dymad.io import load_model
-from dymad.models import DKBF, DLDM
+from dymad.models import DKBF, DLDM, DLTI
 from dymad.training import NODETrainer, LinearTrainer
 from dymad.utils import plot_summary, plot_trajectory, TrajectorySampler
 
@@ -40,9 +40,11 @@ config_gau = {
 cases = [
     {"name" : "dldm", "model" : DLDM, "trainer": NODETrainer,   "config": 'lti_dldm.yaml'},
     {"name" : "dkbf", "model" : DKBF, "trainer": NODETrainer,   "config": 'lti_dkbf.yaml'},
-    {"name" : "dkbl", "model" : DKBF, "trainer": LinearTrainer, "config": 'lti_dkbl.yaml'}
+    {"name" : "dkbl", "model" : DKBF, "trainer": LinearTrainer, "config": 'lti_dkbl.yaml'},
+    {"name" : "ltil", "model" : DLTI, "trainer": LinearTrainer, "config": 'lti_ltil.yaml'}
 ]
-IDX = [0, 1, 2]
+IDX = [0, 1]
+# IDX = [2, 3]
 labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0

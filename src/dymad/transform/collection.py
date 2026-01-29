@@ -142,16 +142,17 @@ class Compose(Transform):
         self._T_names = d["names"]
         self.T = []
         for name, sd in zip(self._T_names, d["children"]):
-            if name not in _TRN_MAP:
+            if name not in TRN_MAP:
                 raise ValueError(f"Unknown transform type in Compose: {name}")
-            self.T.append(_TRN_MAP[name]())
+            self.T.append(TRN_MAP[name]())
             self.T[-1].load_state_dict(sd)
         self.NT = len(self.T)
         self.delay = d["delay"]
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
 
-_TRN_MAP = {
+#: Mapping of transform names to classes.
+TRN_MAP = {
     str(AddOne()):        AddOne,
     str(Compose()):       Compose,
     str(DelayEmbedder()): DelayEmbedder,
@@ -183,9 +184,9 @@ def make_transform(config: List[Dict[str, Any]]) -> Transform:
     transforms = []
     for t in config:
         trn_type = t.get("type", "").lower()
-        if trn_type not in _TRN_MAP:
+        if trn_type not in TRN_MAP:
             raise ValueError(f"Unknown transform type: {trn_type}")
         tmp = dict(t)
         tmp.pop("type", None)
-        transforms.append(_TRN_MAP[trn_type](**tmp))
+        transforms.append(TRN_MAP[trn_type](**tmp))
     return Compose(transforms)

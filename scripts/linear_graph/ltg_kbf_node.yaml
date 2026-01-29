@@ -20,7 +20,7 @@ model:
   name: 'ltg_kbf_node'
   encoder_layers: 1
   decoder_layers: 1
-  latent_dimension: 32
+  hidden_dimension: 32
   koopman_dimension: 3
   const_term: true
   autoencoder_type: "cat"

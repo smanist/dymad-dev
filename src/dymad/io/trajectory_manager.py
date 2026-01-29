@@ -9,7 +9,7 @@ from dymad.io.data import DynData
 from dymad.transform import make_transform
 from dymad.utils.graph import adj_to_edge
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("dymad.cv")
 
 def _process_data(data, x, label, base_dim=1, offset=0):
     """
@@ -706,6 +706,21 @@ class TrajectoryManagerGraph(TrajectoryManager):
     def data_truncation(self) -> None:
         super().data_truncation()
 
+        # Update n_state_features, n_aux_features, n_control_features to per-node basis
+        assert self.metadata["n_state_features"] % self.n_nodes == 0, \
+            "Total number of state features must be divisible by number of nodes."
+        assert self.metadata["n_aux_features"] % self.n_nodes == 0, \
+            "Total number of auxiliary features must be divisible by number of nodes."
+        assert self.metadata["n_control_features"] % self.n_nodes == 0, \
+            "Total number of control features must be divisible by number of nodes."
+        self.metadata["n_state_features"] = self.metadata["n_state_features"] // self.n_nodes
+        self.metadata["n_aux_features"] = self.metadata["n_aux_features"] // self.n_nodes
+        self.metadata["n_control_features"] = self.metadata["n_control_features"] // self.n_nodes
+        logger.info(f"Number of state features, updated for graph: {self.metadata['n_state_features']}")
+        logger.info(f"Number of auxiliary features, updated for graph: {self.metadata['n_aux_features']}")
+        logger.info(f"Number of control features, updated for graph: {self.metadata['n_control_features']}")
+
+        # Graph specific truncation for ei, ew, ea
         cfg = self.metadata['config'].get(self.data_key, {})
         n_samples: Optional[int] = cfg.get("n_samples", None)
         n_steps: Optional[int] = cfg.get("n_steps", None)
@@ -825,18 +840,20 @@ class TrajectoryManagerGraph(TrajectoryManager):
         else:
             _P = [None for _ in _X]
 
-        _Ei = [self.ei[i] for i in indices]
+        # Graph data is not delayed, just truncate out the initial steps.
+        _delay = self.metadata["delay"]
+        _Ei = [self.ei[i][_delay:] for i in indices]
 
         if self.metadata["n_edge_weights"] > 0:
             _Ew = []
             for i in indices:
-                _tmp = self._data_transform_ew.transform([e.reshape(-1,1) for e in self.ew[i][_d:]])
+                _tmp = self._data_transform_ew.transform([e.reshape(-1,1) for e in self.ew[i][_delay:]])
                 _Ew.append([_t.reshape(-1) for _t in _tmp])
         else:
             _Ew = [None for _ in _X]
 
         if self.metadata["n_edge_features"] > 0:
-            _Ea = [self._data_transform_ea.transform(self.ea[i][_d:]) for i in indices]
+            _Ea = [self._data_transform_ea.transform(self.ea[i][_delay:]) for i in indices]
         else:
             _Ea = [None for _ in _X]
 

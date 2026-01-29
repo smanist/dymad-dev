@@ -1,0 +1,51 @@
+data:
+  path: './data/lti.npz'
+  n_samples: 100
+  n_steps: 1000
+  double_precision: true
+
+transform_x:
+  type: "delay"
+  delay: 99
+
+transform_u:
+  - type: "scaler"
+    mode: "01"
+  - type: "delay"
+    delay: 99
+
+split:
+  train_frac: 1.0
+
+dataloader:
+  batch_size: 80
+
+model:
+  name: 'kur_seq'
+  autoencoder_type: 'seq_smp'
+  encoder_layers: 1
+  decoder_layers: 1
+  processor_type: 'gnn_smp'
+  processor_layers: 2
+  hidden_dimension: 32
+  latent_dimension: 200
+  gcl: "cheb"
+  gcl_opts:
+    K: 2
+  activation: "prelu"
+  weight_init: "xavier_uniform"
+
+criterion:
+  dynamics:
+    weight: 1.0
+
+training:
+  n_epochs: 500
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 5e-3
+  decay_rate: 0.999
+
+plotting:
+  xidx: [0, 1, 2, 3, 4]
+  uidx: [0]

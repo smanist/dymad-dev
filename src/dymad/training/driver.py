@@ -137,6 +137,12 @@ class DriverBase:
         self.cv_logger_level = log_config.get("level", "info")
         self.cv_logger_prefix = '' if ifstdout else f"{self.results_prefix}/{self.base_name}_cv"
 
+        # Logger created here so that the initialization process is logged too
+        config_logger(
+            self.cv_logger,
+            mode=self.cv_logger_level,
+            prefix=self.cv_logger_prefix)
+
         # Initialize data sets
         self._init_trajectory_managers()
         self._init_fold_split()
@@ -177,11 +183,6 @@ class DriverBase:
         Returns:
           best_result, all_results
         """
-        config_logger(
-            self.cv_logger,
-            mode=self.cv_logger_level,
-            prefix=self.cv_logger_prefix)
-
         # Reload previous results if continuing training
         file_name = f"{self.results_prefix}/{self.base_name}_cv.npz"
         prev_all_results, combo_offset = [], 0

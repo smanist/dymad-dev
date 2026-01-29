@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 import torch
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple
 
 def _ensure_batches(tensor: torch.Tensor, base_dim: int, offset: int = 0) -> torch.Tensor:
     if tensor is None:
@@ -14,6 +14,19 @@ def _ensure_batches(tensor: torch.Tensor, base_dim: int, offset: int = 0) -> tor
         return tensor
     else:
         raise ValueError(f"Invalid tensor shape for DynData: {tensor.shape}. Expected shape with {base_dim} or {base_dim+1} dimensions.")
+
+def _determine_sizes(lst: List[torch.Tensor]) -> Tuple[int, int]:
+    batch_size, n_steps = None, None
+    for _d in lst:
+        if _d is not None:
+            if _d.ndim == 2:
+                batch_size = 1
+                n_steps = _d.shape[0]
+            else:
+                batch_size = _d.shape[0]
+                n_steps = _d.shape[1]
+            break
+    return batch_size, n_steps
 
 def _process_graph_format_single(lst: Union[List[torch.Tensor], torch.Tensor, None], base_dim) -> torch.Tensor:
     """
@@ -272,10 +285,11 @@ class DynData:
             self.ei, _batch_size = _ensure_graph_format(self.ei, base_dim=2, need_offset=True)
             self.ew, _ = _ensure_graph_format(self.ew, base_dim=1, need_offset=False)
             self.ea, _ = _ensure_graph_format(self.ea, base_dim=2, need_offset=False)
+
             if self.batch_size is None:
                 self.batch_size = _batch_size
                 # self.batch_size might have been set in collate
-            self.n_steps = self.ei.size(0)
+            _, self.n_steps = _determine_sizes([self.x, self.u])
 
             self.n_nodes = self.ei.values().max().item() + 1
             self.x_reshape = self.x.shape[:-1] + (self.n_nodes, -1) if self.x is not None else None
@@ -291,16 +305,7 @@ class DynData:
             self.u = _ensure_batches(self.u, base_dim=1)
             self.p = _ensure_batches(self.p, base_dim=1, offset=1)
 
-            self.batch_size, self.n_steps = None, None
-            for _d in [self.x, self.u]:
-                if _d is not None:
-                    if _d.ndim == 2:
-                        self.batch_size = 1
-                        self.n_steps = _d.shape[0]
-                    else:
-                        self.batch_size = _d.shape[0]
-                        self.n_steps = _d.shape[1]
-                    break
+            self.batch_size, self.n_steps = _determine_sizes([self.x, self.u])
 
     def to(self, device: torch.device, non_blocking: bool = False) -> "DynData":
         """

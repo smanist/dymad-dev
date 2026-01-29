@@ -1,8 +1,7 @@
 API Reference
 =============
 
-Below you'll find the complete public API, grouped by module.
-(The pages themselves are generated automatically -- you never edit them.)
+The complete public API is listed below, grouped by module.
 
 .. autosummary::
    :toctree: api
@@ -18,3 +17,10 @@ Below you'll find the complete public API, grouped by module.
    dymad.training
    dymad.transform
    dymad.utils
+
+See also
+
+.. toctree::
+   :maxdepth: 2
+
+   api_maps

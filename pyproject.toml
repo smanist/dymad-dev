@@ -35,6 +35,10 @@ docs = [
 test = [
   "pytest>=8",
 ]
+viz = [
+  "torchview>=0.2.6",
+  "graphviz",
+]
 
 # pyproject.toml
 [tool.pytest.ini_options]

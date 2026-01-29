@@ -2,8 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from dymad.io import load_model
-from dymad.models import LDM, KBF
+from dymad.io import load_model, visualize_model
+from dymad.models import DLTI, DSDM, KBF, LDM
 from dymad.training import WeakFormTrainer, NODETrainer
 from dymad.utils import plot_summary, plot_trajectory, TrajectorySampler
 
@@ -38,17 +38,22 @@ config_gau = {
             "mode": "zoh"}}}
 
 cases = [
-    {"name": "ldm_wf",   "model" : LDM, "trainer": WeakFormTrainer, "config": 'ltd_ldm_wf.yaml'},
-    {"name": "ldm_node", "model" : LDM, "trainer": NODETrainer,     "config": 'ltd_ldm_node.yaml'},
-    {"name": "kbf_wf",   "model" : KBF, "trainer": WeakFormTrainer, "config": 'ltd_kbf_wf.yaml'},
-    {"name": "kbf_node", "model" : KBF, "trainer": NODETrainer,     "config": 'ltd_kbf_node.yaml'}
+    {"name": "ldm_wf",    "model" : LDM,  "trainer": WeakFormTrainer, "config": 'ltd_ldm_wf.yaml'},
+    {"name": "ldm_node",  "model" : LDM,  "trainer": NODETrainer,     "config": 'ltd_ldm_node.yaml'},
+    {"name": "kbf_wf",    "model" : KBF,  "trainer": WeakFormTrainer, "config": 'ltd_kbf_wf.yaml'},
+    {"name": "kbf_node",  "model" : KBF,  "trainer": NODETrainer,     "config": 'ltd_kbf_node.yaml'},
+    {"name": "lti_node",  "model" : DLTI, "trainer": NODETrainer,     "config": 'ltd_lti_node.yaml'},
+    {"name": "sdm_smp",   "model" : DSDM, "trainer": NODETrainer,     "config": 'ltd_sdm_smp.yaml'},
+    {"name": "sdm_std",   "model" : DSDM, "trainer": NODETrainer,     "config": 'ltd_sdm_std.yaml'}
 ]
-IDX = [0, 1, 2, 3]
+# IDX = [0, 1, 2, 3]
+IDX = [5, 6]
 labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0
 iftrn = 1
 ifplt = 1
+ifviz = 1
 ifprd = 1
 
 if ifdat:
@@ -69,6 +74,13 @@ if ifplt:
     npzs = plot_summary(npz_files, labels = labels, ifclose=False)
     for lbl, npz in zip(labels, npzs):
         print(f"Epoch time: {lbl} - {npz['avg_epoch_time']}")
+
+if ifviz:
+    for _i in IDX:
+        mdl, MDL = cases[_i]['name'], cases[_i]['model']
+        model_graph = visualize_model(
+            mdl_class=MDL, checkpoint_path=f'ltd_{mdl}.pt', ref_data='./data/ltd.npz',
+            depth=1, ifsave=True)
 
 if ifprd:
     sampler = TrajectorySampler(f, g, config='ltd_data.yaml', config_mod=config_gau)

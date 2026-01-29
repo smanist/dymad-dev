@@ -1,6 +1,6 @@
 from dymad.training.driver import DriverBase, SingleSplitDriver
 from dymad.training.helper import aggregate_cv_results, CVResult, iter_param_grid, RunState, set_by_dotted_key
-from dymad.training.ls_update import LSUpdater
+from dymad.training.ls_update import LSUpdater, SOL_MAP
 from dymad.training.opt_base import OptBase
 from dymad.training.opt_linear import OptLinear
 from dymad.training.opt_node import OptNODE
@@ -23,6 +23,7 @@ __all__ = [
     "RunState",
     "set_by_dotted_key",
     "SingleSplitDriver",
+    "SOL_MAP",
     "StackedOpt",
     "StackedTrainer",
     "TrainerBase",

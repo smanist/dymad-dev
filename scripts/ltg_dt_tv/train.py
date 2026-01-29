@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from dymad.io import load_model
+from dymad.io import load_model, visualize_model
 from dymad.models import DLDMG
 from dymad.training import NODETrainer
 from dymad.utils import plot_summary, plot_trajectory
@@ -12,7 +12,7 @@ mdl_kb = {
     "encoder_layers" : 0,
     "decoder_layers" : 0,
     "processor_layers" : 1,
-    "latent_dimension" : 2,
+    "hidden_dimension" : 2,
     "gcl": "gcnv",
     "gcl_opts": {"bias": False},
     "activation" : "none",
@@ -68,9 +68,14 @@ if ifprd:
     for _i in IDX:
         with torch.no_grad():
             mdl, MDL, Trainer, opt = cfgs[_i]
-            _, prd_func = load_model(MDL, 'kura_model.pt')
+            model, prd_func = load_model(MDL, 'kura_model.pt')
             pred = prd_func(x_data, t_data, ei=ei_data, ew=ew_data)
             res.append(pred)
+
+        model_graph = visualize_model(
+            model=model, prd_func=prd_func,
+            ref_data={'t': t_data, 'x': x_data, 'ei': ei_data, 'ew': ew_data},
+            depth=1, ifsave=f'kura_model/kura_model')
 
     plot_trajectory(
         np.array(res), t_data, "LTGV",

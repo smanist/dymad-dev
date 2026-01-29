@@ -21,7 +21,7 @@ mdl_kb = {
     "name" : 'kp_model',
     "encoder_layers" : 2,
     "decoder_layers" : 2,
-    "latent_dimension" : 32,
+    "hidden_dimension" : 32,
     "koopman_dimension" : 4,
     "autoencoder_type": "cat",
     "activation" : "prelu",
@@ -31,7 +31,7 @@ mdl_ld = {
     "encoder_layers": 0,
     "processor_layers": 2,
     "decoder_layers": 0,
-    "latent_dimension": 32,
+    "hidden_dimension": 32,
     "autoencoder_type": "smp",
     "activation": "prelu",
     "weight_init": "xavier_uniform"}

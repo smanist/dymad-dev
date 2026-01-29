@@ -21,7 +21,7 @@ mdl_kb = {
     "name" : 'kp_model',
     "encoder_layers" : 2,
     "decoder_layers" : 2,
-    "latent_dimension" : 32,
+    "hidden_dimension" : 32,
     "koopman_dimension" : 4,
     "activation" : "prelu",
     "weight_init" : "xavier_uniform",
@@ -31,7 +31,7 @@ mdl_ld = {
     "encoder_layers": 0,
     "processor_layers": 2,
     "decoder_layers": 0,
-    "latent_dimension": 32,
+    "hidden_dimension": 32,
     "activation": "prelu",
     "weight_init": "xavier_uniform",
     "gain": 0.01}
@@ -39,7 +39,7 @@ mdl_kl = {
     "name" : 'kp_model',
     "encoder_layers" : 1,
     "decoder_layers" : 1,
-    "latent_dimension" : 32,
+    "hidden_dimension" : 32,
     "koopman_dimension" : 8,
     "activation" : "tanh",
     "autoencoder_type" : "cat",
@@ -130,7 +130,7 @@ trn_phase[1]["trainer"] = "NODE"
 
 cv = {
    "param_grid": {
-        "model.latent_dimension": [16, 32],
+        "model.hidden_dimension": [16, 32],
         "training.sweep_epoch_step": [3, 5]
     },
     "metric": "total"

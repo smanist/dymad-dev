@@ -21,7 +21,7 @@ model:
   encoder_layers: 0
   processor_layers: 1
   decoder_layers: 0
-  latent_dimension: 32
+  hidden_dimension: 32
   activation: "none"
   weight_init: "xavier_uniform"
   input_order: "cubic"

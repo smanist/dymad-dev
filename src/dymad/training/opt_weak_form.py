@@ -51,7 +51,9 @@ class OptWeakForm(OptBase):
 
     def _process_batch(self, batch: DynData) -> torch.Tensor:
         B = batch.to(self.device)
-        z, z_dot, x_hat = self.model(B)
+        z = self.model.encoder(B)
+        z_dot = self.model.dynamics(z, B)
+        x_hat = self.model.decoder(z, B)
 
         z_windows = z.unfold(1, self.N, self.dN)
         z_dot_windows = z_dot.unfold(1, self.N, self.dN)

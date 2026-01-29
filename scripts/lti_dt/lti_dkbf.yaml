@@ -20,7 +20,7 @@ model:
   name: 'lti_dkbf'
   encoder_layers: 1
   decoder_layers: 1
-  latent_dimension: 32
+  hidden_dimension: 32
   koopman_dimension: 4
   const_term: true
   activation: "none"

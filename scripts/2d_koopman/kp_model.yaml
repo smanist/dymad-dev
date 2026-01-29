@@ -22,7 +22,7 @@ model:
   encoder_layers: 0
   processor_layers: 1
   decoder_layers: 0
-  latent_dimension: 64
+  hidden_dimension: 64
   activation: "tanh"
   weight_init: "xavier_uniform"
 

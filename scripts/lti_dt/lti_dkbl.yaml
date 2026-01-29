@@ -20,7 +20,7 @@ model:
   name: 'lti_dkbl'
   encoder_layers: 1
   decoder_layers: 1
-  latent_dimension: 32
+  hidden_dimension: 32
   koopman_dimension: 4
   autoencoder_type: "cat"
   const_term: true

@@ -49,12 +49,7 @@ If there are API errors such as some files not found, try deleting the auto-gene
 
 - FTLE and CLV for nonlinear latent dynamics
 
-- Verify the RNN-type training
-- RNN plus graph
-- Demo on Kuramoto example
-
 - K-Fold CV
-- Add citation in Lorenz
 - Demo on KS chaotic
 
 - two-stage implementation
@@ -62,6 +57,8 @@ If there are API errors such as some files not found, try deleting the auto-gene
 - EnKF, EnKS, IEnKS
 - Interface to numpy
 
+- Split DynData into regular and graph versions
+- Group transforms for DynData, so that trj_mgr and predict can reuse
 - Torch-fy transform classes
 - Internal normalization in PIROM
 

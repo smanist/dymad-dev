@@ -20,7 +20,7 @@ model:
   name: 'dp_kbf_wf'
   encoder_layers: 1
   decoder_layers: 1
-  latent_dimension: 32
+  hidden_dimension: 32
   koopman_dimension: 16  # Key KBF parameter - dimension of Koopman operators
   const_term: true
   activation: "none"

@@ -2,7 +2,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from typing import Dict, Tuple, Union
+from typing import Tuple, Union
 
 from dymad.io import load_model
 from dymad.models import TemplateCorrAlg
@@ -43,7 +43,7 @@ class DPJ(TemplateCorrAlg):
 mdl_kl = {
     "name" : 'res_model',
     "residual_layers" : 1,
-    "latent_dimension" : 32,
+    "hidden_dimension" : 32,
     "residual_dimension" : 1,
     "activation" : "none",
     "end_activation" : False,

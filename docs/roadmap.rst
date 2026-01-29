@@ -12,6 +12,7 @@ Highlights include:
 5. `Global Description of Flutter Dynamics via Koopman Theory <https://arxiv.org/pdf/2505.14697>`_ By Song, J. and Huang, D.
 6. `Modal Analysis of Spatiotemporal Data via Multivariate Gaussian Process Regression <https://doi.org/10.2514/1.J064185>`_ By Song, J. and Huang, D.
 7. `Learning vector fields of differential equations on manifolds with geometrically constrained operator-valued kernels <https://openreview.net/pdf?id=OwpLQrpdwE>`_ By Huang, D., He, H., Harlim, J. and Li, Y.
+8. `Learning solution operator of dynamical systems with diffusion maps kernel ridge regression <https://arxiv.org/abs/2512.17203>`_ By Song, J., Huang, D. and Harlim, J.
 
 What Problems are we solving?
 -----------------------------
@@ -80,14 +81,15 @@ Dynamics on graphs
    - Weather systems: Regions of Earth in general interact with their neighbors, but not with the whole globe within a short time.
    - Vortex dynamics: The vortices in some fluid flow interact with their neighbors, while global interactions are weak or negligible.
 
-Dynamics on manifolds
-^^^^^^^^^^^^^^^^^^^^^
+Dynamics on manifolds/attractors
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- While the state dimension is high, the dynamics is constrained to a low-dimensional manifold.
+- While the state dimension is high, the dynamics is constrained to a low-dimensional manifold/attractor.
 - Leveraging the manifold geometry can help with sample efficiency and model size, e.g., a few states and several hundred samples to predict millions of observations.
 - But geometry also poses challenges, e.g., in the identification of manifold and the preservation of geometry in prediction.
 - Concrete examples
    - Canonical example in fluid dynamics: Vortex street. [7]
+   - Chaotic systems: The attractors of chaotic systems often have fractal structures. [8]
    - Mechanical systems: Rigid-body dynamics evolves on SE(3), and multi-body problems have additional algebraic constraints.
    - Structural dynamics: The dynamic responses of a structural often manifest in a limited combination of modes, forming a natural manifold. [5]
 
@@ -173,8 +175,6 @@ Table of Features
 Legends:
 
 - |:white_check_mark:| Implemented in DyMAD
-- |:building_construction:| Implemented in DyMAD but still need verification
-- |:o:| Implemented in our other repos; to be integrated into DyMAD
 - |:egg:| On-going development
 - |:notepad_spiral:| Planned for future development
 - |:heavy_multiplication_x:| Not applicable
@@ -185,8 +185,8 @@ Model and Optimizer
 So far we consider a range of models and optimizers.  For models,
 
 - Latent Dynamics Model (LDM) follows the generic formulations :math:`(f,g,h)` listed above.
+- Sequential Dynamics Model (SDM) for non-Markovian dynamics with, e.g., Recurrent Neural Networks (RNNs).
 - Koopman Bilinear Form (KBF) replaces :math:`g` with a bilinear model, :math:`A z + \sum_i B(u_i)z + B_0 z`.
-- Recurrent Neural Network (RNN) includes standard architectures, e.g., LSTM and GRU.
 - Kernel methods include standard kernels, and diffusion map, etc.
 - Graph Neural Networks (GNN) accounts for graph structure in the data. 
 - Lastly, LDM/KBF/RNN/Kernel can work with data on graphs.
@@ -222,6 +222,13 @@ The details are provided below.
      - |:notepad_spiral:|
      - |:white_check_mark:|
      - |:white_check_mark:|
+   * - SDM
+     - |:heavy_multiplication_x:|
+     - |:heavy_multiplication_x:|
+     - |:notepad_spiral:|
+     - |:notepad_spiral:|
+     - |:white_check_mark:|
+     - |:white_check_mark:|
    * - KBF
      - |:white_check_mark:|
      - |:white_check_mark:|
@@ -229,13 +236,6 @@ The details are provided below.
      - |:white_check_mark:|
      - |:white_check_mark:|
      - |:white_check_mark:|
-   * - RNN
-     - |:heavy_multiplication_x:|
-     - |:heavy_multiplication_x:|
-     - |:notepad_spiral:|
-     - |:notepad_spiral:|
-     - |:building_construction:|
-     - |:building_construction:|
    * - GNN
      - |:white_check_mark:|
      - |:white_check_mark:|
@@ -261,35 +261,34 @@ The currently available models of each category are listed below.  In the header
      - GNN, CT
      - GNN, DT
    * - LDM
-     - :class:`~dymad.models.LDM`
-     - :class:`~dymad.models.DLDM`
-     - :class:`~dymad.models.GLDM`
-     - :class:`~dymad.models.DGLDM`
+     - :attr:`~dymad.models.collections.LDM`
+     - :attr:`~dymad.models.collections.DLDM`
+     - :attr:`~dymad.models.collections.GLDM`
+     - :attr:`~dymad.models.collections.DGLDM`
+   * - SDM
+     - |:heavy_multiplication_x:|
+     - :attr:`~dymad.models.collections.DSDM`
+     - |:heavy_multiplication_x:|
+     - |:notepad_spiral:|
    * - KBF
-     - :class:`~dymad.models.KBF`
-     - :class:`~dymad.models.DKBF`
-     - :class:`~dymad.models.GKBF`
-     - :class:`~dymad.models.DGKBF`
-   * - RNN
-     - |:building_construction:|
-     - |:building_construction:|
-     - |:building_construction:|
-     - |:building_construction:|
+     - :attr:`~dymad.models.collections.KBF`
+     - :attr:`~dymad.models.collections.DKBF`
+     - :attr:`~dymad.models.collections.GKBF`
+     - :attr:`~dymad.models.collections.DGKBF`
    * - GNN
-     - :class:`~dymad.models.LDMG`
-     - :class:`~dymad.models.DLDMG`
+     - :attr:`~dymad.models.collections.LDMG`
+     - :attr:`~dymad.models.collections.DLDMG`
      - |:notepad_spiral:|
-     - |:notepad_spiral:|
+     - :attr:`~dymad.models.collections.DSDMG`
    * - Kernel
-     - :class:`~dymad.models.KM` :class:`~dymad.models.KMM`
-     - :class:`~dymad.models.DKM` :class:`~dymad.models.DKMSK`
-     - :class:`~dymad.models.GKM`
-     - :class:`~dymad.models.DGKM` :class:`~dymad.models.DGKMSK`
+     - :attr:`~dymad.models.collections.KM` :attr:`~dymad.models.collections.KMM`
+     - :attr:`~dymad.models.collections.DKM` :attr:`~dymad.models.collections.DKMSK`
+     - :attr:`~dymad.models.collections.GKM`
+     - :attr:`~dymad.models.collections.DGKM` :attr:`~dymad.models.collections.DGKMSK`
 
 Lastly, for advanced users, we also provide template model classes for customization:
 
-- :class:`~dymad.models.TemplateUCat`, :class:`~dymad.models.TemplateUCatGraphAE`: `KBF`-like models where only states are encoded into latent space.
-- :class:`~dymad.models.TemplateUEnc`, :class:`~dymad.models.TemplateUEncGraphAE`, :class:`~dymad.models.TemplateUEncGraphDyn`: `LDM`-like models where states and inputs are encoded together into latent space.
+- :class:`~dymad.models.PredefinedModel`: For defining a model as an arbitrary combination of pre-built components.
 - :class:`~dymad.models.TemplateCorrAlg`, :class:`~dymad.models.TemplateCorrDif`: Physics-infused models where a physics-based base dynamics is corrected by a data-driven residual term.
 
 Model Analysis
@@ -314,7 +313,7 @@ The details are provided below.
    * - Linear
      - |:white_check_mark:|
      - |:white_check_mark:|
-     - |:o:|
+     - |:notepad_spiral:|
      - |:notepad_spiral:|
    * - LDM
      - |:notepad_spiral:|
@@ -385,7 +384,7 @@ Lastly, to ease the construction of modeling and analysis pipelines, we provide 
      - |:white_check_mark:|
      - |:white_check_mark:|
      - |:white_check_mark:|
-     - |:o:|
+     - |:notepad_spiral:|
 
 .. list-table:: Miscellaneous
    :widths: 25 25 25 25

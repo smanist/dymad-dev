@@ -9,8 +9,8 @@ except:
     ChebConv, GATConv, GCNConv, GraphConv, SAGEConv = None, None, None, None, None
 from typing import Callable
 
-_ACT_MAP = {
-    # common aliases -> canonical class
+#: Mapping of activation names to activation classes.
+ACT_MAP = {
     "relu"     : nn.ReLU,
     "leakyrelu": nn.LeakyReLU,
     "prelu"    : nn.PReLU,
@@ -26,8 +26,8 @@ _ACT_MAP = {
     "none"     : nn.Identity,
 }
 
-_GCL_MAP = {
-    # common aliases -> canonical class
+#: Mapping of graph convolutional layer names to classes.
+GCL_MAP = {
     "cheb"     : ChebConv,
     "gat"      : GATConv,
     "gcn"      : GCNConv,
@@ -35,8 +35,8 @@ _GCL_MAP = {
     "sage"     : SAGEConv,
 }
 
-_INIT_MAP_W = {
-    # aliases -> torch.nn.init functions
+#: Mapping of weight initialization names to functions.
+INIT_MAP_W = {
     "kaiming_uniform": nn.init.kaiming_uniform_,
     "kaiming_normal":  nn.init.kaiming_normal_,
     "xavier_uniform":  nn.init.xavier_uniform_,
@@ -47,7 +47,8 @@ _INIT_MAP_W = {
     "uniform":         nn.init.uniform_,
 }
 
-_INIT_MAP_B = {
+#: Mapping of bias initialization names to functions.
+INIT_MAP_B = {
     # aliases -> torch.nn.init functions
     "zeros": nn.init.zeros_,
     "ones":  nn.init.ones_,
@@ -61,13 +62,13 @@ def _resolve_activation(spec, dtype, device) -> nn.Module:
     # case 1 ─ string
     if isinstance(spec, str):
         key = spec.lower()
-        if key not in _ACT_MAP:
+        if key not in ACT_MAP:
             raise ValueError(f"Unknown activation string '{spec}'. "
-                             f"Valid keys are {sorted(_ACT_MAP.keys())}.")
+                             f"Valid keys are {sorted(ACT_MAP.keys())}.")
         if key == "prelu":
             # dtype of the slope
-            return partial(_ACT_MAP[key], dtype=dtype, device=device)
-        return _ACT_MAP[key]
+            return partial(ACT_MAP[key], dtype=dtype, device=device)
+        return ACT_MAP[key]
 
     # case 2 ─ activation *class* (subclass of nn.Module)
     if isinstance(spec, type) and issubclass(spec, nn.Module):
@@ -88,10 +89,10 @@ def _resolve_gcl(spec, opts) -> nn.Module:
     # case 1 ─ string
     if isinstance(spec, str):
         key = spec.lower()
-        if key not in _GCL_MAP:
+        if key not in GCL_MAP:
             raise ValueError(f"Unknown GCL string '{spec}'. "
-                             f"Valid keys are {sorted(_GCL_MAP.keys())}.")
-        return lambda in_dim, out_dim: _GCL_MAP[key](in_dim, out_dim, **opts)
+                             f"Valid keys are {sorted(GCL_MAP.keys())}.")
+        return lambda in_dim, out_dim: GCL_MAP[key](in_dim, out_dim, **opts)
 
     # case 2 ─ GCL *class* (subclass of MessagePassing)
     if isinstance(spec, type) and issubclass(spec, MessagePassing):

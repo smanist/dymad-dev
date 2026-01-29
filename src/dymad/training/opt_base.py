@@ -90,7 +90,6 @@ class OptBase:
         # logging summary
         logger.info("Opt Initialized:")
         logger.info(f"Model name: {self.model_name}")
-        logger.info(self.model)
         logger.info(self.model.diagnostic_info())
         logger.info("Optimization settings:")
         logger.info(self.optimizer)
@@ -418,6 +417,9 @@ class OptBase:
             return loss_list
 
         if self.criteria_names[1] == "recon":
+            if x_hat is None:
+                _z = self.model.encoder(B)
+                x_hat = self.model.decoder(_z, B)
             recon_loss = self.criteria[1](B.x, x_hat.view(*B.x.shape))
             loss_list.append(recon_loss)
             n_eval = 2
@@ -426,7 +428,7 @@ class OptBase:
 
         preds = predictions
         if predictions is None:
-            if len(self.criteria) > n_eval:
+            if len(self.criteria)-1 > n_eval:
                 # This means there are additional criteria,
                 # which we assume requires predictions, and need to compute this
                 init_states = B.x[:, 0, :]  # (batch_size, n_total_state_features)

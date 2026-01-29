@@ -2,8 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from dymad.io import load_model
-from dymad.models import GLDM, GKBF, GKM
+from dymad.io import load_model, visualize_model
+from dymad.models import GLDM, GKBF, GKM, GLTI
 from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
 from dymad.utils import adj_to_edge, plot_summary, plot_trajectory, TrajectorySampler
 
@@ -49,11 +49,13 @@ cases = [
     {"name": "kbf_wf",   "model" : GKBF, "trainer": WeakFormTrainer, "config": 'ltg_kbf_wf.yaml'},
     {"name": "kbf_node", "model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'},
     {"name": "kbf_ln",   "model" : GKBF, "trainer": LinearTrainer,   "config": 'ltg_kbf_ln.yaml'},
+    {"name": "lti_wf",   "model" : GLTI, "trainer": WeakFormTrainer, "config": 'ltg_lti_wf.yaml'},
+    {"name": "lti_ln",   "model" : GLTI, "trainer": LinearTrainer,   "config": 'ltg_lti_ln.yaml'},
     {"name": "km_ln",    "model" : GKM,  "trainer": LinearTrainer,   "config": 'ltg_km_ln.yaml'}
 ]
 # IDX = [0, 1]
 # IDX = [2, 3]
-IDX = [2]
+IDX = [4]
 labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0
@@ -97,11 +99,16 @@ if ifprd:
     res = [x_data]
     for _i in IDX:
         mdl, MDL = cases[_i]['name'], cases[_i]['model']
-        _, prd_func = load_model(MDL, f'ltg_{mdl}.pt')
+        model, prd_func = load_model(MDL, f'ltg_{mdl}.pt')
 
         with torch.no_grad():
             _pred = prd_func(x_data, t_data, u=u_data, ei=edge_index)
         res.append(_pred)
+
+        model_graph = visualize_model(
+            model=model, prd_func=prd_func,
+            ref_data={'t': t_data, 'x': x_data, 'u': u_data, 'ei': edge_index},
+            depth=1, ifsave=f'ltg_{mdl}/ltg_{mdl}')
 
     plot_trajectory(
         np.array(res), t_data, "LTG",

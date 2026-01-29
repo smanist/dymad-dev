@@ -1,8 +1,16 @@
 data:
-  path: './data/lti.npz'
-  n_samples: 100
-  n_steps: 100
-  double_precision: true
+  path: './data/ltd.npz'
+  n_samples: 128
+  n_steps: 501
+  double_precision: false
+
+transform_x:
+  type: "delay"
+  delay: 1
+
+transform_u:
+  type: "delay"
+  delay: 1
 
 split:
   train_frac: 0.75
@@ -11,24 +19,27 @@ dataloader:
   batch_size: 64
 
 model:
-  name: 'kur_dkbf'
+  name: 'ltd_lti_node'
   encoder_layers: 1
   decoder_layers: 1
-  latent_dimension: 32
-  koopman_dimension: 4
-  const_term: true
+  koopman_dimension: 8
   activation: "none"
   weight_init: "xavier_uniform"
   gain: 0.01
+  predictor_type: "np"
+
+criterion:
+  dynamics:
+    weight: 1.0
+  recon:
+    weight: 1.0
 
 training:
-  n_epochs: 1000
+  n_epochs: 600
   save_interval: 10
   load_checkpoint: false
   learning_rate: 5e-3
   decay_rate: 0.999
-  reconstruction_weight: 1.0
-  dynamics_weight: 1.0
   chop_mode: "unfold"
   chop_step: 0.5
   sweep_lengths: [3, 5, 7]

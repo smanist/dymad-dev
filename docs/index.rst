@@ -43,4 +43,5 @@ Explore More
    getting_started
    roadmap
    examples
+   theory
    api_ref

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from typing import Callable, Optional, Union
 
-from dymad.modules.helpers import _resolve_activation, _resolve_init, _INIT_MAP_W, _INIT_MAP_B
+from dymad.modules.helpers import _resolve_activation, _resolve_init, INIT_MAP_W, INIT_MAP_B
 from dymad.modules.linear import FlexLinear
 from dymad.modules.misc import TakeFirst
 
@@ -12,12 +12,12 @@ class MLP(nn.Module):
 
     Assuming the following architecture:
 
-        in_dim -> (Linear -> Act) x n_latent -> Linear -> out_dim
+        in_dim -> (Linear -> Act) x n_hidden -> Linear -> out_dim
 
     Args:
         input_dim (int):
             Dimension of the input features.
-        latent_dim (int):
+        hidden_dim (int):
             Width of every hidden layer.
         output_dim (int):
             Dimension of the network output.
@@ -27,7 +27,7 @@ class MLP(nn.Module):
             - If 0, same as Identity, or TakeFirst.
             - If 1, same as Linear.
             - If 2, same as `Linear -> activation -> Linear`.
-            - Otherwise, latent layers are inserted.
+            - Otherwise, hidden layers are inserted.
 
         activation (nn.Module or Callable[[], nn.Module], default = nn.ReLU):
             Non-linearity to insert after every hidden Linear.
@@ -51,7 +51,7 @@ class MLP(nn.Module):
     def __init__(
         self,
         input_dim: int,
-        latent_dim: int,
+        hidden_dim: int,
         output_dim: int,
         *,
         n_layers: int = 2,
@@ -80,17 +80,17 @@ class MLP(nn.Module):
             else:
                 self.net = nn.Linear(input_dim, output_dim, dtype=dtype, device=device)
         else:
-            layers = [nn.Linear(input_dim, latent_dim, dtype=dtype, device=device), _act()]
+            layers = [nn.Linear(input_dim, hidden_dim, dtype=dtype, device=device), _act()]
             for _ in range(n_layers - 2):
-                layers += [nn.Linear(latent_dim, latent_dim, dtype=dtype, device=device), _act()]
-            layers.append(nn.Linear(latent_dim, output_dim, dtype=dtype, device=device))
+                layers += [nn.Linear(hidden_dim, hidden_dim, dtype=dtype, device=device), _act()]
+            layers.append(nn.Linear(hidden_dim, output_dim, dtype=dtype, device=device))
             if end_activation:
                 layers.append(_act())
             self.net = nn.Sequential(*layers)
 
         # Cache init kwargs for later use in self.apply
-        self._weight_init = _resolve_init(weight_init, _INIT_MAP_W)
-        self._bias_init = _resolve_init(bias_init, _INIT_MAP_B)
+        self._weight_init = _resolve_init(weight_init, INIT_MAP_W)
+        self._bias_init = _resolve_init(bias_init, INIT_MAP_B)
 
         # Compute gain
         act_name = _act().__class__.__name__.lower()
@@ -121,7 +121,7 @@ class ResBlockMLP(MLP):
 
     See `MLP` for the arguments.
     """
-    def __init__(self, input_dim: int, latent_dim: int, output_dim: int,
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int,
                  n_layers: int = 2,
                  activation: Union[str, nn.Module, Callable[[], nn.Module]] = nn.ReLU,
                  weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
@@ -131,7 +131,7 @@ class ResBlockMLP(MLP):
                  dtype=None, device=None
                  ):
         assert input_dim == output_dim, "Input and output dimensions must match for ResBlock"
-        super().__init__(input_dim, latent_dim, output_dim,
+        super().__init__(input_dim, hidden_dim, output_dim,
                          n_layers=n_layers,
                          activation=activation,
                          weight_init=weight_init,
@@ -164,7 +164,7 @@ class IdenCatMLP(MLP):
 
     See `MLP` for the arguments.
     """
-    def __init__(self, input_dim: int, latent_dim: int, output_dim: int,
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int,
                  n_layers: int = 2,
                  activation: Union[str, nn.Module, Callable[[], nn.Module]] = nn.ReLU,
                  weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
@@ -173,7 +173,7 @@ class IdenCatMLP(MLP):
                  end_activation: bool = True,
                  dtype=None, device=None):
         assert output_dim > input_dim, "Output dimension must be greater than input dimension"
-        super().__init__(input_dim, latent_dim, output_dim-input_dim,
+        super().__init__(input_dim, hidden_dim, output_dim-input_dim,
                          n_layers=n_layers,
                          activation=activation,
                          weight_init=weight_init,

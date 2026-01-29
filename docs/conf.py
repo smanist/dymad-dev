@@ -8,6 +8,7 @@
 
 import importlib.metadata, sys, os, shutil
 sys.path.insert(0, os.path.abspath(".."))
+sys.path.insert(0, os.path.abspath("_ext"))
 
 project = 'dymad'
 copyright = '2025, APUS Lab @ PSU'
@@ -29,6 +30,7 @@ extensions = [
     "sphinx_autodoc_typehints",
     'sphinxemoji.sphinxemoji'
 ]
+extensions.append("dict_keys")   # Custom extension for documenting dict-like objects
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']

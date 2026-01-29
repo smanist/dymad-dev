@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 from dymad.io import load_model
-from dymad.models import LDM, KBF
+from dymad.models import LDM, KBF, LTI
 from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
 from dymad.utils import plot_summary, plot_trajectory, TrajectorySampler
 
@@ -42,9 +42,11 @@ cases = [
     {"name": "ldm_node", "model" : LDM, "trainer": NODETrainer,     "config": 'lti_ldm_node.yaml'},
     {"name": "kbf_wf",   "model" : KBF, "trainer": WeakFormTrainer, "config": 'lti_kbf_wf.yaml'},
     {"name": "kbf_node", "model" : KBF, "trainer": NODETrainer,     "config": 'lti_kbf_node.yaml'},
-    {"name": "kbf_ln",   "model" : KBF, "trainer": LinearTrainer,   "config": 'lti_kbf_ln.yaml'}
+    {"name": "kbf_ln",   "model" : KBF, "trainer": LinearTrainer,   "config": 'lti_kbf_ln.yaml'},
+    {"name": "lti_wf",   "model" : LTI, "trainer": WeakFormTrainer, "config": 'lti_lti_wf.yaml'},
+    {"name": "lti_ln",   "model" : LTI, "trainer": LinearTrainer,   "config": 'lti_lti_ln.yaml'}
 ]
-IDX = [0, 1, 2, 3, 4]
+IDX = [0, 1, 2, 3, 4, 5, 6]
 labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0

@@ -13,7 +13,7 @@ def gen_mdl_kb(e, l, k):
         "name" : 'vor_model',
         "encoder_layers" : e,
         "decoder_layers" : e,
-        "latent_dimension" : l,
+        "hidden_dimension" : l,
         "koopman_dimension" : k,
         "activation" : "prelu",
         "weight_init" : "xavier_uniform",

@@ -21,7 +21,7 @@ model:
   encoder_layers: 1
   processor_layers: 1
   decoder_layers: 1
-  latent_dimension: 32
+  hidden_dimension: 32
   autoencoder_type: "cat"
   gcl: "sage"
   activation: "none"
