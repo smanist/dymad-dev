@@ -489,9 +489,10 @@ class OptBase:
             if plot:
                 x_truth = x_truth.detach().cpu().numpy().squeeze(0)
                 x_pred = x_pred.detach().cpu().numpy().squeeze(0)
+                ts = ts.detach().cpu().numpy().squeeze(0)
                 _us = None if truth.u is None else truth.u.detach().cpu().numpy().squeeze(0)
                 plotting_config = self.config.get('plotting', {})
-                plot_trajectory(np.array([x_truth, x_pred]), ts.squeeze(0), self.model_name,
+                plot_trajectory(np.array([x_truth, x_pred]), ts, self.model_name,
                                 us=_us, labels=['Truth', 'Prediction'+_crit], prefix=self.results_prefix,
                                 **plotting_config)
 
