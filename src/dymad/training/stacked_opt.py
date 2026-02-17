@@ -50,17 +50,41 @@ class StackedOpt:
         Run all prescribed phases in order.
 
         initial_state:
-          - None          => first trainer will build data/model itself (legacy/simple usage).
-          - data-only     => first trainer reuses data, builds model.
-          - full RunState => continuation: reuse data + model + optimizer, etc.
+          - Required: a RunState instance.
+          - Must contain a config dict with path.results_prefix.
+          - data-only RunState is supported (first phase builds model/optimizer).
+          - full RunState is supported (continuation across phases).
         """
+        if initial_state is None:
+            raise ValueError(
+                "StackedOpt.run requires initial_state to be a RunState; got None."
+            )
+        if not isinstance(initial_state, RunState):
+            raise ValueError(
+                f"StackedOpt.run requires initial_state to be RunState, got {type(initial_state).__name__}."
+            )
+        if not isinstance(initial_state.config, dict):
+            raise ValueError(
+                "StackedOpt.run requires initial_state.config to be a dict containing path.results_prefix."
+            )
+        path_cfg = initial_state.config.get("path", None)
+        if not isinstance(path_cfg, dict):
+            raise ValueError(
+                "StackedOpt.run requires initial_state.config['path'] to be a dict containing results_prefix."
+            )
+        results_prefix = path_cfg.get("results_prefix", None)
+        if not results_prefix:
+            raise ValueError(
+                "StackedOpt.run requires initial_state.config['path']['results_prefix']."
+            )
+
         results = []
         current_state = initial_state
 
         log_config = self.config.get("log", {})
         ifstdout = log_config.get("stdout", False)
         self.logger = logging.getLogger('dymad')
-        path = current_state.config['path']['results_prefix']
+        path = results_prefix
         os.makedirs(path, exist_ok=True)
         path += '/' + path.split('/')[-1]
         config_logger(
