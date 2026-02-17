@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from typing import Optional, Union, Tuple, Dict, List
 
 from dymad.io.data import DynData
-from dymad.transform import make_transform
+from dymad.transform.collection import make_transform
 from dymad.utils.graph import adj_to_edge
 
 logger = logging.getLogger("dymad.cv")

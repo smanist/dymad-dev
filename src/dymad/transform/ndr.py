@@ -3,7 +3,8 @@ import numpy as np
 import sklearn.manifold as skm
 from typing import Any, List
 
-from dymad.numerics import DM, DMF, Manifold, ManifoldAltTree, VBDM
+from dymad.numerics.dm import DM, DMF, VBDM
+from dymad.numerics.manifold import Manifold, ManifoldAltTree
 from dymad.transform.base import Transform
 
 Array = List[np.ndarray]

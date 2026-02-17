@@ -5,7 +5,7 @@ from typing import Dict, List
 from dymad.models.components import ENC_MAP, DEC_MAP, FZU_MAP, DYN_MAP, LIN_MAP
 from dymad.models.prediction import predict_continuous, predict_continuous_exp, predict_continuous_np, \
     predict_discrete, predict_discrete_exp
-from dymad.modules import make_autoencoder, make_network
+from dymad.modules.collections import make_autoencoder, make_network
 
 logger = logging.getLogger(__name__)
 

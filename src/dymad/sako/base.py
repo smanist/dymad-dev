@@ -4,12 +4,14 @@ import numpy as np
 import torch
 from typing import Optional, Tuple, Type
 
-from dymad.io import DataInterface, DynData
-from dymad.models import KBF, DKBF
-from dymad.numerics import check_orthogonality, complex_grid, complex_map, disc2cont, eig_low_rank, mode_split, scaled_eig, truncate_sequence
+from dymad.io.checkpoint import DataInterface
+from dymad.io.data import DynData
+from dymad.models.collections import KBF, DKBF
+from dymad.numerics.complex import complex_grid, complex_map, disc2cont
+from dymad.numerics.linalg import check_orthogonality, eig_low_rank, mode_split, scaled_eig, truncate_sequence
 from dymad.sako.rals import estimate_pseudospectrum, RALowRank
 from dymad.sako.sako import SAKO
-from dymad.utils import plot_contour
+from dymad.utils.plot import plot_contour
 
 logger = logging.getLogger(__name__)
 

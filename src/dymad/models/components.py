@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from typing import Tuple
 
-from dymad.io import DynData
+from dymad.io.data import DynData
 
 # ------------------
 # Encoder functions

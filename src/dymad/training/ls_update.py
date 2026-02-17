@@ -6,9 +6,10 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Tuple
 
-from dymad.io import DynData
+from dymad.io.data import DynData
 from dymad.numerics.linalg import logm_low_rank, real_lowrank_from_eigpairs, truncated_lstsq
-from dymad.sako import filter_spectrum, SAKO
+from dymad.sako.base import filter_spectrum
+from dymad.sako.sako import SAKO
 
 logger = logging.getLogger(__name__)
 

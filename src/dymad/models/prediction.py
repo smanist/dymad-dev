@@ -4,9 +4,9 @@ import torch
 from torchdiffeq import odeint
 from typing import Union
 
-from dymad.io import DynData
-from dymad.numerics import expm_low_rank, expm_full_rank
-from dymad.utils import ControlInterpolator
+from dymad.io.data import DynData
+from dymad.numerics.linalg import expm_low_rank, expm_full_rank
+from dymad.utils.control import ControlInterpolator
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import List, Union
 
-from dymad.numerics import DimensionEstimator
+from dymad.numerics.manifold import DimensionEstimator
 
 logger = logging.getLogger(__name__)
 

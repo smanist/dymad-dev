@@ -8,11 +8,12 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Any, Dict, List, Optional, Type, Union
 
-from dymad.io import DynData
-from dymad.losses import LOSS_MAP
+from dymad.io.data import DynData
+from dymad.losses.losses import LOSS_MAP
 from dymad.training.helper import RunState
 from dymad.training.ls_update import LSUpdater
-from dymad.utils import make_scheduler, plot_hist, plot_trajectory
+from dymad.utils.plot import plot_hist, plot_trajectory
+from dymad.utils.scheduler import make_scheduler
 
 logger = logging.getLogger(__name__)
 

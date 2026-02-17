@@ -2,12 +2,13 @@ import numpy as np
 import torch
 from typing import Union, Tuple
 
-from dymad.io import DynData
+from dymad.io.data import DynData
 from dymad.models.helpers import build_processor, fzu_selector, get_dims
 from dymad.models.model_base import ComposedDynamics
 from dymad.models.prediction import predict_continuous_fenc
-from dymad.modules import FlexLinear, make_krr
-from dymad.numerics import Manifold
+from dymad.modules.collections import make_krr
+from dymad.modules.linear import FlexLinear
+from dymad.numerics.manifold import Manifold
 
 class CD_LDM(ComposedDynamics):
     """Latent Dynamics Model (LDM) class."""

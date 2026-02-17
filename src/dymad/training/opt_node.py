@@ -2,10 +2,10 @@ import logging
 import torch
 from typing import Any, Dict, Type, Union
 
-from dymad.io import DynData
+from dymad.io.data import DynData
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
-from dymad.utils import make_scheduler
+from dymad.utils.scheduler import make_scheduler
 
 logger = logging.getLogger(__name__)
 

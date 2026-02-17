@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from typing import Any, Callable, Dict, Tuple, Union
 
-from dymad.io import DynData
+from dymad.io.data import DynData
 
 
 Encoder = Callable[[nn.Module, DynData], torch.Tensor]

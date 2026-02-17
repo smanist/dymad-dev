@@ -9,7 +9,7 @@ from dymad.training.opt_base import OptBase
 from dymad.training.opt_linear import OptLinear
 from dymad.training.opt_node import OptNODE
 from dymad.training.opt_weak_form import OptWeakForm
-from dymad.utils import config_logger
+from dymad.utils.misc import config_logger
 
 OPT_REGISTRY: Dict[str, Type[OptBase]] = {
     "NODE": OptNODE,

@@ -3,7 +3,8 @@ import numpy as np
 import scipy.linalg as spl
 from typing import Tuple, Union
 
-from dymad.numerics import generate_coef, scaled_eig
+from dymad.numerics.linalg import scaled_eig
+from dymad.numerics.spectrum import generate_coef
 
 logger = logging.getLogger(__name__)
 

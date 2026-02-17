@@ -7,7 +7,8 @@ from typing import Callable, Dict, List, Optional, Union, Tuple, Type
 
 from dymad.io.data import DynData
 from dymad.io.trajectory_manager import TrajectoryManager
-from dymad.transform import Autoencoder, make_transform
+from dymad.transform.base import Autoencoder
+from dymad.transform.collection import make_transform
 from dymad.utils.misc import load_config
 
 logger = logging.getLogger(__name__)

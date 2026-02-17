@@ -4,7 +4,8 @@ import numpy as np
 import torch
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from dymad.numerics import complex_step, torch_jacobian, truncated_svd
+from dymad.numerics.gradients import complex_step, torch_jacobian
+from dymad.numerics.linalg import truncated_svd
 from dymad.transform.lift import poly_cross, poly_inverse, mixed_cross, mixed_inverse
 
 Array = List[np.ndarray]

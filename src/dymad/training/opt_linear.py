@@ -2,7 +2,7 @@ import logging
 import torch
 from typing import Any, Dict, Type
 
-from dymad.io import DynData
+from dymad.io.data import DynData
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 

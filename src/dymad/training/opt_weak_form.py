@@ -2,8 +2,8 @@ import logging
 import torch
 from typing import Any, Dict, Type
 
-from dymad.io import DynData
-from dymad.numerics import generate_weak_weights
+from dymad.io.data import DynData
+from dymad.numerics.weak import generate_weak_weights
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 

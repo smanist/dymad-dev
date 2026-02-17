@@ -7,10 +7,10 @@ import shutil
 import torch
 from typing import Any, Dict, Iterable, List, Tuple, Type, Union
 
-from dymad.io import TrajectoryManager, TrajectoryManagerGraph
+from dymad.io.trajectory_manager import TrajectoryManager, TrajectoryManagerGraph
 from dymad.training.helper import aggregate_cv_results, CVResult, iter_param_grid, RunState, set_by_dotted_key
 from dymad.training.stacked_opt import StackedOpt
-from dymad.utils import config_logger, load_config
+from dymad.utils.misc import config_logger, load_config
 
 # --------------------
 # Standalone single CV run for multi-processing compatibility

@@ -1,12 +1,12 @@
 import torch
 from typing import Dict
 
-from dymad.io import DynData
+from dymad.io.data import DynData
 from dymad.models.components import DEC_MAP, ENC_MAP, FZU_MAP
 from dymad.models.helpers import get_dims
 from dymad.models.model_base import ComposedDynamics
 from dymad.models.prediction import predict_continuous_np, predict_discrete_exp
-from dymad.modules import MLP
+from dymad.modules.mlp import MLP
 
 
 class TemplateCorrAlg(ComposedDynamics):
