@@ -37,6 +37,7 @@ class RunState:
     criteria: Optional[List[torch.nn.Module]] = None
     criteria_weights: Optional[List[float]] = None
     criteria_names: Optional[List[str]] = None
+    latent: Optional[Dict[str, Any]] = None
 
     # Data: live objects only (not serialized)
     train_set: Optional[Dataset] = None
@@ -67,6 +68,7 @@ class RunState:
             ],
             "criteria_weights": self.criteria_weights,
             "criteria_names": self.criteria_names,
+            "latent": self.latent,
             "train_md": self.train_md,
             "valid_md": self.valid_md,
         }
@@ -107,6 +109,7 @@ class RunState:
             criteria=criteria,
             criteria_weights=ckpt.get("criteria_weights", []),
             criteria_names=ckpt.get("criteria_names", []),
+            latent=ckpt.get("latent", None),
             train_md=ckpt.get("train_md", {}),
             valid_md=ckpt.get("valid_md", {}),
         )

@@ -6,13 +6,17 @@ from typing import Dict, Any, Type
 
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
+from dymad.training.opt_infer_latents import OptInferLatents
 from dymad.training.opt_linear import OptLinear
 from dymad.training.opt_node import OptNODE
+from dymad.training.opt_update_theta import OptUpdateTheta
 from dymad.training.opt_weak_form import OptWeakForm
 from dymad.utils.misc import config_logger
 
 OPT_REGISTRY: Dict[str, Type[OptBase]] = {
+    "InferLatents": OptInferLatents,
     "NODE": OptNODE,
+    "UpdateTheta": OptUpdateTheta,
     "Weak": OptWeakForm,
     "Linear": OptLinear,
 }

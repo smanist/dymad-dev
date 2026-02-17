@@ -125,6 +125,7 @@ class OptBase:
         self.valid_loader = state.valid_loader
         self.train_md = state.train_md     # Only need dimension info
         self.valid_md = state.valid_md
+        self.latent = copy.deepcopy(state.latent)
 
         self._setup_model()
         if state.model is None or state.optimizer is None or not state.schedulers:
@@ -177,6 +178,7 @@ class OptBase:
         self.crit = state.crit
         self.convergence_tolerance_reached = False  # reset on load
         self.epoch_times = state.epoch_times
+        self.latent = copy.deepcopy(state.latent)
 
         logger.info(f"Loaded checkpoint from {checkpoint_path}, starting at epoch {self.start_epoch}")
         return flag
@@ -295,6 +297,7 @@ class OptBase:
             criteria=self.criteria,
             criteria_weights=self.criteria_weights,
             criteria_names=self.criteria_names,
+            latent=copy.deepcopy(self.latent),
             train_set=self.train_set,
             valid_set=self.valid_set,
             train_loader=self.train_loader,
