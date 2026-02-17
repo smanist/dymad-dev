@@ -165,7 +165,7 @@ class OptBase:
         if not flag:
             return flag
 
-        ckpt = torch.load(self.checkpoint_path, weights_only=False, map_location=self.device)
+        ckpt = torch.load(checkpoint_path, weights_only=False, map_location=self.device)
         state = RunState.from_checkpoint(
             ckpt, self.model, self.optimizer, self.schedulers, self.criteria)
 
@@ -177,7 +177,7 @@ class OptBase:
         self.convergence_tolerance_reached = False  # reset on load
         self.epoch_times = state.epoch_times
 
-        logger.info(f"Loaded checkpoint from {self.checkpoint_path}, starting at epoch {self.start_epoch}")
+        logger.info(f"Loaded checkpoint from {checkpoint_path}, starting at epoch {self.start_epoch}")
         return flag
 
     # ------------------------------------------------------------------
