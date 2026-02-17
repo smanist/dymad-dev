@@ -55,6 +55,7 @@ If there are API errors such as some files not found, try deleting the auto-gene
 - two-stage implementation
 - N4SID
 - EnKF, EnKS, IEnKS
+
 - Interface to numpy
 
 - Split DynData into regular and graph versions
@@ -64,3 +65,5 @@ If there are API errors such as some files not found, try deleting the auto-gene
 
 - Symmetry analysis
 - Torch-fy Manifold class
+
+- L1/L0 regularized optimization
