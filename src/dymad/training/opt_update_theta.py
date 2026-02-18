@@ -43,11 +43,11 @@ class OptUpdateTheta(OptBase):
             logger.info("UpdateTheta skipped: no latent payload in RunState.")
             return self.run_state.epoch
 
-        self.run_state.latent["theta_update"] = {
+        self.run_state.latent.add_diagnostic("theta_update", {
             "method": "stub",
             "objective": 0.0,
             "note": "no-op theta update",
-        }
+        })
         logger.info("UpdateTheta wrote latent.theta_update placeholder.")
 
         if self.config_phase.get("do_optimizer_step", False):

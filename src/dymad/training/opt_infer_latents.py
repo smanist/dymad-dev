@@ -5,6 +5,7 @@ import torch
 from typing import Any, Dict, Type
 
 from dymad.training.helper import RunState
+from dymad.training.latent_state import MapLatent
 from dymad.training.opt_base import OptBase
 
 logger = logging.getLogger(__name__)
@@ -39,16 +40,20 @@ class OptInferLatents(OptBase):
             logger.info("InferLatents disabled (enable_latent=False). Skipping.")
             return self.run_state.epoch
 
-        self.run_state.latent = {
-            "method": "stub",
-            "z_map": None,
-            "diagnostics": {
-                "note": "placeholder latent inference",
+        z_map = torch.empty(0, dtype=self.dtype, device=self.device)
+        self.run_state.latent = MapLatent(
+            z_map=z_map,
+            diag={
+                "method": "stub",
+                "diagnostics": {
+                    "note": "placeholder latent inference",
+                },
             },
-        }
+        )
         logger.info(
-            "InferLatents wrote latent payload with keys: %s",
-            sorted(self.run_state.latent.keys()),
+            "InferLatents wrote latent payload kind=%s with diag keys: %s",
+            self.run_state.latent.kind,
+            sorted(self.run_state.latent.diagnostic_info().keys()),
         )
         return self.run_state.epoch
 

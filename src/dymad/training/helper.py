@@ -5,6 +5,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from typing import Any, Dict, Iterable, List, Optional
 
+from dymad.training.latent_state import LatentState, MapLatent, latent_from_checkpoint
+
 @dataclass
 class RunState:
     """
@@ -38,7 +40,7 @@ class RunState:
     criteria_weights: Optional[Dict[str, float]] = None
     prediction_criterion: Optional[torch.nn.Module] = None
     prediction_criterion_name: Optional[str] = None
-    latent: Optional[Dict[str, Any]] = None
+    latent: Optional[LatentState] = None
 
     # Data: live objects only (not serialized)
     train_set: Optional[Dataset] = None
@@ -75,7 +77,10 @@ class RunState:
                 else self.prediction_criterion.state_dict()
             ),
             "prediction_criterion_name": self.prediction_criterion_name,
-            "latent": self.latent,
+            "latent": (
+                None if self.latent is None
+                else self.latent.to_checkpoint()
+            ),
             "train_md": self.train_md,
             "valid_md": self.valid_md,
         }
@@ -114,6 +119,24 @@ class RunState:
             if c_state is not None:
                 prediction_criterion.load_state_dict(c_state)
 
+        latent_payload = ckpt.get("latent", None)
+        latent_obj: Optional[LatentState] = None
+        if latent_payload is None:
+            latent_obj = None
+        elif isinstance(latent_payload, dict) and "kind" in latent_payload:
+            latent_obj = latent_from_checkpoint(latent_payload)
+        elif isinstance(latent_payload, dict) and "z_map" in latent_payload:
+            z_map = latent_payload.get("z_map", None)
+            if z_map is not None:
+                latent_obj = MapLatent(
+                    z_map=z_map,
+                    diag=dict(latent_payload.get("diag", {})),
+                )
+            else:
+                latent_obj = None
+        else:
+            latent_obj = None
+
         return cls(
             config=ckpt.get("config", {}),
             epoch=ckpt.get("epoch", 0),
@@ -129,7 +152,7 @@ class RunState:
             criteria_weights=ckpt.get("criteria_weights", {}),
             prediction_criterion=prediction_criterion,
             prediction_criterion_name=ckpt.get("prediction_criterion_name", None),
-            latent=ckpt.get("latent", None),
+            latent=latent_obj,
             train_md=ckpt.get("train_md", {}),
             valid_md=ckpt.get("valid_md", {}),
         )
