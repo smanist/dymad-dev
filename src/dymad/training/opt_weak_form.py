@@ -49,7 +49,7 @@ class OptWeakForm(OptBase):
         self.C = torch.tensor(C.T, dtype=dtype, device=self.device)
         self.D = torch.tensor(D.T, dtype=dtype, device=self.device)
 
-    def _process_batch(self, batch: DynData) -> torch.Tensor:
+    def _process_batch(self, batch: DynData) -> Dict[str, torch.Tensor]:
         B = batch.to(self.device)
         z = self.model.encoder(B)
         z_dot = self.model.dynamics(z, B)
@@ -60,11 +60,11 @@ class OptWeakForm(OptBase):
 
         true_weak = z_windows @ self.C
         pred_weak = z_dot_windows @ self.D
-        weak_loss = self.criteria[0](pred_weak, true_weak)
-        loss_list = [weak_loss]
+        weak_loss = self.criteria["dynamics"](pred_weak, true_weak)
+        loss_dict = {"loss_dyn": weak_loss}
 
         # Other criteria
-        _list = self._additional_criteria_evaluation(x_hat, None, B)
-        loss_list.extend(_list)
+        loss_dict.update(self._additional_criteria_evaluation(x_hat, None, B))
+        loss_dict["loss_total"] = self._aggregate_losses(loss_dict)
 
-        return loss_list
+        return loss_dict

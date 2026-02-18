@@ -264,18 +264,23 @@ def plot_one_summary(npz, label='', index=0, ifscl=True, axes=None):
     else:
         fig = axes[0].figure
         ax = axes
-    scl = npz['hist'][0]['train_total'][0] if ifscl else 1.0
+    first_hist = npz['hist'][0]
+    scl = first_hist['train_losses']['loss_total'][0] if ifscl else 1.0
     for hist in npz['hist']:
-        key = ['total', 'dynamics']
-        for _k in hist.keys():
-            if 'train' in _k:
-                if _k[6:] not in key:
-                    key.append(_k[6:])
+        train_losses = hist.get('train_losses', {})
+        valid_losses = hist.get('valid_losses', {})
+        keys = sorted(set(train_losses) | set(valid_losses))
+        if "loss_total" in keys:
+            keys = ["loss_total"] + [k for k in keys if k != "loss_total"]
+
         epo = hist['epoch']
-        for _i, _k in enumerate(key):
+        for _i, _k in enumerate(keys):
             _sty = LINESTY[_i % len(LINESTY)]
-            ax[0].semilogy(epo, np.abs(hist[f'train_{_k}'])/scl, _sty, color=clr, label=f'{label} T {_k[:3]}', linewidth=1.5)
-            ax[0].semilogy(epo, np.abs(hist[f'valid_{_k}'])/scl, _sty, color=clr, label=f'{label} V {_k[:3]}', linewidth=.75)
+            _name = _k[5:] if _k.startswith("loss_") else _k
+            _train = np.array(train_losses.get(_k, [np.nan] * len(epo)))
+            _valid = np.array(valid_losses.get(_k, [np.nan] * len(epo)))
+            ax[0].semilogy(epo, np.abs(_train)/scl, _sty, color=clr, label=f'{label} T {_name}', linewidth=1.5)
+            ax[0].semilogy(epo, np.abs(_valid)/scl, _sty, color=clr, label=f'{label} V {_name}', linewidth=.75)
     if ifscl:
         ax[0].set_title('Training Loss (scaled)')
         ax[0].set_ylabel('Relative Loss')

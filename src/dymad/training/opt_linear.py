@@ -35,27 +35,32 @@ class OptLinear(OptBase):
         # Additional logging
         logger.info(f"LinearTrainer: method {self._ls.method}, params {self._ls.params}")
 
-    def _process_batch(self, batch: DynData) -> torch.Tensor:
+    def _process_batch(self, batch: DynData) -> Dict[str, torch.Tensor]:
         """
         Process a batch and return predictions and ground truth states.
 
         Only used in `evaluation` in this Trainer.
         """
         B = batch.to(self.device)
-        linear_loss = self._ls.eval_batch(self.model, B, self.criteria[0])
-        loss_list = [linear_loss]
+        linear_loss = self._ls.eval_batch(self.model, B, self.criteria["dynamics"])
+        loss_dict = {"loss_dyn": linear_loss}
 
         # Other criteria
         # x_hat and predictions are computed inside criteria evaluation if needed
         x_hat, preds = None, None
-        _list = self._additional_criteria_evaluation(x_hat, preds, B)
-        loss_list.extend(_list)
+        loss_dict.update(self._additional_criteria_evaluation(x_hat, preds, B))
+        loss_dict["loss_total"] = self._aggregate_losses(loss_dict)
 
-        return loss_list
+        return loss_dict
 
-    def train_epoch(self) -> float:
+    def train_epoch(self) -> Dict[str, float]:
         """Train the model for one epoch."""
         logger.info("Least squares update in OptLinear.")
         avg_epoch_loss, _ = self._ls.update(self.model, self.train_loader)
-        loss_items = [avg_epoch_loss] + [0.0] * (len(self.criteria_weights) - 1)
-        return torch.tensor(avg_epoch_loss, dtype=torch.float64), loss_items
+        loss_dict = {
+            self._criterion_to_loss_key(name): 0.0
+            for name in self.criteria
+        }
+        loss_dict["loss_dyn"] = float(avg_epoch_loss)
+        loss_dict["loss_total"] = float(avg_epoch_loss)
+        return loss_dict

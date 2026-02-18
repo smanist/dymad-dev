@@ -34,9 +34,10 @@ class RunState:
     # Optimization states
     optimizer: Optional[torch.optim.Optimizer] = None
     schedulers: List[Any] = field(default_factory=list)
-    criteria: Optional[List[torch.nn.Module]] = None
-    criteria_weights: Optional[List[float]] = None
-    criteria_names: Optional[List[str]] = None
+    criteria: Optional[Dict[str, torch.nn.Module]] = None
+    criteria_weights: Optional[Dict[str, float]] = None
+    prediction_criterion: Optional[torch.nn.Module] = None
+    prediction_criterion_name: Optional[str] = None
     latent: Optional[Dict[str, Any]] = None
 
     # Data: live objects only (not serialized)
@@ -51,6 +52,7 @@ class RunState:
         """Serialize the persistent subset of state."""
         return {
             "config": self.config,
+            "loss_format": "dict_v1",
             "device": self.device,
             "epoch": self.epoch,
             "best_loss": self.best_loss,
@@ -63,11 +65,16 @@ class RunState:
             "scheduler_state_dicts": [
                 scheduler.state_dict() for scheduler in self.schedulers if hasattr(scheduler, "state_dict")
             ],
-            "criteria_state_dicts": [
-                c.state_dict() for c in self.criteria
-            ],
+            "criteria_state_dicts": (
+                {name: criterion.state_dict() for name, criterion in self.criteria.items()}
+                if self.criteria is not None else {}
+            ),
             "criteria_weights": self.criteria_weights,
-            "criteria_names": self.criteria_names,
+            "prediction_criterion_state_dict": (
+                None if self.prediction_criterion is None
+                else self.prediction_criterion.state_dict()
+            ),
+            "prediction_criterion_name": self.prediction_criterion_name,
             "latent": self.latent,
             "train_md": self.train_md,
             "valid_md": self.valid_md,
@@ -80,11 +87,15 @@ class RunState:
         model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
         schedulers: List[Any],
-        criteria: Optional[List[torch.nn.Module]]
+        criteria: Optional[Dict[str, torch.nn.Module]],
+        prediction_criterion: Optional[torch.nn.Module],
     ) -> "RunState":
         """
         Rebuild RunState from a checkpoint, meant for restarting an interrupted run.
         """
+        if ckpt.get("loss_format") != "dict_v1":
+            raise ValueError("old checkpoint format not supported after loss migration")
+
         model.load_state_dict(ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         if "scheduler_state_dicts" in ckpt:
@@ -92,8 +103,16 @@ class RunState:
                 if hasattr(s, "load_state_dict"):
                     s.load_state_dict(s_state)
         if criteria is not None and "criteria_state_dicts" in ckpt:
-            for criterion, c_state in zip(criteria, ckpt["criteria_state_dicts"]):
-                criterion.load_state_dict(c_state)
+            c_states = ckpt["criteria_state_dicts"]
+            if not isinstance(c_states, dict):
+                raise ValueError("old checkpoint format not supported after loss migration")
+            for name, criterion in criteria.items():
+                if name in c_states:
+                    criterion.load_state_dict(c_states[name])
+        if prediction_criterion is not None and "prediction_criterion_state_dict" in ckpt:
+            c_state = ckpt["prediction_criterion_state_dict"]
+            if c_state is not None:
+                prediction_criterion.load_state_dict(c_state)
 
         return cls(
             config=ckpt.get("config", {}),
@@ -107,8 +126,9 @@ class RunState:
             optimizer=optimizer,
             schedulers=schedulers,
             criteria=criteria,
-            criteria_weights=ckpt.get("criteria_weights", []),
-            criteria_names=ckpt.get("criteria_names", []),
+            criteria_weights=ckpt.get("criteria_weights", {}),
+            prediction_criterion=prediction_criterion,
+            prediction_criterion_name=ckpt.get("prediction_criterion_name", None),
             latent=ckpt.get("latent", None),
             train_md=ckpt.get("train_md", {}),
             valid_md=ckpt.get("valid_md", {}),
@@ -116,7 +136,14 @@ class RunState:
 
     def get_metric(self, metric_name: str) -> float:
         """Get the best value of a metric from history."""
-        return self.best_loss['valid_'+metric_name]
+        key = f"valid_{metric_name}"
+        if key in self.best_loss:
+            return self.best_loss[key]
+        if metric_name.startswith("loss_"):
+            key = f"valid_{metric_name[5:]}"
+            if key in self.best_loss:
+                return self.best_loss[key]
+        raise KeyError(f"Metric '{metric_name}' not found in best_loss.")
 
 
 @dataclass

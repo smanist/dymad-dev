@@ -74,11 +74,7 @@ class OptNODE(OptBase):
         """
         Compute NODE loss terms on a batch and return a dict of named losses.
 
-        The TrainerBase will aggregate:
-          - If 'total' in dict -> use directly.
-          - Else, sum loss_weights[name] * term.
-        Here we expose atomic losses "dynamics" and "recon", and let the
-        base class aggregate according to config["training"]["loss_weights"].
+        Returns a dict with stable names including required ``loss_total``.
         """
         num_steps = self.schedulers[1].get_length()
         if num_steps is None:
@@ -112,13 +108,13 @@ class OptNODE(OptBase):
         )
 
         # Base dynamics criterion
-        dynamics_loss = self.criteria[0](predictions, B.x)
-        loss_list = [dynamics_loss]
+        dynamics_loss = self.criteria["dynamics"](predictions, B.x)
+        loss_dict = {"loss_dyn": dynamics_loss}
 
         # Other criteria
         # x_hat is computed inside criteria evaluation if needed
         x_hat = None
-        _list = self._additional_criteria_evaluation(x_hat, predictions, B)
-        loss_list.extend(_list)
+        loss_dict.update(self._additional_criteria_evaluation(x_hat, predictions, B))
+        loss_dict["loss_total"] = self._aggregate_losses(loss_dict)
 
-        return loss_list
+        return loss_dict
