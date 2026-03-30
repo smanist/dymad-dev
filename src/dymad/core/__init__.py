@@ -1,6 +1,7 @@
 """Core data abstractions for the DyMAD migration."""
 
 from dymad.core.graph_series import FixedGraphSeries, GraphSeries, GraphSeriesBatch, VariableEdgeGraphSeries
+from dymad.core.model_context import GraphModelContext, RegularModelContext, build_model_context
 from dymad.core.series import RegularSeries, RegularSeriesBatch
 from dymad.core.torch_transforms import (
     AddOneTransform,
@@ -29,8 +30,10 @@ __all__ = [
     "FixedGraphSeries",
     "GraphSeries",
     "GraphSeriesBatch",
+    "GraphModelContext",
     "IdentityTransform",
     "build_legacy_transform",
+    "build_model_context",
     "build_transform_module",
     "export_transform_state",
     "LegacyTransformModuleAdapter",
@@ -38,6 +41,7 @@ __all__ = [
     "NDRTransformModuleAdapter",
     "RegularSeries",
     "RegularSeriesBatch",
+    "RegularModelContext",
     "RegularSeriesTransformPipeline",
     "ScalerTransform",
     "SeriesTransformPipeline",

@@ -224,4 +224,10 @@ class DynDataAdapter:
             return None
         if isinstance(payload, tuple):
             return list(payload)
-        return [payload[step] for step in range(n_steps)]
+        if isinstance(payload, torch.Tensor):
+            if payload.ndim >= 2 and payload.shape[0] == n_steps:
+                return [payload[step] for step in range(n_steps)]
+            if payload.ndim == 1 and payload.shape[0] == n_steps:
+                return [payload[step:step + 1] for step in range(n_steps)]
+            return [payload for _ in range(n_steps)]
+        return [payload for _ in range(n_steps)]
