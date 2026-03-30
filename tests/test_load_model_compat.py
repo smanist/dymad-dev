@@ -24,7 +24,7 @@ def test_load_model_compat_routes_via_boundary(monkeypatch, tmp_path: Path) -> N
 
     import dymad.io.checkpoint as checkpoint_module
 
-    monkeypatch.setattr(checkpoint_module, "load_model", fake_load_model)
+    monkeypatch.setattr(checkpoint_module, "_load_model_legacy", fake_load_model)
 
     model, predict_fn, trace = load_model_compat(
         DummyModel,

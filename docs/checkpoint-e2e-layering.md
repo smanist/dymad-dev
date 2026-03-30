@@ -27,22 +27,28 @@ Current verified DyMAD migration path:
 
 ## Verified Sequence
 
-Compatibility entrypoint:
+Public compatibility entrypoint:
+
+- `dymad.io.checkpoint.load_model(...)`
+
+Explicit test helper entrypoint:
 
 - `dymad.io.load_model_compat.load_model_compat(...)`
 
 Execution sequence:
 
-1. `load_model_compat(...)` calls `CompatibilityExecutor.plan_checkpoint_prediction(...)`.
-2. `plan_checkpoint_prediction(...)` uses `FacadeOperations` to register a checkpoint handle and prediction-request handle in `ObjectStore`.
-3. `load_model_compat(...)` calls `CompatibilityExecutor.materialize_checkpoint_prediction(...)`.
-4. `materialize_checkpoint_prediction(...)` resolves handles through `FacadeOperations`.
-5. The resolved checkpoint path is materialized through legacy `dymad.io.checkpoint.load_model(...)`.
+1. `load_model(...)` calls the compatibility adapter path in `dymad.io.load_model_compat`.
+2. the compatibility adapter calls `CompatibilityExecutor.plan_checkpoint_prediction(...)`.
+3. `plan_checkpoint_prediction(...)` uses `FacadeOperations` to register a checkpoint handle and prediction-request handle in `ObjectStore`.
+4. the compatibility adapter calls `CompatibilityExecutor.materialize_checkpoint_prediction(...)`.
+5. `materialize_checkpoint_prediction(...)` resolves handles through `FacadeOperations`.
+6. The resolved checkpoint path is materialized through legacy checkpoint internals.
 
 ## Verification
 
 ```bash
 cd modules/dymad_migrate && PYTHONPATH=src pytest tests/test_checkpoint_e2e_layering.py -q
+cd modules/dymad_migrate && PYTHONPATH=src pytest tests/test_public_load_model_boundary.py -q
 ```
 
-The test validates call order across `exec -> facade -> store` and confirms the compatibility materialization entrypoint remains `dymad.io.checkpoint.load_model`.
+The tests validate call order across `exec -> facade -> store` and confirm the default public entrypoint now routes through the compatibility boundary.

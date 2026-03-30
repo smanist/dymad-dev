@@ -5,7 +5,9 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Optional, Union, Tuple, Dict, List
 
+from dymad.core.series import RegularSeries
 from dymad.io.data import DynData
+from dymad.io.series_adapter import DynDataAdapter, SeriesAdapter
 from dymad.transform import make_transform
 from dymad.utils.graph import adj_to_edge
 
@@ -467,6 +469,23 @@ class TrajectoryManager:
         self._update_dataset_metadata()
 
     def _transform_by_index(self, indices: torch.Tensor) -> List[DynData]:
+        series_dataset = self._transform_regular_series_by_index(indices)
+        return [DynDataAdapter.from_regular_series(series) for series in series_dataset]
+
+    def create_regular_series_dataset(self, indices: torch.Tensor | List[int] | None = None) -> List[RegularSeries]:
+        """Expose the first typed data seam for regular trajectory preprocessing."""
+        if indices is None:
+            if self.data_index is None:
+                raise ValueError("data_index must be set before creating a regular-series dataset")
+            indices = self.data_index
+        if isinstance(indices, list):
+            indices = torch.tensor(indices, dtype=torch.long)
+        return self._transform_regular_series_by_index(indices)
+
+    def _collect_regular_payload_by_index(
+        self,
+        indices: torch.Tensor,
+    ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray | None], List[np.ndarray | None], List[np.ndarray | None]]:
         # Process X first
         # If the common delay is larger (larger delay in u), we trim out the first few steps.
         # This way the latest x and u are aligned.
@@ -505,16 +524,25 @@ class TrajectoryManager:
         else:
             _P = [None for _ in _X]
 
-        # Lastly assemble the dataset.
+        return _T, _X, _Y, _U, _P
+
+    def _transform_regular_series_by_index(self, indices: torch.Tensor) -> List[RegularSeries]:
+        _T, _X, _Y, _U, _P = self._collect_regular_payload_by_index(indices)
+
         dataset = []
         for _t, _x, _y, _u, _p in zip(_T, _X, _Y, _U, _P):
-            dataset.append(DynData(
-                t=torch.tensor(_t, dtype=self.dtype, device=self.device),
-                x=torch.tensor(_x, dtype=self.dtype, device=self.device),
-                y=torch.tensor(_y, dtype=self.dtype, device=self.device) if _y is not None else None,
-                u=torch.tensor(_u, dtype=self.dtype, device=self.device) if _u is not None else None,
-                p=torch.tensor(_p, dtype=self.dtype, device=self.device) if _p is not None else None
-        ))
+            dataset.append(
+                SeriesAdapter.from_regular_arrays(
+                    _t,
+                    _x,
+                    target=_y,
+                    control=_u,
+                    params=_p,
+                    dtype=self.dtype,
+                    device=self.device,
+                    meta={"delay": self.metadata["delay"]},
+                )
+            )
         return dataset
 
     def _update_dataset_metadata(self):

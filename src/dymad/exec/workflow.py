@@ -55,6 +55,6 @@ class CompatibilityExecutor:
             raise ValueError("plan checkpoint/prediction handles are inconsistent")
         checkpoint = self.facade.get_checkpoint(request.checkpoint_handle)
 
-        from dymad.io.checkpoint import load_model as legacy_load_model
+        from dymad.io.checkpoint import _load_model_legacy
 
-        return legacy_load_model(model_class, checkpoint.checkpoint_path)
+        return _load_model_legacy(model_class, checkpoint.checkpoint_path)

@@ -17,7 +17,7 @@ class BoundaryLoadTrace:
 
 
 def load_model_compat(
-    model_class: type[Any],
+    model_class: Any,
     checkpoint_path: str | PathLike[str],
     *,
     context: ExecutionContext | None = None,
@@ -28,7 +28,9 @@ def load_model_compat(
 ) -> tuple[Any, Callable[..., Any]] | tuple[Any, Callable[..., Any], BoundaryLoadTrace]:
     """Route compatibility model loading through the new boundary skeleton."""
     active_context = context or build_default_context()
-    model_ref = f"{model_class.__module__}:{model_class.__name__}"
+    model_module = getattr(model_class, "__module__", type(model_class).__module__)
+    model_name = getattr(model_class, "__name__", type(model_class).__name__)
+    model_ref = f"{model_module}:{model_name}"
     plan = active_context.executor.plan_checkpoint_prediction(
         model_ref=model_ref,
         checkpoint_path=str(checkpoint_path),

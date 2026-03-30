@@ -73,7 +73,7 @@ def test_checkpoint_e2e_path_routes_facade_store_exec(monkeypatch, tmp_path: Pat
 
     import dymad.io.checkpoint as checkpoint_module
 
-    monkeypatch.setattr(checkpoint_module, "load_model", fake_load_model)
+    monkeypatch.setattr(checkpoint_module, "_load_model_legacy", fake_load_model)
 
     model, predict_fn, trace = load_model_compat(
         DummyModel,

@@ -29,7 +29,7 @@ def graph_data_prep(data, nnd):
     tmp = tmp.reshape(-1, *tmp.shape[-2:])     # [all_nodes, T, n_states_per_node]
     return tmp
 
-def load_model(model_class, checkpoint_path):
+def _load_model_legacy(model_class, checkpoint_path):
     """
     Load a model from a checkpoint file.
 
@@ -221,6 +221,29 @@ def load_model(model_class, checkpoint_path):
         return _proc_prd(pred)
 
     return model, predict_fn
+
+
+def load_model(
+        model_class,
+        checkpoint_path,
+        *,
+        context=None,
+        horizon: int = 1,
+        has_control: bool = False,
+        has_graph: bool = False,
+        return_trace: bool = False):
+    """Public checkpoint loader routed through the migration boundary."""
+    from dymad.io.load_model_compat import load_model_compat
+
+    return load_model_compat(
+        model_class,
+        checkpoint_path,
+        context=context,
+        horizon=horizon,
+        has_control=has_control,
+        has_graph=has_graph,
+        return_trace=return_trace,
+    )
 
 
 def visualize_model(
