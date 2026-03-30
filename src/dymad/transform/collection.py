@@ -9,6 +9,12 @@ Array = List[np.ndarray]
 
 logger = logging.getLogger(__name__)
 
+_TYPE_ALIASES = {
+    "diffmap": "dm",
+    "diffmapvb": "vbdm",
+    "isomap": "isomap",
+}
+
 class Compose(Transform):
     """Apply transforms in order.  Inverse is applied in reverse."""
     def __init__(self, transforms: List[Transform] = None):
@@ -183,7 +189,7 @@ def make_transform(config: List[Dict[str, Any]]) -> Transform:
 
     transforms = []
     for t in config:
-        trn_type = t.get("type", "").lower()
+        trn_type = _TYPE_ALIASES.get(t.get("type", "").lower(), t.get("type", "").lower())
         if trn_type not in TRN_MAP:
             raise ValueError(f"Unknown transform type: {trn_type}")
         tmp = dict(t)

@@ -116,6 +116,8 @@ class LegacyTransformModuleAdapter(TransformModule):
         self.legacy_transform = legacy_transform
         self._to_legacy = to_legacy or self._tensor_to_numpy
         self._from_legacy = from_legacy or self._numpy_to_tensor
+        self.input_dim = int(getattr(self.legacy_transform, "_inp_dim", 0) or 0) or None
+        self.output_dim = int(getattr(self.legacy_transform, "_out_dim", 0) or 0) or None
 
     def fit(self, data: Sequence[torch.Tensor]) -> "LegacyTransformModuleAdapter":
         payloads = []
@@ -155,6 +157,19 @@ class LegacyTransformModuleAdapter(TransformModule):
     @staticmethod
     def _numpy_to_tensor(data, *, reference: torch.Tensor) -> torch.Tensor:
         return torch.as_tensor(data, dtype=reference.dtype, device=reference.device)
+
+
+class NDRTransformModuleAdapter(LegacyTransformModuleAdapter):
+    """Explicit wrapper for non-differentiable dimensionality-reduction transforms."""
+
+    def __init__(self, legacy_transform: Transform, *, to_legacy=None, from_legacy=None) -> None:
+        super().__init__(
+            legacy_transform,
+            to_legacy=to_legacy,
+            from_legacy=from_legacy,
+            invertibility="approximate",
+            supports_gradients="false",
+        )
 
 
 class FieldTransformModule(nn.Module):

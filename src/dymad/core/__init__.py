@@ -10,9 +10,11 @@ from dymad.core.torch_transforms import (
     LiftTransform,
     ScalerTransform,
 )
+from dymad.core.transform_builder import build_legacy_transform, build_transform_module, export_transform_state
 from dymad.core.transform_module import (
     FieldTransformModule,
     LegacyTransformModuleAdapter,
+    NDRTransformModuleAdapter,
     SeriesTransformPipeline,
     TransformMetadata,
     TransformModule,
@@ -28,8 +30,12 @@ __all__ = [
     "GraphSeries",
     "GraphSeriesBatch",
     "IdentityTransform",
+    "build_legacy_transform",
+    "build_transform_module",
+    "export_transform_state",
     "LegacyTransformModuleAdapter",
     "LiftTransform",
+    "NDRTransformModuleAdapter",
     "RegularSeries",
     "RegularSeriesBatch",
     "RegularSeriesTransformPipeline",

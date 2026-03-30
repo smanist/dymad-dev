@@ -287,6 +287,8 @@ class ComposeTransform(TransformModule):
         if len(delayed) > 1:
             raise ValueError("ComposeTransform supports at most one delayed stage.")
         self.delay = delayed[0].delay if delayed else 0
+        self.invertibility = self._aggregate_invertibility()
+        self.supports_gradients = self._aggregate_gradient_support()
 
     def fit(self, data: Sequence[torch.Tensor]) -> "ComposeTransform":
         current = list(data)
@@ -307,3 +309,17 @@ class ComposeTransform(TransformModule):
         for stage in reversed(self.transforms):
             data = stage.inverse(data)
         return data
+
+    def _aggregate_invertibility(self) -> str:
+        if any(stage.invertibility == "none" for stage in self.transforms):
+            return "none"
+        if any(stage.invertibility == "approximate" for stage in self.transforms):
+            return "approximate"
+        return "exact"
+
+    def _aggregate_gradient_support(self) -> str:
+        if any(stage.supports_gradients == "false" for stage in self.transforms):
+            return "false"
+        if any(stage.supports_gradients == "approximate" for stage in self.transforms):
+            return "approximate"
+        return "true"

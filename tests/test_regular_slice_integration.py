@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from dymad.core.transform_pipeline import RegularSeriesTransformPipeline
+from dymad.core.transform_module import SeriesTransformPipeline
 from dymad.io import load_model
 from dymad.io.trajectory_manager import TrajectoryManager
 from dymad.transform import make_transform
@@ -63,17 +63,17 @@ def test_regular_checkpoint_prediction_uses_typed_series(monkeypatch, tmp_path: 
 
     payload = _build_checkpoint_payload()
     apply_events: list[int] = []
-    original_apply = RegularSeriesTransformPipeline.apply
+    original_forward = SeriesTransformPipeline.forward
 
-    def traced_apply(self, batch):
+    def traced_forward(self, batch):
         apply_events.append(len(batch))
-        return original_apply(self, batch)
+        return original_forward(self, batch)
 
     monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
     monkeypatch.setattr(
-        checkpoint_module.RegularSeriesTransformPipeline,
-        "apply",
-        traced_apply,
+        checkpoint_module.SeriesTransformPipeline,
+        "forward",
+        traced_forward,
     )
 
     _, predict_fn = load_model(DummyPredictModel, checkpoint_path)
@@ -109,17 +109,17 @@ def test_regular_slice_integration_touches_typed_transform_seam(monkeypatch, tmp
 
     payload = _build_checkpoint_payload()
     apply_events: list[int] = []
-    original_apply = RegularSeriesTransformPipeline.apply
+    original_forward = SeriesTransformPipeline.forward
 
-    def traced_apply(self, batch):
+    def traced_forward(self, batch):
         apply_events.append(len(batch))
-        return original_apply(self, batch)
+        return original_forward(self, batch)
 
     monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
     monkeypatch.setattr(
-        checkpoint_module.RegularSeriesTransformPipeline,
-        "apply",
-        traced_apply,
+        checkpoint_module.SeriesTransformPipeline,
+        "forward",
+        traced_forward,
     )
 
     manager = TrajectoryManager(

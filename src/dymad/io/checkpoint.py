@@ -5,12 +5,13 @@ import os
 import torch
 from typing import Callable, Dict, List, Optional, Union, Tuple, Type
 
+from dymad.core.transform_builder import build_transform_module
 from dymad.core.series import RegularSeriesBatch
-from dymad.core.transform_pipeline import RegularSeriesTransformPipeline
+from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline
 from dymad.io.data import DynData
 from dymad.io.series_adapter import SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManager
-from dymad.transform import Autoencoder, make_transform
+from dymad.transform import Autoencoder
 from dymad.utils.misc import load_config
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,23 @@ def _stack_optional_series(
         return stacked[0]
     return stacked.to(dtype=dtype, device=device)
 
+
+def _to_tensor_batch(
+    data,
+    *,
+    dtype: torch.dtype,
+    device: torch.device | str,
+) -> list[torch.Tensor]:
+    array = _ensure_regular_batch(data)
+    return [torch.as_tensor(item, dtype=dtype, device=device) for item in array]
+
+
+def _stack_batch(outputs: list[torch.Tensor]) -> torch.Tensor:
+    stacked = torch.stack(outputs)
+    if len(outputs) == 1:
+        return stacked[0]
+    return stacked
+
 def _load_model_legacy(model_class, checkpoint_path):
     """
     Load a model from a checkpoint file.
@@ -87,30 +105,44 @@ def _load_model_legacy(model_class, checkpoint_path):
     model.load_state_dict(chkpt['model_state_dict'])
 
     # Data transformations
-    _data_transform_x = make_transform(cfg.get('transform_x', None))
-    _data_transform_x.load_state_dict(md["transform_x_state"])
+    _data_transform_x = build_transform_module(cfg.get('transform_x', None), md["transform_x_state"])
 
     _has_u = md.get('transform_u_state', None) is not None
     if _has_u:
-        _data_transform_u = make_transform(cfg.get('transform_u', None))
-        _data_transform_u.load_state_dict(md["transform_u_state"])
+        _data_transform_u = build_transform_module(cfg.get('transform_u', None), md["transform_u_state"])
 
     _has_ew = cfg.get('transform_ew', None) is not None
     if _has_ew:
-        _data_transform_ew = make_transform(cfg.get('transform_ew', None))
-        _data_transform_ew.load_state_dict(md["transform_ew_state"])
+        _data_transform_ew = build_transform_module(cfg.get('transform_ew', None), md["transform_ew_state"])
 
     _has_ea = cfg.get('transform_ea', None) is not None
     if _has_ea:
-        _data_transform_ea = make_transform(cfg.get('transform_ea', None))
-        _data_transform_ea.load_state_dict(md["transform_ea_state"])
+        _data_transform_ea = build_transform_module(cfg.get('transform_ea', None), md["transform_ea_state"])
 
-    _regular_pipeline = RegularSeriesTransformPipeline.from_legacy(
-        state_transform=_data_transform_x,
-        control_transform=_data_transform_u if _has_u else None,
-    )
+    _regular_pipeline = SeriesTransformPipeline([
+        FieldTransformModule("state", _data_transform_x),
+        *([FieldTransformModule("control", _data_transform_u)] if _has_u else []),
+    ])
 
     # Data processing
+    def _proc_x0(x0, device):
+        transformed = _stack_batch(
+            _data_transform_x.transform_batch(_to_tensor_batch(x0, dtype=dtype, device=device))
+        )
+        if transformed.ndim == 2:
+            return transformed[0]
+        return transformed[:, 0, :]
+
+    _proc_u = lambda us, device: None
+    if _has_u:
+        def _proc_u(us, device):
+            transformed = _stack_batch(
+                _data_transform_u.transform_batch(_to_tensor_batch(us, dtype=dtype, device=device))
+            )
+            if transformed.ndim == 3:
+                return transformed[0]
+            return transformed
+
     def _build_regular_prediction_payload(x0, u, device):
         x_batch = _ensure_regular_batch(x0)
         u_batch = _ensure_regular_batch(u) if u is not None else None
@@ -126,19 +158,21 @@ def _load_model_legacy(model_class, checkpoint_path):
                     device=device,
                 )
             )
-        return _regular_pipeline.apply(RegularSeriesBatch.collate(items))
+        return _regular_pipeline(RegularSeriesBatch.collate(items))
 
     _proc_ew = lambda ew, device: None
     if _has_ew:
         def _proc_ew(ew, device):
             if isinstance(ew, list) and not isinstance(ew[0], list):
-                _tmp = _data_transform_ew.transform([_e.reshape(-1,1) for _e in ew])
-                return [torch.tensor(_e.reshape(-1), dtype=dtype, device=device) for _e in _tmp]
+                payloads = [torch.as_tensor(_e.reshape(-1, 1), dtype=dtype, device=device) for _e in ew]
+                _tmp = _data_transform_ew.transform_batch(payloads)
+                return [step.reshape(-1) for step in _tmp]
             elif isinstance(ew[0], list):
                 _ew = []
                 for e in ew:
-                    _tmp = _data_transform_ew.transform([_e.reshape(-1,1) for _e in e])
-                    _ew.append([torch.tensor(_e.reshape(-1), dtype=dtype, device=device) for _e in _tmp])
+                    payloads = [torch.as_tensor(_e.reshape(-1, 1), dtype=dtype, device=device) for _e in e]
+                    _tmp = _data_transform_ew.transform_batch(payloads)
+                    _ew.append([step.reshape(-1) for step in _tmp])
             else:
                 raise ValueError("Edge weights format not recognized.")
             return _ew
@@ -147,19 +181,25 @@ def _load_model_legacy(model_class, checkpoint_path):
     if _has_ea:
         def _proc_ea(ea, device):
             if isinstance(ea, list) and not isinstance(ea[0], list):
-                _tmp = _data_transform_ea.transform([_e for _e in ea])
-                return [torch.tensor(_e, dtype=dtype, device=device) for _e in _tmp]
+                payloads = [torch.as_tensor(_e, dtype=dtype, device=device) for _e in ea]
+                _tmp = _data_transform_ea.transform_batch(payloads)
+                return _tmp
             elif isinstance(ea[0], list):
                 _ea = []
                 for e in ea:
-                    _tmp = _data_transform_ea.transform([_e for _e in e])
-                    _ea.append([torch.tensor(_e, dtype=dtype, device=device) for _e in _tmp])
+                    payloads = [torch.as_tensor(_e, dtype=dtype, device=device) for _e in e]
+                    _tmp = _data_transform_ea.transform_batch(payloads)
+                    _ea.append(_tmp)
             else:
                 raise ValueError("Edge attributes format not recognized.")
             return _ea
 
     def _proc_prd(pred):
-        return _regular_pipeline.inverse_state_arrays(_ensure_regular_batch(pred))
+        outputs = _data_transform_x.inverse_batch(_to_tensor_batch(pred, dtype=dtype, device="cpu"))
+        result = _stack_batch(outputs).cpu().numpy()
+        if result.ndim == 3 and result.shape[0] == 1:
+            return result[0]
+        return result
 
     # Prediction in data space
     def predict_fn(x0, t, u=None, p=None, ei=None, ew=None, ea=None, device="cpu", ret_dat=False):

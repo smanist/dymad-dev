@@ -7,11 +7,10 @@ from typing import Optional, Union, Tuple, Dict, List
 
 from dymad.core.graph_series import GraphSeries, GraphSeriesBatch
 from dymad.core.series import RegularSeries, RegularSeriesBatch
+from dymad.core.transform_builder import build_legacy_transform, build_transform_module, export_transform_state
 from dymad.core.transform_module import FieldTransformModule, LegacyTransformModuleAdapter, SeriesTransformPipeline
-from dymad.core.transform_pipeline import RegularSeriesTransformPipeline
 from dymad.io.data import DynData
 from dymad.io.series_adapter import DynDataAdapter, SeriesAdapter
-from dymad.transform import make_transform
 from dymad.utils.graph import adj_to_edge
 
 logger = logging.getLogger("dymad.cv")
@@ -161,11 +160,11 @@ class TrajectoryManager:
 
     def _init_transforms(self) -> None:
         self._transform_fitted = False
-        self._data_transform_x = make_transform(self.metadata['config'].get('transform_x', None))
-        self._data_transform_y = make_transform(self.metadata['config'].get('transform_y', None))
-        self._data_transform_p = make_transform(self.metadata['config'].get('transform_p', None))
+        self._data_transform_x = build_legacy_transform(self.metadata['config'].get('transform_x', None))
+        self._data_transform_y = build_legacy_transform(self.metadata['config'].get('transform_y', None))
+        self._data_transform_p = build_legacy_transform(self.metadata['config'].get('transform_p', None))
         cfg_transform_u = self.metadata['config'].get('transform_u', None)
-        self._data_transform_u = make_transform(cfg_transform_u)
+        self._data_transform_u = build_legacy_transform(cfg_transform_u)
         if cfg_transform_u is None:
             self.metadata["delay"] = self._data_transform_x.delay
         else:
@@ -514,18 +513,41 @@ class TrajectoryManager:
             )
         return dataset
 
-    def _build_regular_transform_pipeline(self) -> RegularSeriesTransformPipeline:
-        return RegularSeriesTransformPipeline.from_legacy(
-            state_transform=self._data_transform_x,
-            control_transform=self._data_transform_u if self.metadata["n_control_features"] > 0 else None,
-            target_transform=self._data_transform_y if self.metadata["n_aux_features"] > 0 else None,
-            params_transform=self._data_transform_p if self.metadata["n_parameters"] > 0 else None,
-        )
+    def _build_regular_transform_pipeline(self) -> SeriesTransformPipeline:
+        cfg = self.metadata["config"]
+        return SeriesTransformPipeline([
+            FieldTransformModule(
+                "state",
+                build_transform_module(cfg.get("transform_x", None), self.metadata.get("transform_x_state")),
+            ),
+            *(
+                [FieldTransformModule(
+                    "control",
+                    build_transform_module(cfg.get("transform_u", None), self.metadata.get("transform_u_state")),
+                )]
+                if self.metadata["n_control_features"] > 0 else []
+            ),
+            *(
+                [FieldTransformModule(
+                    "target",
+                    build_transform_module(cfg.get("transform_y", None), self.metadata.get("transform_y_state")),
+                )]
+                if self.metadata["n_aux_features"] > 0 else []
+            ),
+            *(
+                [FieldTransformModule(
+                    "params",
+                    build_transform_module(cfg.get("transform_p", None), self.metadata.get("transform_p_state")),
+                    time_varying=False,
+                )]
+                if self.metadata["n_parameters"] > 0 else []
+            ),
+        ])
 
     def _transform_regular_series_by_index(self, indices: torch.Tensor) -> List[RegularSeries]:
         raw_dataset = self._create_raw_regular_series_by_index(indices)
         pipeline = self._build_regular_transform_pipeline()
-        transformed = pipeline.apply(RegularSeriesBatch.collate(raw_dataset))
+        transformed = pipeline(RegularSeriesBatch.collate(raw_dataset))
         return list(transformed)
 
     def _update_dataset_metadata(self):
@@ -630,12 +652,12 @@ class TrajectoryManagerGraph(TrajectoryManager):
 
     def _init_transforms(self) -> None:
         super()._init_transforms()
-        self._data_transform_ew = make_transform(self.metadata['config'].get('transform_ew', None))
+        self._data_transform_ew = build_legacy_transform(self.metadata['config'].get('transform_ew', None))
         if self._data_transform_ew.delay > 0:
             msg = "Edge weight transformations with delay embedding are not supported."
             logger.error(msg)
             raise ValueError(msg)
-        self._data_transform_ea = make_transform(self.metadata['config'].get('transform_ea', None))
+        self._data_transform_ea = build_legacy_transform(self.metadata['config'].get('transform_ea', None))
         if self._data_transform_ea.delay > 0:
             msg = "Edge attribute transformations with delay embedding are not supported."
             logger.error(msg)
@@ -770,12 +792,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
         if not self._transform_fitted:
             logger.info("Fitting graph transform pipeline on typed graph series.")
             pipeline.fit(raw_batch)
-            self.metadata["transform_x_state"] = self._data_transform_x.state_dict()
-            self.metadata["transform_y_state"] = self._data_transform_y.state_dict() if self.metadata["n_aux_features"] > 0 else None
-            self.metadata["transform_u_state"] = self._data_transform_u.state_dict() if self.metadata["n_control_features"] > 0 else None
-            self.metadata["transform_p_state"] = self._data_transform_p.state_dict() if self.metadata["n_parameters"] > 0 else None
-            self.metadata["transform_ew_state"] = self._data_transform_ew.state_dict() if self.metadata["n_edge_weights"] > 0 else None
-            self.metadata["transform_ea_state"] = self._data_transform_ea.state_dict() if self.metadata["n_edge_features"] > 0 else None
+            self._sync_legacy_graph_transforms_from_pipeline(pipeline)
         else:
             logger.info("Transformations already fitted. Skipping fitting step.")
 
@@ -844,70 +861,79 @@ class TrajectoryManagerGraph(TrajectoryManager):
         return dataset
 
     def _build_graph_transform_pipeline(self) -> SeriesTransformPipeline:
+        cfg = self.metadata["config"]
         return SeriesTransformPipeline([
-            FieldTransformModule("node_state", LegacyTransformModuleAdapter(
-                self._data_transform_x,
-                to_legacy=self._graph_nodes_to_legacy,
-                from_legacy=self._graph_nodes_from_legacy,
-            )),
+            FieldTransformModule(
+                "node_state",
+                build_transform_module(cfg.get("transform_x", None), self.metadata.get("transform_x_state")),
+            ),
             *(
-                [FieldTransformModule("control", LegacyTransformModuleAdapter(
-                    self._data_transform_u,
-                    to_legacy=self._graph_nodes_to_legacy,
-                    from_legacy=self._graph_nodes_from_legacy,
-                ))]
+                [FieldTransformModule(
+                    "control",
+                    build_transform_module(cfg.get("transform_u", None), self.metadata.get("transform_u_state")),
+                )]
                 if self.metadata["n_control_features"] > 0 else []
             ),
             *(
-                [FieldTransformModule("target", LegacyTransformModuleAdapter(
-                    self._data_transform_y,
-                    to_legacy=self._graph_nodes_to_legacy,
-                    from_legacy=self._graph_nodes_from_legacy,
-                ))]
+                [FieldTransformModule(
+                    "target",
+                    build_transform_module(cfg.get("transform_y", None), self.metadata.get("transform_y_state")),
+                )]
                 if self.metadata["n_aux_features"] > 0 else []
             ),
             *(
-                [FieldTransformModule("params", LegacyTransformModuleAdapter(
-                    self._data_transform_p,
-                    to_legacy=self._graph_params_to_legacy,
-                    from_legacy=self._graph_params_from_legacy,
-                ), time_varying=False)]
+                [FieldTransformModule(
+                    "params",
+                    build_transform_module(cfg.get("transform_p", None), self.metadata.get("transform_p_state")),
+                    time_varying=False,
+                )]
                 if self.metadata["n_parameters"] > 0 else []
             ),
             *(
-                [FieldTransformModule("edge_weight", LegacyTransformModuleAdapter(
-                    self._data_transform_ew,
-                    to_legacy=self._graph_edge_weight_to_legacy,
-                    from_legacy=self._graph_edge_weight_from_legacy,
-                ))]
+                [FieldTransformModule(
+                    "edge_weight",
+                    self._build_graph_edge_transform_module(
+                        cfg.get("transform_ew", None),
+                        self.metadata.get("transform_ew_state"),
+                        field="edge_weight",
+                    ),
+                )]
                 if self.metadata["n_edge_weights"] > 0 else []
             ),
             *(
-                [FieldTransformModule("edge_attr", LegacyTransformModuleAdapter(
-                    self._data_transform_ea,
-                    to_legacy=self._graph_edge_attr_to_legacy,
-                    from_legacy=self._graph_edge_attr_from_legacy,
-                ))]
+                [FieldTransformModule(
+                    "edge_attr",
+                    self._build_graph_edge_transform_module(
+                        cfg.get("transform_ea", None),
+                        self.metadata.get("transform_ea_state"),
+                        field="edge_attr",
+                    ),
+                )]
                 if self.metadata["n_edge_features"] > 0 else []
             ),
         ])
 
-    @staticmethod
-    def _graph_nodes_to_legacy(data: torch.Tensor) -> list[np.ndarray]:
-        array = data.detach().cpu().numpy()
-        return [array[:, node_index, :] for node_index in range(array.shape[1])]
-
-    @staticmethod
-    def _graph_nodes_from_legacy(data, *, reference: torch.Tensor) -> torch.Tensor:
-        return torch.as_tensor(np.stack(data, axis=1), dtype=reference.dtype, device=reference.device)
-
-    @staticmethod
-    def _graph_params_to_legacy(data: torch.Tensor) -> np.ndarray:
-        return data.detach().cpu().numpy()
-
-    @staticmethod
-    def _graph_params_from_legacy(data, *, reference: torch.Tensor) -> torch.Tensor:
-        return torch.as_tensor(np.asarray(data), dtype=reference.dtype, device=reference.device)
+    def _build_graph_edge_transform_module(self, config, state_dict, *, field: str):
+        legacy_transform = build_legacy_transform(config)
+        if state_dict is not None:
+            legacy_transform.load_state_dict(state_dict)
+        if field == "edge_weight":
+            return LegacyTransformModuleAdapter(
+                legacy_transform,
+                to_legacy=self._graph_edge_weight_to_legacy,
+                from_legacy=self._graph_edge_weight_from_legacy,
+                invertibility="approximate",
+                supports_gradients="false",
+            )
+        if field == "edge_attr":
+            return LegacyTransformModuleAdapter(
+                legacy_transform,
+                to_legacy=self._graph_edge_attr_to_legacy,
+                from_legacy=self._graph_edge_attr_from_legacy,
+                invertibility="approximate",
+                supports_gradients="false",
+            )
+        raise ValueError(f"Unsupported graph edge field: {field}")
 
     @staticmethod
     def _graph_edge_weight_to_legacy(data: torch.Tensor) -> list[np.ndarray]:
@@ -916,15 +942,52 @@ class TrajectoryManagerGraph(TrajectoryManager):
 
     @staticmethod
     def _graph_edge_weight_from_legacy(data, *, reference: torch.Tensor) -> torch.Tensor:
-        return torch.as_tensor(np.stack([np.asarray(step).reshape(-1) for step in data], axis=0), dtype=reference.dtype, device=reference.device)
+        stacked = np.stack([step.reshape(-1) for step in data], axis=0)
+        return torch.as_tensor(stacked, dtype=reference.dtype, device=reference.device)
 
     @staticmethod
     def _graph_edge_attr_to_legacy(data: torch.Tensor) -> list[np.ndarray]:
-        return [step for step in data.detach().cpu().numpy()]
+        array = data.detach().cpu().numpy()
+        return [step for step in array]
 
     @staticmethod
     def _graph_edge_attr_from_legacy(data, *, reference: torch.Tensor) -> torch.Tensor:
-        return torch.as_tensor(np.stack([np.asarray(step) for step in data], axis=0), dtype=reference.dtype, device=reference.device)
+        stacked = np.stack(data, axis=0)
+        return torch.as_tensor(stacked, dtype=reference.dtype, device=reference.device)
+
+    def _sync_legacy_graph_transforms_from_pipeline(self, pipeline: SeriesTransformPipeline) -> None:
+        stage_by_field = {stage.field: stage.transform for stage in pipeline.stages}
+
+        def _sync(field, legacy_attr, metadata_key):
+            module = stage_by_field.get(field)
+            if module is None:
+                self.metadata[metadata_key] = None
+                return
+            state = export_transform_state(module)
+            getattr(self, legacy_attr).load_state_dict(state)
+            self.metadata[metadata_key] = state
+
+        _sync("node_state", "_data_transform_x", "transform_x_state")
+        if self.metadata["n_aux_features"] > 0:
+            _sync("target", "_data_transform_y", "transform_y_state")
+        else:
+            self.metadata["transform_y_state"] = None
+        if self.metadata["n_control_features"] > 0:
+            _sync("control", "_data_transform_u", "transform_u_state")
+        else:
+            self.metadata["transform_u_state"] = None
+        if self.metadata["n_parameters"] > 0:
+            _sync("params", "_data_transform_p", "transform_p_state")
+        else:
+            self.metadata["transform_p_state"] = None
+        if self.metadata["n_edge_weights"] > 0:
+            _sync("edge_weight", "_data_transform_ew", "transform_ew_state")
+        else:
+            self.metadata["transform_ew_state"] = None
+        if self.metadata["n_edge_features"] > 0:
+            _sync("edge_attr", "_data_transform_ea", "transform_ea_state")
+        else:
+            self.metadata["transform_ea_state"] = None
 
     def _graph_data_reshape(self, data: np.ndarray, forward: bool) -> np.ndarray:
         """
