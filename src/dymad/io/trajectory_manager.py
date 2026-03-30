@@ -5,6 +5,7 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Optional, Union, Tuple, Dict, List
 
+from dymad.core.graph_series import GraphSeries
 from dymad.core.series import RegularSeries, RegularSeriesBatch
 from dymad.core.transform_pipeline import RegularSeriesTransformPipeline
 from dymad.io.data import DynData
@@ -812,73 +813,106 @@ class TrajectoryManagerGraph(TrajectoryManager):
         self._update_dataset_metadata()
 
     def _transform_by_index(self, indices: torch.Tensor) -> List[DynData]:
-        # Process X first
-        # If the common delay is larger (larger delay in u), we trim out the first few steps.
-        # This way the latest x and u are aligned.
-        tmp = [self._graph_data_reshape(self.x[i], forward=True) for i in indices]
-        _X = [np.array(self._data_transform_x.transform(_t)) for _t in tmp]
-        _d = self.metadata["delay"] - self._data_transform_x.delay
-        if _d > 0:
-            _X = [x[:, _d:] for x in _X]
+        graph_dataset = self._transform_graph_series_by_index(indices)
+        return [DynDataAdapter.from_graph_series(series) for series in graph_dataset]
 
-        _T = [self.t[i] for i in indices]
+    def create_graph_series_dataset(self, indices: torch.Tensor | List[int] | None = None) -> List[GraphSeries]:
+        """Expose the typed graph-series seam for graph trajectory preprocessing."""
+        if indices is None:
+            if self.data_index is None:
+                raise ValueError("data_index must be set before creating a graph-series dataset")
+            indices = self.data_index
+        if isinstance(indices, list):
+            indices = torch.tensor(indices, dtype=torch.long)
+        if getattr(self, "dataset", None) is not None and self.data_index is not None:
+            position_by_index = {
+                int(raw_index): position
+                for position, raw_index in enumerate(self.data_index.tolist())
+            }
+            if all(int(index) in position_by_index for index in indices.tolist()):
+                return [
+                    SeriesAdapter.from_dyndata(self.dataset[position_by_index[int(index)]])
+                    for index in indices
+                ]
+        return self._transform_graph_series_by_index(indices)
+
+    def _transform_graph_series_by_index(self, indices: torch.Tensor) -> List[GraphSeries]:
+        # Process X first. If the common delay is larger (larger delay in u), trim the
+        # state payload so the latest x and u remain aligned.
+        tmp = [self._graph_data_reshape(self.x[i], forward=True) for i in indices]
+        state_out = [np.array(self._data_transform_x.transform(payload)) for payload in tmp]
+        trim = self.metadata["delay"] - self._data_transform_x.delay
+        if trim > 0:
+            state_out = [payload[:, trim:] for payload in state_out]
+
+        time_out = [self.t[i] for i in indices]
         if self.metadata["delay"] > 0:
-            _T = [t[self.metadata["delay"]:] for t in _T]
+            time_out = [time[self.metadata["delay"]:] for time in time_out]
 
         if self.metadata["n_aux_features"] > 0:
             tmp = [self._graph_data_reshape(self.y[i], forward=True) for i in indices]
-            _Y = [np.array(self._data_transform_y.transform(_t)) for _t in tmp]
-            _d = self.metadata["delay"]
-            if _d > 0:
-                _Y = [y[:, _d:] for y in _Y]
+            target_out = [np.array(self._data_transform_y.transform(payload)) for payload in tmp]
+            if self.metadata["delay"] > 0:
+                target_out = [payload[:, self.metadata["delay"] :] for payload in target_out]
         else:
-            _Y = [None for _ in _X]
+            target_out = [None for _ in state_out]
 
         if self.metadata["n_control_features"] > 0:
             tmp = [self._graph_data_reshape(self.u[i], forward=True) for i in indices]
-            _U = [np.array(self._data_transform_u.transform(_t)) for _t in tmp]
-            _d = self.metadata["delay"] - self._data_transform_u.delay
-            if _d > 0:
-                _U = [u[:, _d:] for u in _U]
+            control_out = [np.array(self._data_transform_u.transform(payload)) for payload in tmp]
+            trim = self.metadata["delay"] - self._data_transform_u.delay
+            if trim > 0:
+                control_out = [payload[:, trim:] for payload in control_out]
         else:
-            _U = [None for _ in _X]
+            control_out = [None for _ in state_out]
 
         if self.metadata["n_parameters"] > 0:
             tmp = [self._graph_data_reshape(self.p[i][..., None, :], forward=True) for i in indices]
-            _P = [self._data_transform_p.transform(_t) for _t in tmp]
+            params_out = [np.array(self._data_transform_p.transform(payload)) for payload in tmp]
         else:
-            _P = [None for _ in _X]
+            params_out = [None for _ in state_out]
 
-        # Graph data is not delayed, just truncate out the initial steps.
-        _delay = self.metadata["delay"]
-        _Ei = [self.ei[i][_delay:] for i in indices]
+        delay = self.metadata["delay"]
+        edge_index_out = [self.ei[i][delay:] for i in indices]
 
         if self.metadata["n_edge_weights"] > 0:
-            _Ew = []
-            for i in indices:
-                _tmp = self._data_transform_ew.transform([e.reshape(-1,1) for e in self.ew[i][_delay:]])
-                _Ew.append([_t.reshape(-1) for _t in _tmp])
+            edge_weight_out = []
+            for index in indices:
+                transformed = self._data_transform_ew.transform([item.reshape(-1, 1) for item in self.ew[index][delay:]])
+                edge_weight_out.append([item.reshape(-1) for item in transformed])
         else:
-            _Ew = [None for _ in _X]
+            edge_weight_out = [None for _ in state_out]
 
         if self.metadata["n_edge_features"] > 0:
-            _Ea = [self._data_transform_ea.transform(self.ea[i][_delay:]) for i in indices]
+            edge_attr_out = [self._data_transform_ea.transform(self.ea[i][delay:]) for i in indices]
         else:
-            _Ea = [None for _ in _X]
+            edge_attr_out = [None for _ in state_out]
 
-        # Lastly assemble the dataset.
         dataset = []
-        for _t, _x, _y, _u, _p, _ei, _ew, _ea in zip(_T, _X, _Y, _U, _P, _Ei, _Ew, _Ea):
-            dataset.append(DynData(
-                t=torch.tensor(_t, dtype=self.dtype, device=self.device),
-                x=torch.tensor(self._graph_data_reshape(_x, forward=False), dtype=self.dtype, device=self.device),
-                y=torch.tensor(self._graph_data_reshape(_y, forward=False), dtype=self.dtype, device=self.device) if _y is not None else None,
-                u=torch.tensor(self._graph_data_reshape(_u, forward=False), dtype=self.dtype, device=self.device) if _u is not None else None,
-                p=torch.tensor(self._graph_data_reshape(_p, forward=False).squeeze(-2), dtype=self.dtype, device=self.device) if _p is not None else None,
-                ei=[torch.tensor(_e, dtype=torch.long) for _e in _ei],
-                ew=[torch.tensor(_e, dtype=self.dtype) for _e in _ew] if _ew is not None else None,
-                ea=[torch.tensor(_a, dtype=self.dtype) for _a in _ea] if _ea is not None else None,
-            ))
+        for time, state, target, control, params, edge_index, edge_weight, edge_attr in zip(
+            time_out,
+            state_out,
+            target_out,
+            control_out,
+            params_out,
+            edge_index_out,
+            edge_weight_out,
+            edge_attr_out,
+        ):
+            dataset.append(
+                SeriesAdapter.from_graph_arrays(
+                    time=time,
+                    node_state=np.swapaxes(state, 0, 1),
+                    control=np.swapaxes(control, 0, 1) if control is not None else None,
+                    target=np.swapaxes(target, 0, 1) if target is not None else None,
+                    params=params.squeeze(1) if params is not None else None,
+                    edge_index=edge_index,
+                    edge_weight=edge_weight,
+                    edge_attr=edge_attr,
+                    dtype=self.dtype,
+                    device=self.device,
+                )
+            )
         return dataset
 
     def _graph_data_reshape(self, data: np.ndarray, forward: bool) -> np.ndarray:
