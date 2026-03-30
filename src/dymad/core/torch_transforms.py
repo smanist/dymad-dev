@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import product
 from typing import Sequence
 
 import torch
@@ -36,6 +37,168 @@ class AddOneTransform(TransformModule):
 
     def inverse(self, data: torch.Tensor) -> torch.Tensor:
         return data[..., :-1]
+
+
+def _cross_features(blocks: Sequence[torch.Tensor]) -> torch.Tensor:
+    result = blocks[0]
+    for block in blocks[1:]:
+        result = (result.unsqueeze(-1) * block.unsqueeze(-2)).reshape(*result.shape[:-1], -1)
+    return result
+
+
+def _linear_index(sizes: Sequence[int], picks: Sequence[int]) -> int:
+    idx = 0
+    stride = 1
+    for size, pick in zip(reversed(sizes), reversed(picks)):
+        idx += pick * stride
+        stride *= size
+    return idx
+
+
+class LiftTransform(TransformModule):
+    def __init__(self, fobs=None, finv=None, **kwargs) -> None:
+        super().__init__()
+        self.fobs = fobs
+        self.finv = finv
+        self.kwargs = kwargs
+        self._feature_sizes: list[int] | None = None
+
+    def fit(self, data: Sequence[torch.Tensor]) -> "LiftTransform":
+        if not data:
+            return self
+        self.input_dim = int(data[0].shape[-1])
+        sample = self.forward(data[0])
+        self.output_dim = int(sample.shape[-1])
+        self._feature_sizes = self._infer_feature_sizes()
+        return self
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        if self.fobs == "poly":
+            return self._forward_poly(data)
+        if self.fobs == "mixed":
+            return self._forward_mixed(data)
+        raise ValueError("LiftTransform currently supports native fobs='poly' or fobs='mixed' only.")
+
+    def inverse(self, data: torch.Tensor) -> torch.Tensor:
+        if self._feature_sizes is None:
+            raise ValueError("LiftTransform parameters are not initialized. Call fit(...) first.")
+        if self.fobs == "poly":
+            return self._inverse_poly(data)
+        if self.fobs == "mixed":
+            return self._inverse_mixed(data)
+        raise ValueError("LiftTransform currently supports native inverse only for fobs='poly' or fobs='mixed'.")
+
+    def _infer_feature_sizes(self) -> list[int]:
+        if self.fobs == "poly":
+            ks = list(self.kwargs["Ks"])
+            if len(ks) != self.input_dim:
+                raise ValueError("LiftTransform poly Ks must align with input dimension.")
+            return ks
+        if self.fobs == "mixed":
+            opts = self.kwargs["opts"]
+            sizes = [0 for _ in range(self.input_dim)]
+            for index, kind, order in opts:
+                if kind == "m":
+                    sizes[index] = int(order)
+                elif kind == "f":
+                    sizes[index] = 2 * int(order) + 1
+                elif kind == "p":
+                    sizes[index[0]] = int(order[0])
+                    sizes[index[1]] = 2 * int(order[1]) + 1
+                else:
+                    raise ValueError(f"Unknown mixed lift kind: {kind}")
+            return sizes
+        raise ValueError("Unsupported native lift configuration.")
+
+    def _forward_poly(self, data: torch.Tensor) -> torch.Tensor:
+        ks = list(self.kwargs["Ks"])
+        blocks = [
+            torch.stack([data[..., dim] ** order for order in range(int(ks[dim]))], dim=-1)
+            for dim in range(data.shape[-1])
+        ]
+        return _cross_features(blocks)
+
+    def _forward_mixed(self, data: torch.Tensor) -> torch.Tensor:
+        opts = self.kwargs["opts"]
+        feature_blocks: list[torch.Tensor | None] = [None for _ in range(data.shape[-1])]
+        used = set()
+        for index, kind, order in opts:
+            if kind == "m":
+                feature_blocks[index] = torch.stack(
+                    [data[..., index] ** degree for degree in range(int(order))],
+                    dim=-1,
+                )
+                used.add(index)
+            elif kind == "f":
+                value = data[..., index]
+                parts = [torch.ones_like(value)]
+                for degree in range(1, int(order) + 1):
+                    parts.append(torch.cos(degree * value))
+                    parts.append(torch.sin(degree * value))
+                feature_blocks[index] = torch.stack(parts, dim=-1)
+                used.add(index)
+            elif kind == "p":
+                first, second = index
+                radius = torch.sqrt(data[..., first] ** 2 + data[..., second] ** 2)
+                theta = torch.atan2(data[..., second], data[..., first])
+                feature_blocks[first] = torch.stack(
+                    [radius ** degree for degree in range(int(order[0]))],
+                    dim=-1,
+                )
+                parts = [torch.ones_like(theta)]
+                for degree in range(1, int(order[1]) + 1):
+                    parts.append(torch.cos(degree * theta))
+                    parts.append(torch.sin(degree * theta))
+                feature_blocks[second] = torch.stack(parts, dim=-1)
+                used.update(index)
+            else:
+                raise ValueError(f"Unknown mixed lift kind: {kind}")
+        if used != set(range(data.shape[-1])):
+            raise ValueError("LiftTransform mixed options must cover every input dimension exactly once.")
+        return _cross_features(feature_blocks)  # type: ignore[arg-type]
+
+    def _inverse_poly(self, data: torch.Tensor) -> torch.Tensor:
+        assert self._feature_sizes is not None
+        outputs = []
+        for dim in range(len(self._feature_sizes)):
+            picks = [0 for _ in self._feature_sizes]
+            picks[dim] = 1
+            outputs.append(data[..., _linear_index(self._feature_sizes, picks)])
+        return torch.stack(outputs, dim=-1)
+
+    def _inverse_mixed(self, data: torch.Tensor) -> torch.Tensor:
+        assert self._feature_sizes is not None
+        result = torch.zeros(*data.shape[:-1], len(self._feature_sizes), dtype=data.dtype, device=data.device)
+        for index, kind, order in self.kwargs["opts"]:
+            if kind == "m":
+                picks = [0 for _ in self._feature_sizes]
+                picks[index] = 1
+                result[..., index] = data[..., _linear_index(self._feature_sizes, picks)]
+            elif kind == "f":
+                cos_picks = [0 for _ in self._feature_sizes]
+                sin_picks = [0 for _ in self._feature_sizes]
+                cos_picks[index] = 1
+                sin_picks[index] = 2
+                result[..., index] = torch.atan2(
+                    data[..., _linear_index(self._feature_sizes, sin_picks)],
+                    data[..., _linear_index(self._feature_sizes, cos_picks)],
+                )
+            elif kind == "p":
+                first, second = index
+                r_picks = [0 for _ in self._feature_sizes]
+                cos_picks = [0 for _ in self._feature_sizes]
+                sin_picks = [0 for _ in self._feature_sizes]
+                r_picks[first] = 1
+                cos_picks[second] = 1
+                sin_picks[second] = 2
+                radius = data[..., _linear_index(self._feature_sizes, r_picks)]
+                cos_theta = data[..., _linear_index(self._feature_sizes, cos_picks)]
+                sin_theta = data[..., _linear_index(self._feature_sizes, sin_picks)]
+                result[..., first] = radius * cos_theta
+                result[..., second] = radius * sin_theta
+            else:
+                raise ValueError(f"Unknown mixed lift kind: {kind}")
+        return result
 
 
 class ScalerTransform(TransformModule):

@@ -6,11 +6,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from typing import Iterable, Literal, Sequence
 
+import numpy as np
 import torch
 from torch import nn
 
 from dymad.core.graph_series import GraphSeries, GraphSeriesBatch
 from dymad.core.series import RegularSeries, RegularSeriesBatch
+from dymad.transform.base import Transform
 
 FieldName = Literal[
     "state",
@@ -92,6 +94,67 @@ class TransformModule(nn.Module, ABC):
             invertibility=self.invertibility,
             supports_gradients=self.supports_gradients,
         )
+
+
+class LegacyTransformModuleAdapter(TransformModule):
+    """Torch-facing adapter over a fitted legacy NumPy-list transform."""
+
+    def __init__(
+        self,
+        legacy_transform: Transform,
+        *,
+        to_legacy=None,
+        from_legacy=None,
+        invertibility: Invertibility = "exact",
+        supports_gradients: GradientSupport = "false",
+    ) -> None:
+        super().__init__(
+            delay=int(getattr(legacy_transform, "delay", 0)),
+            invertibility=invertibility,
+            supports_gradients=supports_gradients,
+        )
+        self.legacy_transform = legacy_transform
+        self._to_legacy = to_legacy or self._tensor_to_numpy
+        self._from_legacy = from_legacy or self._numpy_to_tensor
+
+    def fit(self, data: Sequence[torch.Tensor]) -> "LegacyTransformModuleAdapter":
+        payloads = []
+        for item in data:
+            converted = self._to_legacy(item)
+            if isinstance(converted, list):
+                payloads.extend(converted)
+            else:
+                payloads.append(converted)
+        if payloads:
+            self.legacy_transform.fit(payloads)
+            self.input_dim = int(getattr(self.legacy_transform, "_inp_dim", 0) or 0) or None
+            self.output_dim = int(getattr(self.legacy_transform, "_out_dim", 0) or 0) or None
+            self.delay = int(getattr(self.legacy_transform, "delay", 0))
+        return self
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        converted = self._to_legacy(data)
+        if isinstance(converted, list):
+            output = self.legacy_transform.transform(converted)
+        else:
+            output = self.legacy_transform.transform([converted])[0]
+        return self._from_legacy(output, reference=data)
+
+    def inverse(self, data: torch.Tensor) -> torch.Tensor:
+        converted = self._to_legacy(data)
+        if isinstance(converted, list):
+            output = self.legacy_transform.inverse_transform(converted)
+        else:
+            output = self.legacy_transform.inverse_transform([converted])[0]
+        return self._from_legacy(output, reference=data)
+
+    @staticmethod
+    def _tensor_to_numpy(data: torch.Tensor) -> np.ndarray:
+        return data.detach().cpu().numpy()
+
+    @staticmethod
+    def _numpy_to_tensor(data, *, reference: torch.Tensor) -> torch.Tensor:
+        return torch.as_tensor(data, dtype=reference.dtype, device=reference.device)
 
 
 class FieldTransformModule(nn.Module):

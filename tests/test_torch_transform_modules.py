@@ -11,6 +11,7 @@ from dymad.core import (
     FixedGraphSeries,
     GraphSeriesBatch,
     IdentityTransform,
+    LiftTransform,
     RegularSeries,
     RegularSeriesBatch,
     ScalerTransform,
@@ -120,3 +121,54 @@ def test_series_transform_pipeline_handles_graph_node_state() -> None:
     assert transformed[0].node_state.shape == (3, 3, 4)
     assert transformed[0].edge_weight.shape == (3, 2)
     assert transformed[0].meta["delay"] == 1
+
+
+def test_lift_transform_poly_matches_legacy_behavior() -> None:
+    payload = np.array(
+        [
+            [1.0, 2.0, -0.1],
+            [1.1, 3.0, -0.2],
+            [1.2, 4.0, -0.3],
+            [1.3, 5.0, -0.4],
+        ],
+        dtype=float,
+    )
+    legacy = make_transform({"type": "Lift", "fobs": "poly", "Ks": [3, 2, 4]})
+    legacy.fit([payload])
+    expected = legacy.transform([payload])[0]
+
+    transform = LiftTransform(fobs="poly", Ks=[3, 2, 4])
+    transform.fit([torch.as_tensor(payload, dtype=torch.float32)])
+    actual = transform(torch.as_tensor(payload, dtype=torch.float32))
+
+    torch.testing.assert_close(actual, torch.as_tensor(expected, dtype=actual.dtype))
+    recovered = transform.inverse(actual)
+    torch.testing.assert_close(recovered, torch.as_tensor(payload, dtype=actual.dtype))
+
+
+def test_lift_transform_mixed_matches_legacy_behavior() -> None:
+    payload = np.array(
+        [
+            [1.0, 0.4, -0.1, 2.0],
+            [1.1, 0.3, -0.2, 2.1],
+            [1.2, -0.2, -0.3, 2.2],
+            [1.3, -0.1, -0.4, 2.3],
+        ],
+        dtype=float,
+    )
+    opts = [
+        (0, "m", 5),
+        (2, "f", 2),
+        ([3, 1], "p", [4, 3]),
+    ]
+    legacy = make_transform({"type": "Lift", "fobs": "mixed", "opts": opts})
+    legacy.fit([payload])
+    expected = legacy.transform([payload])[0]
+
+    transform = LiftTransform(fobs="mixed", opts=opts)
+    transform.fit([torch.as_tensor(payload, dtype=torch.float32)])
+    actual = transform(torch.as_tensor(payload, dtype=torch.float32))
+
+    torch.testing.assert_close(actual, torch.as_tensor(expected, dtype=actual.dtype))
+    recovered = transform.inverse(actual)
+    torch.testing.assert_close(recovered, torch.as_tensor(payload, dtype=actual.dtype))

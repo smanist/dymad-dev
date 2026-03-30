@@ -7,9 +7,16 @@ from dymad.core.torch_transforms import (
     ComposeTransform,
     DelayEmbeddingTransform,
     IdentityTransform,
+    LiftTransform,
     ScalerTransform,
 )
-from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline, TransformMetadata, TransformModule
+from dymad.core.transform_module import (
+    FieldTransformModule,
+    LegacyTransformModuleAdapter,
+    SeriesTransformPipeline,
+    TransformMetadata,
+    TransformModule,
+)
 from dymad.core.transform_pipeline import FieldTransform, RegularSeriesTransformPipeline
 
 __all__ = [
@@ -21,6 +28,8 @@ __all__ = [
     "GraphSeries",
     "GraphSeriesBatch",
     "IdentityTransform",
+    "LegacyTransformModuleAdapter",
+    "LiftTransform",
     "RegularSeries",
     "RegularSeriesBatch",
     "RegularSeriesTransformPipeline",
