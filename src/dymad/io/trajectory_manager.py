@@ -5,7 +5,8 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Optional, Union, Tuple, Dict, List
 
-from dymad.core.series import RegularSeries
+from dymad.core.series import RegularSeries, RegularSeriesBatch
+from dymad.core.transform_pipeline import RegularSeriesTransformPipeline
 from dymad.io.data import DynData
 from dymad.io.series_adapter import DynDataAdapter, SeriesAdapter
 from dymad.transform import make_transform
@@ -480,70 +481,50 @@ class TrajectoryManager:
             indices = self.data_index
         if isinstance(indices, list):
             indices = torch.tensor(indices, dtype=torch.long)
+        if getattr(self, "dataset", None) is not None and self.data_index is not None:
+            position_by_index = {
+                int(raw_index): position
+                for position, raw_index in enumerate(self.data_index.tolist())
+            }
+            if all(int(index) in position_by_index for index in indices.tolist()):
+                return [
+                    SeriesAdapter.from_dyndata(self.dataset[position_by_index[int(index)]])
+                    for index in indices
+                ]
         return self._transform_regular_series_by_index(indices)
 
-    def _collect_regular_payload_by_index(
-        self,
-        indices: torch.Tensor,
-    ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray | None], List[np.ndarray | None], List[np.ndarray | None]]:
-        # Process X first
-        # If the common delay is larger (larger delay in u), we trim out the first few steps.
-        # This way the latest x and u are aligned.
-        _X = self._data_transform_x.transform([self.x[i] for i in indices])
-        _d = self.metadata["delay"] - self._data_transform_x.delay
-        if _d > 0:
-            _X = [x[_d:] for x in _X]
-
-        _T = [self.t[i] for i in indices]
-        if self.metadata["delay"] > 0:
-            _T = [t[self.metadata["delay"]:] for t in _T]
-
-        if self.metadata["n_aux_features"] > 0:
-            # Process Y only if there are auxiliary features.
-            # Same idea as for X, we trim out the first few steps if the delay in x is larger.
-            _Y = self._data_transform_y.transform([self.y[i] for i in indices])
-            _d = self.metadata["delay"] - self._data_transform_y.delay
-            if _d > 0:
-                _Y = [y[_d:] for y in _Y]
-        else:
-            _Y = [None for _ in _X]
-
-        if self.metadata["n_control_features"] > 0:
-            # Process U only if there are control features.
-            # Same idea as for X, we trim out the first few steps if the delay in x is larger.
-            _U = self._data_transform_u.transform([self.u[i] for i in indices])
-            _d = self.metadata["delay"] - self._data_transform_u.delay
-            if _d > 0:
-                _U = [u[_d:] for u in _U]
-        else:
-            _U = [None for _ in _X]
-
-        if self.metadata["n_parameters"] > 0:
-            # Nothing to delay for parameters, they are time-invariant.
-            _P = self._data_transform_p.transform([self.p[i] for i in indices])
-        else:
-            _P = [None for _ in _X]
-
-        return _T, _X, _Y, _U, _P
-
-    def _transform_regular_series_by_index(self, indices: torch.Tensor) -> List[RegularSeries]:
-        _T, _X, _Y, _U, _P = self._collect_regular_payload_by_index(indices)
-
+    def _create_raw_regular_series_by_index(self, indices: torch.Tensor) -> List[RegularSeries]:
         dataset = []
-        for _t, _x, _y, _u, _p in zip(_T, _X, _Y, _U, _P):
+        for index in indices:
+            target = self.y[index] if self.metadata["n_aux_features"] > 0 else None
+            control = self.u[index] if self.metadata["n_control_features"] > 0 else None
+            params = self.p[index] if self.metadata["n_parameters"] > 0 else None
             dataset.append(
                 SeriesAdapter.from_regular_arrays(
-                    _t,
-                    _x,
-                    target=_y,
-                    control=_u,
-                    params=_p,
+                    self.t[index],
+                    self.x[index],
+                    target=target,
+                    control=control,
+                    params=params,
                     dtype=self.dtype,
                     device=self.device,
-                    meta={"delay": self.metadata["delay"]},
                 )
             )
         return dataset
+
+    def _build_regular_transform_pipeline(self) -> RegularSeriesTransformPipeline:
+        return RegularSeriesTransformPipeline.from_legacy(
+            state_transform=self._data_transform_x,
+            control_transform=self._data_transform_u if self.metadata["n_control_features"] > 0 else None,
+            target_transform=self._data_transform_y if self.metadata["n_aux_features"] > 0 else None,
+            params_transform=self._data_transform_p if self.metadata["n_parameters"] > 0 else None,
+        )
+
+    def _transform_regular_series_by_index(self, indices: torch.Tensor) -> List[RegularSeries]:
+        raw_dataset = self._create_raw_regular_series_by_index(indices)
+        pipeline = self._build_regular_transform_pipeline()
+        transformed = pipeline.apply(RegularSeriesBatch.collate(raw_dataset))
+        return list(transformed)
 
     def _update_dataset_metadata(self):
         # Bookkeeping metadata for the dataset.

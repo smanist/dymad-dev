@@ -5,7 +5,10 @@ import os
 import torch
 from typing import Callable, Dict, List, Optional, Union, Tuple, Type
 
+from dymad.core.series import RegularSeriesBatch
+from dymad.core.transform_pipeline import RegularSeriesTransformPipeline
 from dymad.io.data import DynData
+from dymad.io.series_adapter import SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManager
 from dymad.transform import Autoencoder, make_transform
 from dymad.utils.misc import load_config
@@ -28,6 +31,29 @@ def graph_data_prep(data, nnd):
     tmp = np.swapaxes(tmp, -3, -2)             # [..., n_nodes, T, n_states_per_node]  Needed for time delay
     tmp = tmp.reshape(-1, *tmp.shape[-2:])     # [all_nodes, T, n_states_per_node]
     return tmp
+
+
+def _ensure_regular_batch(data):
+    array = np.asarray(data)
+    if array.ndim == 1:
+        return np.expand_dims(array, axis=(0, 1))
+    if array.ndim == 2:
+        return np.expand_dims(array, axis=0)
+    return array
+
+
+def _stack_optional_series(
+    values: list[torch.Tensor | None],
+    *,
+    dtype: torch.dtype,
+    device: torch.device | str,
+):
+    if not values or all(value is None for value in values):
+        return None
+    stacked = torch.stack([value for value in values if value is not None])
+    if len(values) == 1:
+        return stacked[0]
+    return stacked.to(dtype=dtype, device=device)
 
 def _load_model_legacy(model_class, checkpoint_path):
     """
@@ -79,21 +105,28 @@ def _load_model_legacy(model_class, checkpoint_path):
         _data_transform_ea = make_transform(cfg.get('transform_ea', None))
         _data_transform_ea.load_state_dict(md["transform_ea_state"])
 
-    # Data processing
-    def _proc_x0(x0, device):
-        _x0 = np.array(_data_transform_x.transform(_atleast_3d(x0)))[:,0,:]
-        if len(_x0) == 1:
-            _x0 = _x0[0]
-        _x0 = torch.tensor(_x0, dtype=dtype, device=device)
-        return _x0
+    _regular_pipeline = RegularSeriesTransformPipeline.from_legacy(
+        state_transform=_data_transform_x,
+        control_transform=_data_transform_u if _has_u else None,
+    )
 
-    _proc_u = lambda us, device: None
-    if _has_u:
-        def _proc_u(us, device):
-            _u = np.array(_data_transform_u.transform(_atleast_3d(us)))
-            if len(_u) == 1:
-                _u = _u[0]
-            return torch.tensor(_u, dtype=dtype, device=device)
+    # Data processing
+    def _build_regular_prediction_payload(x0, u, device):
+        x_batch = _ensure_regular_batch(x0)
+        u_batch = _ensure_regular_batch(u) if u is not None else None
+        items = []
+        for index in range(x_batch.shape[0]):
+            control = None if u_batch is None else u_batch[index]
+            items.append(
+                SeriesAdapter.from_regular_arrays(
+                    np.arange(x_batch.shape[1], dtype=np.int64),
+                    x_batch[index],
+                    control=control,
+                    dtype=dtype,
+                    device=device,
+                )
+            )
+        return _regular_pipeline.apply(RegularSeriesBatch.collate(items))
 
     _proc_ew = lambda ew, device: None
     if _has_ew:
@@ -126,10 +159,7 @@ def _load_model_legacy(model_class, checkpoint_path):
             return _ea
 
     def _proc_prd(pred):
-        tmp = np.array(_data_transform_x.inverse_transform(_atleast_3d(pred)))
-        if tmp.shape[0] == 1:
-            return tmp[0]
-        return tmp
+        return _regular_pipeline.inverse_state_arrays(_ensure_regular_batch(pred))
 
     # Prediction in data space
     def predict_fn(x0, t, u=None, p=None, ei=None, ew=None, ea=None, device="cpu", ret_dat=False):
@@ -138,12 +168,16 @@ def _load_model_legacy(model_class, checkpoint_path):
             t = torch.from_numpy(t).to(device=device)
         _has_graph = ei is not None
         if ei is None:
-            if u is None:
-                _data = DynData()
-            else:
-                _u  = _proc_u(u, device)
-                _data = DynData(u=_u)
-            _x0 = _proc_x0(x0, device)
+            regular_payload = _build_regular_prediction_payload(x0, u, device)
+            _x0 = torch.stack([series.state[0] for series in regular_payload.items])
+            if len(regular_payload.items) == 1:
+                _x0 = _x0[0]
+            _u = _stack_optional_series(
+                [series.control for series in regular_payload.items],
+                dtype=dtype,
+                device=device,
+            )
+            _data = DynData(u=_u)
             _data.batch_size = _x0.shape[0] if _x0.ndim == 2 else 1
         else:
             if isinstance(ei, (np.ndarray, torch.Tensor)):

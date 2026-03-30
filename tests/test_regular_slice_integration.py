@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from dymad.core.transform_pipeline import RegularSeriesTransformPipeline
+from dymad.io import load_model
+from dymad.io.trajectory_manager import TrajectoryManager
+from dymad.transform import make_transform
+
+
+class DummyPredictModel:
+    def __init__(self, config, md, dtype=torch.float32):
+        self.dtype = dtype
+        self.config = config
+        self.md = md
+        self.state_dict_loaded = None
+
+    def load_state_dict(self, state_dict):
+        self.state_dict_loaded = state_dict
+
+    def predict(self, x0, data, t):
+        steps = t.shape[-1]
+        if x0.ndim == 1:
+            return x0.unsqueeze(0).repeat(steps, 1)
+        return x0.unsqueeze(1).repeat(1, steps, 1)
+
+
+def _build_checkpoint_payload():
+    x_fit = [
+        np.array([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=float),
+        np.array([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=float),
+    ]
+    u_fit = [
+        np.array([[0.0], [1.0], [2.0]], dtype=float),
+        np.array([[1.0], [2.0], [3.0]], dtype=float),
+    ]
+    transform_x = make_transform({"type": "Scaler", "mode": "01"})
+    transform_u = make_transform({"type": "Scaler", "mode": "-11"})
+    transform_x.fit(x_fit)
+    transform_u.fit(u_fit)
+    return {
+        "config": {
+            "data": {"double_precision": False},
+            "transform_x": {"type": "Scaler", "mode": "01"},
+            "transform_u": {"type": "Scaler", "mode": "-11"},
+        },
+        "train_md": {
+            "transform_x_state": transform_x.state_dict(),
+            "transform_u_state": transform_u.state_dict(),
+        },
+        "model_state_dict": {"dummy": torch.tensor(1.0)},
+    }
+
+
+def test_regular_checkpoint_prediction_uses_typed_series(monkeypatch, tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "dummy.pt"
+    checkpoint_path.write_text("placeholder", encoding="utf-8")
+
+    import dymad.io.checkpoint as checkpoint_module
+
+    payload = _build_checkpoint_payload()
+    apply_events: list[int] = []
+    original_apply = RegularSeriesTransformPipeline.apply
+
+    def traced_apply(self, batch):
+        apply_events.append(len(batch))
+        return original_apply(self, batch)
+
+    monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
+    monkeypatch.setattr(
+        checkpoint_module.RegularSeriesTransformPipeline,
+        "apply",
+        traced_apply,
+    )
+
+    _, predict_fn = load_model(DummyPredictModel, checkpoint_path)
+    x0 = np.array([[1.0, 3.0], [2.0, 4.0]], dtype=float)
+    u = np.array([[0.2], [0.6]], dtype=float)
+    t = np.array([0.0, 1.0, 2.0], dtype=float)
+    prediction = predict_fn(x0, t, u=u)
+
+    assert apply_events == [1]
+    assert prediction.shape == (3, 2)
+
+
+def test_regular_slice_integration_touches_typed_transform_seam(monkeypatch, tmp_path: Path) -> None:
+    data_path = tmp_path / "regular_slice.npz"
+    t = np.stack([
+        np.linspace(0.0, 1.0, 6),
+        np.linspace(0.0, 1.0, 6),
+    ])
+    x = np.stack([
+        np.column_stack((np.linspace(0.0, 1.0, 6), np.linspace(1.0, 2.0, 6))),
+        np.column_stack((np.linspace(2.0, 3.0, 6), np.linspace(3.0, 4.0, 6))),
+    ])
+    u = np.stack([
+        np.linspace(0.0, 0.5, 6).reshape(-1, 1),
+        np.linspace(0.5, 1.0, 6).reshape(-1, 1),
+    ])
+    np.savez(data_path, t=t, x=x, u=u)
+
+    checkpoint_path = tmp_path / "dummy.pt"
+    checkpoint_path.write_text("placeholder", encoding="utf-8")
+
+    import dymad.io.checkpoint as checkpoint_module
+
+    payload = _build_checkpoint_payload()
+    apply_events: list[int] = []
+    original_apply = RegularSeriesTransformPipeline.apply
+
+    def traced_apply(self, batch):
+        apply_events.append(len(batch))
+        return original_apply(self, batch)
+
+    monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
+    monkeypatch.setattr(
+        checkpoint_module.RegularSeriesTransformPipeline,
+        "apply",
+        traced_apply,
+    )
+
+    manager = TrajectoryManager(
+        metadata={
+            "data_key": "data",
+            "config": {
+                "data": {"path": str(data_path)},
+                "transform_x": [
+                    {"type": "Scaler", "mode": "01"},
+                    {"type": "delay", "delay": 2},
+                ],
+                "transform_u": {"type": "Scaler", "mode": "-11"},
+            },
+        }
+    )
+    manager.prepare_data()
+    manager.set_data_index([0, 1])
+    manager.apply_data_transformations()
+
+    _, predict_fn = load_model(DummyPredictModel, checkpoint_path)
+    prediction = predict_fn(x[0], t[0], u=u[0])
+
+    assert len(manager.dataset) == 2
+    assert apply_events == [2, 1]
+    assert prediction.shape == (6, 2)

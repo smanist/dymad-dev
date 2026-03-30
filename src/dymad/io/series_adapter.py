@@ -57,7 +57,7 @@ class SeriesAdapter:
             control=_squeeze_batch(data.u),
             target=_squeeze_batch(data.y),
             params=_squeeze_batch(data.p),
-            meta={"source": "DynData"},
+            meta=dict(data.meta[0]) if data.meta else {"source": "DynData"},
         )
 
 
