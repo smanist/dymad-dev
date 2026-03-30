@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from dymad.facade.handles import CheckpointHandle, PredictionHandle
-from dymad.store.object_store import ObjectStore, ObjectSummary, PredictionRequestRecord
+from dymad.store.object_store import (
+    CheckpointRecord,
+    ObjectStore,
+    ObjectSummary,
+    PredictionRequestRecord,
+)
 
 
 class FacadeOperations:
@@ -46,6 +51,10 @@ class FacadeOperations:
     def get_prediction_request(self, handle: str) -> PredictionRequestRecord:
         request = PredictionHandle.parse(handle)
         return self._store.get_prediction_request(request.value)
+
+    def get_checkpoint(self, handle: str) -> CheckpointRecord:
+        checkpoint = CheckpointHandle.parse(handle)
+        return self._store.get_checkpoint(checkpoint.value)
 
     def describe_object(self, handle: str) -> ObjectSummary:
         return self._store.summarize(handle)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from dymad.exec.state import PredictionWorkflowPlan
 from dymad.facade.operations import FacadeOperations
@@ -42,3 +43,18 @@ class CompatibilityExecutor:
                 "Numerical model behavior remains in legacy io/models modules.",
             ),
         )
+
+    def materialize_checkpoint_prediction(
+        self,
+        *,
+        plan: PredictionWorkflowPlan,
+        model_class: type[Any],
+    ) -> tuple[Any, Callable[..., Any]]:
+        request = self.facade.get_prediction_request(plan.prediction_handle)
+        if request.checkpoint_handle != plan.checkpoint_handle:
+            raise ValueError("plan checkpoint/prediction handles are inconsistent")
+        checkpoint = self.facade.get_checkpoint(request.checkpoint_handle)
+
+        from dymad.io.checkpoint import load_model as legacy_load_model
+
+        return legacy_load_model(model_class, checkpoint.checkpoint_path)
