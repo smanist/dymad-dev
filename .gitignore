@@ -1,6 +1,5 @@
 .DS_Store
 .VSCodeCounter
-tasks/
 **/__pycache__/
 **/*.log
 **/*.png
