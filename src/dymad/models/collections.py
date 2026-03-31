@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import Dict
 
-from dymad.models.helpers import build_model
+from dymad.models.helpers import build_model_from_spec
+from dymad.models.model_spec import LegacyPredefinedModelAdapter, ModelSpec
 from dymad.models.recipes import CD_KM, CD_KMM, CD_KMSK, CD_LDM, CD_LFM, CD_SDM
 
 @dataclass
@@ -26,12 +27,15 @@ class PredefinedModel:
     model_cls: object
 
     def __post_init__(self):
-        # Determine if graph compatible
-        # Three possibilities: autoencoder (graph/node), dynamics (graph)
-        self.GRAPH = \
-            'graph' in self.encoder or 'node' in self.encoder or \
-            'graph' in self.decoder or 'node' in self.decoder or \
-            'graph' in self.dynamics
+        self.model_spec = LegacyPredefinedModelAdapter.from_legacy_parts(
+            continuous_time=self.CONT,
+            encoder=self.encoder,
+            feature=self.feature,
+            dynamics=self.dynamics,
+            decoder=self.decoder,
+            model_cls=self.model_cls,
+        )
+        self.GRAPH = self.model_spec.graph_mode != "none"
 
     def __call__(
             self,
@@ -48,15 +52,17 @@ class PredefinedModel:
         calling `LDM(model_config, data_meta, dtype, device)` would behave like
         instantiating a class by `__init__`, but actually invokes this `__call__` method.
         """
-        model_spec = [
-            self.CONT,
-            self.encoder,
-            self.feature,
-            self.dynamics,
-            self.decoder,
-            self.model_cls
-        ]
-        return build_model(model_spec, model_config, data_meta, dtype, device)
+        return build_model_from_spec(
+            self.model_spec,
+            model_config,
+            data_meta,
+            dtype,
+            device,
+        )
+
+    def typed_spec(self) -> ModelSpec:
+        """Expose the typed model spec behind this compatibility wrapper."""
+        return self.model_spec
 
 #                       CONT,  encoder,    feature, dynamics,       decoder, model_cls
 LDM   = PredefinedModel(True,  "smpl",     "none",  "direct",       "auto",  CD_LDM)

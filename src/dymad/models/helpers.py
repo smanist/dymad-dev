@@ -1,8 +1,9 @@
 import copy
 import logging
-from typing import Dict, List
+from typing import Dict, List, Union
 
 from dymad.models.components import ENC_MAP, DEC_MAP, FZU_MAP, DYN_MAP, LIN_MAP
+from dymad.models.model_spec import ModelSpec
 from dymad.models.prediction import predict_continuous, predict_continuous_exp, predict_continuous_np, \
     predict_discrete, predict_discrete_exp
 from dymad.modules import make_autoencoder, make_network
@@ -227,3 +228,15 @@ def build_model(
     logger.info(f"- If graph model: {model.GRAPH}, continuous-time: {model.CONT}")
 
     return model
+
+
+def build_model_from_spec(
+        model_spec: Union[ModelSpec, List],
+        model_config: Dict, data_meta: Dict,
+        dtype=None, device=None):
+    """Build a model from a typed ModelSpec compatibility object."""
+    if isinstance(model_spec, ModelSpec):
+        legacy_spec = list(model_spec.to_legacy_tuple())
+    else:
+        legacy_spec = model_spec
+    return build_model(legacy_spec, model_config, data_meta, dtype, device)
