@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from typing import Optional, Tuple, Type
 
-from dymad.io import DataInterface, DynData
+from dymad.io import DataInterface
 from dymad.models import KBF, DKBF
 from dymad.numerics import check_orthogonality, complex_grid, complex_map, disc2cont, eig_low_rank, mode_split, scaled_eig, truncate_sequence
 from dymad.sako.rals import estimate_pseudospectrum, RALowRank
@@ -74,6 +74,12 @@ def per_state_err(prd, ref):
     e0 = np.mean(norm_diff / norm_ref, axis=0)
     return e0
 
+
+def encode_runtime_batch(model: torch.nn.Module, batch) -> np.ndarray:
+    """Encode one trainer batch via typed-runtime payloads or a legacy fallback."""
+    runtime = batch.runtime.to_legacy_runtime() if hasattr(batch, "runtime") else batch
+    return model.encoder(runtime).cpu().detach().numpy()
+
 class SAInterface(DataInterface):
     """
     Interface for spectral analysis of KBF and DKBF models.
@@ -93,7 +99,7 @@ class SAInterface(DataInterface):
     def _setup_sa_terms(self):
         P0, P1 = [], []
         for batch in self.train_loader:
-            _P = self.model.encoder(DynData(x=batch.x)).cpu().detach().numpy()
+            _P = encode_runtime_batch(self.model, batch)
             _P0, _P1 = _P[..., :-1, :], _P[..., 1:, :]
             _P0 = _P0.reshape(-1, _P0.shape[-1])
             _P1 = _P1.reshape(-1, _P1.shape[-1])
