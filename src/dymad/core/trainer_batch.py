@@ -1,4 +1,4 @@
-"""Trainer-facing typed batch wrappers used during DynData retirement."""
+"""Trainer-facing typed batch wrappers used during LegacyRuntimeBatch retirement."""
 
 from __future__ import annotations
 

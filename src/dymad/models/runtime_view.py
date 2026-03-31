@@ -8,14 +8,14 @@ from typing import TypeAlias
 import torch
 
 from dymad.core.model_context import GraphModelContext, RegularModelContext
-from dymad.io.data import DynData
+from dymad.io.legacy_runtime import LegacyRuntimeBatch
 
 
 @dataclass(frozen=True)
 class ComponentInputView:
-    """Expose runtime fields needed by model helpers without indexing DynData directly."""
+    """Expose runtime fields needed by model helpers without indexing LegacyRuntimeBatch directly."""
 
-    runtime: DynData
+    runtime: LegacyRuntimeBatch
 
     @classmethod
     def build(cls, payload: ComponentInputPayload) -> "ComponentInputView":
@@ -25,7 +25,7 @@ class ComponentInputView:
             return cls(payload.to_legacy_runtime().get_step(0))
         if isinstance(payload, GraphModelContext):
             return cls(payload.to_legacy_runtime().get_step(0))
-        if isinstance(payload, DynData):
+        if isinstance(payload, LegacyRuntimeBatch):
             return cls(payload)
         raise TypeError(f"Unsupported component payload type: {type(payload)!r}")
 
@@ -70,4 +70,4 @@ def build_component_input_view(payload: ComponentInputPayload) -> ComponentInput
     return ComponentInputView.build(payload)
 
 
-ComponentInputPayload: TypeAlias = DynData | RegularModelContext | GraphModelContext | ComponentInputView
+ComponentInputPayload: TypeAlias = LegacyRuntimeBatch | RegularModelContext | GraphModelContext | ComponentInputView

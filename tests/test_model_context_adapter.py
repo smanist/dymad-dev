@@ -12,7 +12,7 @@ from dymad.core.model_context import (
     materialize_model_base_forward_payload,
     materialize_prediction_runtime,
 )
-from dymad.io.data import DynData
+from dymad.io.legacy_runtime import LegacyRuntimeBatch
 from dymad.models.components import enc_graph_iden, enc_iden, zu_cat_smpl, zu_cat_smpl_graph
 
 
@@ -157,7 +157,7 @@ def test_materialize_prediction_runtime_expands_regular_context_batches():
 
 
 def test_materialize_prediction_runtime_expands_single_legacy_payload():
-    payload = DynData(
+    payload = LegacyRuntimeBatch(
         t=torch.tensor([0.0, 1.0]),
         x=torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
         u=torch.tensor([[0.1], [0.2]]),

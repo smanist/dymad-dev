@@ -13,7 +13,7 @@ def _ensure_batches(tensor: torch.Tensor, base_dim: int, offset: int = 0) -> tor
         # (batch_size, n_steps, ...)
         return tensor
     else:
-        raise ValueError(f"Invalid tensor shape for DynData: {tensor.shape}. Expected shape with {base_dim} or {base_dim+1} dimensions.")
+        raise ValueError(f"Invalid tensor shape for LegacyRuntimeBatch: {tensor.shape}. Expected shape with {base_dim} or {base_dim+1} dimensions.")
 
 def _determine_sizes(lst: List[torch.Tensor]) -> Tuple[int, int]:
     batch_size, n_steps = None, None
@@ -89,7 +89,7 @@ def _ensure_one_batch(tensor: torch.Tensor) -> torch.Tensor:
         # (n_steps, ...)
         return tensor.unsqueeze(0)
     else:
-        raise ValueError(f"Invalid tensor shape for DynData in graph mode: {tensor.shape}. " \
+        raise ValueError(f"Invalid tensor shape for LegacyRuntimeBatch in graph mode: {tensor.shape}. " \
                          f"Expected shape with 2D or 3D.")
 
 def _ensure_graph_format(
@@ -173,7 +173,7 @@ def _unfold(tensor: torch.Tensor, window: int, stride: int, offset: int = 0) -> 
     return torch.nested.nested_tensor(collated, layout=torch.jagged, dtype=buffer[0][0].dtype)
 
 @dataclass
-class DynData:
+class LegacyRuntimeBatch:
     """
     Data structure for time series data.
 
@@ -276,7 +276,7 @@ class DynData:
                     # This typically happens after collate
                     assert self.t.size(0) == 1, "In graph mode, batch size must be 1."
                 else:
-                    raise ValueError(f"Invalid tensor shape for DynData.t in graph mode: {self.t.shape}.")
+                    raise ValueError(f"Invalid tensor shape for LegacyRuntimeBatch.t in graph mode: {self.t.shape}.")
             self.x = _ensure_one_batch(self.x)
             self.y = _ensure_one_batch(self.y)
             self.u = _ensure_one_batch(self.u)
@@ -307,7 +307,7 @@ class DynData:
 
             self.batch_size, self.n_steps = _determine_sizes([self.x, self.u])
 
-    def to(self, device: torch.device, non_blocking: bool = False) -> "DynData":
+    def to(self, device: torch.device, non_blocking: bool = False) -> "LegacyRuntimeBatch":
         """
         Move data tensors to a different device.
 
@@ -316,7 +316,7 @@ class DynData:
             non_blocking (bool, optional): If True, the operation will be non-blocking.
 
         Returns:
-            DynData: A DynData instance with tensors on the target device.
+            LegacyRuntimeBatch: A LegacyRuntimeBatch instance with tensors on the target device.
         """
         self.t = self.t.to(device, non_blocking=non_blocking) if self.t is not None else None
         self.x = self.x.to(device, non_blocking=non_blocking) if self.x is not None else None
@@ -330,9 +330,9 @@ class DynData:
         return self
 
     @classmethod
-    def collate(cls, batch_list: List["DynData"]) -> "DynData":
+    def collate(cls, batch_list: List["LegacyRuntimeBatch"]) -> "LegacyRuntimeBatch":
         """
-        Collate a list of DynData instances into a single DynData instance.
+        Collate a list of LegacyRuntimeBatch instances into a single LegacyRuntimeBatch instance.
         Needed by DataLoader to stack data tensors.
 
         The graph version follows PyGData, that assembles the graphs of each sample
@@ -340,10 +340,10 @@ class DynData:
         on a single graph to maximize parallelism.
 
         Args:
-            batch_list (List[DynData]): List of DynData instances to collate.
+            batch_list (List[LegacyRuntimeBatch]): List of LegacyRuntimeBatch instances to collate.
 
         Returns:
-            DynData: A single DynData instance with stacked data tensors.
+            LegacyRuntimeBatch: A single LegacyRuntimeBatch instance with stacked data tensors.
         """
         if len(batch_list) == 1:
             return batch_list[0]    # No need to collate
@@ -367,19 +367,19 @@ class DynData:
             ea = _collate_nested_tensor([b.ea for b in batch_list], False) if batch_list[0].ea is not None else None
 
             # Collate already aggregates graphs, so batch_size is carried over to give true batch size
-            return DynData(t=ts, x=xs, y=ys, u=us, p=ps, ei=ei, ew=ew, ea=ea, meta=ms, batch_size=len(batch_list))
+            return LegacyRuntimeBatch(t=ts, x=xs, y=ys, u=us, p=ps, ei=ei, ew=ew, ea=ea, meta=ms, batch_size=len(batch_list))
 
         ts = torch.concatenate([b.t for b in batch_list], dim=0) if batch_list[0].t is not None else None
         xs = torch.concatenate([b.x for b in batch_list], dim=0) if batch_list[0].x is not None else None
         ys = torch.concatenate([b.y for b in batch_list], dim=0) if batch_list[0].y is not None else None
         us = torch.concatenate([b.u for b in batch_list], dim=0) if batch_list[0].u is not None else None
         ps = torch.concatenate([b.p for b in batch_list], dim=0) if batch_list[0].p is not None else None
-        return DynData(t=ts, x=xs, y=ys, u=us, p=ps, meta=ms)
+        return LegacyRuntimeBatch(t=ts, x=xs, y=ys, u=us, p=ps, meta=ms)
 
-    def get_step(self, start: int, end: Optional[int] = None) -> "DynData":
+    def get_step(self, start: int, end: Optional[int] = None) -> "LegacyRuntimeBatch":
         if end is None:
             end = start + 1
-        tmp = DynData(
+        tmp = LegacyRuntimeBatch(
             t = self.t[:, start:end] if self.t is not None else None,
             x = self.x[:, start:end] if self.x is not None else None,
             y = self.y[:, start:end] if self.y is not None else None,
@@ -396,7 +396,7 @@ class DynData:
             tmp.squeeze_time()
         return tmp
 
-    def squeeze_time(self) -> "DynData":
+    def squeeze_time(self) -> "LegacyRuntimeBatch":
         self.t = self.t.squeeze(1) if self.t is not None else None
         self.x = self.x.squeeze(1) if self.x is not None else None
         self.y = self.y.squeeze(1) if self.y is not None else None
@@ -411,7 +411,7 @@ class DynData:
     def truncate(self, num_step):
         return self.get_step(0, num_step)
 
-    def unfold(self, window: int, stride: int) -> "DynData":
+    def unfold(self, window: int, stride: int) -> "LegacyRuntimeBatch":
         """
         Unfold the data into overlapping windows.
 
@@ -431,7 +431,7 @@ class DynData:
             stride (int): Step size for the sliding window.
 
         Returns:
-            DynData: A new DynData instance with unfolded data.
+            LegacyRuntimeBatch: A new LegacyRuntimeBatch instance with unfolded data.
         """
         if self._has_graph:
             # Graph mode:
@@ -446,7 +446,7 @@ class DynData:
             ei_unfolded = _unfold(self.ei, window, stride, offset=self.n_nodes)
             ew_unfolded = _unfold(self.ew, window, stride)
             ea_unfolded = _unfold(self.ea, window, stride)
-            return DynData(
+            return LegacyRuntimeBatch(
                 t=t_unfolded, x=x_unfolded, y=y_unfolded, u=u_unfolded, p=p_unfolded,
                 ei=ei_unfolded, ew=ew_unfolded, ea=ea_unfolded, meta=self.meta)
 
@@ -458,15 +458,15 @@ class DynData:
         u_unfolded = _unf(self.u)
         n_windows  = x_unfolded.size(0) // self.x.size(0)
         p_unfolded = self.p.repeat_interleave(n_windows, dim=0) if self.p is not None else None
-        return DynData(t=t_unfolded, x=x_unfolded, y=y_unfolded, u=u_unfolded, p=p_unfolded, meta=self.meta)
+        return LegacyRuntimeBatch(t=t_unfolded, x=x_unfolded, y=y_unfolded, u=u_unfolded, p=p_unfolded, meta=self.meta)
 
-    def set_x(self, value: torch.Tensor) -> "DynData":
+    def set_x(self, value: torch.Tensor) -> "LegacyRuntimeBatch":
         self.x = value
         if self._has_graph:
             self.x_reshape = self.x.shape[:-1] + (self.n_nodes, -1)
         return self
 
-    def set_u(self, value: Optional[torch.Tensor] = None) -> "DynData":
+    def set_u(self, value: Optional[torch.Tensor] = None) -> "LegacyRuntimeBatch":
         if value is None:
             return self
         self.u = value

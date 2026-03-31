@@ -11,7 +11,7 @@ from dymad.core.graph_series import GraphSeries, GraphSeriesBatch
 from dymad.core.series import RegularSeries, RegularSeriesBatch
 
 if TYPE_CHECKING:
-    from dymad.io.data import DynData
+    from dymad.io.legacy_runtime import LegacyRuntimeBatch
 
 
 @dataclass(frozen=True)
@@ -42,12 +42,12 @@ class RegularModelContext:
             return state[0]
         return state
 
-    def to_legacy_runtime(self) -> "DynData":
-        from dymad.io.data import DynData
+    def to_legacy_runtime(self) -> "LegacyRuntimeBatch":
+        from dymad.io.legacy_runtime import LegacyRuntimeBatch
         from dymad.io.series_adapter import regular_series_to_legacy_runtime
 
         payloads = [regular_series_to_legacy_runtime(item) for item in self.batch]
-        return DynData.collate(payloads)
+        return LegacyRuntimeBatch.collate(payloads)
 
 
 @dataclass(frozen=True)
@@ -82,12 +82,12 @@ class GraphModelContext:
             return state[0]
         return state
 
-    def to_legacy_runtime(self) -> "DynData":
-        from dymad.io.data import DynData
+    def to_legacy_runtime(self) -> "LegacyRuntimeBatch":
+        from dymad.io.legacy_runtime import LegacyRuntimeBatch
         from dymad.io.series_adapter import graph_series_to_legacy_runtime
 
         payloads = [graph_series_to_legacy_runtime(item) for item in self.batch]
-        return DynData.collate(payloads)
+        return LegacyRuntimeBatch.collate(payloads)
 
 
 def build_model_context(
@@ -106,7 +106,7 @@ def build_model_context(
     raise TypeError(f"Unsupported model-context payload type: {type(batch)!r}")
 
 
-ModelRuntimePayload: TypeAlias = "DynData | RegularModelContext | GraphModelContext"
+ModelRuntimePayload: TypeAlias = "LegacyRuntimeBatch | RegularModelContext | GraphModelContext"
 
 
 def _expand_regular_context_for_prediction(
@@ -157,7 +157,7 @@ def _expand_graph_context_for_prediction(
     )
 
 
-def _context_from_legacy_runtime(payload: "DynData") -> RegularModelContext | GraphModelContext:
+def _context_from_legacy_runtime(payload: "LegacyRuntimeBatch") -> RegularModelContext | GraphModelContext:
     from dymad.io.series_adapter import SeriesAdapter
 
     return build_model_context(SeriesAdapter.from_dyndata(payload))
@@ -175,7 +175,7 @@ def materialize_model_base_forward_payload(
 ) -> RegularModelContext | GraphModelContext:
     """Build the model-base forward payload through one explicit compatibility seam."""
 
-    from dymad.io.data import DynData
+    from dymad.io.legacy_runtime import LegacyRuntimeBatch
 
     if x is None:
         raise ValueError("model_base.forward requires `x` to materialize runtime payload.")
@@ -221,7 +221,7 @@ def materialize_model_base_forward_payload(
         else:
             raise ValueError(f"Unsupported regular forward input shape for p: {tuple(p.shape)}")
 
-        runtime = DynData(t=time, x=state, u=control, p=params)
+        runtime = LegacyRuntimeBatch(t=time, x=state, u=control, p=params)
         if runtime.batch_size is None or runtime.batch_size == 1:
             context = _context_from_legacy_runtime(runtime)
             if not isinstance(context, RegularModelContext):
@@ -230,7 +230,7 @@ def materialize_model_base_forward_payload(
 
         items = []
         for idx in range(runtime.batch_size):
-            sample = DynData(
+            sample = LegacyRuntimeBatch(
                 t=runtime.t[idx : idx + 1] if runtime.t is not None else None,
                 x=runtime.x[idx : idx + 1] if runtime.x is not None else None,
                 u=runtime.u[idx : idx + 1] if runtime.u is not None else None,
@@ -251,7 +251,7 @@ def materialize_model_base_forward_payload(
     else:
         raise ValueError(f"Unsupported graph forward input shape for x: {tuple(x.shape)}")
 
-    legacy_runtime = DynData(
+    legacy_runtime = LegacyRuntimeBatch(
         t=t,
         x=state,
         u=u,
@@ -271,15 +271,15 @@ def materialize_prediction_runtime(
     *,
     batch_size: int,
     is_batch: bool,
-) -> "DynData":
+) -> "LegacyRuntimeBatch":
     """Materialize a prediction runtime payload through the typed-context boundary."""
 
-    from dymad.io.data import DynData
+    from dymad.io.legacy_runtime import LegacyRuntimeBatch
 
     if payload is None:
-        return DynData()
+        return LegacyRuntimeBatch()
 
-    if isinstance(payload, DynData):
+    if isinstance(payload, LegacyRuntimeBatch):
         if not is_batch:
             if payload.batch_size is not None and payload.batch_size != 1:
                 raise ValueError(

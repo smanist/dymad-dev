@@ -41,7 +41,7 @@ def test_build_data_state_uses_regular_typed_batches_for_linear_only(tmp_path) -
     batch = next(iter(state.train_loader))
 
     assert isinstance(batch, RegularTrainerBatch)
-    assert state.train_set[0].__class__.__name__ == "DynData"
+    assert state.train_set[0].__class__.__name__ == "LegacyRuntimeBatch"
 
 
 def test_build_data_state_uses_graph_typed_batches_for_linear_only(ltg_data) -> None:
@@ -68,4 +68,4 @@ def test_build_data_state_uses_graph_typed_batches_for_linear_only(ltg_data) -> 
     batch = next(iter(state.train_loader))
 
     assert isinstance(batch, GraphTrainerBatch)
-    assert state.train_set[0].__class__.__name__ == "DynData"
+    assert state.train_set[0].__class__.__name__ == "LegacyRuntimeBatch"

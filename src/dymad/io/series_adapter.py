@@ -1,4 +1,4 @@
-"""Compatibility adapters between typed series objects and legacy DynData."""
+"""Compatibility adapters between typed series objects and legacy LegacyRuntimeBatch."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import torch
 
 from dymad.core.graph_series import FixedGraphSeries, GraphSeries, VariableEdgeGraphSeries
 from dymad.core.series import RegularSeries
-from dymad.io.data import DynData
+from dymad.io.legacy_runtime import LegacyRuntimeBatch
 
 
 class SeriesAdapter:
@@ -74,7 +74,7 @@ class SeriesAdapter:
         )
 
     @staticmethod
-    def from_dyndata(data: DynData) -> RegularSeries | GraphSeries:
+    def from_dyndata(data: LegacyRuntimeBatch) -> RegularSeries | GraphSeries:
         if data._has_graph:
             return SeriesAdapter.from_graph_dyndata(data)
 
@@ -84,13 +84,13 @@ class SeriesAdapter:
             control=SeriesAdapter._squeeze_batch(data.u),
             target=SeriesAdapter._squeeze_batch(data.y),
             params=SeriesAdapter._squeeze_batch(data.p),
-            meta=dict(data.meta[0]) if data.meta else {"source": "DynData"},
+            meta=dict(data.meta[0]) if data.meta else {"source": "LegacyRuntimeBatch"},
         )
 
     @staticmethod
-    def from_graph_dyndata(data: DynData) -> GraphSeries:
+    def from_graph_dyndata(data: LegacyRuntimeBatch) -> GraphSeries:
         if not data._has_graph:
-            raise ValueError("non-graph DynData is not supported by the graph-series adapter")
+            raise ValueError("non-graph LegacyRuntimeBatch is not supported by the graph-series adapter")
 
         time = SeriesAdapter._squeeze_batch(data.t)
         n_steps = int(time.shape[0])
@@ -105,7 +105,7 @@ class SeriesAdapter:
         edge_weight_steps = tuple(step for step in data.ew.unbind()) if data.ew is not None else None
         edge_attr_steps = tuple(step for step in data.ea.unbind()) if data.ea is not None else None
         if len(edge_index_steps) != n_steps:
-            raise ValueError("Graph DynData edge_index steps must align with time")
+            raise ValueError("Graph LegacyRuntimeBatch edge_index steps must align with time")
 
         edge_index: torch.Tensor | tuple[torch.Tensor, ...]
         if all(torch.equal(edge_index_steps[0], step) for step in edge_index_steps[1:]):
@@ -124,7 +124,7 @@ class SeriesAdapter:
             edge_attr=edge_attr_steps,
             dtype=node_state.dtype,
             device=node_state.device,
-            meta=dict(data.meta[0]) if data.meta else {"source": "DynData"},
+            meta=dict(data.meta[0]) if data.meta else {"source": "LegacyRuntimeBatch"},
         )
 
     @staticmethod
@@ -136,7 +136,7 @@ class SeriesAdapter:
         if tensor.ndim >= 1 and tensor.shape[0] == 1:
             return tensor[0]
         raise ValueError(
-            "DynData batch_size > 1 is not supported by SeriesAdapter.from_dyndata; "
+            "LegacyRuntimeBatch batch_size > 1 is not supported by SeriesAdapter.from_dyndata; "
             "adapt one trajectory at a time"
         )
 
@@ -183,10 +183,10 @@ class SeriesAdapter:
         return torch.as_tensor(payload, dtype=dtype, device=device)
 
 
-def regular_series_to_legacy_runtime(series: RegularSeries) -> DynData:
-    """Temporary deletion-stage bridge from typed regular series to DynData."""
+def regular_series_to_legacy_runtime(series: RegularSeries) -> LegacyRuntimeBatch:
+    """Temporary deletion-stage bridge from typed regular series to LegacyRuntimeBatch."""
 
-    return DynData(
+    return LegacyRuntimeBatch(
         t=series.time,
         x=series.state,
         y=series.target,
@@ -196,11 +196,11 @@ def regular_series_to_legacy_runtime(series: RegularSeries) -> DynData:
     )
 
 
-def graph_series_to_legacy_runtime(series: GraphSeries) -> DynData:
-    """Temporary deletion-stage bridge from typed graph series to DynData."""
+def graph_series_to_legacy_runtime(series: GraphSeries) -> LegacyRuntimeBatch:
+    """Temporary deletion-stage bridge from typed graph series to LegacyRuntimeBatch."""
 
     n_steps = int(series.time.shape[0])
-    return DynData(
+    return LegacyRuntimeBatch(
         t=series.time,
         x=series.node_state.reshape(n_steps, -1),
         y=series.target.reshape(n_steps, -1) if series.target is not None else None,

@@ -10,7 +10,7 @@ from dymad.core.series import RegularSeries, RegularSeriesBatch
 from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 from dymad.core.transform_builder import build_legacy_transform, build_transform_module, export_transform_state
 from dymad.core.transform_module import FieldTransformModule, LegacyTransformModuleAdapter, SeriesTransformPipeline
-from dymad.io.data import DynData
+from dymad.io.legacy_runtime import LegacyRuntimeBatch
 from dymad.io.series_adapter import (
     SeriesAdapter,
     graph_series_to_legacy_runtime,
@@ -486,7 +486,7 @@ class TrajectoryManager:
 
         self._update_dataset_metadata()
 
-    def _transform_by_index(self, indices: torch.Tensor) -> List[DynData]:
+    def _transform_by_index(self, indices: torch.Tensor) -> List[LegacyRuntimeBatch]:
         series_dataset = self._transform_regular_series_by_index(indices)
         return [regular_series_to_legacy_runtime(series) for series in series_dataset]
 
@@ -637,7 +637,7 @@ class TrajectoryManager:
             )
             return
 
-        self.dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=if_shuffle, collate_fn=DynData.collate)
+        self.dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=if_shuffle, collate_fn=LegacyRuntimeBatch.collate)
 
 class TrajectoryManagerGraph(TrajectoryManager):
     r"""
@@ -835,7 +835,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
 
         self._update_dataset_metadata()
 
-    def _transform_by_index(self, indices: torch.Tensor) -> List[DynData]:
+    def _transform_by_index(self, indices: torch.Tensor) -> List[LegacyRuntimeBatch]:
         graph_dataset = self._transform_graph_series_by_index(indices)
         return [graph_series_to_legacy_runtime(series) for series in graph_dataset]
 
@@ -1055,7 +1055,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
         n_batch = int(np.ceil(len(self.dataset) / batch_size))
         _data = []
         for i in range(n_batch):
-            _data.append(DynData.collate(self.dataset[i*batch_size:(i+1)*batch_size]))
+            _data.append(LegacyRuntimeBatch.collate(self.dataset[i*batch_size:(i+1)*batch_size]))
 
         logger.info(f"Creating dataloaders with batch size 1 for graph data, aggregated from {batch_size} samples.")
-        self.dataloader = DataLoader(_data, batch_size=1, shuffle=if_shuffle, collate_fn=DynData.collate)
+        self.dataloader = DataLoader(_data, batch_size=1, shuffle=if_shuffle, collate_fn=LegacyRuntimeBatch.collate)
