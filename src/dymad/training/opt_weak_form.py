@@ -2,8 +2,8 @@ import logging
 import torch
 from typing import Any, Dict, Type
 
-from dymad.io import DynData
 from dymad.numerics import generate_weak_weights
+from dymad.training.batch_adapter import TrainerBatch, batch_to_legacy_runtime
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 
@@ -49,11 +49,12 @@ class OptWeakForm(OptBase):
         self.C = torch.tensor(C.T, dtype=dtype, device=self.device)
         self.D = torch.tensor(D.T, dtype=dtype, device=self.device)
 
-    def _process_batch(self, batch: DynData) -> torch.Tensor:
+    def _process_batch(self, batch: TrainerBatch) -> torch.Tensor:
         B = batch.to(self.device)
-        z = self.model.encoder(B)
-        z_dot = self.model.dynamics(z, B)
-        x_hat = self.model.decoder(z, B)
+        runtime = batch_to_legacy_runtime(B)
+        z = self.model.encoder(runtime)
+        z_dot = self.model.dynamics(z, runtime)
+        x_hat = self.model.decoder(z, runtime)
 
         z_windows = z.unfold(1, self.N, self.dN)
         z_dot_windows = z_dot.unfold(1, self.N, self.dN)

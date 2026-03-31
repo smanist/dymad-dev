@@ -8,8 +8,8 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Any, Dict, List, Optional, Type, Union
 
-from dymad.io import DynData
 from dymad.losses import LOSS_MAP
+from dymad.training.batch_adapter import TrainerBatch, batch_to_legacy_runtime
 from dymad.training.helper import RunState
 from dymad.training.ls_update import LSUpdater
 from dymad.utils import make_scheduler, plot_hist, plot_trajectory
@@ -408,7 +408,12 @@ class OptBase:
             total += _l * _w
         return total
 
-    def _additional_criteria_evaluation(self, x_hat, predictions, B) -> None:
+    def _additional_criteria_evaluation(
+        self,
+        x_hat,
+        predictions,
+        batch: TrainerBatch,
+    ) -> None:
         """
         Compute additional criteria losses beyond dynamics
         """
@@ -416,11 +421,13 @@ class OptBase:
         if len(self.criteria_weights) < 2:
             return loss_list
 
+        runtime = batch_to_legacy_runtime(batch)
+
         if self.criteria_names[1] == "recon":
             if x_hat is None:
-                _z = self.model.encoder(B)
-                x_hat = self.model.decoder(_z, B)
-            recon_loss = self.criteria[1](B.x, x_hat.view(*B.x.shape))
+                _z = self.model.encoder(runtime)
+                x_hat = self.model.decoder(_z, runtime)
+            recon_loss = self.criteria[1](runtime.x, x_hat.view(*runtime.x.shape))
             loss_list.append(recon_loss)
             n_eval = 2
         else:
@@ -431,9 +438,9 @@ class OptBase:
             if len(self.criteria)-1 > n_eval:
                 # This means there are additional criteria,
                 # which we assume requires predictions, and need to compute this
-                init_states = B.x[:, 0, :]  # (batch_size, n_total_state_features)
+                init_states = runtime.x[:, 0, :]  # (batch_size, n_total_state_features)
                 # Use the actual time points from trajectory manager
-                ts = B.t
+                ts = runtime.t
                 if ts.dim() == 3 and ts.size(0) == 1:
                     # Expect this to be the graph case with broadcasted time
                     # For now we only take the first batch entry, assuming all are identical
@@ -441,14 +448,14 @@ class OptBase:
                 ts = ts.to(self.device)
                 preds = self.model.predict(
                     init_states,
-                    B,
+                    runtime,
                     ts,
                     method=self.ode_method,
                     **self.ode_args,
                 )
 
         for _i in range(n_eval, len(self.criteria)-1):
-            loss_value = self.criteria[_i](preds, B.x)
+            loss_value = self.criteria[_i](preds, runtime.x)
             loss_list.append(loss_value)
 
         return loss_list
@@ -458,7 +465,7 @@ class OptBase:
     # ------------------------------------------------------------------
 
     def evaluate_prediction_criterion_single(self,
-                    truth: DynData,
+                    truth: TrainerBatch,
                     method: str = 'dopri5',
                     plot: bool = False) -> float:
         """
@@ -468,21 +475,22 @@ class OptBase:
         a prediction-based criterion (e.g., RMSE over trajectory).
 
         Args:
-            truth (DynData): Ground truth trajectory data
+            truth (TrainerBatch): Ground truth trajectory payload
             method (str): ODE solver method (for models that use ODE solvers)
             plot (bool): Whether to plot the predicted vs ground truth trajectories
 
         Returns:
             float: Prediction criterion between predictions and ground truth, can be problem dependent
         """
+        runtime = batch_to_legacy_runtime(truth)
         with torch.no_grad():
             # Extract states and controls
-            x_truth = truth.x
-            x0 = truth.x[:, 0, :]
-            ts = truth.t
+            x_truth = runtime.x
+            x0 = runtime.x[:, 0, :]
+            ts = runtime.t
 
             # Make prediction
-            x_pred = self.model.predict(x0, truth, ts, method=method)
+            x_pred = self.model.predict(x0, runtime, ts, method=method)
 
             # Prediction criterion
             prediction_crit = self.criteria[-1](x_pred, x_truth)
@@ -492,7 +500,7 @@ class OptBase:
                 x_truth = x_truth.detach().cpu().numpy().squeeze(0)
                 x_pred = x_pred.detach().cpu().numpy().squeeze(0)
                 ts = ts.detach().cpu().numpy().squeeze(0)
-                _us = None if truth.u is None else truth.u.detach().cpu().numpy().squeeze(0)
+                _us = None if runtime.u is None else runtime.u.detach().cpu().numpy().squeeze(0)
                 plotting_config = self.config.get('plotting', {})
                 plot_trajectory(np.array([x_truth, x_pred]), ts, self.model_name,
                                 us=_us, labels=['Truth', 'Prediction'+_crit], prefix=self.results_prefix,
