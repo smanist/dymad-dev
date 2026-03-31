@@ -2,10 +2,11 @@ import numpy as np
 import torch
 from typing import Union, Tuple
 
-from dymad.io import DynData
+from dymad.core.model_context import ModelRuntimePayload
 from dymad.models.helpers import build_processor, fzu_selector, get_dims
 from dymad.models.model_base import ComposedDynamics
 from dymad.models.prediction import predict_continuous_fenc
+from dymad.models.runtime_view import ComponentInputPayload
 from dymad.modules import FlexLinear, make_krr
 from dymad.numerics import Manifold
 
@@ -252,11 +253,11 @@ class CD_KMM(CD_KM):
         residual = self.processor_net.fit()
         return self.processor_net._alphas, residual
 
-    def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
+    def predict(self, x0: torch.Tensor, w: ModelRuntimePayload, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
         """Predict trajectory using discrete-time iterations."""
         return predict_continuous_fenc(self, x0, ts, w, **kwargs)
 
-    def fenc_step(self, z: torch.Tensor, w: DynData, dt: float) -> torch.Tensor:
+    def fenc_step(self, z: torch.Tensor, w: ComponentInputPayload, dt: float) -> torch.Tensor:
         """
         First-order Euler step with Normal Correction.
         """

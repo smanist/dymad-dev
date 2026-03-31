@@ -1,11 +1,11 @@
 import torch
 from typing import Dict
 
-from dymad.io import DynData
 from dymad.models.components import DEC_MAP, ENC_MAP, FZU_MAP
 from dymad.models.helpers import get_dims
 from dymad.models.model_base import ComposedDynamics
 from dymad.models.prediction import predict_continuous_np, predict_discrete_exp
+from dymad.models.runtime_view import ComponentInputPayload, build_component_input_view
 from dymad.modules import MLP
 
 
@@ -92,26 +92,30 @@ class TemplateCorrAlg(ComposedDynamics):
         """
         raise NotImplementedError("Implement in derived class.")
 
-    def dynamics(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+    def dynamics(self, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
         """Processing without control inputs."""
+        view = build_component_input_view(w)
+        runtime = view.runtime
         if z.ndim == 3:
-            w_p = w.p.unsqueeze(-2)
+            w_p = runtime.p.unsqueeze(-2)
         else:
-            w_p = w.p
+            w_p = runtime.p
         _l = self.processor_net(self.features(z, w))
-        _f = self.base_dynamics(z, w.u, _l, w_p)
+        _f = self.base_dynamics(z, view.control, _l, w_p)
         return _f
 
 
-def enc_corr_dif_ctrl(self, w: DynData) -> torch.Tensor:
+def enc_corr_dif_ctrl(self, w: ComponentInputPayload) -> torch.Tensor:
     """Encodes states and controls."""
+    view = build_component_input_view(w)
     return torch.cat(
-        [w.x, self.net(torch.cat([w.x, w.u], dim=-1))],
+        [view.state, self.net(torch.cat([view.state, view.control], dim=-1))],
         dim=-1)
 
-def enc_corr_dif_auto(self, w: DynData) -> torch.Tensor:
+def enc_corr_dif_auto(self, w: ComponentInputPayload) -> torch.Tensor:
     """Encodes states."""
-    return torch.cat([w.x, self.net(w.x)], dim=-1)
+    view = build_component_input_view(w)
+    return torch.cat([view.state, self.net(view.state)], dim=-1)
 
 class TemplateCorrDif(ComposedDynamics):
     """
@@ -248,13 +252,15 @@ class TemplateCorrDif(ComposedDynamics):
         """
         raise NotImplementedError("Implement in derived class.")
 
-    def dynamics(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+    def dynamics(self, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
+        view = build_component_input_view(w)
+        runtime = view.runtime
         if z.ndim == 3:
-            w_p = w.p.unsqueeze(-2)
+            w_p = runtime.p.unsqueeze(-2)
         else:
-            w_p = w.p
+            w_p = runtime.p
         _x = z[..., :self.n_total_state_features]
         _f = self.processor_net(self.features(z, w))
-        _dx = self.base_dynamics(_x, w.u, _f, w_p)
+        _dx = self.base_dynamics(_x, view.control, _f, w_p)
         _ds = self.latent_net(self.features(z, w))
         return torch.cat([_dx, _ds], dim=-1)
