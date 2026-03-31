@@ -4,22 +4,23 @@ import torch
 import torch.nn as nn
 from typing import Any, Callable, Dict, Tuple, Union
 
-from dymad.io import DynData
+from dymad.io.data import DynData
+from dymad.models.runtime_view import ComponentInputPayload
 
 
-Encoder = Callable[[nn.Module, DynData], torch.Tensor]
+Encoder = Callable[[nn.Module, ComponentInputPayload], torch.Tensor]
 """encoder(net, w) -> x"""
 
-Features = Callable[[torch.Tensor, DynData], torch.Tensor]
+Features = Callable[[torch.Tensor, ComponentInputPayload], torch.Tensor]
 """features(z, w) -> s"""
 
-Composer = Callable[[nn.Module, torch.Tensor, torch.Tensor, DynData], torch.Tensor]
+Composer = Callable[[nn.Module, torch.Tensor, torch.Tensor, ComponentInputPayload], torch.Tensor]
 """composer(net, s, z, w) -> r"""
 
-Decoder = Callable[[nn.Module, torch.Tensor, DynData], torch.Tensor]
+Decoder = Callable[[nn.Module, torch.Tensor, ComponentInputPayload], torch.Tensor]
 """decoder(net, z, w) -> x"""
 
-Predictor = Callable[[torch.Tensor, DynData, Union[np.ndarray, torch.Tensor], Any], Tuple[torch.Tensor, torch.Tensor]]
+Predictor = Callable[[torch.Tensor, ComponentInputPayload, Union[np.ndarray, torch.Tensor], Any], Tuple[torch.Tensor, torch.Tensor]]
 r"""predict(x0, w, ts, \*\*kwargs) -> (x_pred, z_pred)"""
 
 
@@ -176,11 +177,11 @@ class ComposedDynamics(nn.Module):
         x_hat = self.decoder(z, w)
         return z, z_dot, x_hat
 
-    def encoder(self, w: DynData) -> torch.Tensor:
+    def encoder(self, w: ComponentInputPayload) -> torch.Tensor:
         """Encode the inputs into latent states."""
         return self._encoder(self.encoder_net, w)
 
-    def dynamics(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+    def dynamics(self, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
         """
         Compute the dynamics output given latent states and inputs.
 
@@ -188,11 +189,11 @@ class ComposedDynamics(nn.Module):
         """
         return self.composer(self.processor_net, self.features(z, w), z, w)
 
-    def decoder(self, z: torch.Tensor, w: DynData) -> torch.Tensor:
+    def decoder(self, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
         """Decode the latent states into outputs."""
         return self._decoder(self.decoder_net, z, w)
 
-    def linear_eval(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
+    def linear_eval(self, w: ComponentInputPayload) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute linear evaluation, dz, and states, z, for the model.
 
         dz = Af(z)
@@ -201,7 +202,7 @@ class ComposedDynamics(nn.Module):
         """
         return self._linear_eval(self, w)
 
-    def linear_features(self, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
+    def linear_features(self, w: ComponentInputPayload) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute linear features, f, and outputs, dz, for the model.
 
         dz = Af(z)
@@ -224,7 +225,7 @@ class ComposedDynamics(nn.Module):
         """
         raise NotImplementedError("This is the base class.")
 
-    def predict(self, x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor],
+    def predict(self, x0: torch.Tensor, w: ComponentInputPayload, ts: Union[np.ndarray, torch.Tensor],
                 method= 'dopri5', **kwargs) -> torch.Tensor:
         """
         Predict trajectory using specified method.

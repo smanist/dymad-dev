@@ -2,53 +2,60 @@ import torch
 import torch.nn as nn
 from typing import Tuple
 
-from dymad.io import DynData
+from dymad.models.runtime_view import ComponentInputPayload, build_component_input_view
 
 # ------------------
 # Encoder functions
 # ------------------
 
-def enc_iden(net: nn.Module, w: DynData) -> torch.Tensor:
+def enc_iden(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Identity encoder function."""
-    return w.x
+    return build_component_input_view(w).state
 
-def enc_smpl_auto(net: nn.Module, w: DynData) -> torch.Tensor:
+def enc_smpl_auto(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Only encodes states."""
-    return net(w.x)
+    return net(build_component_input_view(w).state)
 
-def enc_smpl_ctrl(net: nn.Module, w: DynData) -> torch.Tensor:
+def enc_smpl_ctrl(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Encodes states and controls."""
-    return net(torch.cat([w.x, w.u], dim=-1))
+    view = build_component_input_view(w)
+    return net(torch.cat([view.state, view.control], dim=-1))
 
-def enc_raw_ctrl(net: nn.Module, w: DynData) -> torch.Tensor:
+def enc_raw_ctrl(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Let encoder handle states and controls."""
-    return net(w.x, w.u)
+    view = build_component_input_view(w)
+    return net(view.state, view.control)
 
-def enc_graph_iden(net: nn.Module, w: DynData) -> torch.Tensor:
+def enc_graph_iden(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Identity encoder function for graph data."""
-    return w.xg
+    return build_component_input_view(w).graph_state
 
-def enc_graph_auto(net: nn.Module, w: DynData) -> torch.Tensor:
+def enc_graph_auto(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Using GNN in EncAuto."""
-    return w.g(net(w.xg, w.ei, w.ew, w.ea))
+    view = build_component_input_view(w)
+    return view.unflatten_nodes(net(view.graph_state, view.edge_index, view.edge_weight, view.edge_attr))
 
-def enc_graph_ctrl(net: nn.Module, w: DynData) -> torch.Tensor:
+def enc_graph_ctrl(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Using GNN in EncCtrl."""
-    xu_cat = torch.cat([w.xg, w.ug], dim=-1)
-    return w.g(net(xu_cat, w.ei, w.ew, w.ea))
+    view = build_component_input_view(w)
+    xu_cat = torch.cat([view.graph_state, view.graph_control], dim=-1)
+    return view.unflatten_nodes(net(xu_cat, view.edge_index, view.edge_weight, view.edge_attr))
 
-def enc_node_auto(net: nn.Module, w: DynData) -> torch.Tensor:
+def enc_node_auto(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Using EncAuto for each node of graph."""
-    return w.G(net(w.xg))      # G is needed for unified data structure
+    view = build_component_input_view(w)
+    return view.flatten_nodes(net(view.graph_state))
 
-def enc_node_ctrl(net: nn.Module, w: DynData) -> torch.Tensor:
+def enc_node_ctrl(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Using EncCtrl for each node of graph."""
-    xu_cat = torch.cat([w.xg, w.ug], dim=-1)
-    return w.G(net(xu_cat))    # G is needed for unified data structure
+    view = build_component_input_view(w)
+    xu_cat = torch.cat([view.graph_state, view.graph_control], dim=-1)
+    return view.flatten_nodes(net(xu_cat))
 
-def enc_node_raw_ctrl(net: nn.Module, w: DynData) -> torch.Tensor:
+def enc_node_raw_ctrl(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Using EncCtrl for each node of graph, letting encoder handle the concatenation."""
-    return w.G(net(w.xg, w.ug))    # G is needed for unified data structure
+    view = build_component_input_view(w)
+    return view.flatten_nodes(net(view.graph_state, view.graph_control))
 
 #: Mapping of encoder names to encoder functions.
 ENC_MAP = {
@@ -71,21 +78,23 @@ ENC_MAP = {
 # ------------------
 # Decoder functions
 # ------------------
-def dec_iden(net: nn.Module, z: torch.Tensor, w: DynData) -> torch.Tensor:
+def dec_iden(net: nn.Module, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Identity decoder function."""
     return z
 
-def dec_auto(net: nn.Module, z: torch.Tensor, w: DynData) -> torch.Tensor:
+def dec_auto(net: nn.Module, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Generic decoder function."""
     return net(z)
 
-def dec_graph(net: nn.Module, z: torch.Tensor, w: DynData) -> torch.Tensor:
+def dec_graph(net: nn.Module, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Graph decoder function."""
-    return net(z, w.ei, w.ew, w.ea)
+    view = build_component_input_view(w)
+    return net(z, view.edge_index, view.edge_weight, view.edge_attr)
 
-def dec_node(net: nn.Module, z: torch.Tensor, w: DynData) -> torch.Tensor:
+def dec_node(net: nn.Module, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Node-wise decoder function."""
-    return w.G(net(w.g(z)))    # G is needed for unified data structure
+    view = build_component_input_view(w)
+    return view.flatten_nodes(net(view.unflatten_nodes(z)))
 
 #: Mapping of decoder names to decoder functions.
 DEC_MAP = {
@@ -100,37 +109,39 @@ DEC_MAP = {
 # Dynamics modules - features
 # ------------------
 
-def zu_cat_none(z: torch.Tensor, w: DynData) -> torch.Tensor:
+def zu_cat_none(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """No concatenation, just return z."""
     return z
 
-def zu_cat_smpl(z: torch.Tensor, w: DynData) -> torch.Tensor:
+def zu_cat_smpl(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Simple concatenation of z and u."""
-    return torch.cat([z, w.u], dim=-1)
+    return torch.cat([z, build_component_input_view(w).control], dim=-1)
 
-def zu_blin_no_const(z: torch.Tensor, w: DynData) -> torch.Tensor:
+def zu_blin_no_const(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Compute bilinear features without constant term."""
-    z_u = (z.unsqueeze(-1) * w.u.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
+    control = build_component_input_view(w).control
+    z_u = (z.unsqueeze(-1) * control.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
     return torch.cat([z, z_u], dim=-1)
 
-def zu_blin_with_const(z: torch.Tensor, w: DynData) -> torch.Tensor:
+def zu_blin_with_const(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Compute bilinear features with constant term."""
-    z_u = (z.unsqueeze(-1) * w.u.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
-    return torch.cat([z, z_u, w.u], dim=-1)
+    control = build_component_input_view(w).control
+    z_u = (z.unsqueeze(-1) * control.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
+    return torch.cat([z, z_u, control], dim=-1)
 
-def zu_cat_smpl_graph(z: torch.Tensor, w: DynData) -> torch.Tensor:
+def zu_cat_smpl_graph(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Simple concatenation of z and u on graph."""
-    return torch.cat([z, w.ug], dim=-1)
+    return torch.cat([z, build_component_input_view(w).graph_control], dim=-1)
 
-def zu_blin_no_const_graph(z: torch.Tensor, w: DynData) -> torch.Tensor:
+def zu_blin_no_const_graph(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Compute bilinear features without constant term for graph data."""
-    u_reshaped = w.ug
+    u_reshaped = build_component_input_view(w).graph_control
     z_u = (z.unsqueeze(-1) * u_reshaped.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
     return torch.cat([z, z_u], dim=-1)
 
-def zu_blin_with_const_graph(z: torch.Tensor, w: DynData) -> torch.Tensor:
+def zu_blin_with_const_graph(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Compute bilinear features with constant term for graph data."""
-    u_reshaped = w.ug
+    u_reshaped = build_component_input_view(w).graph_control
     z_u = (z.unsqueeze(-1) * u_reshaped.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
     return torch.cat([z, z_u, u_reshaped], dim=-1)
 
@@ -150,21 +161,23 @@ FZU_MAP = {
 # Dynamics modules - composers
 # ------------------
 
-def dyn_direct(net: nn.Module, s: torch.Tensor, z: torch.Tensor, w: DynData) -> torch.Tensor:
+def dyn_direct(net: nn.Module, s: torch.Tensor, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Processing without control inputs."""
     return net(s)
 
-def dyn_skip(net: nn.Module, s: torch.Tensor, z: torch.Tensor, w: DynData) -> torch.Tensor:
+def dyn_skip(net: nn.Module, s: torch.Tensor, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Processing with skip connection."""
     return z + net(s)
 
-def dyn_graph_direct(net: nn.Module, s: torch.Tensor, z: torch.Tensor, w: DynData) -> torch.Tensor:
+def dyn_graph_direct(net: nn.Module, s: torch.Tensor, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Processing by GNN."""
-    return net(w.g(s), w.ei, w.ew, w.ea)   # G is effectively applied in the net
+    view = build_component_input_view(w)
+    return net(view.unflatten_nodes(s), view.edge_index, view.edge_weight, view.edge_attr)
 
-def dyn_graph_skip(net: nn.Module, s: torch.Tensor, z: torch.Tensor, w: DynData) -> torch.Tensor:
+def dyn_graph_skip(net: nn.Module, s: torch.Tensor, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Processing by GNN with skip connection."""
-    return z + net(w.g(s), w.ei, w.ew, w.ea)   # G is effectively applied in the net
+    view = build_component_input_view(w)
+    return z + net(view.unflatten_nodes(s), view.edge_index, view.edge_weight, view.edge_attr)
 
 #: Mapping of dynamics composer names to functions.
 DYN_MAP = {
@@ -178,24 +191,24 @@ DYN_MAP = {
 # Dynamics modules - linear features
 # ------------------
 
-def linear_eval_smpl(mdl, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
+def linear_eval_smpl(mdl, w: ComponentInputPayload) -> Tuple[torch.Tensor, torch.Tensor]:
     """Compute linear evaluation, dz, and states, z, for the model."""
     z = mdl.encoder(w)
     z_dot = mdl.dynamics(z, w)
     return z_dot, z
 
-def linear_features_smpl(mdl, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
+def linear_features_smpl(mdl, w: ComponentInputPayload) -> Tuple[torch.Tensor, torch.Tensor]:
     """Compute linear features, f, and outputs, dz, for the model."""
     z = mdl.encoder(w)
     return mdl.features(z, w), z
 
-def linear_eval_graph(mdl, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
+def linear_eval_graph(mdl, w: ComponentInputPayload) -> Tuple[torch.Tensor, torch.Tensor]:
     """Compute linear evaluation, dz, and states, z, for the model."""
     z = mdl.encoder(w)
     z_dot = mdl.dynamics(z, w)
     return z_dot.permute(0, 2, 1, 3), z.permute(0, 2, 1, 3)
 
-def linear_features_graph(mdl, w: DynData) -> Tuple[torch.Tensor, torch.Tensor]:
+def linear_features_graph(mdl, w: ComponentInputPayload) -> Tuple[torch.Tensor, torch.Tensor]:
     """Compute linear features, f, and outputs, dz, for the model."""
     z = mdl.encoder(w)
     f = mdl.features(z, w)
