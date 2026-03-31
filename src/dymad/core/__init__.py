@@ -3,6 +3,7 @@
 from dymad.core.graph_series import FixedGraphSeries, GraphSeries, GraphSeriesBatch, VariableEdgeGraphSeries
 from dymad.core.model_context import GraphModelContext, RegularModelContext, build_model_context
 from dymad.core.series import RegularSeries, RegularSeriesBatch
+from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 from dymad.core.torch_transforms import (
     AddOneTransform,
     ComposeTransform,
@@ -30,6 +31,7 @@ __all__ = [
     "FixedGraphSeries",
     "GraphSeries",
     "GraphSeriesBatch",
+    "GraphTrainerBatch",
     "GraphModelContext",
     "IdentityTransform",
     "build_legacy_transform",
@@ -41,6 +43,7 @@ __all__ = [
     "NDRTransformModuleAdapter",
     "RegularSeries",
     "RegularSeriesBatch",
+    "RegularTrainerBatch",
     "RegularModelContext",
     "RegularSeriesTransformPipeline",
     "ScalerTransform",

@@ -7,6 +7,7 @@ from typing import Optional, Union, Tuple, Dict, List
 
 from dymad.core.graph_series import GraphSeries, GraphSeriesBatch
 from dymad.core.series import RegularSeries, RegularSeriesBatch
+from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 from dymad.core.transform_builder import build_legacy_transform, build_transform_module, export_transform_state
 from dymad.core.transform_module import FieldTransformModule, LegacyTransformModuleAdapter, SeriesTransformPipeline
 from dymad.io.data import DynData
@@ -154,6 +155,7 @@ class TrajectoryManager:
             device: torch.device = torch.device("cpu")):
         self.metadata = copy.deepcopy(metadata)
         self.device = device
+        self.typed_dataset: list[RegularSeries] | list[GraphSeries] | None = None
 
         self._init_transforms()
         self._load_metadata(self.metadata, data_key)
@@ -265,17 +267,26 @@ class TrajectoryManager:
         self.load_data()
         self.data_truncation()
 
-    def process_data(self) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
+    def process_data(
+        self,
+        *,
+        typed: bool = False,
+    ) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
         """
         Latter half of process_all
         """
         self.apply_data_transformations()
-        self.create_dataloaders()
+        self.create_dataloaders(typed=typed)
 
-        logger.info(f"Data processing complete. Data size: {len(self.dataset)}.")
-        return self.dataloader, self.dataset, self.metadata
+        dataset = self.typed_dataset if typed else self.dataset
+        logger.info(f"Data processing complete. Data size: {len(dataset)}.")
+        return self.dataloader, dataset, self.metadata
 
-    def process_all(self) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
+    def process_all(
+        self,
+        *,
+        typed: bool = False,
+    ) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
         """
         Returns:
             A tuple containing: dataloader, dataset, metadata
@@ -283,7 +294,7 @@ class TrajectoryManager:
         self.prepare_data()
         if self.data_index is None:
             self.set_data_index()
-        res = self.process_data()
+        res = self.process_data(typed=typed)
         return res
 
     # --------------
@@ -461,7 +472,8 @@ class TrajectoryManager:
             logger.info("Transformations already fitted. Skipping fitting step.")
 
         logger.info("Applying transformations to state features and control inputs.")
-        self.dataset = self._transform_by_index(self.data_index)
+        self.typed_dataset = self._transform_regular_series_by_index(self.data_index)
+        self.dataset = [DynDataAdapter.from_regular_series(series) for series in self.typed_dataset]
 
         if self.metadata["delay"] > 0:
             logger.info("Conforming the time data due to delay.")
@@ -601,7 +613,7 @@ class TrajectoryManager:
         else:
             return []
 
-    def create_dataloaders(self) -> None:
+    def create_dataloaders(self, *, typed: bool = False) -> None:
         """
         Create dataloaders for the data set.
         """
@@ -610,6 +622,17 @@ class TrajectoryManager:
         if_shuffle: bool = dl_cfg.get("shuffle", True)
 
         logger.info(f"Creating dataloaders for model with batch size {batch_size}.")
+        if typed:
+            if self.typed_dataset is None:
+                raise ValueError("typed_dataset is not available; apply_data_transformations must run first")
+            self.dataloader = DataLoader(
+                self.typed_dataset,
+                batch_size=batch_size,
+                shuffle=if_shuffle,
+                collate_fn=RegularTrainerBatch.collate_series,
+            )
+            return
+
         self.dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=if_shuffle, collate_fn=DynData.collate)
 
 class TrajectoryManagerGraph(TrajectoryManager):
@@ -797,7 +820,8 @@ class TrajectoryManagerGraph(TrajectoryManager):
             logger.info("Transformations already fitted. Skipping fitting step.")
 
         logger.info("Applying graph transformations through the typed series pipeline.")
-        transformed = pipeline(raw_batch)
+        transformed = list(pipeline(raw_batch))
+        self.typed_dataset = transformed
         self.dataset = [DynDataAdapter.from_graph_series(series) for series in transformed]
 
         if self.metadata["delay"] > 0:
@@ -1004,13 +1028,25 @@ class TrajectoryManagerGraph(TrajectoryManager):
         tmp = np.swapaxes(data, 0, 1)  # [T, n_nodes, n_features_per_node]
         return tmp.reshape(tmp.shape[0], -1)
 
-    def create_dataloaders(self) -> None:
+    def create_dataloaders(self, *, typed: bool = False) -> None:
         """
         For graph data, we aggregate the trajectories into batches of graphs.
         """
         dl_cfg = self.metadata['config'].get("dataloader", {})
         batch_size: int = dl_cfg.get("batch_size", 1)
         if_shuffle: bool = dl_cfg.get("shuffle", True)
+
+        if typed:
+            if self.typed_dataset is None:
+                raise ValueError("typed_dataset is not available; apply_data_transformations must run first")
+            logger.info(f"Creating typed graph dataloaders with batch size {batch_size}.")
+            self.dataloader = DataLoader(
+                self.typed_dataset,
+                batch_size=batch_size,
+                shuffle=if_shuffle,
+                collate_fn=GraphTrainerBatch.collate_series,
+            )
+            return
 
         n_batch = int(np.ceil(len(self.dataset) / batch_size))
         _data = []
