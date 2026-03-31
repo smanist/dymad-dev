@@ -11,7 +11,11 @@ from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 from dymad.core.transform_builder import build_legacy_transform, build_transform_module, export_transform_state
 from dymad.core.transform_module import FieldTransformModule, LegacyTransformModuleAdapter, SeriesTransformPipeline
 from dymad.io.data import DynData
-from dymad.io.series_adapter import DynDataAdapter, SeriesAdapter
+from dymad.io.series_adapter import (
+    SeriesAdapter,
+    graph_series_to_legacy_runtime,
+    regular_series_to_legacy_runtime,
+)
 from dymad.utils.graph import adj_to_edge
 
 logger = logging.getLogger("dymad.cv")
@@ -473,7 +477,7 @@ class TrajectoryManager:
 
         logger.info("Applying transformations to state features and control inputs.")
         self.typed_dataset = self._transform_regular_series_by_index(self.data_index)
-        self.dataset = [DynDataAdapter.from_regular_series(series) for series in self.typed_dataset]
+        self.dataset = [regular_series_to_legacy_runtime(series) for series in self.typed_dataset]
 
         if self.metadata["delay"] > 0:
             logger.info("Conforming the time data due to delay.")
@@ -484,7 +488,7 @@ class TrajectoryManager:
 
     def _transform_by_index(self, indices: torch.Tensor) -> List[DynData]:
         series_dataset = self._transform_regular_series_by_index(indices)
-        return [DynDataAdapter.from_regular_series(series) for series in series_dataset]
+        return [regular_series_to_legacy_runtime(series) for series in series_dataset]
 
     def create_regular_series_dataset(self, indices: torch.Tensor | List[int] | None = None) -> List[RegularSeries]:
         """Expose the first typed data seam for regular trajectory preprocessing."""
@@ -822,7 +826,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
         logger.info("Applying graph transformations through the typed series pipeline.")
         transformed = list(pipeline(raw_batch))
         self.typed_dataset = transformed
-        self.dataset = [DynDataAdapter.from_graph_series(series) for series in transformed]
+        self.dataset = [graph_series_to_legacy_runtime(series) for series in transformed]
 
         if self.metadata["delay"] > 0:
             logger.info("Conforming the time data due to delay.")
@@ -833,7 +837,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
 
     def _transform_by_index(self, indices: torch.Tensor) -> List[DynData]:
         graph_dataset = self._transform_graph_series_by_index(indices)
-        return [DynDataAdapter.from_graph_series(series) for series in graph_dataset]
+        return [graph_series_to_legacy_runtime(series) for series in graph_dataset]
 
     def create_graph_series_dataset(self, indices: torch.Tensor | List[int] | None = None) -> List[GraphSeries]:
         """Expose the typed graph-series seam for graph trajectory preprocessing."""

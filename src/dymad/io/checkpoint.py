@@ -10,7 +10,7 @@ from dymad.core.graph_series import GraphSeriesBatch
 from dymad.core.transform_builder import build_transform_module
 from dymad.core.series import RegularSeriesBatch
 from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline
-from dymad.io.series_adapter import DynDataAdapter, SeriesAdapter
+from dymad.io.series_adapter import SeriesAdapter, regular_series_to_legacy_runtime
 from dymad.io.trajectory_manager import TrajectoryManager
 from dymad.transform import Autoencoder
 from dymad.utils.misc import load_config
@@ -431,7 +431,7 @@ class DataInterface:
                     dtype=self.dtype,
                     device=self.device,
                 )
-                _z = self.model.encoder(DynDataAdapter.from_regular_series(payload))
+                _z = self.model.encoder(regular_series_to_legacy_runtime(payload))
                 return _z.reshape(*_x_shape, -1)
             def decoder(z):
                 return self.model.decoder(z, None)

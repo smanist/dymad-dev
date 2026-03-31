@@ -5,7 +5,7 @@ import torch
 
 from dymad.core.series import RegularSeries
 from dymad.transform import make_transform
-from dymad.io.series_adapter import DynDataAdapter, SeriesAdapter
+from dymad.io.series_adapter import SeriesAdapter, regular_series_to_legacy_runtime
 from dymad.io.trajectory_manager import TrajectoryManager
 
 
@@ -46,7 +46,7 @@ def test_regular_series_seam_matches_legacy_regular_dataset(tmp_path) -> None:
     first_legacy = manager.dataset[0]
     assert isinstance(first_series, RegularSeries)
 
-    roundtrip = DynDataAdapter.from_regular_series(first_series)
+    roundtrip = regular_series_to_legacy_runtime(first_series)
     from_legacy = SeriesAdapter.from_dyndata(first_legacy)
 
     torch.testing.assert_close(first_series.time, first_legacy.t.squeeze(0))

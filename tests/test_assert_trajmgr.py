@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 import torch
 
-from dymad.io import DynData, TrajectoryManager
+from dymad.io import TrajectoryManager
+from dymad.io.data import DynData
 from dymad.transform import make_transform
 
 HERE = Path(__file__).parent

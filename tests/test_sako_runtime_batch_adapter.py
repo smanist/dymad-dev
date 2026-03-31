@@ -1,7 +1,7 @@
 import torch
 
 from dymad.core import RegularSeries, RegularTrainerBatch
-from dymad.io import DynData
+from dymad.io.data import DynData
 from dymad.sako.base import encode_runtime_batch
 
 

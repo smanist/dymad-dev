@@ -44,9 +44,9 @@ class RegularModelContext:
 
     def to_legacy_runtime(self) -> "DynData":
         from dymad.io.data import DynData
-        from dymad.io.series_adapter import DynDataAdapter
+        from dymad.io.series_adapter import regular_series_to_legacy_runtime
 
-        payloads = [DynDataAdapter.from_regular_series(item) for item in self.batch]
+        payloads = [regular_series_to_legacy_runtime(item) for item in self.batch]
         return DynData.collate(payloads)
 
 
@@ -84,9 +84,9 @@ class GraphModelContext:
 
     def to_legacy_runtime(self) -> "DynData":
         from dymad.io.data import DynData
-        from dymad.io.series_adapter import DynDataAdapter
+        from dymad.io.series_adapter import graph_series_to_legacy_runtime
 
-        payloads = [DynDataAdapter.from_graph_series(item) for item in self.batch]
+        payloads = [graph_series_to_legacy_runtime(item) for item in self.batch]
         return DynData.collate(payloads)
 
 

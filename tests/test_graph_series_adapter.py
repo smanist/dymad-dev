@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 
 from dymad.core import FixedGraphSeries
-from dymad.io.series_adapter import DynDataAdapter, SeriesAdapter
+from dymad.io.series_adapter import SeriesAdapter, graph_series_to_legacy_runtime
 from dymad.io.trajectory_manager import TrajectoryManagerGraph
 
 
@@ -36,7 +36,7 @@ def test_graph_series_seam_matches_legacy_graph_dataset(ltg_data) -> None:
     first_legacy = manager.dataset[0]
     assert isinstance(first_series, FixedGraphSeries)
 
-    roundtrip = DynDataAdapter.from_graph_series(first_series)
+    roundtrip = graph_series_to_legacy_runtime(first_series)
     from_legacy = SeriesAdapter.from_dyndata(first_legacy)
 
     assert isinstance(from_legacy, FixedGraphSeries)
@@ -65,17 +65,13 @@ def test_graph_trajectory_manager_uses_typed_series_before_legacy_adaptation(mon
     import dymad.io.trajectory_manager as trajectory_manager_module
 
     calls: list[str] = []
-    original = trajectory_manager_module.DynDataAdapter.from_graph_series
+    original = trajectory_manager_module.graph_series_to_legacy_runtime
 
     def traced(series):
         calls.append(type(series).__name__)
         return original(series)
 
-    monkeypatch.setattr(
-        trajectory_manager_module.DynDataAdapter,
-        "from_graph_series",
-        staticmethod(traced),
-    )
+    monkeypatch.setattr(trajectory_manager_module, "graph_series_to_legacy_runtime", traced)
 
     manager.apply_data_transformations()
 

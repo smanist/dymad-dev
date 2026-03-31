@@ -3,7 +3,8 @@ import numpy as np
 import pytest
 import torch
 
-from dymad.io import DynData, TrajectoryManagerGraph
+from dymad.io import TrajectoryManagerGraph
+from dymad.io.data import DynData
 from dymad.transform import make_transform
 from dymad.utils import adj_to_edge
 

@@ -183,51 +183,51 @@ class SeriesAdapter:
         return torch.as_tensor(payload, dtype=dtype, device=device)
 
 
-class DynDataAdapter:
-    """Adapt typed series back to the legacy runtime object."""
+def regular_series_to_legacy_runtime(series: RegularSeries) -> DynData:
+    """Temporary deletion-stage bridge from typed regular series to DynData."""
 
-    @staticmethod
-    def from_regular_series(series: RegularSeries) -> DynData:
-        return DynData(
-            t=series.time,
-            x=series.state,
-            y=series.target,
-            u=series.control,
-            p=series.params,
-            meta=[dict(series.meta)] if series.meta else [],
-        )
+    return DynData(
+        t=series.time,
+        x=series.state,
+        y=series.target,
+        u=series.control,
+        p=series.params,
+        meta=[dict(series.meta)] if series.meta else [],
+    )
 
-    @staticmethod
-    def from_graph_series(series: GraphSeries) -> DynData:
-        n_steps = int(series.time.shape[0])
-        return DynData(
-            t=series.time,
-            x=series.node_state.reshape(n_steps, -1),
-            y=series.target.reshape(n_steps, -1) if series.target is not None else None,
-            u=series.control.reshape(n_steps, -1) if series.control is not None else None,
-            p=series.params.reshape(-1) if series.params is not None else None,
-            ei=DynDataAdapter._graph_edge_steps(series, n_steps),
-            ew=DynDataAdapter._graph_optional_steps(series.edge_weight, n_steps),
-            ea=DynDataAdapter._graph_optional_steps(series.edge_attr, n_steps),
-            meta=[dict(series.meta)] if series.meta else [],
-        )
 
-    @staticmethod
-    def _graph_edge_steps(series: GraphSeries, n_steps: int) -> list[torch.Tensor]:
-        if isinstance(series.edge_index, torch.Tensor):
-            return [series.edge_index.transpose(0, 1) for _ in range(n_steps)]
-        return [step.transpose(0, 1) for step in series.edge_index]
+def graph_series_to_legacy_runtime(series: GraphSeries) -> DynData:
+    """Temporary deletion-stage bridge from typed graph series to DynData."""
 
-    @staticmethod
-    def _graph_optional_steps(payload, n_steps: int):
-        if payload is None:
-            return None
-        if isinstance(payload, tuple):
-            return list(payload)
-        if isinstance(payload, torch.Tensor):
-            if payload.ndim >= 2 and payload.shape[0] == n_steps:
-                return [payload[step] for step in range(n_steps)]
-            if payload.ndim == 1 and payload.shape[0] == n_steps:
-                return [payload[step:step + 1] for step in range(n_steps)]
-            return [payload for _ in range(n_steps)]
+    n_steps = int(series.time.shape[0])
+    return DynData(
+        t=series.time,
+        x=series.node_state.reshape(n_steps, -1),
+        y=series.target.reshape(n_steps, -1) if series.target is not None else None,
+        u=series.control.reshape(n_steps, -1) if series.control is not None else None,
+        p=series.params.reshape(-1) if series.params is not None else None,
+        ei=_graph_edge_steps(series, n_steps),
+        ew=_graph_optional_steps(series.edge_weight, n_steps),
+        ea=_graph_optional_steps(series.edge_attr, n_steps),
+        meta=[dict(series.meta)] if series.meta else [],
+    )
+
+
+def _graph_edge_steps(series: GraphSeries, n_steps: int) -> list[torch.Tensor]:
+    if isinstance(series.edge_index, torch.Tensor):
+        return [series.edge_index.transpose(0, 1) for _ in range(n_steps)]
+    return [step.transpose(0, 1) for step in series.edge_index]
+
+
+def _graph_optional_steps(payload, n_steps: int):
+    if payload is None:
+        return None
+    if isinstance(payload, tuple):
+        return list(payload)
+    if isinstance(payload, torch.Tensor):
+        if payload.ndim >= 2 and payload.shape[0] == n_steps:
+            return [payload[step] for step in range(n_steps)]
+        if payload.ndim == 1 and payload.shape[0] == n_steps:
+            return [payload[step:step + 1] for step in range(n_steps)]
         return [payload for _ in range(n_steps)]
+    return [payload for _ in range(n_steps)]
