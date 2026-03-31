@@ -1,16 +1,18 @@
+from __future__ import annotations
+
 import logging
 import numpy as np
 import torch
 from torchdiffeq import odeint
 from typing import Union
 
-from dymad.io import DynData
+from dymad.core.model_context import ModelRuntimePayload, materialize_prediction_runtime
 from dymad.numerics import expm_low_rank, expm_full_rank
 from dymad.utils import ControlInterpolator
 
 logger = logging.getLogger(__name__)
 
-def _prepare_data(x0, ts, ws, device):
+def _prepare_data(x0, ts, ws: ModelRuntimePayload | None, device):
     # Initial conditions
     # Determines batch size
     is_batch = x0.ndim == 2
@@ -41,28 +43,12 @@ def _prepare_data(x0, ts, ws, device):
         _Nt = _ts.shape[-1]
 
     # Inputs
-    _ws, _Nw = None, None
-    if ws is not None:
-        if is_batch:
-            if ws.batch_size == 1 and _Nb > 1:
-                _ws = DynData.collate([ws for _ in range(_Nb)])
-            elif ws.batch_size == _Nb:
-                _ws = ws
-            else:
-                raise ValueError(f"Batch mode: ws batch size must be 1 or match x0. Got ws: {ws.batch_size}, x0: {_Nb}")
-
-            if _ws._has_graph:
-                # Graph mode, batch always 1
-                # Need to flatten x0
-                _x0 = _x0.view(1, -1)
-        else:
-            if ws.batch_size is not None and ws.batch_size != 1:
-                raise ValueError(f"Single mode: ws batch size must be 1. Got ws: {ws.batch_size}")
-            _ws = ws
-        _ws = _ws.to(device)
-        _Nw = _ws.n_steps
-    else:
-        _ws = DynData().to(device)
+    _ws = materialize_prediction_runtime(ws, batch_size=_Nb, is_batch=is_batch).to(device)
+    _Nw = _ws.n_steps
+    if _ws._has_graph:
+        # Graph mode, batch always 1
+        # Need to flatten x0
+        _x0 = _x0.view(1, -1)
 
     # Check step consistency
     if _Nt is None:
@@ -98,7 +84,7 @@ def predict_continuous(
     model,
     x0: torch.Tensor,
     ts: Union[np.ndarray, torch.Tensor],
-    ws: DynData = None,
+    ws: ModelRuntimePayload | None = None,
     method: str = 'dopri5',
     order: str = 'cubic',
     **kwargs
@@ -162,7 +148,7 @@ def predict_continuous_np(
     model,
     x0: torch.Tensor,
     ts: Union[np.ndarray, torch.Tensor],
-    ws: DynData = None,
+    ws: ModelRuntimePayload | None = None,
     method: str = 'dopri5',
     order: str = 'cubic',
     **kwargs
@@ -208,7 +194,7 @@ def predict_continuous_exp(
     model,
     x0: torch.Tensor,
     ts: Union[np.ndarray, torch.Tensor],
-    ws: DynData = None,
+    ws: ModelRuntimePayload | None = None,
     **kwargs
 ) -> torch.Tensor:
     """
@@ -257,7 +243,7 @@ def predict_continuous_fenc(
     model,
     x0: torch.Tensor,
     ts: Union[np.ndarray, torch.Tensor],
-    ws: DynData = None,
+    ws: ModelRuntimePayload | None = None,
     **kwargs
 ) -> torch.Tensor:
     """
@@ -295,7 +281,7 @@ def predict_discrete(
     model,
     x0: torch.Tensor,
     ts: Union[np.ndarray, torch.Tensor],
-    ws: DynData = None,
+    ws: ModelRuntimePayload | None = None,
     **kwargs
 ) -> torch.Tensor:
     """
@@ -343,7 +329,7 @@ def predict_discrete_exp(
     model,
     x0: torch.Tensor,
     ts: Union[np.ndarray, torch.Tensor],
-    ws: DynData = None,
+    ws: ModelRuntimePayload | None = None,
     **kwargs
 ) -> torch.Tensor:
     """

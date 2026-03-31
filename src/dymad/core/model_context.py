@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 import torch
 
@@ -104,3 +104,116 @@ def build_model_context(
     if isinstance(batch, GraphSeriesBatch):
         return GraphModelContext.from_batch(batch)
     raise TypeError(f"Unsupported model-context payload type: {type(batch)!r}")
+
+
+ModelRuntimePayload: TypeAlias = "DynData | RegularModelContext | GraphModelContext"
+
+
+def _expand_regular_context_for_prediction(
+    context: RegularModelContext,
+    *,
+    batch_size: int,
+    is_batch: bool,
+) -> RegularModelContext:
+    if not is_batch:
+        if context.batch_size != 1:
+            raise ValueError(
+                f"Single mode: ws batch size must be 1. Got ws: {context.batch_size}"
+            )
+        return context
+
+    if context.batch_size == 1 and batch_size > 1:
+        return RegularModelContext.from_batch(
+            RegularSeriesBatch.collate(context.batch[0] for _ in range(batch_size))
+        )
+    if context.batch_size == batch_size:
+        return context
+    raise ValueError(
+        f"Batch mode: ws batch size must be 1 or match x0. Got ws: {context.batch_size}, x0: {batch_size}"
+    )
+
+
+def _expand_graph_context_for_prediction(
+    context: GraphModelContext,
+    *,
+    batch_size: int,
+    is_batch: bool,
+) -> GraphModelContext:
+    if not is_batch:
+        if context.batch_size != 1:
+            raise ValueError(
+                f"Single mode: ws batch size must be 1. Got ws: {context.batch_size}"
+            )
+        return context
+
+    if context.batch_size == 1 and batch_size > 1:
+        return GraphModelContext.from_batch(
+            GraphSeriesBatch.collate(context.batch[0] for _ in range(batch_size))
+        )
+    if context.batch_size == batch_size:
+        return context
+    raise ValueError(
+        f"Batch mode: ws batch size must be 1 or match x0. Got ws: {context.batch_size}, x0: {batch_size}"
+    )
+
+
+def _context_from_legacy_runtime(payload: "DynData") -> RegularModelContext | GraphModelContext:
+    from dymad.io.series_adapter import SeriesAdapter
+
+    return build_model_context(SeriesAdapter.from_dyndata(payload))
+
+
+def materialize_prediction_runtime(
+    payload: ModelRuntimePayload | None,
+    *,
+    batch_size: int,
+    is_batch: bool,
+) -> "DynData":
+    """Materialize a prediction runtime payload through the typed-context boundary."""
+
+    from dymad.io.data import DynData
+
+    if payload is None:
+        return DynData()
+
+    if isinstance(payload, DynData):
+        if not is_batch:
+            if payload.batch_size is not None and payload.batch_size != 1:
+                raise ValueError(
+                    f"Single mode: ws batch size must be 1. Got ws: {payload.batch_size}"
+                )
+            return payload
+        if payload.batch_size == batch_size:
+            return payload
+        if payload.batch_size != 1:
+            raise ValueError(
+                f"Batch mode: ws batch size must be 1 or match x0. Got ws: {payload.batch_size}, x0: {batch_size}"
+            )
+        context = _context_from_legacy_runtime(payload)
+        if isinstance(context, RegularModelContext):
+            return _expand_regular_context_for_prediction(
+                context,
+                batch_size=batch_size,
+                is_batch=True,
+            ).to_legacy_runtime()
+        return _expand_graph_context_for_prediction(
+            context,
+            batch_size=batch_size,
+            is_batch=True,
+        ).to_legacy_runtime()
+
+    if isinstance(payload, RegularModelContext):
+        return _expand_regular_context_for_prediction(
+            payload,
+            batch_size=batch_size,
+            is_batch=is_batch,
+        ).to_legacy_runtime()
+
+    if isinstance(payload, GraphModelContext):
+        return _expand_graph_context_for_prediction(
+            payload,
+            batch_size=batch_size,
+            is_batch=is_batch,
+        ).to_legacy_runtime()
+
+    raise TypeError(f"Unsupported runtime payload type: {type(payload)!r}")

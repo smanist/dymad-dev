@@ -8,6 +8,8 @@ from dymad.core import (
     RegularSeries,
     RegularSeriesBatch,
 )
+from dymad.core.model_context import materialize_prediction_runtime
+from dymad.io.data import DynData
 from dymad.models.components import enc_graph_iden, enc_iden, zu_cat_smpl, zu_cat_smpl_graph
 
 
@@ -132,3 +134,34 @@ def test_graph_model_context_preserves_graph_helper_inputs():
     )
     expected = torch.cat([z, step0.ug], dim=-1)
     assert torch.equal(zu_cat_smpl_graph(z, step0), expected)
+
+
+def test_materialize_prediction_runtime_expands_regular_context_batches():
+    context = RegularModelContext.from_series(
+        RegularSeries(
+            time=torch.tensor([0.0, 1.0]),
+            state=torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+            control=torch.tensor([[0.1], [0.2]]),
+            params=torch.tensor([9.0]),
+        )
+    )
+
+    runtime = materialize_prediction_runtime(context, batch_size=3, is_batch=True)
+
+    assert runtime.batch_size == 3
+    assert torch.equal(runtime.x[0], runtime.x[1])
+    assert torch.equal(runtime.u[0], runtime.u[2])
+
+
+def test_materialize_prediction_runtime_expands_single_legacy_payload():
+    payload = DynData(
+        t=torch.tensor([0.0, 1.0]),
+        x=torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+        u=torch.tensor([[0.1], [0.2]]),
+    )
+
+    runtime = materialize_prediction_runtime(payload, batch_size=2, is_batch=True)
+
+    assert runtime.batch_size == 2
+    assert torch.equal(runtime.x[0], runtime.x[1])
+    assert torch.equal(runtime.u[0], runtime.u[1])
