@@ -6,9 +6,9 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Tuple
 
-from dymad.io import DynData
 from dymad.numerics.linalg import logm_low_rank, real_lowrank_from_eigpairs, truncated_lstsq
 from dymad.sako import filter_spectrum, SAKO
+from dymad.training.batch_adapter import TrainerBatch, batch_to_legacy_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -19,18 +19,20 @@ def _dt_target(z: torch.Tensor) -> torch.Tensor:
     """Compute discrete-time targets."""
     return z[..., 1:, :]
 
-def _comp_linear_features_dt(model, batch: DynData, **kwargs) -> torch.Tensor:
+def _comp_linear_features_dt(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
     """Compute linear features for discrete-time models."""
-    A, z = model.linear_features(batch)
+    runtime = batch_to_legacy_runtime(batch)
+    A, z = model.linear_features(runtime)
     _A = A[..., :-1, :]
     _z = _dt_target(z)
     return _A.reshape(-1, _A.shape[-1]), _z.reshape(-1, _z.shape[-1])
 
-def _comp_linear_eval_dt(model, batch: DynData, **kwargs) -> torch.Tensor:
+def _comp_linear_eval_dt(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
     """Compute predicted targets for discrete-time models.
     z_dot really means z_next here.
     """
-    z_dot, z = model.linear_eval(batch)
+    runtime = batch_to_legacy_runtime(batch)
+    z_dot, z = model.linear_eval(runtime)
     return z_dot[..., :-1, :], _dt_target(z)
 
 def _ct_target(z: torch.Tensor, dt, order=2) -> torch.Tensor:
@@ -45,15 +47,17 @@ def _ct_target(z: torch.Tensor, dt, order=2) -> torch.Tensor:
     else:
         raise ValueError(f"Unsupported FD order: {order}. Only 1 and 2 are supported.")
 
-def _comp_linear_features_ct(model, batch: DynData, **kwargs) -> torch.Tensor:
+def _comp_linear_features_ct(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
     """Compute linear features for continuous-time models."""
-    A, z = model.linear_features(batch)
+    runtime = batch_to_legacy_runtime(batch)
+    A, z = model.linear_features(runtime)
     _z = _ct_target(z, kwargs['dt'], kwargs.get('order', 2))
     return A.reshape(-1, A.shape[-1]), _z.reshape(-1, _z.shape[-1])
 
-def _comp_linear_eval_ct(model, batch: DynData, **kwargs) -> torch.Tensor:
+def _comp_linear_eval_ct(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
     """Compute predicted targets for continuous-time models."""
-    z_dot, z = model.linear_eval(batch)
+    runtime = batch_to_legacy_runtime(batch)
+    z_dot, z = model.linear_eval(runtime)
     return z_dot, _ct_target(z, kwargs['dt'], kwargs.get('order', 2))
 
 def check_linear_impl(model) -> bool:
@@ -253,7 +257,7 @@ class LSUpdater:
         # Additional logging
         logger.info(f"Using method: {self.method} with params: {self.params}")
 
-    def eval_batch(self, model, batch: DynData, criterion) -> torch.Tensor:
+    def eval_batch(self, model, batch: TrainerBatch, criterion) -> torch.Tensor:
         """
         Process a batch and return predictions and ground truth states.
 

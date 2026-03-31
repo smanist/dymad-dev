@@ -2,7 +2,7 @@ import logging
 import torch
 from typing import Any, Dict, Type
 
-from dymad.io import DynData
+from dymad.training.batch_adapter import TrainerBatch, batch_to_legacy_runtime
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 
@@ -35,7 +35,7 @@ class OptLinear(OptBase):
         # Additional logging
         logger.info(f"LinearTrainer: method {self._ls.method}, params {self._ls.params}")
 
-    def _process_batch(self, batch: DynData) -> torch.Tensor:
+    def _process_batch(self, batch: TrainerBatch) -> torch.Tensor:
         """
         Process a batch and return predictions and ground truth states.
 
@@ -48,7 +48,7 @@ class OptLinear(OptBase):
         # Other criteria
         # x_hat and predictions are computed inside criteria evaluation if needed
         x_hat, preds = None, None
-        _list = self._additional_criteria_evaluation(x_hat, preds, B)
+        _list = self._additional_criteria_evaluation(x_hat, preds, batch_to_legacy_runtime(B))
         loss_list.extend(_list)
 
         return loss_list

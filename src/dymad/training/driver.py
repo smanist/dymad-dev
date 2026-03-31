@@ -12,6 +12,15 @@ from dymad.training.helper import aggregate_cv_results, CVResult, iter_param_gri
 from dymad.training.stacked_opt import StackedOpt
 from dymad.utils import config_logger, load_config
 
+
+def _use_typed_batches(cfg: Dict[str, Any]) -> bool:
+    """Use typed trainer batches only for pure Linear-phase runs for now."""
+
+    phases = cfg.get("phases", [])
+    if not phases:
+        return False
+    return all(phase.get("trainer") == "Linear" for phase in phases)
+
 # --------------------
 # Standalone single CV run for multi-processing compatibility
 # --------------------
@@ -39,14 +48,20 @@ def _build_data_state(fold_id: int, cfg: Dict[str, Any], train_sets, valid_sets,
     # Config can contain different data transforms
     # So we need to update the datasets accordingly
     # The data transforms in valid set should be determined by train set
+    typed_batches = _use_typed_batches(cfg)
+
     trainset: TrajectoryManager | TrajectoryManagerGraph = train_sets[fold_id]
     trainset.update_config(cfg)
-    train_loader, train_set, train_md = trainset.process_data()
+    train_loader, train_set, train_md = trainset.process_data(typed=typed_batches)
+    if typed_batches:
+        train_set = trainset.dataset
 
     validset: TrajectoryManager | TrajectoryManagerGraph = valid_sets[fold_id]
     validset.update_config(cfg)
     validset.set_transforms(trajmgr=trainset)
-    valid_loader, valid_set, valid_md = validset.process_data()
+    valid_loader, valid_set, valid_md = validset.process_data(typed=typed_batches)
+    if typed_batches:
+        valid_set = validset.dataset
 
     return RunState(
         config=cfg,
