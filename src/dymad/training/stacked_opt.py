@@ -4,6 +4,11 @@ import os
 import torch
 from typing import Dict, Any, Type
 
+from dymad.training.phase_runtime import (
+    compose_run_state,
+    run_state_to_phase_context,
+    run_state_to_trainer_state,
+)
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 from dymad.training.opt_linear import OptLinear
@@ -55,12 +60,13 @@ class StackedOpt:
           - full RunState => continuation: reuse data + model + optimizer, etc.
         """
         results = []
-        current_state = initial_state
+        phase_context = run_state_to_phase_context(initial_state)
+        trainer_state = run_state_to_trainer_state(initial_state)
 
         log_config = self.config.get("log", {})
         ifstdout = log_config.get("stdout", False)
         self.logger = logging.getLogger('dymad')
-        path = current_state.config['path']['results_prefix']
+        path = trainer_state.config['path']['results_prefix']
         os.makedirs(path, exist_ok=True)
         path += '/' + path.split('/')[-1]
         config_logger(
@@ -74,6 +80,10 @@ class StackedOpt:
             trainer_cls = OPT_REGISTRY[trainer_key]
 
             self.logger.info(f"=== Starting phase '{phase_name}' with trainer '{trainer_key}' ===")
+
+            # Temporary compatibility adapter while trainer classes still consume
+            # legacy RunState directly.
+            current_state = compose_run_state(trainer_state, phase_context)
 
             # Instantiate trainer; it will attach to provided RunState (data-only or full).
             trainer = trainer_cls(
@@ -89,7 +99,10 @@ class StackedOpt:
             epoch = trainer.train()
 
             # Export state for the next phase
-            current_state = trainer.export_run_state(epoch)
+            phase_state = trainer.export_run_state(epoch)
+            trainer_state = run_state_to_trainer_state(phase_state)
+            phase_context = run_state_to_phase_context(phase_state)
+            current_state = compose_run_state(trainer_state, phase_context)
             results.append(PhaseResult(
                 name=phase_name,
                 run_state=current_state,
