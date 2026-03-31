@@ -2,7 +2,7 @@ import logging
 import torch
 from typing import Any, Dict, Type, Union
 
-from dymad.io import DynData
+from dymad.training.batch_adapter import TrainerBatch, batch_to_legacy_runtime
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 from dymad.utils import make_scheduler
@@ -70,7 +70,7 @@ class OptNODE(OptBase):
             logger.info(f"Chop mode: {self.chop_mode}, window stride: {self.chop_step}")
         logger.info(f"Added sweep scheduler: {self.schedulers[-1].diagnostic_info()}")
 
-    def _process_batch(self, batch: DynData) -> Dict[str, torch.Tensor]:
+    def _process_batch(self, batch: TrainerBatch) -> Dict[str, torch.Tensor]:
         """
         Compute NODE loss terms on a batch and return a dict of named losses.
 
@@ -81,21 +81,29 @@ class OptNODE(OptBase):
         base class aggregate according to config["training"]["loss_weights"].
         """
         num_steps = self.schedulers[1].get_length()
+        runtime = batch_to_legacy_runtime(batch)
         if num_steps is None:
-            num_steps = batch.x.size(1)
+            num_steps = runtime.x.size(1)
 
-        # Chop trajectories
+        # Chop trajectories through the typed-batch path when possible.
         if self.chop_mode == "initial":
-            B = batch.truncate(num_steps)
+            if hasattr(batch, "truncate"):
+                B = batch.truncate(num_steps).to(self.device)
+                runtime = batch_to_legacy_runtime(B)
+            else:
+                runtime = runtime.truncate(num_steps).to(self.device)
         else:
-            B = batch.unfold(num_steps, _determine_chop_step(num_steps, self.chop_step))
-
-        B = B.to(self.device)
+            chop_step = _determine_chop_step(num_steps, self.chop_step)
+            if hasattr(batch, "window"):
+                B = batch.window(num_steps, chop_step).to(self.device)
+                runtime = batch_to_legacy_runtime(B)
+            else:
+                runtime = runtime.unfold(num_steps, chop_step).to(self.device)
 
         # Initial states and time vector
-        init_states = B.x[:, 0, :]  # (batch_size, n_total_state_features)
+        init_states = runtime.x[:, 0, :]  # (batch_size, n_total_state_features)
         # Use the actual time points from trajectory manager
-        ts = B.t[:, :num_steps]
+        ts = runtime.t[:, :num_steps]
         if ts.dim() == 3 and ts.size(0) == 1:
             # Expect this to be the graph case with broadcasted time
             # For now we only take the first batch entry, assuming all are identical
@@ -105,20 +113,20 @@ class OptNODE(OptBase):
         # Batched NODE prediction
         predictions = self.model.predict(
             init_states,
-            B,
+            runtime,
             ts,
             method=self.ode_method,
             **self.ode_args,
         )
 
         # Base dynamics criterion
-        dynamics_loss = self.criteria[0](predictions, B.x)
+        dynamics_loss = self.criteria[0](predictions, runtime.x)
         loss_list = [dynamics_loss]
 
         # Other criteria
         # x_hat is computed inside criteria evaluation if needed
         x_hat = None
-        _list = self._additional_criteria_evaluation(x_hat, predictions, B)
+        _list = self._additional_criteria_evaluation(x_hat, predictions, runtime)
         loss_list.extend(_list)
 
         return loss_list
