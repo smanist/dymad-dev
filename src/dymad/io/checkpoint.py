@@ -10,8 +10,7 @@ from dymad.core.graph_series import GraphSeriesBatch
 from dymad.core.transform_builder import build_transform_module
 from dymad.core.series import RegularSeriesBatch
 from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline
-from dymad.io.data import DynData
-from dymad.io.series_adapter import SeriesAdapter
+from dymad.io.series_adapter import DynDataAdapter, SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManager
 from dymad.transform import Autoencoder
 from dymad.utils.misc import load_config
@@ -81,6 +80,16 @@ def _stack_batch(outputs: list[torch.Tensor]) -> torch.Tensor:
     if len(outputs) == 1:
         return stacked[0]
     return stacked
+
+
+def _normalize_graph_batch_payload(payload, batch_size: int):
+    if payload is None:
+        return [None] * batch_size
+    if isinstance(payload, list) and payload and isinstance(payload[0], list):
+        if len(payload) != batch_size:
+            raise ValueError("Nested graph payload batch size must match the input batch size.")
+        return payload
+    return [payload for _ in range(batch_size)]
 
 def _load_model_legacy(model_class, checkpoint_path):
     """
@@ -170,14 +179,20 @@ def _load_model_legacy(model_class, checkpoint_path):
         return _regular_pipeline(RegularSeriesBatch.collate(items))
 
     def _build_graph_prediction_payload(x0, u, ei, ew, ea, device):
-        nnd = _infer_graph_nodes(ei)
+        array = np.asarray(x0)
+        if array.ndim == 2:
+            array = np.expand_dims(array, axis=0)
+
+        batch_size = array.shape[0]
+        edge_index_payloads = _normalize_graph_batch_payload(ei, batch_size)
+        nnd = _infer_graph_nodes(edge_index_payloads[0])
         node_state = _transform_graph_node_payload(x0, nnd, _data_transform_x, dtype, device)
         control = None
         if _has_u and u is not None:
             control = _transform_graph_node_payload(u, nnd, _data_transform_u, dtype, device)
 
-        edge_weight = _proc_ew(ew, device)
-        edge_attr = _proc_ea(ea, device)
+        edge_weight_payloads = _normalize_graph_batch_payload(_proc_ew(ew, device), batch_size)
+        edge_attr_payloads = _normalize_graph_batch_payload(_proc_ea(ea, device), batch_size)
 
         items = []
         for index in range(node_state.shape[0]):
@@ -185,10 +200,10 @@ def _load_model_legacy(model_class, checkpoint_path):
                 SeriesAdapter.from_graph_arrays(
                     np.arange(node_state.shape[1], dtype=np.int64),
                     node_state[index],
-                    edge_index=ei,
+                    edge_index=edge_index_payloads[index],
                     control=None if control is None else control[index],
-                    edge_weight=edge_weight,
-                    edge_attr=edge_attr,
+                    edge_weight=edge_weight_payloads[index],
+                    edge_attr=edge_attr_payloads[index],
                     dtype=dtype,
                     device=device,
                 )
@@ -248,22 +263,9 @@ def _load_model_legacy(model_class, checkpoint_path):
             _x0 = regular_context.initial_state_tensor(squeeze_single=True)
             _data = regular_context.to_legacy_runtime()
         else:
-            if isinstance(ei, list) and ei and isinstance(ei[0], list):
-                _ei = []
-                for e in ei:
-                    _ei.append([torch.as_tensor(_e).to(device=device) for _e in e])
-                _u = _proc_u(u, device)
-                _ew = _proc_ew(ew, device)
-                _ea = _proc_ea(ea, device)
-                _data = DynData(u=_u, ei=_ei, ew=_ew, ea=_ea)
-                nnd = _data.n_nodes // _data.batch_size
-                tmp = graph_data_prep(x0, nnd)
-                _x0 = _proc_x0(tmp, device)
-                _x0 = _x0.reshape(_data.batch_size, -1)
-            else:
-                graph_context = _build_graph_prediction_payload(x0, u, ei, ew, ea, device)
-                _x0 = graph_context.initial_state_tensor(squeeze_single=True)
-                _data = graph_context.to_legacy_runtime()
+            graph_context = _build_graph_prediction_payload(x0, u, ei, ew, ea, device)
+            _x0 = graph_context.initial_state_tensor(squeeze_single=True)
+            _data = graph_context.to_legacy_runtime()
 
         if p is not None:
             _data.p = torch.as_tensor(p, dtype=dtype, device=device)
@@ -422,7 +424,14 @@ class DataInterface:
             self.model, self.prd_func = load_model(model_class, checkpoint_path)
             def encoder(x):
                 _x_shape = x.shape[:-1]
-                _z = self.model.encoder(DynData(x=torch.atleast_2d(torch.as_tensor(x))))
+                x_tensor = torch.atleast_2d(torch.as_tensor(x, dtype=self.dtype, device=self.device))
+                payload = SeriesAdapter.from_regular_arrays(
+                    time=np.arange(x_tensor.shape[0], dtype=np.int64),
+                    state=x_tensor,
+                    dtype=self.dtype,
+                    device=self.device,
+                )
+                _z = self.model.encoder(DynDataAdapter.from_regular_series(payload))
                 return _z.reshape(*_x_shape, -1)
             def decoder(z):
                 return self.model.decoder(z, None)
@@ -452,26 +461,23 @@ class DataInterface:
             cfg = copy.deepcopy(metadata['train_md'])
             cfg['config']['dataloader']['shuffle'] = False   # Turn off shuffling to ensure fixed order of samples
             train = TrajectoryManager(cfg, data_key='train', device=self.device)
-            self.train_loader, dataset, _ = train.process_all()
+            self.train_loader, dataset, _ = train.process_all(typed=True)
 
             cfg = copy.deepcopy(metadata['valid_md'])
             cfg['config']['dataloader']['shuffle'] = False   # Turn off shuffling to ensure fixed order of samples
             valid = TrajectoryManager(cfg, data_key='valid', device=self.device)
-            self.valid_loader = valid.process_all()[0]
+            self.valid_loader = valid.process_all(typed=True)[0]
 
-            self.t = dataset[0].t[0].clone().detach()
+            self.t = dataset[0].time.clone().detach()
             tm = train
         else:
             # Simple config
             # Here we just let train and valid be the same
             tm = TrajectoryManager(metadata, data_key='train', device=self.device)
-            _dataloader, _dataset, _ = tm.process_all()
-            # Turn off shuffling to ensure fixed order of samples
-            self.train_loader = torch.utils.data.DataLoader(
-                _dataset, batch_size=_dataloader.batch_size, shuffle=False, collate_fn=DynData.collate)
+            self.train_loader, _dataset, _ = tm.process_all(typed=True)
             self.valid_loader = self.train_loader
 
-            self.t = _dataset[0].t[0].clone().detach()
+            self.t = _dataset[0].time.clone().detach()
 
         self.dtype = tm.dtype
         self._trans_x = tm._data_transform_x
@@ -501,7 +507,7 @@ class DataInterface:
         """
         F = []
         for batch in self.train_loader:
-            B = batch.x.cpu().numpy()[..., :-1, :]        # This is already transformed
+            B = batch.state_tensor().cpu().numpy()[..., :-1, :]        # This is already transformed
             B = B.reshape(-1, B.shape[-1])
             end = self.NT-1 if self.has_model else self.NT
             B = self._trans_x.inverse_transform([B], [0, end])[0]   # A hack to get back to the original space
