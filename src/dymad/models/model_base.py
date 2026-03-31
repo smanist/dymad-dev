@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from typing import Any, Callable, Dict, Tuple, Union
 
-from dymad.io.data import DynData
+from dymad.core.model_context import materialize_model_base_forward_payload
 from dymad.models.runtime_view import ComponentInputPayload
 
 
@@ -59,7 +59,7 @@ class ComposedDynamics(nn.Module):
 
     Signature for predict:
 
-    - `predict(x0: torch.Tensor, w: DynData, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> Tuple[torch.Tensor, torch.Tensor]`
+    - `predict(x0: torch.Tensor, w: ComponentInputPayload, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> Tuple[torch.Tensor, torch.Tensor]`
     - Usually comes from `dymad/models/prediction`
 
     For mathematical formulation, see `theory/architecture` in the documentation.
@@ -163,15 +163,7 @@ class ComposedDynamics(nn.Module):
             The forward pass should not be used directly.
             This interface is provided for model inspection and analysis.
         """
-        # ei, ew, ea are tuples of values and offsets, so that torchview can handle them
-        # For DynData, we need to convert them back to nested tensors
-        _x = x if ei is None else x.unsqueeze(0)   # Graph case always use batch size 1
-        w = DynData(
-            t=t, u=u, p=p,
-            ei=torch.nested.nested_tensor_from_jagged(*ei) if ei is not None else None,
-            ew=torch.nested.nested_tensor_from_jagged(*ew) if ew is not None else None,
-            ea=torch.nested.nested_tensor_from_jagged(*ea) if ea is not None else None
-            ).get_step(0).set_x(_x)
+        w = materialize_model_base_forward_payload(t=t, x=x, u=u, p=p, ei=ei, ew=ew, ea=ea)
         z = self.encoder(w)
         z_dot = self.dynamics(z, w)
         x_hat = self.decoder(z, w)

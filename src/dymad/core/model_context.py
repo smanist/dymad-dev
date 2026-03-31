@@ -163,6 +163,109 @@ def _context_from_legacy_runtime(payload: "DynData") -> RegularModelContext | Gr
     return build_model_context(SeriesAdapter.from_dyndata(payload))
 
 
+def materialize_model_base_forward_payload(
+    *,
+    t: torch.Tensor | None,
+    x: torch.Tensor | None,
+    u: torch.Tensor | None,
+    p: torch.Tensor | None,
+    ei: tuple[torch.Tensor, torch.Tensor] | None,
+    ew: tuple[torch.Tensor, torch.Tensor] | None,
+    ea: tuple[torch.Tensor, torch.Tensor] | None,
+) -> RegularModelContext | GraphModelContext:
+    """Build the model-base forward payload through one explicit compatibility seam."""
+
+    from dymad.io.data import DynData
+
+    if x is None:
+        raise ValueError("model_base.forward requires `x` to materialize runtime payload.")
+
+    if ei is None:
+        if x.ndim == 1:
+            state = x.reshape(1, 1, -1)
+        elif x.ndim == 2:
+            state = x.unsqueeze(1)
+        elif x.ndim == 3:
+            state = x
+        else:
+            raise ValueError(f"Unsupported regular forward input shape for x: {tuple(x.shape)}")
+
+        if t is None:
+            time = None
+        elif t.ndim == 0:
+            time = t.reshape(1, 1)
+        elif t.ndim == 1:
+            time = t.reshape(-1, 1)
+        elif t.ndim == 2:
+            time = t if t.shape[-1] == 1 else t[:, :1]
+        else:
+            raise ValueError(f"Unsupported regular forward input shape for t: {tuple(t.shape)}")
+
+        if u is None:
+            control = None
+        elif u.ndim == 1:
+            control = u.reshape(1, 1, -1)
+        elif u.ndim == 2:
+            control = u.unsqueeze(1)
+        elif u.ndim == 3:
+            control = u
+        else:
+            raise ValueError(f"Unsupported regular forward input shape for u: {tuple(u.shape)}")
+
+        if p is None:
+            params = None
+        elif p.ndim == 1:
+            params = p.unsqueeze(0)
+        elif p.ndim == 2:
+            params = p
+        else:
+            raise ValueError(f"Unsupported regular forward input shape for p: {tuple(p.shape)}")
+
+        runtime = DynData(t=time, x=state, u=control, p=params)
+        if runtime.batch_size is None or runtime.batch_size == 1:
+            context = _context_from_legacy_runtime(runtime)
+            if not isinstance(context, RegularModelContext):
+                raise TypeError("Expected regular context from non-graph forward payload.")
+            return context
+
+        items = []
+        for idx in range(runtime.batch_size):
+            sample = DynData(
+                t=runtime.t[idx : idx + 1] if runtime.t is not None else None,
+                x=runtime.x[idx : idx + 1] if runtime.x is not None else None,
+                u=runtime.u[idx : idx + 1] if runtime.u is not None else None,
+                p=runtime.p[idx : idx + 1] if runtime.p is not None else None,
+            )
+            sample_context = _context_from_legacy_runtime(sample)
+            if not isinstance(sample_context, RegularModelContext):
+                raise TypeError("Expected regular context while splitting regular forward payload.")
+            items.append(sample_context.batch[0])
+        return RegularModelContext.from_batch(RegularSeriesBatch.collate(items))
+
+    if x.ndim == 1:
+        state = x.reshape(1, 1, -1)
+    elif x.ndim == 2:
+        state = x.unsqueeze(0)
+    elif x.ndim == 3:
+        state = x
+    else:
+        raise ValueError(f"Unsupported graph forward input shape for x: {tuple(x.shape)}")
+
+    legacy_runtime = DynData(
+        t=t,
+        x=state,
+        u=u,
+        p=p,
+        ei=torch.nested.nested_tensor_from_jagged(*ei),
+        ew=torch.nested.nested_tensor_from_jagged(*ew) if ew is not None else None,
+        ea=torch.nested.nested_tensor_from_jagged(*ea) if ea is not None else None,
+    )
+    context = _context_from_legacy_runtime(legacy_runtime)
+    if not isinstance(context, GraphModelContext):
+        raise TypeError("Expected graph context from graph forward payload.")
+    return context
+
+
 def materialize_prediction_runtime(
     payload: ModelRuntimePayload | None,
     *,
