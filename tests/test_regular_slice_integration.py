@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from dymad.core import GraphModelContext, RegularModelContext
 from dymad.core.transform_module import SeriesTransformPipeline
 from dymad.io import load_model
 from dymad.io.trajectory_manager import TrajectoryManager
@@ -84,6 +85,76 @@ def test_regular_checkpoint_prediction_uses_typed_series(monkeypatch, tmp_path: 
 
     assert apply_events == [1]
     assert prediction.shape == (3, 2)
+
+
+def test_regular_checkpoint_prediction_routes_through_model_context(monkeypatch, tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "dummy.pt"
+    checkpoint_path.write_text("placeholder", encoding="utf-8")
+
+    import dymad.io.checkpoint as checkpoint_module
+
+    payload = _build_checkpoint_payload()
+    captured: dict[str, object] = {}
+    original_build_model_context = checkpoint_module.build_model_context
+
+    def traced_build_model_context(batch):
+        context = original_build_model_context(batch)
+        captured["context_type"] = type(context)
+        captured["initial_state"] = context.initial_state_tensor(squeeze_single=True).clone()
+        captured["legacy_runtime"] = context.to_legacy_runtime()
+        return context
+
+    monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
+    monkeypatch.setattr(checkpoint_module, "build_model_context", traced_build_model_context)
+
+    _, predict_fn = load_model(DummyPredictModel, checkpoint_path)
+    x0 = np.array([[1.0, 3.0], [2.0, 4.0]], dtype=float)
+    u = np.array([[0.2], [0.6]], dtype=float)
+    t = np.array([0.0, 1.0, 2.0], dtype=float)
+    prediction = predict_fn(x0, t, u=u)
+
+    assert captured["context_type"] is RegularModelContext
+    legacy_runtime = captured["legacy_runtime"]
+    assert torch.equal(legacy_runtime.x[:, 0, :], captured["initial_state"].unsqueeze(0))
+    assert legacy_runtime.batch_size == 1
+    assert legacy_runtime.n_steps == 2
+    assert prediction.shape == (3, 2)
+
+
+def test_graph_checkpoint_prediction_routes_through_model_context(monkeypatch, tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "dummy.pt"
+    checkpoint_path.write_text("placeholder", encoding="utf-8")
+
+    import dymad.io.checkpoint as checkpoint_module
+
+    payload = _build_checkpoint_payload()
+    captured: dict[str, object] = {}
+    original_build_model_context = checkpoint_module.build_model_context
+
+    def traced_build_model_context(batch):
+        context = original_build_model_context(batch)
+        captured["context_type"] = type(context)
+        captured["initial_state"] = context.initial_state_tensor(squeeze_single=True).clone()
+        captured["legacy_runtime"] = context.to_legacy_runtime()
+        return context
+
+    monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
+    monkeypatch.setattr(checkpoint_module, "build_model_context", traced_build_model_context)
+
+    _, predict_fn = load_model(DummyPredictModel, checkpoint_path)
+    x0 = np.array([[1.0, 3.0, 5.0, 7.0], [2.0, 4.0, 6.0, 8.0]], dtype=float)
+    u = np.array([[0.2, 0.4], [0.6, 0.8]], dtype=float)
+    t = np.array([0.0, 1.0], dtype=float)
+    edge_index = np.array([[0, 1], [1, 0]], dtype=int)
+    prediction = predict_fn(x0, t, u=u, ei=edge_index)
+
+    assert captured["context_type"] is GraphModelContext
+    legacy_runtime = captured["legacy_runtime"]
+    assert legacy_runtime._has_graph
+    assert legacy_runtime.batch_size == 1
+    assert legacy_runtime.n_nodes == 2
+    assert torch.equal(legacy_runtime.x[:, 0, :], captured["initial_state"].unsqueeze(0))
+    assert prediction.shape == (2, 4)
 
 
 def test_regular_slice_integration_touches_typed_transform_seam(monkeypatch, tmp_path: Path) -> None:

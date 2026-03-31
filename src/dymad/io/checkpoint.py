@@ -5,6 +5,8 @@ import os
 import torch
 from typing import Callable, Dict, List, Optional, Union, Tuple, Type
 
+from dymad.core import build_model_context
+from dymad.core.graph_series import GraphSeriesBatch
 from dymad.core.transform_builder import build_transform_module
 from dymad.core.series import RegularSeriesBatch
 from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline
@@ -34,6 +36,28 @@ def graph_data_prep(data, nnd):
     return tmp
 
 
+def _infer_graph_nodes(edge_index) -> int:
+    if isinstance(edge_index, (np.ndarray, torch.Tensor)):
+        tensor = torch.as_tensor(edge_index)
+        return int(tensor.max().item()) + 1
+    if isinstance(edge_index, list) and edge_index and isinstance(edge_index[0], (np.ndarray, torch.Tensor)):
+        values = [torch.as_tensor(step).max().item() for step in edge_index]
+        return int(max(values)) + 1
+    raise ValueError("Typed graph checkpoint prediction currently supports fixed or per-step single-graph edge indices.")
+
+
+def _transform_graph_node_payload(data, nnd, transform_module, dtype, device):
+    array = np.asarray(data)
+    if array.ndim == 2:
+        array = np.expand_dims(array, axis=0)
+
+    batch_size = array.shape[0]
+    node_major = graph_data_prep(array, nnd)
+    transformed = transform_module.transform_batch(_to_tensor_batch(node_major, dtype=dtype, device=device))
+    stacked = torch.stack(transformed)
+    return stacked.reshape(batch_size, nnd, stacked.shape[-2], stacked.shape[-1]).permute(0, 2, 1, 3)
+
+
 def _ensure_regular_batch(data):
     array = np.asarray(data)
     if array.ndim == 1:
@@ -41,21 +65,6 @@ def _ensure_regular_batch(data):
     if array.ndim == 2:
         return np.expand_dims(array, axis=0)
     return array
-
-
-def _stack_optional_series(
-    values: list[torch.Tensor | None],
-    *,
-    dtype: torch.dtype,
-    device: torch.device | str,
-):
-    if not values or all(value is None for value in values):
-        return None
-    stacked = torch.stack([value for value in values if value is not None])
-    if len(values) == 1:
-        return stacked[0]
-    return stacked.to(dtype=dtype, device=device)
-
 
 def _to_tensor_batch(
     data,
@@ -160,6 +169,32 @@ def _load_model_legacy(model_class, checkpoint_path):
             )
         return _regular_pipeline(RegularSeriesBatch.collate(items))
 
+    def _build_graph_prediction_payload(x0, u, ei, ew, ea, device):
+        nnd = _infer_graph_nodes(ei)
+        node_state = _transform_graph_node_payload(x0, nnd, _data_transform_x, dtype, device)
+        control = None
+        if _has_u and u is not None:
+            control = _transform_graph_node_payload(u, nnd, _data_transform_u, dtype, device)
+
+        edge_weight = _proc_ew(ew, device)
+        edge_attr = _proc_ea(ea, device)
+
+        items = []
+        for index in range(node_state.shape[0]):
+            items.append(
+                SeriesAdapter.from_graph_arrays(
+                    np.arange(node_state.shape[1], dtype=np.int64),
+                    node_state[index],
+                    edge_index=ei,
+                    control=None if control is None else control[index],
+                    edge_weight=edge_weight,
+                    edge_attr=edge_attr,
+                    dtype=dtype,
+                    device=device,
+                )
+            )
+        return build_model_context(GraphSeriesBatch.collate(items))
+
     _proc_ew = lambda ew, device: None
     if _has_ew:
         def _proc_ew(ew, device):
@@ -209,44 +244,26 @@ def _load_model_legacy(model_class, checkpoint_path):
         _has_graph = ei is not None
         if ei is None:
             regular_payload = _build_regular_prediction_payload(x0, u, device)
-            _x0 = torch.stack([series.state[0] for series in regular_payload.items])
-            if len(regular_payload.items) == 1:
-                _x0 = _x0[0]
-            _u = _stack_optional_series(
-                [series.control for series in regular_payload.items],
-                dtype=dtype,
-                device=device,
-            )
-            _data = DynData(u=_u)
-            _data.batch_size = _x0.shape[0] if _x0.ndim == 2 else 1
+            regular_context = build_model_context(regular_payload)
+            _x0 = regular_context.initial_state_tensor(squeeze_single=True)
+            _data = regular_context.to_legacy_runtime()
         else:
-            if isinstance(ei, (np.ndarray, torch.Tensor)):
-                ei = torch.as_tensor(ei).to(device=device)
-                _ei = [ei for _ in range(t.shape[-1])]
-            elif isinstance(ei, list):
-                if isinstance(ei[0], (np.ndarray, torch.Tensor)):
-                    _ei = [torch.as_tensor(e).to(device=device) for e in ei]
-                elif isinstance(ei[0], list):
-                    _ei = []
-                    for e in ei:
-                        _ei.append([torch.as_tensor(_e).to(device=device) for _e in e])
-                else:
-                    raise ValueError("Edge index format not recognized.")
+            if isinstance(ei, list) and ei and isinstance(ei[0], list):
+                _ei = []
+                for e in ei:
+                    _ei.append([torch.as_tensor(_e).to(device=device) for _e in e])
+                _u = _proc_u(u, device)
+                _ew = _proc_ew(ew, device)
+                _ea = _proc_ea(ea, device)
+                _data = DynData(u=_u, ei=_ei, ew=_ew, ea=_ea)
+                nnd = _data.n_nodes // _data.batch_size
+                tmp = graph_data_prep(x0, nnd)
+                _x0 = _proc_x0(tmp, device)
+                _x0 = _x0.reshape(_data.batch_size, -1)
             else:
-                raise ValueError("Edge index format not recognized.")
-            _u  = _proc_u(u, device)
-            _ew = _proc_ew(ew, device)
-            _ea = _proc_ea(ea, device)
-            _data = DynData(u=_u, ei=_ei, ew=_ew, ea=_ea)
-
-            # Some hacking to handle graph data
-            # `x0` usually come in shape (..., T, n_nodes * n_states_per_node)
-            nnd = _data.n_nodes // _data.batch_size
-            tmp = graph_data_prep(x0, nnd)             # [all_nodes, T, n_states_per_node]
-            _x0 = _proc_x0(tmp, device)                # [all_nodes, n_features_per_node]  Only the first step taken
-            _x0 = _x0.reshape(_data.batch_size, -1)    # [batch_size, n_nodes*n_features_per_node]
-
-            # _data.batch_size is tracked in DynData for the graph, so no need to set here
+                graph_context = _build_graph_prediction_payload(x0, u, ei, ew, ea, device)
+                _x0 = graph_context.initial_state_tensor(squeeze_single=True)
+                _data = graph_context.to_legacy_runtime()
 
         if p is not None:
             _data.p = torch.as_tensor(p, dtype=dtype, device=device)

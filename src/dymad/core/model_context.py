@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import torch
 
 from dymad.core.graph_series import GraphSeries, GraphSeriesBatch
 from dymad.core.series import RegularSeries, RegularSeriesBatch
-from dymad.io.data import DynData
-from dymad.io.series_adapter import DynDataAdapter
+
+if TYPE_CHECKING:
+    from dymad.io.data import DynData
 
 
 @dataclass(frozen=True)
@@ -40,7 +42,10 @@ class RegularModelContext:
             return state[0]
         return state
 
-    def to_legacy_runtime(self) -> DynData:
+    def to_legacy_runtime(self) -> "DynData":
+        from dymad.io.data import DynData
+        from dymad.io.series_adapter import DynDataAdapter
+
         payloads = [DynDataAdapter.from_regular_series(item) for item in self.batch]
         return DynData.collate(payloads)
 
@@ -77,7 +82,10 @@ class GraphModelContext:
             return state[0]
         return state
 
-    def to_legacy_runtime(self) -> DynData:
+    def to_legacy_runtime(self) -> "DynData":
+        from dymad.io.data import DynData
+        from dymad.io.series_adapter import DynDataAdapter
+
         payloads = [DynDataAdapter.from_graph_series(item) for item in self.batch]
         return DynData.collate(payloads)
 
