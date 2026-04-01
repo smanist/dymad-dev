@@ -50,6 +50,11 @@ class OptWeakForm(OptBase):
         self.D = torch.tensor(D.T, dtype=dtype, device=self.device)
 
     def _process_batch(self, batch: TrainerBatch) -> torch.Tensor:
+        if hasattr(batch, "is_ragged") and batch.is_ragged:
+            return self._average_loss_lists(
+                [self._process_batch(sample) for sample in batch.iter_single_batches()]
+            )
+
         B = batch.to(self.device)
         runtime = batch_to_legacy_runtime(B)
         z = self.model.encoder(runtime)

@@ -869,7 +869,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
         for index in indices:
             target = np.swapaxes(self._graph_data_reshape(self.y[index], forward=True), 0, 1) if self.metadata["n_aux_features"] > 0 else None
             control = np.swapaxes(self._graph_data_reshape(self.u[index], forward=True), 0, 1) if self.metadata["n_control_features"] > 0 else None
-            params = self.p[index].reshape(self.n_nodes, -1) if self.metadata["n_parameters"] > 0 else None
+            params = self.p[index] if self.metadata["n_parameters"] > 0 else None
             edge_weight = np.stack(self.ew[index], axis=0) if self.metadata["n_edge_weights"] > 0 else None
             edge_attr = np.stack(self.ea[index], axis=0) if self.metadata["n_edge_features"] > 0 else None
             dataset.append(

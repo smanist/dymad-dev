@@ -4,11 +4,14 @@ from dymad.core import (
     FixedGraphSeries,
     GraphModelContext,
     GraphSeriesBatch,
+    RaggedRegularSeriesBatch,
     RegularModelContext,
     RegularSeries,
     RegularSeriesBatch,
+    UniformLengthRegularSeriesBatch,
 )
 from dymad.core.model_context import (
+    LegacyRuntimeCollection,
     materialize_model_base_forward_payload,
     materialize_prediction_runtime,
 )
@@ -38,6 +41,7 @@ def test_regular_model_context_preserves_legacy_runtime_fields():
 
     context = RegularModelContext.from_batch(batch)
 
+    assert isinstance(batch, UniformLengthRegularSeriesBatch)
     assert context.batch_size == 2
     assert context.n_steps == (3, 3)
     assert torch.equal(
@@ -168,6 +172,29 @@ def test_materialize_prediction_runtime_expands_single_legacy_payload():
     assert runtime.batch_size == 2
     assert torch.equal(runtime.x[0], runtime.x[1])
     assert torch.equal(runtime.u[0], runtime.u[1])
+
+
+def test_regular_model_context_uses_ragged_runtime_collection_for_uneven_batches():
+    batch = RegularSeriesBatch.collate(
+        [
+            RegularSeries(
+                time=torch.tensor([0.0, 1.0]),
+                state=torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+            ),
+            RegularSeries(
+                time=torch.tensor([0.0, 1.0, 2.0]),
+                state=torch.tensor([[5.0, 6.0], [7.0, 8.0], [9.0, 10.0]]),
+            ),
+        ]
+    )
+
+    context = RegularModelContext.from_batch(batch)
+    runtime = context.to_legacy_runtime()
+
+    assert isinstance(batch, RaggedRegularSeriesBatch)
+    assert isinstance(runtime, LegacyRuntimeCollection)
+    assert runtime.batch_size == 2
+    assert runtime.n_steps == (2, 3)
 
 
 def test_materialize_model_base_forward_payload_regular_context():

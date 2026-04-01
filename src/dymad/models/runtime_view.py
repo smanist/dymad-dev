@@ -7,7 +7,7 @@ from typing import TypeAlias
 
 import torch
 
-from dymad.core.model_context import GraphModelContext, RegularModelContext
+from dymad.core.model_context import GraphModelContext, LegacyRuntimeCollection, RegularModelContext
 from dymad.io.legacy_runtime import LegacyRuntimeBatch
 
 
@@ -22,9 +22,19 @@ class ComponentInputView:
         if isinstance(payload, ComponentInputView):
             return payload
         if isinstance(payload, RegularModelContext):
-            return cls(payload.to_legacy_runtime().get_step(0))
+            runtime = payload.to_legacy_runtime()
+            if isinstance(runtime, LegacyRuntimeCollection):
+                if len(runtime) != 1:
+                    raise ValueError("ComponentInputView requires a single runtime payload, not a ragged batch.")
+                runtime = runtime.items[0]
+            return cls(runtime.get_step(0))
         if isinstance(payload, GraphModelContext):
-            return cls(payload.to_legacy_runtime().get_step(0))
+            runtime = payload.to_legacy_runtime()
+            if isinstance(runtime, LegacyRuntimeCollection):
+                if len(runtime) != 1:
+                    raise ValueError("ComponentInputView requires a single runtime payload, not a ragged batch.")
+                runtime = runtime.items[0]
+            return cls(runtime.get_step(0))
         if isinstance(payload, LegacyRuntimeBatch):
             return cls(payload)
         raise TypeError(f"Unsupported component payload type: {type(payload)!r}")

@@ -1,8 +1,20 @@
 """Core data abstractions for the DyMAD migration."""
 
-from dymad.core.graph_series import FixedGraphSeries, GraphSeries, GraphSeriesBatch, VariableEdgeGraphSeries
+from dymad.core.graph_series import (
+    FixedGraphSeries,
+    GraphSeries,
+    GraphSeriesBatch,
+    RaggedGraphSeriesBatch,
+    UniformLengthGraphSeriesBatch,
+    VariableEdgeGraphSeries,
+)
 from dymad.core.model_context import GraphModelContext, RegularModelContext, build_model_context
-from dymad.core.series import RegularSeries, RegularSeriesBatch
+from dymad.core.series import (
+    RaggedRegularSeriesBatch,
+    RegularSeries,
+    RegularSeriesBatch,
+    UniformLengthRegularSeriesBatch,
+)
 from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 from dymad.core.torch_transforms import (
     AddOneTransform,
@@ -46,10 +58,14 @@ __all__ = [
     "RegularTrainerBatch",
     "RegularModelContext",
     "RegularSeriesTransformPipeline",
+    "RaggedGraphSeriesBatch",
+    "RaggedRegularSeriesBatch",
     "ScalerTransform",
     "SeriesTransformPipeline",
     "TransformMetadata",
     "TransformModule",
+    "UniformLengthGraphSeriesBatch",
+    "UniformLengthRegularSeriesBatch",
     "DelayEmbeddingTransform",
     "VariableEdgeGraphSeries",
 ]

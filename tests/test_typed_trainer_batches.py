@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from dymad.core import GraphTrainerBatch, RegularTrainerBatch
+from dymad.core import GraphTrainerBatch, RaggedRegularSeriesBatch, RegularTrainerBatch, RegularSeries, RegularSeriesBatch
 from dymad.io.trajectory_manager import TrajectoryManager, TrajectoryManagerGraph
 
 
@@ -72,3 +72,25 @@ def test_graph_typed_dataloader_emits_graph_trainer_batch(ltg_data) -> None:
     assert len(batch.edge_index_payload()) == 2
     moved = batch.to(dtype=torch.double)
     assert moved.node_state_tensor().dtype == torch.double
+
+
+def test_regular_typed_batch_marks_ragged_and_preserves_singletons() -> None:
+    batch = RegularTrainerBatch(
+        RegularSeriesBatch.collate(
+            [
+                RegularSeries(
+                    time=torch.tensor([0.0, 1.0]),
+                    state=torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+                ),
+                RegularSeries(
+                    time=torch.tensor([0.0, 1.0, 2.0]),
+                    state=torch.tensor([[5.0, 6.0], [7.0, 8.0], [9.0, 10.0]]),
+                ),
+            ]
+        )
+    )
+
+    assert isinstance(batch.series, RaggedRegularSeriesBatch)
+    assert batch.is_ragged is True
+    singleton_lengths = [len(single.series[0].time) for single in batch.iter_single_batches()]
+    assert singleton_lengths == [2, 3]

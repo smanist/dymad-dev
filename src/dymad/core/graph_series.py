@@ -109,6 +109,10 @@ class VariableEdgeGraphSeries(GraphSeries):
     def __post_init__(self) -> None:
         if len(self.edge_index) != self.time.shape[0]:
             raise ValueError("VariableEdgeGraphSeries.edge_index must align with time steps")
+        if isinstance(self.edge_weight, tuple) and len(self.edge_weight) != self.time.shape[0]:
+            raise ValueError("VariableEdgeGraphSeries.edge_weight must align with time steps")
+        if isinstance(self.edge_attr, tuple) and len(self.edge_attr) != self.time.shape[0]:
+            raise ValueError("VariableEdgeGraphSeries.edge_attr must align with time steps")
 
 
 @dataclass(frozen=True)
@@ -119,7 +123,16 @@ class GraphSeriesBatch:
 
     @classmethod
     def collate(cls, items: Iterable[GraphSeries]) -> "GraphSeriesBatch":
-        return cls(tuple(items))
+        items = tuple(items)
+        if cls is not GraphSeriesBatch:
+            return cls(items)
+        if not items:
+            return UniformLengthGraphSeriesBatch(items)
+
+        lengths = {int(item.time.shape[0]) for item in items}
+        if len(lengths) == 1:
+            return UniformLengthGraphSeriesBatch(items)
+        return RaggedGraphSeriesBatch(items)
 
     def __len__(self) -> int:
         return len(self.items)
@@ -130,6 +143,14 @@ class GraphSeriesBatch:
     def __getitem__(self, index: int) -> GraphSeries:
         return self.items[index]
 
+    @property
+    def step_lengths(self) -> tuple[int, ...]:
+        return tuple(int(item.time.shape[0]) for item in self.items)
+
+    @property
+    def is_uniform_length(self) -> bool:
+        return len(set(self.step_lengths)) <= 1
+
     def slice_batch(self, indices: Iterable[int]) -> "GraphSeriesBatch":
         return GraphSeriesBatch.collate(self.items[index] for index in indices)
 
@@ -139,3 +160,23 @@ class GraphSeriesBatch:
         dtype: torch.dtype | None = None,
     ) -> "GraphSeriesBatch":
         return GraphSeriesBatch.collate(item.to(device=device, dtype=dtype) for item in self.items)
+
+
+@dataclass(frozen=True)
+class UniformLengthGraphSeriesBatch(GraphSeriesBatch):
+    """Graph batch with equal step count across all trajectories."""
+
+    def stacked_time(self) -> torch.Tensor:
+        return torch.stack([item.time for item in self.items])
+
+    def stacked_node_state(self) -> torch.Tensor:
+        return torch.stack([item.node_state for item in self.items])
+
+
+@dataclass(frozen=True)
+class RaggedGraphSeriesBatch(GraphSeriesBatch):
+    """Graph batch with varying step counts across trajectories."""
+
+    @property
+    def is_uniform_length(self) -> bool:
+        return False

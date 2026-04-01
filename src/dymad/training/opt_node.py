@@ -80,6 +80,11 @@ class OptNODE(OptBase):
         Here we expose atomic losses "dynamics" and "recon", and let the
         base class aggregate according to config["training"]["loss_weights"].
         """
+        if hasattr(batch, "is_ragged") and batch.is_ragged:
+            return self._average_loss_lists(
+                [self._process_batch(sample) for sample in batch.iter_single_batches()]
+            )
+
         num_steps = self.schedulers[1].get_length()
         runtime = batch_to_legacy_runtime(batch)
         if num_steps is None:

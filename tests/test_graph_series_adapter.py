@@ -46,7 +46,7 @@ def test_graph_series_seam_matches_legacy_graph_dataset(ltg_data) -> None:
         first_legacy.x.squeeze(0).reshape(first_legacy.n_steps, first_legacy.n_nodes, -1),
     )
     torch.testing.assert_close(first_series.control, first_legacy.u.squeeze(0).reshape(first_legacy.n_steps, first_legacy.n_nodes, -1))
-    torch.testing.assert_close(first_series.params, first_legacy.p.squeeze(0).reshape(first_legacy.n_nodes, -1))
+    torch.testing.assert_close(first_series.params, first_legacy.p.squeeze(0))
     torch.testing.assert_close(roundtrip.x, first_legacy.x)
     torch.testing.assert_close(roundtrip.u, first_legacy.u)
     torch.testing.assert_close(roundtrip.p, first_legacy.p)
@@ -55,6 +55,22 @@ def test_graph_series_seam_matches_legacy_graph_dataset(ltg_data) -> None:
     torch.testing.assert_close(from_legacy.params, first_series.params)
     for expected, actual in zip(roundtrip.ei.unbind(), first_legacy.ei.unbind()):
         torch.testing.assert_close(expected, actual)
+
+
+def test_graph_series_roundtrip_preserves_explicit_param_shape() -> None:
+    series = FixedGraphSeries(
+        time=torch.tensor([0.0, 1.0]),
+        node_state=torch.arange(8, dtype=torch.float32).reshape(2, 2, 2),
+        edge_index=torch.tensor([[0, 1], [1, 0]], dtype=torch.long),
+        params=torch.arange(6, dtype=torch.float32).reshape(2, 3),
+        meta={"kind": "manual"},
+    )
+
+    runtime = graph_series_to_legacy_runtime(series)
+    restored = SeriesAdapter.from_dyndata(runtime)
+
+    assert runtime.p.shape == (1, 6)
+    torch.testing.assert_close(restored.params, series.params)
 
 
 def test_graph_trajectory_manager_uses_typed_series_before_legacy_adaptation(monkeypatch, ltg_data) -> None:

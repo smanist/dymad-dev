@@ -99,7 +99,7 @@ class SeriesAdapter:
         node_state = SeriesAdapter._reshape_graph_payload(SeriesAdapter._squeeze_batch(data.x), n_nodes)
         control = SeriesAdapter._reshape_graph_payload(SeriesAdapter._squeeze_batch(data.u), n_nodes)
         target = SeriesAdapter._reshape_graph_payload(SeriesAdapter._squeeze_batch(data.y), n_nodes)
-        params = data.p[0].reshape(n_nodes, -1) if data.p is not None else None
+        params = SeriesAdapter._restore_graph_params(data)
 
         edge_index_steps = tuple(step.transpose(0, 1) for step in data.ei.unbind())
         edge_weight_steps = tuple(step for step in data.ew.unbind()) if data.ew is not None else None
@@ -182,6 +182,18 @@ class SeriesAdapter:
             return tuple(torch.as_tensor(item, dtype=dtype, device=device) for item in payload)
         return torch.as_tensor(payload, dtype=dtype, device=device)
 
+    @staticmethod
+    def _restore_graph_params(data: LegacyRuntimeBatch) -> torch.Tensor | None:
+        if data.p is None:
+            return None
+
+        params = data.p[0]
+        meta = data.meta[0] if data.meta else {}
+        param_shape = meta.get("param_shape")
+        if param_shape is not None:
+            return params.reshape(tuple(param_shape))
+        return params
+
 
 def regular_series_to_legacy_runtime(series: RegularSeries) -> LegacyRuntimeBatch:
     """Temporary deletion-stage bridge from typed regular series to LegacyRuntimeBatch."""
@@ -200,6 +212,9 @@ def graph_series_to_legacy_runtime(series: GraphSeries) -> LegacyRuntimeBatch:
     """Temporary deletion-stage bridge from typed graph series to LegacyRuntimeBatch."""
 
     n_steps = int(series.time.shape[0])
+    meta = dict(series.meta)
+    if series.params is not None:
+        meta["param_shape"] = tuple(int(dim) for dim in series.params.shape)
     return LegacyRuntimeBatch(
         t=series.time,
         x=series.node_state.reshape(n_steps, -1),
@@ -209,7 +224,7 @@ def graph_series_to_legacy_runtime(series: GraphSeries) -> LegacyRuntimeBatch:
         ei=_graph_edge_steps(series, n_steps),
         ew=_graph_optional_steps(series.edge_weight, n_steps),
         ea=_graph_optional_steps(series.edge_attr, n_steps),
-        meta=[dict(series.meta)] if series.meta else [],
+        meta=[meta] if meta else [],
     )
 
 

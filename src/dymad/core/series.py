@@ -77,7 +77,16 @@ class RegularSeriesBatch:
 
     @classmethod
     def collate(cls, items: Iterable[RegularSeries]) -> "RegularSeriesBatch":
-        return cls(tuple(items))
+        items = tuple(items)
+        if cls is not RegularSeriesBatch:
+            return cls(items)
+        if not items:
+            return UniformLengthRegularSeriesBatch(items)
+
+        lengths = {int(item.time.shape[0]) for item in items}
+        if len(lengths) == 1:
+            return UniformLengthRegularSeriesBatch(items)
+        return RaggedRegularSeriesBatch(items)
 
     def __len__(self) -> int:
         return len(self.items)
@@ -88,6 +97,14 @@ class RegularSeriesBatch:
     def __getitem__(self, index: int) -> RegularSeries:
         return self.items[index]
 
+    @property
+    def step_lengths(self) -> tuple[int, ...]:
+        return tuple(int(item.time.shape[0]) for item in self.items)
+
+    @property
+    def is_uniform_length(self) -> bool:
+        return len(set(self.step_lengths)) <= 1
+
     def slice_batch(self, indices: Iterable[int]) -> "RegularSeriesBatch":
         return RegularSeriesBatch.collate(self.items[index] for index in indices)
 
@@ -97,3 +114,23 @@ class RegularSeriesBatch:
         dtype: torch.dtype | None = None,
     ) -> "RegularSeriesBatch":
         return RegularSeriesBatch.collate(item.to(device=device, dtype=dtype) for item in self.items)
+
+
+@dataclass(frozen=True)
+class UniformLengthRegularSeriesBatch(RegularSeriesBatch):
+    """Regular batch with equal step count across all trajectories."""
+
+    def stacked_time(self) -> torch.Tensor:
+        return torch.stack([item.time for item in self.items])
+
+    def stacked_state(self) -> torch.Tensor:
+        return torch.stack([item.state for item in self.items])
+
+
+@dataclass(frozen=True)
+class RaggedRegularSeriesBatch(RegularSeriesBatch):
+    """Regular batch with varying step counts across trajectories."""
+
+    @property
+    def is_uniform_length(self) -> bool:
+        return False

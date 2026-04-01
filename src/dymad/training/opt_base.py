@@ -8,8 +8,10 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Any, Dict, List, Optional, Type, Union
 
+from dymad.core.model_context import LegacyRuntimeCollection
 from dymad.losses import LOSS_MAP
-from dymad.training.batch_adapter import TrainerBatch, batch_to_legacy_runtime
+from dymad.io.legacy_runtime import LegacyRuntimeBatch
+from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_legacy_runtime
 from dymad.training.helper import RunState
 from dymad.training.ls_update import LSUpdater
 from dymad.utils import make_scheduler, plot_hist, plot_trajectory
@@ -408,11 +410,18 @@ class OptBase:
             total += _l * _w
         return total
 
+    @staticmethod
+    def _average_loss_lists(loss_lists: List[List[torch.Tensor]]) -> List[torch.Tensor]:
+        if not loss_lists:
+            raise ValueError("loss_lists must not be empty")
+        n_items = len(loss_lists)
+        return [sum(loss_terms) / n_items for loss_terms in zip(*loss_lists)]
+
     def _additional_criteria_evaluation(
         self,
         x_hat,
         predictions,
-        batch: TrainerBatch,
+        batch: TrainerBatch | RuntimeBatch,
     ) -> None:
         """
         Compute additional criteria losses beyond dynamics
@@ -421,7 +430,19 @@ class OptBase:
         if len(self.criteria_weights) < 2:
             return loss_list
 
-        runtime = batch_to_legacy_runtime(batch)
+        if isinstance(batch, (LegacyRuntimeBatch, LegacyRuntimeCollection)):
+            runtime = batch
+        else:
+            runtime = batch_to_legacy_runtime(batch)
+
+        if isinstance(runtime, LegacyRuntimeCollection):
+            if x_hat is not None or predictions is not None:
+                raise ValueError("Ragged runtime collections require per-sample criteria evaluation.")
+            loss_lists = [
+                self._additional_criteria_evaluation(None, None, item)
+                for item in runtime.items
+            ]
+            return self._average_loss_lists(loss_lists)
 
         if self.criteria_names[1] == "recon":
             if x_hat is None:

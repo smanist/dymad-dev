@@ -6,7 +6,7 @@ import torch
 from torchdiffeq import odeint
 from typing import Union
 
-from dymad.core.model_context import ModelRuntimePayload, materialize_prediction_runtime
+from dymad.core.model_context import LegacyRuntimeCollection, ModelRuntimePayload, materialize_prediction_runtime
 from dymad.numerics import expm_low_rank, expm_full_rank
 from dymad.utils import ControlInterpolator
 
@@ -44,6 +44,14 @@ def _prepare_data(x0, ts, ws: ModelRuntimePayload | None, device):
 
     # Inputs
     _ws = materialize_prediction_runtime(ws, batch_size=_Nb, is_batch=is_batch).to(device)
+    if isinstance(_ws, LegacyRuntimeCollection):
+        if len(_ws) == 1:
+            _ws = _ws.items[0]
+        else:
+            raise ValueError(
+                "Ragged batch prediction is not supported in one vectorized call yet. "
+                "Predict each series separately or use uniform-length batches."
+            )
     _Nw = _ws.n_steps
     if _ws._has_graph:
         # Graph mode, batch always 1

@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import torch
+import pytest
 
-from dymad.core import FixedGraphSeries, GraphSeriesBatch, VariableEdgeGraphSeries
+from dymad.core import (
+    FixedGraphSeries,
+    GraphSeriesBatch,
+    RaggedGraphSeriesBatch,
+    UniformLengthGraphSeriesBatch,
+    VariableEdgeGraphSeries,
+)
 
 
 def test_fixed_graph_series_slice_and_device_dtype_move() -> None:
@@ -65,7 +72,45 @@ def test_variable_edge_graph_series_batch_collation() -> None:
     subset = batch.slice_batch([1])
 
     assert len(batch) == 2
+    assert isinstance(batch, UniformLengthGraphSeriesBatch)
     assert len(subset) == 1
     assert subset[0].meta["kind"] == "variable-b"
     assert moved[0].node_state.dtype == torch.float64
     assert moved[0].edge_index[0].dtype == torch.long
+
+
+def test_variable_edge_graph_series_validates_optional_edge_payload_lengths() -> None:
+    with pytest.raises(ValueError, match="edge_weight"):
+        VariableEdgeGraphSeries(
+            time=torch.arange(3, dtype=torch.float32),
+            node_state=torch.arange(18, dtype=torch.float32).reshape(3, 3, 2),
+            edge_index=(
+                torch.tensor([[0], [1]], dtype=torch.long),
+                torch.tensor([[1], [2]], dtype=torch.long),
+                torch.tensor([[2], [0]], dtype=torch.long),
+            ),
+            edge_weight=(
+                torch.tensor([1.0]),
+                torch.tensor([2.0]),
+            ),
+        )
+
+
+def test_graph_series_batch_collate_marks_ragged_lengths() -> None:
+    batch = GraphSeriesBatch.collate(
+        [
+            FixedGraphSeries(
+                time=torch.arange(2, dtype=torch.float32),
+                node_state=torch.arange(8, dtype=torch.float32).reshape(2, 2, 2),
+                edge_index=torch.tensor([[0, 1], [1, 0]], dtype=torch.long),
+            ),
+            FixedGraphSeries(
+                time=torch.arange(3, dtype=torch.float32),
+                node_state=torch.arange(12, dtype=torch.float32).reshape(3, 2, 2),
+                edge_index=torch.tensor([[0, 1], [1, 0]], dtype=torch.long),
+            ),
+        ]
+    )
+
+    assert isinstance(batch, RaggedGraphSeriesBatch)
+    assert batch.is_uniform_length is False

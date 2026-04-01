@@ -41,6 +41,11 @@ class OptLinear(OptBase):
 
         Only used in `evaluation` in this Trainer.
         """
+        if hasattr(batch, "is_ragged") and batch.is_ragged:
+            return self._average_loss_lists(
+                [self._process_batch(sample) for sample in batch.iter_single_batches()]
+            )
+
         B = batch.to(self.device)
         linear_loss = self._ls.eval_batch(self.model, B, self.criteria[0])
         loss_list = [linear_loss]

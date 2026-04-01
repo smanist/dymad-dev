@@ -7,11 +7,50 @@ from typing import TYPE_CHECKING, TypeAlias
 
 import torch
 
-from dymad.core.graph_series import GraphSeries, GraphSeriesBatch
-from dymad.core.series import RegularSeries, RegularSeriesBatch
+from dymad.core.graph_series import (
+    GraphSeries,
+    GraphSeriesBatch,
+    UniformLengthGraphSeriesBatch,
+)
+from dymad.core.series import (
+    RegularSeries,
+    RegularSeriesBatch,
+    UniformLengthRegularSeriesBatch,
+)
 
 if TYPE_CHECKING:
     from dymad.io.legacy_runtime import LegacyRuntimeBatch
+
+
+@dataclass(frozen=True)
+class LegacyRuntimeCollection:
+    """Ragged execution wrapper over per-sample legacy runtimes."""
+
+    items: tuple["LegacyRuntimeBatch", ...]
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    @property
+    def batch_size(self) -> int:
+        return len(self.items)
+
+    @property
+    def n_steps(self) -> tuple[int, ...]:
+        return tuple(int(item.n_steps) for item in self.items)
+
+    @property
+    def _has_graph(self) -> bool:
+        return bool(self.items and self.items[0]._has_graph)
+
+    def to(
+        self,
+        device: torch.device | str | None = None,
+        non_blocking: bool = False,
+    ) -> "LegacyRuntimeCollection":
+        return LegacyRuntimeCollection(
+            tuple(item.to(device, non_blocking=non_blocking) for item in self.items)
+        )
 
 
 @dataclass(frozen=True)
@@ -42,11 +81,13 @@ class RegularModelContext:
             return state[0]
         return state
 
-    def to_legacy_runtime(self) -> "LegacyRuntimeBatch":
+    def to_legacy_runtime(self) -> "LegacyRuntimeBatch | LegacyRuntimeCollection":
         from dymad.io.legacy_runtime import LegacyRuntimeBatch
         from dymad.io.series_adapter import regular_series_to_legacy_runtime
 
         payloads = [regular_series_to_legacy_runtime(item) for item in self.batch]
+        if not isinstance(self.batch, UniformLengthRegularSeriesBatch):
+            return LegacyRuntimeCollection(tuple(payloads))
         return LegacyRuntimeBatch.collate(payloads)
 
 
@@ -82,11 +123,13 @@ class GraphModelContext:
             return state[0]
         return state
 
-    def to_legacy_runtime(self) -> "LegacyRuntimeBatch":
+    def to_legacy_runtime(self) -> "LegacyRuntimeBatch | LegacyRuntimeCollection":
         from dymad.io.legacy_runtime import LegacyRuntimeBatch
         from dymad.io.series_adapter import graph_series_to_legacy_runtime
 
         payloads = [graph_series_to_legacy_runtime(item) for item in self.batch]
+        if not isinstance(self.batch, UniformLengthGraphSeriesBatch):
+            return LegacyRuntimeCollection(tuple(payloads))
         return LegacyRuntimeBatch.collate(payloads)
 
 
@@ -106,7 +149,7 @@ def build_model_context(
     raise TypeError(f"Unsupported model-context payload type: {type(batch)!r}")
 
 
-ModelRuntimePayload: TypeAlias = "LegacyRuntimeBatch | RegularModelContext | GraphModelContext"
+ModelRuntimePayload: TypeAlias = "LegacyRuntimeBatch | LegacyRuntimeCollection | RegularModelContext | GraphModelContext"
 
 
 def _expand_regular_context_for_prediction(
@@ -271,13 +314,27 @@ def materialize_prediction_runtime(
     *,
     batch_size: int,
     is_batch: bool,
-) -> "LegacyRuntimeBatch":
+) -> "LegacyRuntimeBatch | LegacyRuntimeCollection":
     """Materialize a prediction runtime payload through the typed-context boundary."""
 
     from dymad.io.legacy_runtime import LegacyRuntimeBatch
 
     if payload is None:
         return LegacyRuntimeBatch()
+
+    if isinstance(payload, LegacyRuntimeCollection):
+        if not is_batch:
+            if payload.batch_size != 1:
+                raise ValueError(
+                    f"Single mode: ws batch size must be 1. Got ws: {payload.batch_size}"
+                )
+            return payload.items[0]
+        if payload.batch_size != batch_size:
+            raise ValueError(
+                f"Batch mode: ws batch size must match x0 for ragged runtime payloads. "
+                f"Got ws: {payload.batch_size}, x0: {batch_size}"
+            )
+        return payload
 
     if isinstance(payload, LegacyRuntimeBatch):
         if not is_batch:
