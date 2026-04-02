@@ -86,8 +86,8 @@ class OptNODE(OptBase):
             )
 
         num_steps = self.schedulers[1].get_length()
-        runtime = batch_to_runtime(batch)
         if num_steps is None:
+            runtime = batch_to_runtime(batch)
             num_steps = runtime.x.size(1)
 
         # Chop trajectories through the typed-batch path when possible.
@@ -96,6 +96,7 @@ class OptNODE(OptBase):
                 B = batch.truncate(num_steps).to(self.device)
                 runtime = batch_to_runtime(B)
             else:
+                runtime = batch_to_runtime(batch)
                 runtime = runtime.truncate(num_steps).to(self.device)
         else:
             chop_step = _determine_chop_step(num_steps, self.chop_step)
@@ -103,6 +104,7 @@ class OptNODE(OptBase):
                 B = batch.window(num_steps, chop_step).to(self.device)
                 runtime = batch_to_runtime(B)
             else:
+                runtime = batch_to_runtime(batch)
                 runtime = runtime.unfold(num_steps, chop_step).to(self.device)
 
         # Initial states and time vector

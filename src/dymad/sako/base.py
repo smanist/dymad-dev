@@ -76,8 +76,8 @@ def per_state_err(prd, ref):
 
 
 def encode_runtime_batch(model: torch.nn.Module, batch) -> np.ndarray:
-    """Encode one trainer batch via typed-runtime payloads or a legacy fallback."""
-    runtime = batch.runtime.to_runtime() if hasattr(batch, "runtime") else batch
+    """Encode one trainer batch via typed-runtime payloads."""
+    runtime = batch.runtime if hasattr(batch, "runtime") else batch
     return model.encoder(runtime).cpu().detach().numpy()
 
 class SAInterface(DataInterface):

@@ -106,6 +106,12 @@ class GNN(nn.Module):
         assert edge_index.ndim >= 3, "edge_index must have shape (..., n_edges, 2)"
 
         _x_batch, _x_shape = x.shape[:-2], x.shape[-2:]
+        edge_index, edge_weights, edge_attr = self._broadcast_graph_payloads(
+            x,
+            edge_index,
+            edge_weights,
+            edge_attr,
+        )
         _e_batch = edge_index.shape[:-2]
         assert _x_batch == _e_batch, \
             f"Batch shape of x and edge_index must match. Got {_x_batch} and {_e_batch}."
@@ -145,6 +151,38 @@ class GNN(nn.Module):
         x_cat = x_flat.reshape(1, -1, _x_shape[1])
         out = self._forward_single(x_cat, ei_cat, ew, ea, **kwargs)
         return out.reshape(*_x_batch, -1)
+
+    def _broadcast_graph_payloads(self, x, edge_index, edge_weights, edge_attr):
+        x_batch = x.shape[:-2]
+        edge_batch = edge_index.shape[:-2]
+        if edge_batch == x_batch:
+            return edge_index, edge_weights, edge_attr
+        if len(edge_batch) > len(x_batch) or x_batch[: len(edge_batch)] != edge_batch:
+            raise AssertionError(
+                f"Batch shape of x and edge_index must match or edge payloads must be a prefix. Got {x_batch} and {edge_batch}."
+            )
+
+        pad_dims = len(x_batch) - len(edge_batch)
+
+        def _expand(tensor, suffix_dims):
+            if tensor is None:
+                return None
+            tensor_batch = tensor.shape[:-suffix_dims]
+            if tensor_batch == x_batch:
+                return tensor
+            if len(tensor_batch) > len(x_batch) or x_batch[: len(tensor_batch)] != tensor_batch:
+                raise AssertionError(
+                    f"Graph payload batch shape must match x or be a prefix. Got {tensor_batch} and {x_batch}."
+                )
+            extra = len(x_batch) - len(tensor_batch)
+            view_shape = (*tensor_batch, *([1] * extra), *tensor.shape[-suffix_dims:])
+            expand_shape = (*x_batch, *tensor.shape[-suffix_dims:])
+            return tensor.reshape(view_shape).expand(expand_shape)
+
+        edge_index = _expand(edge_index, 2)
+        edge_weights = _expand(edge_weights, 1)
+        edge_attr = _expand(edge_attr, 2)
+        return edge_index, edge_weights, edge_attr
 
     def _forward_single(self, x, edge_index, edge_weights, edge_attr, **kwargs):
         """

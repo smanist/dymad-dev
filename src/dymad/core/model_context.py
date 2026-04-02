@@ -180,13 +180,29 @@ def _regular_series_from_runtime(payload: UniformRegularRuntime) -> RegularSerie
 
 
 def _graph_series_from_runtime(payload: UniformGraphRuntime) -> GraphSeries:
-    edge_index_steps = tuple(step.transpose(0, 1) for step in payload.edge_index[0])
-    edge_weight_steps = None if payload.edge_weight is None else tuple(step for step in payload.edge_weight[0])
-    edge_attr_steps = None if payload.edge_attr is None else tuple(step for step in payload.edge_attr[0])
-    if all(torch.equal(edge_index_steps[0], step) for step in edge_index_steps[1:]):
-        edge_index: torch.Tensor | tuple[torch.Tensor, ...] = edge_index_steps[0]
+    if payload.edge_index.ndim == 3:
+        edge_index: torch.Tensor | tuple[torch.Tensor, ...] = payload.edge_index[0].transpose(0, 1)
     else:
-        edge_index = edge_index_steps
+        edge_index_steps = tuple(step.transpose(0, 1) for step in payload.edge_index[0])
+        if all(torch.equal(edge_index_steps[0], step) for step in edge_index_steps[1:]):
+            edge_index = edge_index_steps[0]
+        else:
+            edge_index = edge_index_steps
+
+    edge_weight = None
+    if payload.edge_weight is not None:
+        if payload.edge_weight.ndim == 2:
+            edge_weight = payload.edge_weight[0]
+        else:
+            edge_weight = tuple(step for step in payload.edge_weight[0])
+
+    edge_attr = None
+    if payload.edge_attr is not None:
+        if payload.edge_attr.ndim == 3:
+            edge_attr = payload.edge_attr[0]
+        else:
+            edge_attr = tuple(step for step in payload.edge_attr[0])
+
     cls = FixedGraphSeries if isinstance(edge_index, torch.Tensor) else VariableEdgeGraphSeries
     return cls(
         time=payload.time[0],
@@ -195,8 +211,8 @@ def _graph_series_from_runtime(payload: UniformGraphRuntime) -> GraphSeries:
         control=payload.control[0] if payload.control is not None else None,
         target=payload.target[0] if payload.target is not None else None,
         params=payload.params[0] if payload.params is not None else None,
-        edge_weight=edge_weight_steps,
-        edge_attr=edge_attr_steps,
+        edge_weight=edge_weight,
+        edge_attr=edge_attr,
         meta=dict(payload.meta[0]) if payload.meta else {},
     )
 

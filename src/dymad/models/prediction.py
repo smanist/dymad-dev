@@ -82,7 +82,14 @@ def _prepare_data(x0, ts, ws: ModelRuntimePayload | None, device):
 
 def _proc_ztraj(z_traj, model, ws, n_steps, is_batch):
     if _runtime_is_graph(ws):
-        if _runtime_is_typed(ws):
+        if (
+            _runtime_is_typed(ws)
+            and _runtime_is_uniform_length(ws)
+            and bool(getattr(ws, "is_fixed_topology", False))
+        ):
+            tmp = z_traj.permute(1, 0, 2, 3)
+            x_traj = model.decoder(tmp, ws)
+        elif _runtime_is_typed(ws):
             outputs = []
             for step in range(n_steps):
                 wtmp = ws.get_step(step)

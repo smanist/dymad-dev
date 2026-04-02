@@ -17,7 +17,7 @@ def batch_to_runtime(batch: TrainerBatch) -> RuntimeBatch:
     """Normalize trainer input batches to the native typed runtime payload."""
     if isinstance(batch, (RegularSeries, GraphSeries)):
         return runtime_from_series(batch)
-    return batch.runtime.to_runtime()
+    return batch.runtime
 
 
 def iter_runtime_batches(runtime: RuntimeBatch):

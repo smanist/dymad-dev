@@ -204,7 +204,15 @@ def linear_features_smpl(mdl, w: ComponentInputPayload) -> Tuple[torch.Tensor, t
 
 def linear_eval_graph(mdl, w: ComponentInputPayload) -> Tuple[torch.Tensor, torch.Tensor]:
     """Compute linear evaluation, dz, and states, z, for the model."""
-    if getattr(w, "is_graph", False) and hasattr(w, "get_step") and hasattr(w, "n_steps"):
+    if (
+        getattr(w, "is_graph", False)
+        and hasattr(w, "get_step")
+        and hasattr(w, "n_steps")
+        and not (
+            getattr(w, "is_uniform_length", False)
+            and bool(getattr(w, "is_fixed_topology", False))
+        )
+    ):
         z = torch.stack([mdl.encoder(w.get_step(step)) for step in range(w.n_steps)], dim=1)
         z_dot = torch.stack([mdl.dynamics(z[:, step], w.get_step(step)) for step in range(w.n_steps)], dim=1)
         return z_dot.permute(0, 2, 1, 3), z.permute(0, 2, 1, 3)
@@ -214,7 +222,15 @@ def linear_eval_graph(mdl, w: ComponentInputPayload) -> Tuple[torch.Tensor, torc
 
 def linear_features_graph(mdl, w: ComponentInputPayload) -> Tuple[torch.Tensor, torch.Tensor]:
     """Compute linear features, f, and outputs, dz, for the model."""
-    if getattr(w, "is_graph", False) and hasattr(w, "get_step") and hasattr(w, "n_steps"):
+    if (
+        getattr(w, "is_graph", False)
+        and hasattr(w, "get_step")
+        and hasattr(w, "n_steps")
+        and not (
+            getattr(w, "is_uniform_length", False)
+            and bool(getattr(w, "is_fixed_topology", False))
+        )
+    ):
         z = torch.stack([mdl.encoder(w.get_step(step)) for step in range(w.n_steps)], dim=1)
         f = torch.stack([mdl.features(z[:, step], w.get_step(step)) for step in range(w.n_steps)], dim=1)
         return f.permute(0, 2, 1, 3), z.permute(0, 2, 1, 3)
