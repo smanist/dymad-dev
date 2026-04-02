@@ -6,10 +6,9 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Tuple
 
-from dymad.core.model_context import LegacyRuntimeCollection
 from dymad.numerics.linalg import logm_low_rank, real_lowrank_from_eigpairs, truncated_lstsq
 from dymad.sako import filter_spectrum, SAKO
-from dymad.training.batch_adapter import TrainerBatch, batch_to_legacy_runtime
+from dymad.training.batch_adapter import TrainerBatch, batch_to_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +21,9 @@ def _dt_target(z: torch.Tensor) -> torch.Tensor:
 
 def _comp_linear_features_dt(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
     """Compute linear features for discrete-time models."""
-    runtime = batch_to_legacy_runtime(batch)
-    if isinstance(runtime, LegacyRuntimeCollection):
-        A_blocks, z_blocks = zip(*[ _comp_linear_features_dt(model, item, **kwargs) for item in runtime.items ])
+    runtime = batch_to_runtime(batch)
+    if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
+        A_blocks, z_blocks = zip(*[_comp_linear_features_dt(model, item, **kwargs) for item in runtime.iter_series()])
         return torch.cat(A_blocks, dim=0), torch.cat(z_blocks, dim=0)
     A, z = model.linear_features(runtime)
     _A = A[..., :-1, :]
@@ -35,9 +34,9 @@ def _comp_linear_eval_dt(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
     """Compute predicted targets for discrete-time models.
     z_dot really means z_next here.
     """
-    runtime = batch_to_legacy_runtime(batch)
-    if isinstance(runtime, LegacyRuntimeCollection):
-        z_dots, zs = zip(*[_comp_linear_eval_dt(model, item, **kwargs) for item in runtime.items])
+    runtime = batch_to_runtime(batch)
+    if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
+        z_dots, zs = zip(*[_comp_linear_eval_dt(model, item, **kwargs) for item in runtime.iter_series()])
         return torch.cat(z_dots, dim=0), torch.cat(zs, dim=0)
     z_dot, z = model.linear_eval(runtime)
     return z_dot[..., :-1, :], _dt_target(z)
@@ -56,9 +55,9 @@ def _ct_target(z: torch.Tensor, dt, order=2) -> torch.Tensor:
 
 def _comp_linear_features_ct(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
     """Compute linear features for continuous-time models."""
-    runtime = batch_to_legacy_runtime(batch)
-    if isinstance(runtime, LegacyRuntimeCollection):
-        A_blocks, z_blocks = zip(*[_comp_linear_features_ct(model, item, **kwargs) for item in runtime.items])
+    runtime = batch_to_runtime(batch)
+    if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
+        A_blocks, z_blocks = zip(*[_comp_linear_features_ct(model, item, **kwargs) for item in runtime.iter_series()])
         return torch.cat(A_blocks, dim=0), torch.cat(z_blocks, dim=0)
     A, z = model.linear_features(runtime)
     _z = _ct_target(z, kwargs['dt'], kwargs.get('order', 2))
@@ -66,9 +65,9 @@ def _comp_linear_features_ct(model, batch: TrainerBatch, **kwargs) -> torch.Tens
 
 def _comp_linear_eval_ct(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
     """Compute predicted targets for continuous-time models."""
-    runtime = batch_to_legacy_runtime(batch)
-    if isinstance(runtime, LegacyRuntimeCollection):
-        z_dots, zs = zip(*[_comp_linear_eval_ct(model, item, **kwargs) for item in runtime.items])
+    runtime = batch_to_runtime(batch)
+    if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
+        z_dots, zs = zip(*[_comp_linear_eval_ct(model, item, **kwargs) for item in runtime.iter_series()])
         return torch.cat(z_dots, dim=0), torch.cat(zs, dim=0)
     z_dot, z = model.linear_eval(runtime)
     return z_dot, _ct_target(z, kwargs['dt'], kwargs.get('order', 2))

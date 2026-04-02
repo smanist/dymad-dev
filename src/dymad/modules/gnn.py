@@ -130,12 +130,12 @@ class GNN(nn.Module):
             if edge_weights is None:
                 ew = None
             else:
-                ew = edge_weights.values()
+                ew = edge_weights.values() if edge_weights.is_nested else edge_weights.reshape(-1)
 
             if edge_attr is None:
                 ea = None
             else:
-                ea = edge_attr.values()
+                ea = edge_attr.values() if edge_attr.is_nested else edge_attr.reshape(-1, edge_attr.shape[-1])
 
             # Process node features
             _x_cat = x.reshape(1, -1, _x_shape[1])

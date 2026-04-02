@@ -2,7 +2,7 @@ import logging
 import torch
 from typing import Any, Dict, Type, Union
 
-from dymad.training.batch_adapter import TrainerBatch, batch_to_legacy_runtime
+from dymad.training.batch_adapter import TrainerBatch, batch_to_runtime
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 from dymad.utils import make_scheduler
@@ -86,7 +86,7 @@ class OptNODE(OptBase):
             )
 
         num_steps = self.schedulers[1].get_length()
-        runtime = batch_to_legacy_runtime(batch)
+        runtime = batch_to_runtime(batch)
         if num_steps is None:
             num_steps = runtime.x.size(1)
 
@@ -94,14 +94,14 @@ class OptNODE(OptBase):
         if self.chop_mode == "initial":
             if hasattr(batch, "truncate"):
                 B = batch.truncate(num_steps).to(self.device)
-                runtime = batch_to_legacy_runtime(B)
+                runtime = batch_to_runtime(B)
             else:
                 runtime = runtime.truncate(num_steps).to(self.device)
         else:
             chop_step = _determine_chop_step(num_steps, self.chop_step)
             if hasattr(batch, "window"):
                 B = batch.window(num_steps, chop_step).to(self.device)
-                runtime = batch_to_legacy_runtime(B)
+                runtime = batch_to_runtime(B)
             else:
                 runtime = runtime.unfold(num_steps, chop_step).to(self.device)
 
@@ -109,10 +109,6 @@ class OptNODE(OptBase):
         init_states = runtime.x[:, 0, :]  # (batch_size, n_total_state_features)
         # Use the actual time points from trajectory manager
         ts = runtime.t[:, :num_steps]
-        if ts.dim() == 3 and ts.size(0) == 1:
-            # Expect this to be the graph case with broadcasted time
-            # For now we only take the first batch entry, assuming all are identical
-            ts = ts[..., 0]
         ts = ts.to(self.device)
 
         # Batched NODE prediction

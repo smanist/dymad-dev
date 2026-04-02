@@ -8,6 +8,7 @@ from typing import TypeAlias
 import torch
 
 from dymad.core.model_context import GraphModelContext, LegacyRuntimeCollection, RegularModelContext
+from dymad.core.runtime import GraphRuntimeStep, RegularRuntimeStep, TypedRuntime, TypedRuntimeStep
 from dymad.io.legacy_runtime import LegacyRuntimeBatch
 
 
@@ -15,27 +16,19 @@ from dymad.io.legacy_runtime import LegacyRuntimeBatch
 class ComponentInputView:
     """Expose runtime fields needed by model helpers without indexing LegacyRuntimeBatch directly."""
 
-    runtime: LegacyRuntimeBatch
+    runtime: LegacyRuntimeBatch | TypedRuntime | TypedRuntimeStep
 
     @classmethod
     def build(cls, payload: ComponentInputPayload) -> "ComponentInputView":
         if isinstance(payload, ComponentInputView):
             return payload
         if isinstance(payload, RegularModelContext):
-            runtime = payload.to_legacy_runtime()
-            if isinstance(runtime, LegacyRuntimeCollection):
-                if len(runtime) != 1:
-                    raise ValueError("ComponentInputView requires a single runtime payload, not a ragged batch.")
-                runtime = runtime.items[0]
-            return cls(runtime.get_step(0))
+            return cls(payload.to_runtime().get_step(0))
         if isinstance(payload, GraphModelContext):
-            runtime = payload.to_legacy_runtime()
-            if isinstance(runtime, LegacyRuntimeCollection):
-                if len(runtime) != 1:
-                    raise ValueError("ComponentInputView requires a single runtime payload, not a ragged batch.")
-                runtime = runtime.items[0]
-            return cls(runtime.get_step(0))
-        if isinstance(payload, LegacyRuntimeBatch):
+            return cls(payload.to_runtime().get_step(0))
+        if isinstance(payload, (LegacyRuntimeBatch, RegularRuntimeStep, GraphRuntimeStep)):
+            return cls(payload)
+        if hasattr(payload, "get_step") or hasattr(payload, "x"):
             return cls(payload)
         raise TypeError(f"Unsupported component payload type: {type(payload)!r}")
 
@@ -80,4 +73,4 @@ def build_component_input_view(payload: ComponentInputPayload) -> ComponentInput
     return ComponentInputView.build(payload)
 
 
-ComponentInputPayload: TypeAlias = LegacyRuntimeBatch | RegularModelContext | GraphModelContext | ComponentInputView
+ComponentInputPayload: TypeAlias = LegacyRuntimeBatch | TypedRuntime | TypedRuntimeStep | RegularModelContext | GraphModelContext | ComponentInputView

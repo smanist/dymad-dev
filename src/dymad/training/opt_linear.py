@@ -2,7 +2,7 @@ import logging
 import torch
 from typing import Any, Dict, Type
 
-from dymad.training.batch_adapter import TrainerBatch, batch_to_legacy_runtime
+from dymad.training.batch_adapter import TrainerBatch, batch_to_runtime
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 
@@ -53,7 +53,7 @@ class OptLinear(OptBase):
         # Other criteria
         # x_hat and predictions are computed inside criteria evaluation if needed
         x_hat, preds = None, None
-        _list = self._additional_criteria_evaluation(x_hat, preds, batch_to_legacy_runtime(B))
+        _list = self._additional_criteria_evaluation(x_hat, preds, batch_to_runtime(B))
         loss_list.extend(_list)
 
         return loss_list

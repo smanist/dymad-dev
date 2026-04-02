@@ -9,6 +9,17 @@ from dymad.core.graph_series import (
     VariableEdgeGraphSeries,
 )
 from dymad.core.model_context import GraphModelContext, RegularModelContext, build_model_context
+from dymad.core.runtime import (
+    EmptyRegularRuntime,
+    GraphRuntimeStep,
+    RaggedGraphRuntime,
+    RaggedRegularRuntime,
+    RegularRuntimeStep,
+    UniformGraphRuntime,
+    UniformRegularRuntime,
+    to_padded_graph_runtime,
+    to_padded_regular_runtime,
+)
 from dymad.core.series import (
     RaggedRegularSeriesBatch,
     RegularSeries,
@@ -41,8 +52,10 @@ __all__ = [
     "FieldTransform",
     "FieldTransformModule",
     "FixedGraphSeries",
+    "EmptyRegularRuntime",
     "GraphSeries",
     "GraphSeriesBatch",
+    "GraphRuntimeStep",
     "GraphTrainerBatch",
     "GraphModelContext",
     "IdentityTransform",
@@ -55,10 +68,13 @@ __all__ = [
     "NDRTransformModuleAdapter",
     "RegularSeries",
     "RegularSeriesBatch",
+    "RegularRuntimeStep",
     "RegularTrainerBatch",
     "RegularModelContext",
     "RegularSeriesTransformPipeline",
+    "RaggedGraphRuntime",
     "RaggedGraphSeriesBatch",
+    "RaggedRegularRuntime",
     "RaggedRegularSeriesBatch",
     "ScalerTransform",
     "SeriesTransformPipeline",
@@ -66,6 +82,10 @@ __all__ = [
     "TransformModule",
     "UniformLengthGraphSeriesBatch",
     "UniformLengthRegularSeriesBatch",
+    "UniformGraphRuntime",
+    "UniformRegularRuntime",
     "DelayEmbeddingTransform",
     "VariableEdgeGraphSeries",
+    "to_padded_graph_runtime",
+    "to_padded_regular_runtime",
 ]

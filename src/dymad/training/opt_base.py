@@ -8,10 +8,9 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Any, Dict, List, Optional, Type, Union
 
-from dymad.core.model_context import LegacyRuntimeCollection
 from dymad.losses import LOSS_MAP
 from dymad.io.legacy_runtime import LegacyRuntimeBatch
-from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_legacy_runtime
+from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_runtime
 from dymad.training.helper import RunState
 from dymad.training.ls_update import LSUpdater
 from dymad.utils import make_scheduler, plot_hist, plot_trajectory
@@ -430,17 +429,19 @@ class OptBase:
         if len(self.criteria_weights) < 2:
             return loss_list
 
-        if isinstance(batch, (LegacyRuntimeBatch, LegacyRuntimeCollection)):
+        if isinstance(batch, LegacyRuntimeBatch):
+            runtime = batch
+        elif hasattr(batch, "is_uniform_length") and hasattr(batch, "iter_series"):
             runtime = batch
         else:
-            runtime = batch_to_legacy_runtime(batch)
+            runtime = batch_to_runtime(batch)
 
-        if isinstance(runtime, LegacyRuntimeCollection):
+        if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
             if x_hat is not None or predictions is not None:
                 raise ValueError("Ragged runtime collections require per-sample criteria evaluation.")
             loss_lists = [
                 self._additional_criteria_evaluation(None, None, item)
-                for item in runtime.items
+                for item in runtime.iter_series()
             ]
             return self._average_loss_lists(loss_lists)
 
@@ -462,10 +463,6 @@ class OptBase:
                 init_states = runtime.x[:, 0, :]  # (batch_size, n_total_state_features)
                 # Use the actual time points from trajectory manager
                 ts = runtime.t
-                if ts.dim() == 3 and ts.size(0) == 1:
-                    # Expect this to be the graph case with broadcasted time
-                    # For now we only take the first batch entry, assuming all are identical
-                    ts = ts[..., 0]
                 ts = ts.to(self.device)
                 preds = self.model.predict(
                     init_states,
@@ -503,7 +500,7 @@ class OptBase:
         Returns:
             float: Prediction criterion between predictions and ground truth, can be problem dependent
         """
-        runtime = batch_to_legacy_runtime(truth)
+        runtime = batch_to_runtime(truth)
         with torch.no_grad():
             # Extract states and controls
             x_truth = runtime.x

@@ -3,7 +3,7 @@ import torch
 from typing import Any, Dict, Type
 
 from dymad.numerics import generate_weak_weights
-from dymad.training.batch_adapter import TrainerBatch, batch_to_legacy_runtime
+from dymad.training.batch_adapter import TrainerBatch, batch_to_runtime
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 
@@ -56,7 +56,7 @@ class OptWeakForm(OptBase):
             )
 
         B = batch.to(self.device)
-        runtime = batch_to_legacy_runtime(B)
+        runtime = batch_to_runtime(B)
         z = self.model.encoder(runtime)
         z_dot = self.model.dynamics(z, runtime)
         x_hat = self.model.decoder(z, runtime)

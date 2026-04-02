@@ -477,7 +477,7 @@ class TrajectoryManager:
 
         logger.info("Applying transformations to state features and control inputs.")
         self.typed_dataset = self._transform_regular_series_by_index(self.data_index)
-        self.dataset = [regular_series_to_legacy_runtime(series) for series in self.typed_dataset]
+        self.dataset = self._transform_regular_legacy_by_index(self.data_index)
 
         if self.metadata["delay"] > 0:
             logger.info("Conforming the time data due to delay.")
@@ -487,8 +487,7 @@ class TrajectoryManager:
         self._update_dataset_metadata()
 
     def _transform_by_index(self, indices: torch.Tensor) -> List[LegacyRuntimeBatch]:
-        series_dataset = self._transform_regular_series_by_index(indices)
-        return [regular_series_to_legacy_runtime(series) for series in series_dataset]
+        return self._transform_regular_legacy_by_index(indices)
 
     def create_regular_series_dataset(self, indices: torch.Tensor | List[int] | None = None) -> List[RegularSeries]:
         """Expose the first typed data seam for regular trajectory preprocessing."""
@@ -565,6 +564,61 @@ class TrajectoryManager:
         pipeline = self._build_regular_transform_pipeline()
         transformed = pipeline(RegularSeriesBatch.collate(raw_dataset))
         return list(transformed)
+
+    def _legacy_delay_meta(self, *, field_delays: Dict[str, int] | None = None) -> List[Dict]:
+        if self.metadata["delay"] <= 0:
+            return []
+        return [{
+            "delay": self.metadata["delay"],
+            "field_delays": dict(field_delays or {}),
+        }]
+
+    def _align_legacy_timevarying(self, payloads: List[np.ndarray], *, field_delay: int) -> List[np.ndarray]:
+        trim = self.metadata["delay"] - field_delay
+        if trim <= 0:
+            return payloads
+        return [payload[trim:] for payload in payloads]
+
+    def _transform_regular_legacy_by_index(self, indices: torch.Tensor) -> List[LegacyRuntimeBatch]:
+        index_list = [int(index) for index in indices.tolist()]
+
+        states = self._data_transform_x.transform([self.x[index] for index in index_list])
+        targets = None
+        if self.metadata["n_aux_features"] > 0:
+            targets = self._align_legacy_timevarying(
+                self._data_transform_y.transform([self.y[index] for index in index_list]),
+                field_delay=getattr(self._data_transform_y, "delay", 0),
+            )
+        controls = None
+        if self.metadata["n_control_features"] > 0:
+            controls = self._align_legacy_timevarying(
+                self._data_transform_u.transform([self.u[index] for index in index_list]),
+                field_delay=getattr(self._data_transform_u, "delay", 0),
+            )
+        params = None
+        if self.metadata["n_parameters"] > 0:
+            params = self._data_transform_p.transform([self.p[index] for index in index_list])
+
+        field_delays = {
+            "state": getattr(self._data_transform_x, "delay", 0),
+            "target": getattr(self._data_transform_y, "delay", 0),
+            "control": getattr(self._data_transform_u, "delay", 0),
+        }
+
+        dataset = []
+        for position, index in enumerate(index_list):
+            time = self.t[index][self.metadata["delay"]:] if self.metadata["delay"] > 0 else self.t[index]
+            dataset.append(
+                LegacyRuntimeBatch(
+                    t=torch.as_tensor(time, dtype=self.dtype, device=self.device),
+                    x=torch.as_tensor(states[position], dtype=self.dtype, device=self.device),
+                    y=None if targets is None else torch.as_tensor(targets[position], dtype=self.dtype, device=self.device),
+                    u=None if controls is None else torch.as_tensor(controls[position], dtype=self.dtype, device=self.device),
+                    p=None if params is None else torch.as_tensor(params[position], dtype=self.dtype, device=self.device),
+                    meta=self._legacy_delay_meta(field_delays=field_delays),
+                )
+            )
+        return dataset
 
     def _update_dataset_metadata(self):
         # Bookkeeping metadata for the dataset.
@@ -826,7 +880,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
         logger.info("Applying graph transformations through the typed series pipeline.")
         transformed = list(pipeline(raw_batch))
         self.typed_dataset = transformed
-        self.dataset = [graph_series_to_legacy_runtime(series) for series in transformed]
+        self.dataset = self._transform_graph_legacy_by_index(self.data_index)
 
         if self.metadata["delay"] > 0:
             logger.info("Conforming the time data due to delay.")
@@ -836,8 +890,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
         self._update_dataset_metadata()
 
     def _transform_by_index(self, indices: torch.Tensor) -> List[LegacyRuntimeBatch]:
-        graph_dataset = self._transform_graph_series_by_index(indices)
-        return [graph_series_to_legacy_runtime(series) for series in graph_dataset]
+        return self._transform_graph_legacy_by_index(indices)
 
     def create_graph_series_dataset(self, indices: torch.Tensor | List[int] | None = None) -> List[GraphSeries]:
         """Expose the typed graph-series seam for graph trajectory preprocessing."""
@@ -884,6 +937,106 @@ class TrajectoryManagerGraph(TrajectoryManager):
                     edge_attr=edge_attr,
                     dtype=self.dtype,
                     device=self.device,
+                )
+            )
+        return dataset
+
+    def _transform_graph_nodes_legacy(
+        self,
+        arrays: List[np.ndarray],
+        transform,
+        *,
+        field_delay: int,
+    ) -> List[np.ndarray]:
+        transformed = []
+        for array in arrays:
+            node_major = self._graph_data_reshape(array, forward=True)
+            payloads = [node_major[node_index] for node_index in range(node_major.shape[0])]
+            node_outputs = transform.transform(payloads)
+            node_outputs = self._align_legacy_timevarying(node_outputs, field_delay=field_delay)
+            transformed.append(
+                self._graph_data_reshape(np.stack(node_outputs, axis=0), forward=False)
+            )
+        return transformed
+
+    def _transform_graph_legacy_by_index(self, indices: torch.Tensor) -> List[LegacyRuntimeBatch]:
+        index_list = [int(index) for index in indices.tolist()]
+        state_delay = getattr(self._data_transform_x, "delay", 0)
+        control_delay = getattr(self._data_transform_u, "delay", 0)
+        target_delay = getattr(self._data_transform_y, "delay", 0)
+
+        states = self._transform_graph_nodes_legacy(
+            [self.x[index] for index in index_list],
+            self._data_transform_x,
+            field_delay=state_delay,
+        )
+        targets = None
+        if self.metadata["n_aux_features"] > 0:
+            targets = self._transform_graph_nodes_legacy(
+                [self.y[index] for index in index_list],
+                self._data_transform_y,
+                field_delay=target_delay,
+            )
+        controls = None
+        if self.metadata["n_control_features"] > 0:
+            controls = self._transform_graph_nodes_legacy(
+                [self.u[index] for index in index_list],
+                self._data_transform_u,
+                field_delay=control_delay,
+            )
+        params = None
+        if self.metadata["n_parameters"] > 0:
+            params = self._data_transform_p.transform([self.p[index] for index in index_list])
+
+        edge_weights = None
+        if self.metadata["n_edge_weights"] > 0:
+            edge_weights = self._align_legacy_timevarying(
+                [self._data_transform_ew.transform(self.ew[index]) for index in index_list],
+                field_delay=getattr(self._data_transform_ew, "delay", 0),
+            )
+        edge_attrs = None
+        if self.metadata["n_edge_features"] > 0:
+            edge_attrs = self._align_legacy_timevarying(
+                [self._data_transform_ea.transform(self.ea[index]) for index in index_list],
+                field_delay=getattr(self._data_transform_ea, "delay", 0),
+            )
+
+        field_delays = {
+            "state": state_delay,
+            "target": target_delay,
+            "control": control_delay,
+            "edge_weight": getattr(self._data_transform_ew, "delay", 0),
+            "edge_attr": getattr(self._data_transform_ea, "delay", 0),
+        }
+
+        dataset = []
+        for position, index in enumerate(index_list):
+            trim = self.metadata["delay"]
+            edge_index = self.ei[index][trim:] if trim > 0 else self.ei[index]
+            time = self.t[index][trim:] if trim > 0 else self.t[index]
+            edge_index = [
+                torch.as_tensor(step, dtype=torch.long, device=self.device)
+                for step in edge_index
+            ]
+            edge_weight = None if edge_weights is None else [
+                torch.as_tensor(step, dtype=self.dtype, device=self.device)
+                for step in edge_weights[position]
+            ]
+            edge_attr = None if edge_attrs is None else [
+                torch.as_tensor(step, dtype=self.dtype, device=self.device)
+                for step in edge_attrs[position]
+            ]
+            dataset.append(
+                LegacyRuntimeBatch(
+                    t=torch.as_tensor(time, dtype=self.dtype, device=self.device),
+                    x=torch.as_tensor(states[position], dtype=self.dtype, device=self.device),
+                    y=None if targets is None else torch.as_tensor(targets[position], dtype=self.dtype, device=self.device),
+                    u=None if controls is None else torch.as_tensor(controls[position], dtype=self.dtype, device=self.device),
+                    p=None if params is None else torch.as_tensor(params[position], dtype=self.dtype, device=self.device),
+                    ei=edge_index,
+                    ew=edge_weight,
+                    ea=edge_attr,
+                    meta=self._legacy_delay_meta(field_delays=field_delays),
                 )
             )
         return dataset

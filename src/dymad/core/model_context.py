@@ -12,6 +12,13 @@ from dymad.core.graph_series import (
     GraphSeriesBatch,
     UniformLengthGraphSeriesBatch,
 )
+from dymad.core.runtime import (
+    EmptyRegularRuntime,
+    GraphRuntime,
+    TypedRuntime,
+    to_padded_graph_runtime,
+    to_padded_regular_runtime,
+)
 from dymad.core.series import (
     RegularSeries,
     RegularSeriesBatch,
@@ -76,10 +83,13 @@ class RegularModelContext:
         return tuple(int(item.time.shape[0]) for item in self.batch)
 
     def initial_state_tensor(self, *, squeeze_single: bool = False) -> torch.Tensor:
-        state = torch.stack([item.state[0] for item in self.batch], dim=0)
+        state = self.to_runtime().initial_state()
         if squeeze_single and state.shape[0] == 1:
             return state[0]
         return state
+
+    def to_runtime(self) -> TypedRuntime:
+        return to_padded_regular_runtime(self.batch)
 
     def to_legacy_runtime(self) -> "LegacyRuntimeBatch | LegacyRuntimeCollection":
         from dymad.io.legacy_runtime import LegacyRuntimeBatch
@@ -118,10 +128,13 @@ class GraphModelContext:
         return tuple(int(item.node_state.shape[1]) for item in self.batch)
 
     def initial_state_tensor(self, *, squeeze_single: bool = False) -> torch.Tensor:
-        state = torch.stack([item.node_state[0].reshape(-1) for item in self.batch], dim=0)
+        state = self.to_runtime().initial_state()
         if squeeze_single and state.shape[0] == 1:
             return state[0]
         return state
+
+    def to_runtime(self) -> GraphRuntime:
+        return to_padded_graph_runtime(self.batch)
 
     def to_legacy_runtime(self) -> "LegacyRuntimeBatch | LegacyRuntimeCollection":
         from dymad.io.legacy_runtime import LegacyRuntimeBatch
@@ -149,7 +162,7 @@ def build_model_context(
     raise TypeError(f"Unsupported model-context payload type: {type(batch)!r}")
 
 
-ModelRuntimePayload: TypeAlias = "LegacyRuntimeBatch | LegacyRuntimeCollection | RegularModelContext | GraphModelContext"
+ModelRuntimePayload: TypeAlias = "LegacyRuntimeBatch | LegacyRuntimeCollection | TypedRuntime | RegularModelContext | GraphModelContext"
 
 
 def _expand_regular_context_for_prediction(
@@ -314,13 +327,13 @@ def materialize_prediction_runtime(
     *,
     batch_size: int,
     is_batch: bool,
-) -> "LegacyRuntimeBatch | LegacyRuntimeCollection":
+) -> TypedRuntime:
     """Materialize a prediction runtime payload through the typed-context boundary."""
 
     from dymad.io.legacy_runtime import LegacyRuntimeBatch
 
     if payload is None:
-        return LegacyRuntimeBatch()
+        return EmptyRegularRuntime(batch_size=batch_size if is_batch else 1)
 
     if isinstance(payload, LegacyRuntimeCollection):
         if not is_batch:
@@ -328,13 +341,19 @@ def materialize_prediction_runtime(
                 raise ValueError(
                     f"Single mode: ws batch size must be 1. Got ws: {payload.batch_size}"
                 )
-            return payload.items[0]
+            return _context_from_legacy_runtime(payload.items[0]).to_runtime()
         if payload.batch_size != batch_size:
             raise ValueError(
                 f"Batch mode: ws batch size must match x0 for ragged runtime payloads. "
                 f"Got ws: {payload.batch_size}, x0: {batch_size}"
             )
-        return payload
+        series = []
+        for item in payload.items:
+            context = _context_from_legacy_runtime(item)
+            series.append(context.batch[0])
+        if isinstance(series[0], RegularSeries):
+            return to_padded_regular_runtime(RegularSeriesBatch.collate(series))
+        return to_padded_graph_runtime(GraphSeriesBatch.collate(series))
 
     if isinstance(payload, LegacyRuntimeBatch):
         if not is_batch:
@@ -367,13 +386,26 @@ def materialize_prediction_runtime(
             payload,
             batch_size=batch_size,
             is_batch=is_batch,
-        ).to_legacy_runtime()
+        ).to_runtime()
 
     if isinstance(payload, GraphModelContext):
         return _expand_graph_context_for_prediction(
             payload,
             batch_size=batch_size,
             is_batch=is_batch,
-        ).to_legacy_runtime()
+        ).to_runtime()
+
+    if hasattr(payload, "batch_size") and hasattr(payload, "is_graph"):
+        if not is_batch:
+            if payload.batch_size != 1:
+                raise ValueError(
+                    f"Single mode: ws batch size must be 1. Got ws: {payload.batch_size}"
+                )
+            return payload
+        if payload.batch_size != batch_size:
+            raise ValueError(
+                f"Batch mode: ws batch size must be 1 or match x0. Got ws: {payload.batch_size}, x0: {batch_size}"
+            )
+        return payload
 
     raise TypeError(f"Unsupported runtime payload type: {type(payload)!r}")

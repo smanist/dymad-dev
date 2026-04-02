@@ -91,4 +91,9 @@ def test_graph_trajectory_manager_uses_typed_series_before_legacy_adaptation(mon
 
     manager.apply_data_transformations()
 
-    assert calls == ["FixedGraphSeries", "FixedGraphSeries"]
+    assert manager.typed_dataset is not None
+    assert [type(series).__name__ for series in manager.typed_dataset] == [
+        "FixedGraphSeries",
+        "FixedGraphSeries",
+    ]
+    assert calls == []

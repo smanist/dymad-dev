@@ -6,11 +6,28 @@ import torch
 from torchdiffeq import odeint
 from typing import Union
 
-from dymad.core.model_context import LegacyRuntimeCollection, ModelRuntimePayload, materialize_prediction_runtime
+from dymad.core.model_context import ModelRuntimePayload, materialize_prediction_runtime
+from dymad.core.runtime import TypedRuntime
 from dymad.numerics import expm_low_rank, expm_full_rank
 from dymad.utils import ControlInterpolator
 
 logger = logging.getLogger(__name__)
+
+def _runtime_is_graph(runtime) -> bool:
+    return bool(getattr(runtime, "is_graph", getattr(runtime, "_has_graph", False)))
+
+
+def _runtime_is_typed(runtime) -> bool:
+    return hasattr(runtime, "is_graph") and hasattr(runtime, "is_uniform_length")
+
+
+def _runtime_is_uniform_length(runtime) -> bool:
+    return bool(getattr(runtime, "is_uniform_length", True))
+
+
+def _runtime_valid_mask(runtime) -> torch.Tensor | None:
+    return getattr(runtime, "valid_mask", None)
+
 
 def _prepare_data(x0, ts, ws: ModelRuntimePayload | None, device):
     # Initial conditions
@@ -28,6 +45,8 @@ def _prepare_data(x0, ts, ws: ModelRuntimePayload | None, device):
             _ts = torch.from_numpy(ts).float()
         else:
             _ts = ts.float()
+        if _ts.ndim == 3 and _ts.shape[0] == 1:
+            _ts = _ts[:, :, 0]
         if is_batch:
             if _ts.ndim == 1:
                 _ts = _ts.unsqueeze(0).repeat(_Nb, 1)  # (batch_size, n_steps)
@@ -44,19 +63,9 @@ def _prepare_data(x0, ts, ws: ModelRuntimePayload | None, device):
 
     # Inputs
     _ws = materialize_prediction_runtime(ws, batch_size=_Nb, is_batch=is_batch).to(device)
-    if isinstance(_ws, LegacyRuntimeCollection):
-        if len(_ws) == 1:
-            _ws = _ws.items[0]
-        else:
-            raise ValueError(
-                "Ragged batch prediction is not supported in one vectorized call yet. "
-                "Predict each series separately or use uniform-length batches."
-            )
     _Nw = _ws.n_steps
-    if _ws._has_graph:
-        # Graph mode, batch always 1
-        # Need to flatten x0
-        _x0 = _x0.view(1, -1)
+    if _runtime_is_graph(_ws):
+        _x0 = _x0.view(_Nb, -1)
 
     # Check step consistency
     if _Nt is None:
@@ -72,17 +81,75 @@ def _prepare_data(x0, ts, ws: ModelRuntimePayload | None, device):
     return _x0, _ts, _ws, n_steps, is_batch
 
 def _proc_ztraj(z_traj, model, ws, n_steps, is_batch):
-    if ws._has_graph:
-        # after stack: z_traj (n_steps, batch_size, node, z_dim)
-        tmp = z_traj.permute(1, 0, 2, 3)  # (batch_size, n_steps, node, z_dim)
-        x_traj = model.decoder(tmp, ws)
+    if _runtime_is_graph(ws):
+        if _runtime_is_typed(ws):
+            outputs = []
+            for step in range(n_steps):
+                wtmp = ws.get_step(step)
+                outputs.append(model.decoder(z_traj[step], wtmp))
+            x_traj = torch.stack(outputs, dim=1)
+        else:
+            tmp = z_traj.permute(1, 0, 2, 3)
+            x_traj = model.decoder(tmp, ws)
     else:
         x_traj = model.decoder(z_traj.view(-1, z_traj.shape[-1]), None)
         x_traj = x_traj.view(n_steps, z_traj.shape[1], -1).transpose(0, 1)
 
+    valid_mask = _runtime_valid_mask(ws)
+    if not _runtime_is_uniform_length(ws) and valid_mask is not None:
+        if _runtime_is_graph(ws):
+            x_traj = x_traj * valid_mask.unsqueeze(-1).unsqueeze(-1)
+        else:
+            x_traj = x_traj * valid_mask.unsqueeze(-1)
+
     if not is_batch:
         x_traj = x_traj.squeeze(0)
     return x_traj
+
+
+def _pad_ragged_predictions(
+    outputs: list[torch.Tensor],
+    runtime: TypedRuntime,
+    *,
+    is_graph: bool,
+) -> torch.Tensor:
+    if not outputs:
+        raise ValueError("outputs must not be empty")
+    batch_size = len(outputs)
+    max_steps = runtime.n_steps
+    if is_graph:
+        ref_shape = outputs[0].shape[1:]
+    else:
+        ref_shape = outputs[0].shape[1:]
+    out = torch.zeros(
+        (batch_size, max_steps, *ref_shape),
+        dtype=outputs[0].dtype,
+        device=outputs[0].device,
+    )
+    for idx, (pred, length) in enumerate(zip(outputs, runtime.step_lengths)):
+        out[idx, :length] = pred[:length]
+    return out
+
+
+def _predict_ragged_series(
+    predict_fn,
+    model,
+    x0: torch.Tensor,
+    ts: torch.Tensor | None,
+    ws: TypedRuntime,
+    **kwargs,
+) -> torch.Tensor:
+    outputs: list[torch.Tensor] = []
+    for idx, series_runtime in enumerate(ws.iter_series()):
+        series_x0 = x0[idx]
+        series_ts = None
+        if ts is not None:
+            series_ts = ts[idx, : ws.step_lengths[idx]]
+        pred = predict_fn(model, series_x0, series_ts, ws=series_runtime, **kwargs)
+        if pred.ndim == 1:
+            pred = pred.unsqueeze(0)
+        outputs.append(pred)
+    return _pad_ragged_predictions(outputs, ws, is_graph=_runtime_is_graph(ws))
 
 # ------------------
 # Continuous-time case
@@ -119,6 +186,17 @@ def predict_continuous(
             - Batch: shape (batch_size, n_steps, n_features)
     """
     _x0, _ts, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
+    if not _runtime_is_uniform_length(_ws):
+        return _predict_ragged_series(
+            predict_continuous,
+            model,
+            _x0,
+            _ts,
+            _ws,
+            method=method,
+            order=order,
+            **kwargs,
+        )
     _ts = _ts[0]
 
     def bucket(t):
@@ -168,6 +246,17 @@ def predict_continuous_np(
     back to the observation space and encode back; the decoding happens only at the end.
     """
     _x0, _ts, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
+    if not _runtime_is_uniform_length(_ws):
+        return _predict_ragged_series(
+            predict_continuous_np,
+            model,
+            _x0,
+            _ts,
+            _ws,
+            method=method,
+            order=order,
+            **kwargs,
+        )
     _ts = _ts[0]
 
     def bucket(t):
@@ -216,6 +305,15 @@ def predict_continuous_exp(
     Currently only for KBF-type models with linear dynamics.
     """
     _x0, _, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
+    if not _runtime_is_uniform_length(_ws):
+        return _predict_ragged_series(
+            predict_continuous_exp,
+            model,
+            _x0,
+            ts if isinstance(ts, torch.Tensor) else torch.as_tensor(ts, dtype=_x0.dtype, device=_x0.device),
+            _ws,
+            **kwargs,
+        )
     if _ws is not None:
         assert _ws.u is None, "predict_discrete_exp only supports autonomous case."
 
@@ -260,6 +358,15 @@ def predict_continuous_fenc(
     Currently only for kernel machine with tangent kernel.
     """
     _x0, _ts, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
+    if not _runtime_is_uniform_length(_ws):
+        return _predict_ragged_series(
+            predict_continuous_fenc,
+            model,
+            _x0,
+            _ts,
+            _ws,
+            **kwargs,
+        )
 
     logger.debug(f"predict_continuous_fenc: {'Batch' if is_batch else 'Single'} mode")
 
@@ -313,6 +420,8 @@ def predict_discrete(
             - Batch: (batch_size, n_steps, n_features)
     """
     _x0, _, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
+    if not _runtime_is_uniform_length(_ws):
+        return _predict_ragged_series(predict_discrete, model, _x0, None, _ws, **kwargs)
 
     wtmp = _ws.get_step(0).set_x(_x0)
     ztmp = model.encoder(wtmp)            # The initial condition for dynamics
@@ -346,6 +455,8 @@ def predict_discrete_exp(
     In discrete-time, this is equivalent to repeated application of the dynamics.
     """
     _x0, _, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
+    if not _runtime_is_uniform_length(_ws):
+        return _predict_ragged_series(predict_discrete_exp, model, _x0, None, _ws, **kwargs)
 
     logger.debug(f"predict_discrete: {'Batch' if is_batch else 'Single'} mode")
 
