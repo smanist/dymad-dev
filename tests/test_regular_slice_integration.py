@@ -101,7 +101,7 @@ def test_regular_checkpoint_prediction_routes_through_model_context(monkeypatch,
         context = original_build_model_context(batch)
         captured["context_type"] = type(context)
         captured["initial_state"] = context.initial_state_tensor(squeeze_single=True).clone()
-        captured["legacy_runtime"] = context.to_legacy_runtime()
+        captured["runtime"] = context.to_runtime()
         return context
 
     monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
@@ -114,10 +114,10 @@ def test_regular_checkpoint_prediction_routes_through_model_context(monkeypatch,
     prediction = predict_fn(x0, t, u=u)
 
     assert captured["context_type"] is RegularModelContext
-    legacy_runtime = captured["legacy_runtime"]
-    assert torch.equal(legacy_runtime.x[:, 0, :], captured["initial_state"].unsqueeze(0))
-    assert legacy_runtime.batch_size == 1
-    assert legacy_runtime.n_steps == 2
+    runtime = captured["runtime"]
+    assert torch.equal(runtime.x[:, 0, :], captured["initial_state"].unsqueeze(0))
+    assert runtime.batch_size == 1
+    assert runtime.n_steps == 2
     assert prediction.shape == (3, 2)
 
 
@@ -135,7 +135,7 @@ def test_graph_checkpoint_prediction_routes_through_model_context(monkeypatch, t
         context = original_build_model_context(batch)
         captured["context_type"] = type(context)
         captured["initial_state"] = context.initial_state_tensor(squeeze_single=True).clone()
-        captured["legacy_runtime"] = context.to_legacy_runtime()
+        captured["runtime"] = context.to_runtime()
         return context
 
     monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
@@ -149,11 +149,11 @@ def test_graph_checkpoint_prediction_routes_through_model_context(monkeypatch, t
     prediction = predict_fn(x0, t, u=u, ei=edge_index)
 
     assert captured["context_type"] is GraphModelContext
-    legacy_runtime = captured["legacy_runtime"]
-    assert legacy_runtime._has_graph
-    assert legacy_runtime.batch_size == 1
-    assert legacy_runtime.n_nodes == 2
-    assert torch.equal(legacy_runtime.x[:, 0, :], captured["initial_state"].unsqueeze(0))
+    runtime = captured["runtime"]
+    assert runtime.is_graph
+    assert runtime.batch_size == 1
+    assert runtime.n_nodes == 2
+    assert torch.equal(runtime.x[:, 0, :], captured["initial_state"].unsqueeze(0))
     assert prediction.shape == (2, 4)
 
 

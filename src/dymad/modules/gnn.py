@@ -103,44 +103,48 @@ class GNN(nn.Module):
         Otherwise, we aggregate the graph on the fly so the shapes are reduced
         to the first case.  The aggregation takes a bit more time.
         """
-        assert edge_index.ndim == 3, "edge_index must have shape (..., n_edges, 2)"
-        if x.shape[0] == 1:
-            # The usual case, where we have a single edge_index
-            ew = None if edge_weights is None else edge_weights[0]
-            ea = None if edge_attr is None else edge_attr[0]
-            return self._forward_single(x, edge_index[0].transpose(0, 1), ew, ea, **kwargs)
+        assert edge_index.ndim >= 3, "edge_index must have shape (..., n_edges, 2)"
+
+        _x_batch, _x_shape = x.shape[:-2], x.shape[-2:]
+        _e_batch = edge_index.shape[:-2]
+        assert _x_batch == _e_batch, \
+            f"Batch shape of x and edge_index must match. Got {_x_batch} and {_e_batch}."
+
+        n_graphs = 1
+        for d in _x_batch:
+            n_graphs *= d
+
+        x_flat = x.reshape(n_graphs, _x_shape[0], _x_shape[1])
+        edge_index_flat = edge_index.reshape(n_graphs, edge_index.shape[-2], edge_index.shape[-1])
+
+        if n_graphs == 1:
+            ew = None if edge_weights is None else edge_weights.reshape(1, -1)[0]
+            ea = None if edge_attr is None else edge_attr.reshape(1, edge_attr.shape[-2], edge_attr.shape[-1])[0]
+            return self._forward_single(x_flat, edge_index_flat[0].transpose(0, 1), ew, ea, **kwargs)
+
+        offsets = torch.arange(
+            n_graphs,
+            device=edge_index.device,
+            dtype=edge_index.dtype,
+        ) * _x_shape[0]
+        ei_cat = torch.cat(
+            [edge_index_flat[i] + offsets[i] for i in range(n_graphs)],
+            dim=0,
+        ).transpose(0, 1)
+
+        if edge_weights is None:
+            ew = None
         else:
-            # The slower case, where we aggregate graph on the fly
-            _x_batch, _x_shape = x.shape[:-2], x.shape[-2:]
-            _e_batch, _e_shape = edge_index.shape[:-2], edge_index.shape[-2:]
-            assert _x_batch == _e_batch, \
-                f"Batch shape of x and edge_index must match. Got {_x_batch} and {_e_batch}."
+            ew = edge_weights.values() if edge_weights.is_nested else edge_weights.reshape(-1)
 
-            # Aggregate graph by shifting node indices
-            _ei = edge_index.unbind()
-            _tmp = 1
-            for d in _x_batch:
-                _tmp *= d
-            _n_nodes = [0] + [_x_shape[0]] * (_tmp - 1)
-            _offset = torch.tensor(_n_nodes).cumsum(dim=0)
-            _ei_cat = torch.concatenate([
-                b + _offset[i] for i, b in enumerate(_ei)],
-                dim=-2).transpose(0, 1)
+        if edge_attr is None:
+            ea = None
+        else:
+            ea = edge_attr.values() if edge_attr.is_nested else edge_attr.reshape(-1, edge_attr.shape[-1])
 
-            if edge_weights is None:
-                ew = None
-            else:
-                ew = edge_weights.values() if edge_weights.is_nested else edge_weights.reshape(-1)
-
-            if edge_attr is None:
-                ea = None
-            else:
-                ea = edge_attr.values() if edge_attr.is_nested else edge_attr.reshape(-1, edge_attr.shape[-1])
-
-            # Process node features
-            _x_cat = x.reshape(1, -1, _x_shape[1])
-            _out = self._forward_single(_x_cat, _ei_cat, ew, ea, **kwargs)
-            return _out.reshape(*_x_batch, -1)
+        x_cat = x_flat.reshape(1, -1, _x_shape[1])
+        out = self._forward_single(x_cat, ei_cat, ew, ea, **kwargs)
+        return out.reshape(*_x_batch, -1)
 
     def _forward_single(self, x, edge_index, edge_weights, edge_attr, **kwargs):
         """

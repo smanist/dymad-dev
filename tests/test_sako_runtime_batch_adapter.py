@@ -1,7 +1,6 @@
 import torch
 
 from dymad.core import RegularSeries, RegularTrainerBatch, UniformRegularRuntime
-from dymad.io.legacy_runtime import LegacyRuntimeBatch
 from dymad.sako.base import encode_runtime_batch
 
 
@@ -35,9 +34,12 @@ def test_encode_runtime_batch_accepts_typed_regular_trainer_batch():
     assert torch.equal(model.last_payload.x, batch.state_tensor())
 
 
-def test_encode_runtime_batch_preserves_legacy_payload():
+def test_encode_runtime_batch_accepts_runtime_payload():
     model = _DummyModel()
-    payload = LegacyRuntimeBatch(x=torch.ones(1, 3, 2, dtype=torch.float64))
+    payload = UniformRegularRuntime(
+        time=torch.arange(3, dtype=torch.float64).unsqueeze(0),
+        state=torch.ones(1, 3, 2, dtype=torch.float64),
+    )
 
     encoded = encode_runtime_batch(model, payload)
 

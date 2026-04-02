@@ -1,4 +1,4 @@
-"""Trainer-facing typed batch wrappers used during LegacyRuntimeBatch retirement."""
+"""Trainer-facing typed batch wrappers."""
 
 from __future__ import annotations
 

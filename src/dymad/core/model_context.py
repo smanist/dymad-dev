@@ -3,61 +3,34 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeAlias
+from typing import Any, TypeAlias
 
 import torch
 
 from dymad.core.graph_series import (
+    FixedGraphSeries,
     GraphSeries,
     GraphSeriesBatch,
+    VariableEdgeGraphSeries,
     UniformLengthGraphSeriesBatch,
 )
 from dymad.core.runtime import (
     EmptyRegularRuntime,
     GraphRuntime,
+    RaggedGraphRuntime,
+    RaggedRegularRuntime,
     TypedRuntime,
+    UniformGraphRuntime,
+    UniformRegularRuntime,
     to_padded_graph_runtime,
     to_padded_regular_runtime,
 )
 from dymad.core.series import (
+    RaggedRegularSeriesBatch,
     RegularSeries,
     RegularSeriesBatch,
     UniformLengthRegularSeriesBatch,
 )
-
-if TYPE_CHECKING:
-    from dymad.io.legacy_runtime import LegacyRuntimeBatch
-
-
-@dataclass(frozen=True)
-class LegacyRuntimeCollection:
-    """Ragged execution wrapper over per-sample legacy runtimes."""
-
-    items: tuple["LegacyRuntimeBatch", ...]
-
-    def __len__(self) -> int:
-        return len(self.items)
-
-    @property
-    def batch_size(self) -> int:
-        return len(self.items)
-
-    @property
-    def n_steps(self) -> tuple[int, ...]:
-        return tuple(int(item.n_steps) for item in self.items)
-
-    @property
-    def _has_graph(self) -> bool:
-        return bool(self.items and self.items[0]._has_graph)
-
-    def to(
-        self,
-        device: torch.device | str | None = None,
-        non_blocking: bool = False,
-    ) -> "LegacyRuntimeCollection":
-        return LegacyRuntimeCollection(
-            tuple(item.to(device, non_blocking=non_blocking) for item in self.items)
-        )
 
 
 @dataclass(frozen=True)
@@ -90,15 +63,6 @@ class RegularModelContext:
 
     def to_runtime(self) -> TypedRuntime:
         return to_padded_regular_runtime(self.batch)
-
-    def to_legacy_runtime(self) -> "LegacyRuntimeBatch | LegacyRuntimeCollection":
-        from dymad.io.legacy_runtime import LegacyRuntimeBatch
-        from dymad.io.series_adapter import regular_series_to_legacy_runtime
-
-        payloads = [regular_series_to_legacy_runtime(item) for item in self.batch]
-        if not isinstance(self.batch, UniformLengthRegularSeriesBatch):
-            return LegacyRuntimeCollection(tuple(payloads))
-        return LegacyRuntimeBatch.collate(payloads)
 
 
 @dataclass(frozen=True)
@@ -136,15 +100,6 @@ class GraphModelContext:
     def to_runtime(self) -> GraphRuntime:
         return to_padded_graph_runtime(self.batch)
 
-    def to_legacy_runtime(self) -> "LegacyRuntimeBatch | LegacyRuntimeCollection":
-        from dymad.io.legacy_runtime import LegacyRuntimeBatch
-        from dymad.io.series_adapter import graph_series_to_legacy_runtime
-
-        payloads = [graph_series_to_legacy_runtime(item) for item in self.batch]
-        if not isinstance(self.batch, UniformLengthGraphSeriesBatch):
-            return LegacyRuntimeCollection(tuple(payloads))
-        return LegacyRuntimeBatch.collate(payloads)
-
 
 def build_model_context(
     batch: RegularSeries | RegularSeriesBatch | GraphSeries | GraphSeriesBatch,
@@ -162,7 +117,7 @@ def build_model_context(
     raise TypeError(f"Unsupported model-context payload type: {type(batch)!r}")
 
 
-ModelRuntimePayload: TypeAlias = "LegacyRuntimeBatch | LegacyRuntimeCollection | TypedRuntime | RegularModelContext | GraphModelContext"
+ModelRuntimePayload: TypeAlias = "TypedRuntime | RegularModelContext | GraphModelContext"
 
 
 def _expand_regular_context_for_prediction(
@@ -213,10 +168,95 @@ def _expand_graph_context_for_prediction(
     )
 
 
-def _context_from_legacy_runtime(payload: "LegacyRuntimeBatch") -> RegularModelContext | GraphModelContext:
-    from dymad.io.series_adapter import SeriesAdapter
+def _regular_series_from_runtime(payload: UniformRegularRuntime) -> RegularSeries:
+    return RegularSeries(
+        time=payload.time[0],
+        state=payload.state[0],
+        control=payload.control[0] if payload.control is not None else None,
+        target=payload.target[0] if payload.target is not None else None,
+        params=payload.params[0] if payload.params is not None else None,
+        meta=dict(payload.meta[0]) if payload.meta else {},
+    )
 
-    return build_model_context(SeriesAdapter.from_dyndata(payload))
+
+def _graph_series_from_runtime(payload: UniformGraphRuntime) -> GraphSeries:
+    edge_index_steps = tuple(step.transpose(0, 1) for step in payload.edge_index[0])
+    edge_weight_steps = None if payload.edge_weight is None else tuple(step for step in payload.edge_weight[0])
+    edge_attr_steps = None if payload.edge_attr is None else tuple(step for step in payload.edge_attr[0])
+    if all(torch.equal(edge_index_steps[0], step) for step in edge_index_steps[1:]):
+        edge_index: torch.Tensor | tuple[torch.Tensor, ...] = edge_index_steps[0]
+    else:
+        edge_index = edge_index_steps
+    cls = FixedGraphSeries if isinstance(edge_index, torch.Tensor) else VariableEdgeGraphSeries
+    return cls(
+        time=payload.time[0],
+        node_state=payload.node_state[0],
+        edge_index=edge_index,
+        control=payload.control[0] if payload.control is not None else None,
+        target=payload.target[0] if payload.target is not None else None,
+        params=payload.params[0] if payload.params is not None else None,
+        edge_weight=edge_weight_steps,
+        edge_attr=edge_attr_steps,
+        meta=dict(payload.meta[0]) if payload.meta else {},
+    )
+
+
+def _context_from_runtime(payload: TypedRuntime) -> RegularModelContext | GraphModelContext:
+    if isinstance(payload, EmptyRegularRuntime):
+        return RegularModelContext.from_batch(RegularSeriesBatch.collate([]))
+    items = list(payload.iter_series())
+    if not items:
+        return RegularModelContext.from_batch(RegularSeriesBatch.collate([]))
+    if payload.is_graph:
+        return GraphModelContext.from_batch(
+            GraphSeriesBatch.collate(_graph_series_from_runtime(item) for item in items)
+        )
+    return RegularModelContext.from_batch(
+        RegularSeriesBatch.collate(_regular_series_from_runtime(item) for item in items)
+    )
+
+
+def _ensure_time_tensor(
+    t: torch.Tensor | None,
+    *,
+    batch_size: int,
+    n_steps: int,
+    device: torch.device,
+) -> torch.Tensor:
+    if t is None:
+        return torch.arange(n_steps, device=device, dtype=torch.get_default_dtype()).expand(batch_size, -1)
+    if t.ndim == 0:
+        return t.reshape(1, 1).expand(batch_size, n_steps)
+    if t.ndim == 1:
+        if t.shape[0] == n_steps:
+            return t.reshape(1, -1).expand(batch_size, -1)
+        if t.shape[0] == batch_size and n_steps == 1:
+            return t.reshape(batch_size, 1)
+        raise ValueError(f"Unsupported time shape {tuple(t.shape)} for batch_size={batch_size}, n_steps={n_steps}")
+    if t.ndim == 2:
+        if t.shape == (batch_size, n_steps):
+            return t
+        if t.shape == (1, n_steps):
+            return t.expand(batch_size, -1)
+        if t.shape == (batch_size, 1):
+            return t.expand(-1, n_steps)
+        raise ValueError(f"Unsupported time shape {tuple(t.shape)} for batch_size={batch_size}, n_steps={n_steps}")
+    raise ValueError(f"Unsupported time shape {tuple(t.shape)}")
+
+
+def _split_nested_payload(payload: tuple[torch.Tensor, torch.Tensor] | None) -> list[torch.Tensor] | None:
+    if payload is None:
+        return None
+    values, offsets = payload
+    nested = torch.nested.nested_tensor_from_jagged(values, offsets)
+    return [item for item in nested.unbind()]
+
+
+def _infer_graph_nodes(edge_index: Any) -> int:
+    tensor = torch.as_tensor(edge_index)
+    if tensor.numel() == 0:
+        raise ValueError("Cannot infer graph node count from an empty edge_index payload.")
+    return int(tensor.max().item()) + 1
 
 
 def materialize_model_base_forward_payload(
@@ -229,14 +269,14 @@ def materialize_model_base_forward_payload(
     ew: tuple[torch.Tensor, torch.Tensor] | None,
     ea: tuple[torch.Tensor, torch.Tensor] | None,
 ) -> RegularModelContext | GraphModelContext:
-    """Build the model-base forward payload through one explicit compatibility seam."""
-
-    from dymad.io.legacy_runtime import LegacyRuntimeBatch
+    """Build a typed model-runtime context from raw model-base forward inputs."""
 
     if x is None:
         raise ValueError("model_base.forward requires `x` to materialize runtime payload.")
 
     if ei is None:
+        from dymad.io.series_adapter import SeriesAdapter
+
         if x.ndim == 1:
             state = x.reshape(1, 1, -1)
         elif x.ndim == 2:
@@ -245,81 +285,100 @@ def materialize_model_base_forward_payload(
             state = x
         else:
             raise ValueError(f"Unsupported regular forward input shape for x: {tuple(x.shape)}")
-
-        if t is None:
-            time = None
-        elif t.ndim == 0:
-            time = t.reshape(1, 1)
-        elif t.ndim == 1:
-            time = t.reshape(-1, 1)
-        elif t.ndim == 2:
-            time = t if t.shape[-1] == 1 else t[:, :1]
-        else:
-            raise ValueError(f"Unsupported regular forward input shape for t: {tuple(t.shape)}")
-
+        batch_size, n_steps = state.shape[:2]
+        time = _ensure_time_tensor(t, batch_size=batch_size, n_steps=n_steps, device=state.device)
         if u is None:
             control = None
         elif u.ndim == 1:
-            control = u.reshape(1, 1, -1)
+            control = u.reshape(1, 1, -1).expand(batch_size, n_steps, -1)
         elif u.ndim == 2:
-            control = u.unsqueeze(1)
+            control = u.unsqueeze(1) if u.shape[0] == batch_size else u.reshape(1, n_steps, -1).expand(batch_size, -1, -1)
         elif u.ndim == 3:
             control = u
         else:
             raise ValueError(f"Unsupported regular forward input shape for u: {tuple(u.shape)}")
-
         if p is None:
             params = None
         elif p.ndim == 1:
-            params = p.unsqueeze(0)
+            params = p.unsqueeze(0).expand(batch_size, -1)
         elif p.ndim == 2:
             params = p
         else:
             raise ValueError(f"Unsupported regular forward input shape for p: {tuple(p.shape)}")
-
-        runtime = LegacyRuntimeBatch(t=time, x=state, u=control, p=params)
-        if runtime.batch_size is None or runtime.batch_size == 1:
-            context = _context_from_legacy_runtime(runtime)
-            if not isinstance(context, RegularModelContext):
-                raise TypeError("Expected regular context from non-graph forward payload.")
-            return context
-
-        items = []
-        for idx in range(runtime.batch_size):
-            sample = LegacyRuntimeBatch(
-                t=runtime.t[idx : idx + 1] if runtime.t is not None else None,
-                x=runtime.x[idx : idx + 1] if runtime.x is not None else None,
-                u=runtime.u[idx : idx + 1] if runtime.u is not None else None,
-                p=runtime.p[idx : idx + 1] if runtime.p is not None else None,
+        return RegularModelContext.from_batch(
+            RegularSeriesBatch.collate(
+                RegularSeries(
+                    time=time[idx],
+                    state=state[idx],
+                    control=None if control is None else control[idx],
+                    params=None if params is None else params[idx],
+                )
+                for idx in range(batch_size)
             )
-            sample_context = _context_from_legacy_runtime(sample)
-            if not isinstance(sample_context, RegularModelContext):
-                raise TypeError("Expected regular context while splitting regular forward payload.")
-            items.append(sample_context.batch[0])
-        return RegularModelContext.from_batch(RegularSeriesBatch.collate(items))
+        )
+
+    from dymad.io.series_adapter import SeriesAdapter
 
     if x.ndim == 1:
-        state = x.reshape(1, 1, -1)
+        flat_state = x.reshape(1, 1, -1)
     elif x.ndim == 2:
-        state = x.unsqueeze(0)
+        flat_state = x.unsqueeze(1)
     elif x.ndim == 3:
-        state = x
+        flat_state = x
     else:
         raise ValueError(f"Unsupported graph forward input shape for x: {tuple(x.shape)}")
 
-    legacy_runtime = LegacyRuntimeBatch(
-        t=t,
-        x=state,
-        u=u,
-        p=p,
-        ei=torch.nested.nested_tensor_from_jagged(*ei),
-        ew=torch.nested.nested_tensor_from_jagged(*ew) if ew is not None else None,
-        ea=torch.nested.nested_tensor_from_jagged(*ea) if ea is not None else None,
-    )
-    context = _context_from_legacy_runtime(legacy_runtime)
-    if not isinstance(context, GraphModelContext):
-        raise TypeError("Expected graph context from graph forward payload.")
-    return context
+    edge_index_items = _split_nested_payload(ei)
+    edge_weight_items = _split_nested_payload(ew)
+    edge_attr_items = _split_nested_payload(ea)
+    if edge_index_items is None or not edge_index_items:
+        raise ValueError("Graph forward payload requires edge_index data.")
+
+    batch_size, n_steps = flat_state.shape[:2]
+    if len(edge_index_items) == 1 and batch_size > 1:
+        edge_index_items = edge_index_items * batch_size
+    if edge_weight_items is not None and len(edge_weight_items) == 1 and batch_size > 1:
+        edge_weight_items = edge_weight_items * batch_size
+    if edge_attr_items is not None and len(edge_attr_items) == 1 and batch_size > 1:
+        edge_attr_items = edge_attr_items * batch_size
+    if len(edge_index_items) != batch_size:
+        raise ValueError("Graph edge_index payload batch size must match x.")
+
+    time = _ensure_time_tensor(t, batch_size=batch_size, n_steps=n_steps, device=flat_state.device)
+    items = []
+    for idx in range(batch_size):
+        edge_index_item = edge_index_items[idx]
+        n_nodes = _infer_graph_nodes(edge_index_item)
+        node_state = flat_state[idx].reshape(n_steps, n_nodes, -1)
+        control = None
+        if u is not None:
+            if u.ndim == 1:
+                control = u.reshape(1, n_nodes, -1).expand(n_steps, -1, -1)
+            elif u.ndim == 2:
+                control = u.reshape(n_steps, n_nodes, -1)
+            elif u.ndim == 3:
+                control = u[idx].reshape(n_steps, n_nodes, -1)
+            else:
+                raise ValueError(f"Unsupported graph forward input shape for u: {tuple(u.shape)}")
+        params = None
+        if p is not None:
+            params = p[idx] if p.ndim > 1 else p
+        edge_weight_item = None if edge_weight_items is None else edge_weight_items[idx]
+        edge_attr_item = None if edge_attr_items is None else edge_attr_items[idx]
+        items.append(
+            SeriesAdapter.from_graph_arrays(
+                time=time[idx],
+                node_state=node_state,
+                edge_index=edge_index_item,
+                control=control,
+                params=params,
+                edge_weight=edge_weight_item,
+                edge_attr=edge_attr_item,
+                dtype=node_state.dtype,
+                device=node_state.device,
+            )
+        )
+    return GraphModelContext.from_batch(GraphSeriesBatch.collate(items))
 
 
 def materialize_prediction_runtime(
@@ -330,56 +389,8 @@ def materialize_prediction_runtime(
 ) -> TypedRuntime:
     """Materialize a prediction runtime payload through the typed-context boundary."""
 
-    from dymad.io.legacy_runtime import LegacyRuntimeBatch
-
     if payload is None:
         return EmptyRegularRuntime(batch_size=batch_size if is_batch else 1)
-
-    if isinstance(payload, LegacyRuntimeCollection):
-        if not is_batch:
-            if payload.batch_size != 1:
-                raise ValueError(
-                    f"Single mode: ws batch size must be 1. Got ws: {payload.batch_size}"
-                )
-            return _context_from_legacy_runtime(payload.items[0]).to_runtime()
-        if payload.batch_size != batch_size:
-            raise ValueError(
-                f"Batch mode: ws batch size must match x0 for ragged runtime payloads. "
-                f"Got ws: {payload.batch_size}, x0: {batch_size}"
-            )
-        series = []
-        for item in payload.items:
-            context = _context_from_legacy_runtime(item)
-            series.append(context.batch[0])
-        if isinstance(series[0], RegularSeries):
-            return to_padded_regular_runtime(RegularSeriesBatch.collate(series))
-        return to_padded_graph_runtime(GraphSeriesBatch.collate(series))
-
-    if isinstance(payload, LegacyRuntimeBatch):
-        if not is_batch:
-            if payload.batch_size is not None and payload.batch_size != 1:
-                raise ValueError(
-                    f"Single mode: ws batch size must be 1. Got ws: {payload.batch_size}"
-                )
-            return payload
-        if payload.batch_size == batch_size:
-            return payload
-        if payload.batch_size != 1:
-            raise ValueError(
-                f"Batch mode: ws batch size must be 1 or match x0. Got ws: {payload.batch_size}, x0: {batch_size}"
-            )
-        context = _context_from_legacy_runtime(payload)
-        if isinstance(context, RegularModelContext):
-            return _expand_regular_context_for_prediction(
-                context,
-                batch_size=batch_size,
-                is_batch=True,
-            ).to_legacy_runtime()
-        return _expand_graph_context_for_prediction(
-            context,
-            batch_size=batch_size,
-            is_batch=True,
-        ).to_legacy_runtime()
 
     if isinstance(payload, RegularModelContext):
         return _expand_regular_context_for_prediction(
@@ -402,10 +413,24 @@ def materialize_prediction_runtime(
                     f"Single mode: ws batch size must be 1. Got ws: {payload.batch_size}"
                 )
             return payload
+        if payload.batch_size == batch_size:
+            return payload
+        if payload.batch_size == 1:
+            context = _context_from_runtime(payload)
+            if isinstance(context, RegularModelContext):
+                return _expand_regular_context_for_prediction(
+                    context,
+                    batch_size=batch_size,
+                    is_batch=True,
+                ).to_runtime()
+            return _expand_graph_context_for_prediction(
+                context,
+                batch_size=batch_size,
+                is_batch=True,
+            ).to_runtime()
         if payload.batch_size != batch_size:
             raise ValueError(
                 f"Batch mode: ws batch size must be 1 or match x0. Got ws: {payload.batch_size}, x0: {batch_size}"
             )
-        return payload
 
     raise TypeError(f"Unsupported runtime payload type: {type(payload)!r}")

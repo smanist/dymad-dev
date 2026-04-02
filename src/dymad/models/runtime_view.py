@@ -7,16 +7,15 @@ from typing import TypeAlias
 
 import torch
 
-from dymad.core.model_context import GraphModelContext, LegacyRuntimeCollection, RegularModelContext
+from dymad.core.model_context import GraphModelContext, RegularModelContext
 from dymad.core.runtime import GraphRuntimeStep, RegularRuntimeStep, TypedRuntime, TypedRuntimeStep
-from dymad.io.legacy_runtime import LegacyRuntimeBatch
 
 
 @dataclass(frozen=True)
 class ComponentInputView:
-    """Expose runtime fields needed by model helpers without indexing LegacyRuntimeBatch directly."""
+    """Expose runtime fields needed by model helpers through typed runtime views."""
 
-    runtime: LegacyRuntimeBatch | TypedRuntime | TypedRuntimeStep
+    runtime: TypedRuntime | TypedRuntimeStep
 
     @classmethod
     def build(cls, payload: ComponentInputPayload) -> "ComponentInputView":
@@ -26,9 +25,9 @@ class ComponentInputView:
             return cls(payload.to_runtime().get_step(0))
         if isinstance(payload, GraphModelContext):
             return cls(payload.to_runtime().get_step(0))
-        if isinstance(payload, (LegacyRuntimeBatch, RegularRuntimeStep, GraphRuntimeStep)):
+        if isinstance(payload, (RegularRuntimeStep, GraphRuntimeStep)):
             return cls(payload)
-        if hasattr(payload, "get_step") or hasattr(payload, "x"):
+        if hasattr(payload, "get_step") and hasattr(payload, "is_graph"):
             return cls(payload)
         raise TypeError(f"Unsupported component payload type: {type(payload)!r}")
 
@@ -73,4 +72,4 @@ def build_component_input_view(payload: ComponentInputPayload) -> ComponentInput
     return ComponentInputView.build(payload)
 
 
-ComponentInputPayload: TypeAlias = LegacyRuntimeBatch | TypedRuntime | TypedRuntimeStep | RegularModelContext | GraphModelContext | ComponentInputView
+ComponentInputPayload: TypeAlias = TypedRuntime | TypedRuntimeStep | RegularModelContext | GraphModelContext | ComponentInputView

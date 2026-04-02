@@ -4,22 +4,22 @@ from dymad.core import (
     FixedGraphSeries,
     GraphModelContext,
     GraphSeriesBatch,
-    RaggedRegularSeriesBatch,
+    RaggedRegularRuntime,
     RegularModelContext,
     RegularSeries,
     RegularSeriesBatch,
+    UniformGraphRuntime,
     UniformLengthRegularSeriesBatch,
+    UniformRegularRuntime,
 )
 from dymad.core.model_context import (
-    LegacyRuntimeCollection,
     materialize_model_base_forward_payload,
     materialize_prediction_runtime,
 )
-from dymad.io.legacy_runtime import LegacyRuntimeBatch
 from dymad.models.components import enc_graph_iden, enc_iden, zu_cat_smpl, zu_cat_smpl_graph
 
 
-def test_regular_model_context_preserves_legacy_runtime_fields():
+def test_regular_model_context_preserves_runtime_fields():
     batch = RegularSeriesBatch.collate(
         [
             RegularSeries(
@@ -40,24 +40,22 @@ def test_regular_model_context_preserves_legacy_runtime_fields():
     )
 
     context = RegularModelContext.from_batch(batch)
+    runtime = context.to_runtime()
 
     assert isinstance(batch, UniformLengthRegularSeriesBatch)
+    assert isinstance(runtime, UniformRegularRuntime)
     assert context.batch_size == 2
     assert context.n_steps == (3, 3)
     assert torch.equal(
         context.initial_state_tensor(),
         torch.tensor([[1.0, 2.0], [10.0, 20.0]]),
     )
-
-    legacy = context.to_legacy_runtime()
-    assert legacy.batch_size == 2
-    assert legacy.n_steps == 3
-    assert torch.equal(legacy.x[:, 0, :], context.initial_state_tensor())
-    assert torch.equal(enc_iden(None, legacy.get_step(0)), context.initial_state_tensor())
+    assert torch.equal(runtime.x[:, 0, :], context.initial_state_tensor())
+    assert torch.equal(enc_iden(None, runtime.get_step(0)), context.initial_state_tensor())
 
     z = torch.tensor([[7.0, 8.0], [9.0, 10.0]])
-    expected = torch.cat([z, legacy.get_step(0).u], dim=-1)
-    assert torch.equal(zu_cat_smpl(z, legacy.get_step(0)), expected)
+    expected = torch.cat([z, runtime.get_step(0).u], dim=-1)
+    assert torch.equal(zu_cat_smpl(z, runtime.get_step(0)), expected)
 
 
 def test_graph_model_context_preserves_graph_helper_inputs():
@@ -103,7 +101,10 @@ def test_graph_model_context_preserves_graph_helper_inputs():
     )
 
     context = GraphModelContext.from_batch(batch)
+    runtime = context.to_runtime()
+    step0 = runtime.get_step(0)
 
+    assert isinstance(runtime, UniformGraphRuntime)
     assert context.batch_size == 2
     assert context.n_steps == (2, 2)
     assert context.n_nodes == (2, 2)
@@ -116,28 +117,22 @@ def test_graph_model_context_preserves_graph_helper_inputs():
             ]
         ),
     )
-
-    legacy = context.to_legacy_runtime()
-    step0 = legacy.get_step(0)
-    assert legacy.batch_size == 2
-    assert legacy._has_graph
     assert torch.equal(
         step0.xg,
         torch.tensor(
             [
-                [
-                    [1.0, 2.0],
-                    [3.0, 4.0],
-                    [10.0, 20.0],
-                    [30.0, 40.0],
-                ]
+                [[1.0, 2.0], [3.0, 4.0]],
+                [[10.0, 20.0], [30.0, 40.0]],
             ]
         ),
     )
     assert torch.equal(enc_graph_iden(None, step0), step0.xg)
 
     z = torch.tensor(
-        [[[1.0, 1.5], [2.0, 2.5], [3.0, 3.5], [4.0, 4.5]]]
+        [
+            [[1.0, 1.5], [2.0, 2.5]],
+            [[3.0, 3.5], [4.0, 4.5]],
+        ]
     )
     expected = torch.cat([z, step0.ug], dim=-1)
     assert torch.equal(zu_cat_smpl_graph(z, step0), expected)
@@ -155,26 +150,27 @@ def test_materialize_prediction_runtime_expands_regular_context_batches():
 
     runtime = materialize_prediction_runtime(context, batch_size=3, is_batch=True)
 
+    assert isinstance(runtime, UniformRegularRuntime)
     assert runtime.batch_size == 3
     assert torch.equal(runtime.x[0], runtime.x[1])
     assert torch.equal(runtime.u[0], runtime.u[2])
 
 
-def test_materialize_prediction_runtime_expands_single_legacy_payload():
-    payload = LegacyRuntimeBatch(
-        t=torch.tensor([0.0, 1.0]),
-        x=torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
-        u=torch.tensor([[0.1], [0.2]]),
+def test_materialize_prediction_runtime_expands_single_typed_runtime():
+    runtime = UniformRegularRuntime(
+        time=torch.tensor([[0.0, 1.0]]),
+        state=torch.tensor([[[1.0, 2.0], [3.0, 4.0]]]),
+        control=torch.tensor([[[0.1], [0.2]]]),
     )
 
-    runtime = materialize_prediction_runtime(payload, batch_size=2, is_batch=True)
+    expanded = materialize_prediction_runtime(runtime, batch_size=2, is_batch=True)
 
-    assert runtime.batch_size == 2
-    assert torch.equal(runtime.x[0], runtime.x[1])
-    assert torch.equal(runtime.u[0], runtime.u[1])
+    assert expanded.batch_size == 2
+    assert torch.equal(expanded.x[0], expanded.x[1])
+    assert torch.equal(expanded.u[0], expanded.u[1])
 
 
-def test_regular_model_context_uses_ragged_runtime_collection_for_uneven_batches():
+def test_regular_model_context_uses_ragged_runtime_for_uneven_batches():
     batch = RegularSeriesBatch.collate(
         [
             RegularSeries(
@@ -189,12 +185,11 @@ def test_regular_model_context_uses_ragged_runtime_collection_for_uneven_batches
     )
 
     context = RegularModelContext.from_batch(batch)
-    runtime = context.to_legacy_runtime()
+    runtime = context.to_runtime()
 
-    assert isinstance(batch, RaggedRegularSeriesBatch)
-    assert isinstance(runtime, LegacyRuntimeCollection)
+    assert isinstance(runtime, RaggedRegularRuntime)
     assert runtime.batch_size == 2
-    assert runtime.n_steps == (2, 3)
+    assert runtime.step_lengths == (2, 3)
 
 
 def test_materialize_model_base_forward_payload_regular_context():

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 
-from dymad.core import GraphTrainerBatch, RegularTrainerBatch
+from dymad.core import GraphSeries, GraphTrainerBatch, RegularSeries, RegularTrainerBatch
 from dymad.io.trajectory_manager import TrajectoryManager, TrajectoryManagerGraph
 from dymad.training.driver import _build_data_state
 
@@ -41,7 +41,7 @@ def test_build_data_state_uses_regular_typed_batches_for_linear_only(tmp_path) -
     batch = next(iter(state.train_loader))
 
     assert isinstance(batch, RegularTrainerBatch)
-    assert state.train_set[0].__class__.__name__ == "LegacyRuntimeBatch"
+    assert isinstance(state.train_set[0], RegularSeries)
 
 
 def test_build_data_state_uses_graph_typed_batches_for_linear_only(ltg_data) -> None:
@@ -68,4 +68,4 @@ def test_build_data_state_uses_graph_typed_batches_for_linear_only(ltg_data) -> 
     batch = next(iter(state.train_loader))
 
     assert isinstance(batch, GraphTrainerBatch)
-    assert state.train_set[0].__class__.__name__ == "LegacyRuntimeBatch"
+    assert isinstance(state.train_set[0], GraphSeries)

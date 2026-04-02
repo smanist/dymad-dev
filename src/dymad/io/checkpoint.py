@@ -3,14 +3,22 @@ import logging
 import numpy as np
 import os
 import torch
+from dataclasses import replace
 from typing import Callable, Dict, List, Optional, Union, Tuple, Type
 
 from dymad.core import build_model_context
 from dymad.core.graph_series import GraphSeriesBatch
+from dymad.core.runtime import (
+    RaggedGraphRuntime,
+    RaggedRegularRuntime,
+    TypedRuntime,
+    UniformGraphRuntime,
+    UniformRegularRuntime,
+)
 from dymad.core.transform_builder import build_transform_module
 from dymad.core.series import RegularSeriesBatch
 from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline
-from dymad.io.series_adapter import SeriesAdapter, regular_series_to_legacy_runtime
+from dymad.io.series_adapter import SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManager
 from dymad.transform import Autoencoder
 from dymad.utils.misc import load_config
@@ -91,6 +99,14 @@ def _normalize_graph_batch_payload(payload, batch_size: int):
         return payload
     return [payload for _ in range(batch_size)]
 
+
+def _runtime_with_params(runtime: TypedRuntime, params: torch.Tensor | None) -> TypedRuntime:
+    if params is None:
+        return runtime
+    if isinstance(runtime, (UniformRegularRuntime, RaggedRegularRuntime, UniformGraphRuntime, RaggedGraphRuntime)):
+        return replace(runtime, params=params)
+    return runtime
+
 def _load_model_legacy(model_class, checkpoint_path):
     """
     Load a model from a checkpoint file.
@@ -161,24 +177,27 @@ def _load_model_legacy(model_class, checkpoint_path):
                 return transformed[0]
             return transformed
 
-    def _build_regular_prediction_payload(x0, u, device):
+    def _build_regular_prediction_payload(x0, u, p, device):
         x_batch = _ensure_regular_batch(x0)
         u_batch = _ensure_regular_batch(u) if u is not None else None
+        p_batch = _ensure_regular_batch(p) if p is not None else None
         items = []
         for index in range(x_batch.shape[0]):
             control = None if u_batch is None else u_batch[index]
+            params = None if p_batch is None else p_batch[index, 0]
             items.append(
                 SeriesAdapter.from_regular_arrays(
                     np.arange(x_batch.shape[1], dtype=np.int64),
                     x_batch[index],
                     control=control,
+                    params=params,
                     dtype=dtype,
                     device=device,
                 )
             )
         return _regular_pipeline(RegularSeriesBatch.collate(items))
 
-    def _build_graph_prediction_payload(x0, u, ei, ew, ea, device):
+    def _build_graph_prediction_payload(x0, u, p, ei, ew, ea, device):
         array = np.asarray(x0)
         if array.ndim == 2:
             array = np.expand_dims(array, axis=0)
@@ -190,6 +209,7 @@ def _load_model_legacy(model_class, checkpoint_path):
         control = None
         if _has_u and u is not None:
             control = _transform_graph_node_payload(u, nnd, _data_transform_u, dtype, device)
+        p_batch = None if p is None else _ensure_regular_batch(p)
 
         edge_weight_payloads = _normalize_graph_batch_payload(_proc_ew(ew, device), batch_size)
         edge_attr_payloads = _normalize_graph_batch_payload(_proc_ea(ea, device), batch_size)
@@ -202,6 +222,7 @@ def _load_model_legacy(model_class, checkpoint_path):
                     node_state[index],
                     edge_index=edge_index_payloads[index],
                     control=None if control is None else control[index],
+                    params=None if p_batch is None else p_batch[index, 0],
                     edge_weight=edge_weight_payloads[index],
                     edge_attr=edge_attr_payloads[index],
                     dtype=dtype,
@@ -258,27 +279,28 @@ def _load_model_legacy(model_class, checkpoint_path):
             t = torch.from_numpy(t).to(device=device)
         _has_graph = ei is not None
         if ei is None:
-            regular_payload = _build_regular_prediction_payload(x0, u, device)
+            regular_payload = _build_regular_prediction_payload(x0, u, p, device)
             regular_context = build_model_context(regular_payload)
             _x0 = regular_context.initial_state_tensor(squeeze_single=True)
-            _data = regular_context.to_legacy_runtime()
+            _data = regular_context.to_runtime()
         else:
-            graph_context = _build_graph_prediction_payload(x0, u, ei, ew, ea, device)
+            graph_context = _build_graph_prediction_payload(x0, u, p, ei, ew, ea, device)
             _x0 = graph_context.initial_state_tensor(squeeze_single=True)
-            _data = graph_context.to_legacy_runtime()
-
-        if p is not None:
-            _data.p = torch.as_tensor(p, dtype=dtype, device=device)
+            _data = graph_context.to_runtime()
+        _data = _runtime_with_params(
+            _data,
+            None if p is None else torch.as_tensor(p, dtype=dtype, device=device),
+        )
 
         if ret_dat:
             return {
-                't': t,
+                't': _data.t,
                 'x': _x0,
                 'u': _data.u,
                 'p': _data.p,
-                'ei': _data.ei,
-                'ew': _data.ew,
-                'ea': _data.ea
+                'ei': getattr(_data, "ei", None),
+                'ew': getattr(_data, "ew", None),
+                'ea': getattr(_data, "ea", None),
             }
 
         with torch.no_grad():
@@ -375,7 +397,7 @@ def visualize_model(
         ret_dat=True)
     for _k in ['ei', 'ew', 'ea']:
         # Decompose nested tensors so that torchview can handle them
-        if input_data[_k] is not None:
+        if getattr(input_data[_k], "is_nested", False):
             input_data[_k] = (input_data[_k].values(), input_data[_k].offsets())
 
     model_graph = draw_graph(
@@ -431,7 +453,7 @@ class DataInterface:
                     dtype=self.dtype,
                     device=self.device,
                 )
-                _z = self.model.encoder(regular_series_to_legacy_runtime(payload))
+                _z = self.model.encoder(build_model_context(payload))
                 return _z.reshape(*_x_shape, -1)
             def decoder(z):
                 return self.model.decoder(z, None)

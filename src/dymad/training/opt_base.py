@@ -9,7 +9,6 @@ from torch.utils.data import DataLoader
 from typing import Any, Dict, List, Optional, Type, Union
 
 from dymad.losses import LOSS_MAP
-from dymad.io.legacy_runtime import LegacyRuntimeBatch
 from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_runtime
 from dymad.training.helper import RunState
 from dymad.training.ls_update import LSUpdater
@@ -429,9 +428,7 @@ class OptBase:
         if len(self.criteria_weights) < 2:
             return loss_list
 
-        if isinstance(batch, LegacyRuntimeBatch):
-            runtime = batch
-        elif hasattr(batch, "is_uniform_length") and hasattr(batch, "iter_series"):
+        if hasattr(batch, "is_uniform_length") and hasattr(batch, "iter_series"):
             runtime = batch
         else:
             runtime = batch_to_runtime(batch)

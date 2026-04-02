@@ -36,6 +36,23 @@ def _slice_edge_sequence(
     return tensor
 
 
+def _slice_graph_tensor_if_time_varying(
+    tensor: torch.Tensor | tuple[torch.Tensor, ...] | None,
+    *,
+    start: int,
+    end: int,
+    n_steps: int,
+    min_ndim: int,
+):
+    if tensor is None:
+        return None
+    if isinstance(tensor, tuple):
+        return tensor[start:end]
+    if tensor.ndim >= min_ndim and tensor.shape[0] == n_steps:
+        return tensor[start:end]
+    return tensor
+
+
 @dataclass(frozen=True)
 class GraphSeries:
     """One graph trajectory with explicit node and edge payload semantics."""
@@ -55,6 +72,7 @@ class GraphSeries:
         return isinstance(self.edge_index, torch.Tensor)
 
     def slice_steps(self, start: int, end: int) -> "GraphSeries":
+        n_steps = int(self.time.shape[0])
         return replace(
             self,
             time=self.time[start:end],
@@ -62,8 +80,20 @@ class GraphSeries:
             control=self.control[start:end] if self.control is not None else None,
             target=self.target[start:end] if self.target is not None else None,
             edge_index=_slice_edge_sequence(self.edge_index, start, end),
-            edge_weight=_slice_edge_sequence(self.edge_weight, start, end),
-            edge_attr=_slice_edge_sequence(self.edge_attr, start, end),
+            edge_weight=_slice_graph_tensor_if_time_varying(
+                self.edge_weight,
+                start=start,
+                end=end,
+                n_steps=n_steps,
+                min_ndim=2,
+            ),
+            edge_attr=_slice_graph_tensor_if_time_varying(
+                self.edge_attr,
+                start=start,
+                end=end,
+                n_steps=n_steps,
+                min_ndim=3,
+            ),
             meta=dict(self.meta),
         )
 
