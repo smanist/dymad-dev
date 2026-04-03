@@ -54,13 +54,13 @@ cases = [
     {"name": "km_ln",    "model" : GKM,  "trainer": LinearTrainer,   "config": 'ltg_km_ln.yaml'}
 ]
 # IDX = [0, 1]
-# IDX = [2, 3]
-IDX = [4]
+IDX = [2, 3]
+# IDX = [4]
 labels = [cases[i]['name'] for i in IDX]
 
 ifdat = 0
-iftrn = 1
-ifplt = 1
+iftrn = 0
+ifplt = 0
 ifprd = 1
 
 if ifdat:
