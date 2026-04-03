@@ -220,9 +220,8 @@ def predict_continuous(
     z0 = model.encoder(_ws.get_step(0).set_x(_x0))
     def ode_func(t, z):
         _tk  = bucket(t)
-        wtmp = _ws.get_step(_tk)
-        u    = u_intp(t)
-        x    = model.decoder(z, wtmp.set_u(u))
+        wtmp = _ws.get_step(_tk).set_u(u_intp(t))
+        x    = model.decoder(z, wtmp)
         wtmp = wtmp.set_x(x)
         z    = model.encoder(wtmp)
         z_dot = model.dynamics(z, wtmp)
