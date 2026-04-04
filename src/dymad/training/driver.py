@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Tuple, Type, Union
 
 from dymad.io import TrajectoryManager, TrajectoryManagerGraph
 from dymad.training.helper import aggregate_cv_results, CVResult, iter_param_grid, RunState, set_by_dotted_key
-from dymad.training.stacked_opt import StackedOpt
+from dymad.training.trainer_run import TrainerRun
 from dymad.utils import config_logger, load_config
 
 # --------------------
@@ -75,14 +75,17 @@ def run_cv_single(args: Dict[str, Any]):
         args['valid_sets'],
         args['device'])
 
-    # Run the optimizer with this config and data state
-    opt = StackedOpt(
+    # Run one concrete trainer run for this fold+combo.
+    trainer_run = TrainerRun(
         config=cfg,
         model_class=args['model_class'],
         device=args['device'],
         dtype=args['train_sets'][0].dtype,
+        run_name=cfg["model"]["name"],
+        checkpoint_prefix=cfg["path"]["checkpoint_prefix"],
+        results_prefix=cfg["path"]["results_prefix"],
     )
-    results = opt.run(initial_state=data_state)
+    results = trainer_run.run(initial_state=data_state)
 
     metric_value = results[-1].to_run_state().get_metric(args['metric'])
 

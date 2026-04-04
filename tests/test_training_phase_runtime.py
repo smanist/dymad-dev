@@ -6,6 +6,7 @@ from dymad.training.phase_runtime import (
     run_state_to_phase_context,
     run_state_to_trainer_state,
 )
+from dymad.training import driver
 from dymad.training import phase_pipeline
 from dymad.training import stacked_opt
 
@@ -155,3 +156,81 @@ def test_stacked_opt_wraps_phase_pipeline(monkeypatch):
     assert calls["run"] == 1
     assert opt.phases == state.config["phases"]
     assert results == [state]
+
+
+def test_run_cv_single_uses_trainer_run(monkeypatch):
+    calls = {"init": 0, "run": 0, "metric": None}
+    expected_metric = 0.123
+    data_state = object()
+
+    cfg = {
+        "model": {"name": "demo-model"},
+        "path": {"checkpoint_prefix": "/tmp/cp", "results_prefix": "/tmp/rp"},
+        "phases": [{"name": "p0", "trainer": "Linear"}],
+    }
+
+    monkeypatch.setattr(
+        driver,
+        "_apply_combo_to_config",
+        lambda combo_idx, fold_id, fold_cfg, combo, base_name, checkpoint_prefix, results_prefix: (cfg, "/tmp/model_prefix"),
+    )
+    monkeypatch.setattr(
+        driver,
+        "_build_data_state",
+        lambda fold_id, cfg, train_sets, valid_sets, device: data_state,
+    )
+
+    class _FakeFinalRunState:
+        def get_metric(self, metric_name):
+            calls["metric"] = metric_name
+            return expected_metric
+
+    class _FakePhaseResult:
+        def to_run_state(self):
+            return _FakeFinalRunState()
+
+    class _FakeTrainerRun:
+        def __init__(self, config, model_class, device, dtype, run_name, checkpoint_prefix, results_prefix):
+            calls["init"] += 1
+            calls["config"] = config
+            calls["run_name"] = run_name
+            calls["checkpoint_prefix"] = checkpoint_prefix
+            calls["results_prefix"] = results_prefix
+            calls["dtype"] = dtype
+
+        def run(self, initial_state):
+            calls["run"] += 1
+            calls["initial_state"] = initial_state
+            return [_FakePhaseResult()]
+
+    monkeypatch.setattr(driver, "TrainerRun", _FakeTrainerRun)
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+
+    args = {
+        "combo_idx": 5,
+        "fold_idx": 2,
+        "fold_cfg": {"seed": 0},
+        "combo": {"training.lr": 0.1},
+        "base_name": "base",
+        "checkpoint_prefix": "/checkpoints",
+        "results_prefix": "/results",
+        "train_sets": [_FakeTrainSet()],
+        "valid_sets": [_FakeTrainSet()],
+        "model_class": object,
+        "device": torch.device("cpu"),
+        "metric": "total",
+    }
+
+    result = driver.run_cv_single(args)
+
+    assert calls["init"] == 1
+    assert calls["run"] == 1
+    assert calls["initial_state"] is data_state
+    assert calls["run_name"] == "demo-model"
+    assert calls["checkpoint_prefix"] == "/tmp/cp"
+    assert calls["results_prefix"] == "/tmp/rp"
+    assert calls["dtype"] == torch.float32
+    assert calls["metric"] == "total"
+    assert result["metric_value"] == expected_metric
