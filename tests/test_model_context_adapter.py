@@ -234,3 +234,19 @@ def test_materialize_model_base_forward_payload_graph_context():
         payload.initial_state_tensor(),
         torch.tensor([[1.0, 2.0, 3.0, 4.0]]),
     )
+
+
+def test_materialize_model_base_forward_payload_accepts_dense_graph_edge_tensor():
+    payload = materialize_model_base_forward_payload(
+        t=torch.tensor([[0.0]]),
+        x=torch.tensor([[1.0, 2.0, 3.0, 4.0]]),
+        u=torch.tensor([[[0.1, 0.2]]]),
+        p=None,
+        ei=torch.tensor([[[0, 1], [1, 0]]], dtype=torch.long),
+        ew=torch.tensor([[1.0, 2.0]]),
+        ea=None,
+    )
+
+    assert isinstance(payload, GraphModelContext)
+    assert payload.n_nodes == (2,)
+    assert torch.equal(payload.initial_state_tensor(), torch.tensor([[1.0, 2.0, 3.0, 4.0]]))
