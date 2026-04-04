@@ -5,7 +5,7 @@ from typing import Optional, Tuple, Type
 
 from dymad.exec.context import build_default_context
 from dymad.io import DataInterface
-from dymad.models import KBF, DKBF
+from dymad.models.collections import DKBF, KBF
 from dymad.numerics import check_orthogonality, disc2cont, eig_low_rank, scaled_eig, truncate_sequence
 from dymad.sako.adapter import SpectralAnalysisAdapter, SpectralEigensystem
 from dymad.sako.plotting import SpectralPlottingAdapter, per_state_err

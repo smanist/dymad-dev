@@ -6,7 +6,7 @@ import torch
 from dataclasses import replace
 from typing import Callable, Dict, List, Optional, Union, Tuple, Type
 
-from dymad.core import build_model_context
+from dymad.core.model_context import build_model_context
 from dymad.core.graph_series import GraphSeriesBatch
 from dymad.core.runtime import (
     RaggedGraphRuntime,
