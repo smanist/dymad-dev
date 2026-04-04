@@ -42,13 +42,13 @@ class PhaseResult:
         return self.trainer_state.best_loss[f"valid_{metric_name}"]
 
     def to_run_state(self) -> RunState:
-        """Compatibility adapter for legacy callers expecting ``RunState``."""
+        """Temporary compatibility adapter for legacy callers expecting ``RunState``."""
 
         return compose_run_state(self.trainer_state, self.phase_context)
 
     @property
     def run_state(self) -> RunState:
-        """Legacy compatibility alias. Prefer ``trainer_state``/``phase_context``."""
+        """Temporary alias for legacy callers. Prefer ``trainer_state``/``phase_context``."""
 
         return self.to_run_state()
 

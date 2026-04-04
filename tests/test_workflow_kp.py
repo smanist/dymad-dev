@@ -15,6 +15,7 @@ import torch
 
 from dymad.io import load_model
 from dymad.models import DKBF, DLDM, KBF, LDM
+import dymad.training.driver as training_driver
 from dymad.training import LinearTrainer, NODETrainer, StackedTrainer, WeakFormTrainer
 
 mdl_kb = {
@@ -163,6 +164,36 @@ def predict_case(idx, sample, path):
     _, prd_func = load_model(MDL, path/'kp_model/kp_model.pt')
     with torch.no_grad():
         prd_func(x_data, t_data)
+
+def test_non_linear_kp_workflow_routes_through_trainer_run(kp_data, env_setup, monkeypatch):
+    calls = {"init": 0, "run": 0}
+    real_trainer_run = training_driver.TrainerRun
+
+    class _InstrumentedTrainerRun(real_trainer_run):
+        def __init__(self, *args, **kwargs):
+            calls["init"] += 1
+            cfg = kwargs["config"]
+            calls["phase_trainers"] = [phase["trainer"] for phase in cfg.get("phases", [])]
+            calls["run_name"] = kwargs["run_name"]
+            super().__init__(*args, **kwargs)
+
+        def run(self, initial_state):
+            calls["run"] += 1
+            return super().run(initial_state)
+
+    monkeypatch.setattr(training_driver, "TrainerRun", _InstrumentedTrainerRun)
+
+    try:
+        # idx=1 corresponds to NODE-based non-linear LDM workflow.
+        train_case(1, kp_data, env_setup)
+    finally:
+        if os.path.exists(env_setup/'kp_model'):
+            shutil.rmtree(env_setup/'kp_model')
+
+    assert calls["init"] == 1
+    assert calls["run"] == 1
+    assert calls["phase_trainers"] == ["NODE"]
+    assert calls["run_name"] == "kp_model_c0_f0"
 
 @pytest.mark.parametrize("idx", range(len(cfgs)))
 def test_kp(kp_data, kp_test, env_setup, idx):
