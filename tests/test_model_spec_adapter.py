@@ -53,3 +53,26 @@ def test_build_model_from_spec_adapts_to_legacy_builder(monkeypatch) -> None:
 
     assert result == "legacy-stub"
     assert calls["model_spec"] == [True, "smpl_auto", "cat", "direct", "auto", object]
+
+
+def test_build_model_from_spec_uses_typed_dispatch_for_lti(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_build_model(model_spec, model_config, data_meta, dtype=None, device=None):
+        calls["model_spec"] = model_spec
+        return "typed-dispatch-stub"
+
+    def fail_to_legacy_tuple(_self):
+        raise AssertionError("legacy tuple fallback should not run for LTI typed dispatch")
+
+    monkeypatch.setattr(helpers_module, "build_model", fake_build_model)
+    monkeypatch.setattr(ModelSpec, "to_legacy_tuple", fail_to_legacy_tuple)
+
+    result = helpers_module.build_model_from_spec(
+        collections_module.LTI.typed_spec(),
+        {"name": "lti_model"},
+        {"delay": 0},
+    )
+
+    assert result == "typed-dispatch-stub"
+    assert calls["model_spec"] == [True, "smpl_auto", "cat", "direct", "auto", collections_module.CD_LFM]

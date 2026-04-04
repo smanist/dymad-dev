@@ -230,13 +230,46 @@ def build_model(
     return model
 
 
+def _is_lti_typed_family(model_spec: ModelSpec) -> bool:
+    if model_spec.rollout is None or model_spec.memory is None:
+        return False
+    if model_spec.rollout.family != "lti":
+        return False
+    if model_spec.dynamics.family != "direct":
+        return False
+    return model_spec.memory.latent_state == "cat"
+
+
+def _build_lti_legacy_tuple(model_spec: ModelSpec) -> List:
+    expected_predictor = "continuous" if model_spec.continuous_time else "discrete"
+    if model_spec.rollout is None:
+        raise ValueError("LTI typed dispatch requires rollout metadata.")
+    if model_spec.rollout.predictor != expected_predictor:
+        raise ValueError(
+            f"LTI typed dispatch predictor mismatch: expected {expected_predictor}, "
+            f"got {model_spec.rollout.predictor}.")
+    if not model_spec.rollout.supports_control_inputs:
+        raise ValueError("LTI typed dispatch requires control-input support.")
+    return [
+        model_spec.continuous_time,
+        model_spec.encoder.family,
+        model_spec.feature.family,
+        model_spec.dynamics.family,
+        model_spec.decoder.family,
+        model_spec.model_cls,
+    ]
+
+
 def build_model_from_spec(
         model_spec: Union[ModelSpec, List],
         model_config: Dict, data_meta: Dict,
         dtype=None, device=None):
     """Build a model from a typed ModelSpec compatibility object."""
     if isinstance(model_spec, ModelSpec):
-        legacy_spec = list(model_spec.to_legacy_tuple())
+        if _is_lti_typed_family(model_spec):
+            legacy_spec = _build_lti_legacy_tuple(model_spec)
+        else:
+            legacy_spec = list(model_spec.to_legacy_tuple())
     else:
         legacy_spec = model_spec
     return build_model(legacy_spec, model_config, data_meta, dtype, device)
