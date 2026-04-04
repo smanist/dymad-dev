@@ -7,7 +7,7 @@ import torch
 
 from dymad.io import load_model
 from dymad.models import DKBF, KBF
-from dymad.sako import SpectralAnalysis, SpectralAnalysisAdapter
+from dymad.sako import SpectralAnalysis, SpectralAnalysisAdapter, SpectralPlottingAdapter
 from dymad.training import LinearTrainer, NODETrainer
 
 mdl_kb = {
@@ -172,6 +172,35 @@ def test_spectral_analysis_routes_pseudospectrum_through_adapter(sa_lti_data, en
     analysis.estimate_ps(grid, mode="disc", method="standard", return_vec=False)
 
     assert call_counter["estimate_ps"] >= 1
+
+    if os.path.exists(env_setup / "sa_model"):
+        shutil.rmtree(env_setup / "sa_model")
+
+
+def test_spectral_analysis_routes_plotting_through_adapter(sa_lti_data, env_setup, monkeypatch):
+    train_case(5, sa_lti_data, env_setup)
+
+    call_counter = {"plot_eigs": 0}
+
+    def wrapped_plot_eigs(self, *args, **kwargs):
+        call_counter["plot_eigs"] += 1
+        return ("fig", "ax", [])
+
+    monkeypatch.setattr(SpectralPlottingAdapter, "plot_eigs", wrapped_plot_eigs)
+
+    _, model_class, _, _ = cfgs[5]
+    analysis = SpectralAnalysis(
+        model_class,
+        env_setup / "sa_model/sa_model.pt",
+        dt=dt,
+        reps=1e-10,
+        etol=1e-12,
+    )
+
+    result = analysis.plot_eigs()
+
+    assert call_counter["plot_eigs"] >= 1
+    assert result == ("fig", "ax", [])
 
     if os.path.exists(env_setup / "sa_model"):
         shutil.rmtree(env_setup / "sa_model")
