@@ -6,6 +6,7 @@ from dymad.store.object_store import (
     ObjectStore,
     ObjectSummary,
     PredictionRequestRecord,
+    SpectralSnapshotRecord,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "ObjectStore",
     "ObjectSummary",
     "PredictionRequestRecord",
+    "SpectralSnapshotRecord",
 ]

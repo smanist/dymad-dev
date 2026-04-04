@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from dymad.sako.snapshot import SpectralSnapshot
+else:
+    SpectralSnapshot = Any
 
 
 class ObjectNotFoundError(KeyError):
@@ -29,6 +34,13 @@ class PredictionRequestRecord:
 
 
 @dataclass(frozen=True)
+class SpectralSnapshotRecord:
+    handle: str
+    checkpoint_handle: str
+    snapshot: SpectralSnapshot
+
+
+@dataclass(frozen=True)
 class ObjectSummary:
     handle: str
     kind: str
@@ -42,6 +54,7 @@ class ObjectStore:
     def __init__(self) -> None:
         self._checkpoints: dict[str, CheckpointRecord] = {}
         self._prediction_requests: dict[str, PredictionRequestRecord] = {}
+        self._spectral_snapshots: dict[str, SpectralSnapshotRecord] = {}
 
     def put_checkpoint(self, *, model_ref: str, checkpoint_path: str, device: str) -> str:
         handle = self._new_handle("chk")
@@ -85,6 +98,23 @@ class ObjectStore:
         except KeyError as exc:
             raise ObjectNotFoundError(f"unknown prediction handle: {handle}") from exc
 
+    def put_spectral_snapshot(self, *, checkpoint_handle: str, snapshot: SpectralSnapshot) -> str:
+        # Validate derived handle exists before creating a snapshot record.
+        self.get_checkpoint(checkpoint_handle)
+        handle = self._new_handle("specsnap")
+        self._spectral_snapshots[handle] = SpectralSnapshotRecord(
+            handle=handle,
+            checkpoint_handle=checkpoint_handle,
+            snapshot=snapshot,
+        )
+        return handle
+
+    def get_spectral_snapshot(self, handle: str) -> SpectralSnapshotRecord:
+        try:
+            return self._spectral_snapshots[handle]
+        except KeyError as exc:
+            raise ObjectNotFoundError(f"unknown spectral snapshot handle: {handle}") from exc
+
     def summarize(self, handle: str) -> ObjectSummary:
         if handle in self._checkpoints:
             checkpoint = self._checkpoints[handle]
@@ -101,6 +131,15 @@ class ObjectStore:
                 kind="prediction_request",
                 derived_from=request.checkpoint_handle,
                 preview=f"horizon={request.horizon}, control={request.has_control}, graph={request.has_graph}",
+            )
+        if handle in self._spectral_snapshots:
+            snapshot_record = self._spectral_snapshots[handle]
+            snapshot = snapshot_record.snapshot
+            return ObjectSummary(
+                handle=handle,
+                kind="spectral_snapshot",
+                derived_from=snapshot_record.checkpoint_handle,
+                preview=f"samples={snapshot.sample_count}, obs_dim={snapshot.obs_dim}",
             )
         raise ObjectNotFoundError(f"unknown handle: {handle}")
 

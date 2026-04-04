@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-from dymad.facade.handles import CheckpointHandle, PredictionHandle
+from typing import TYPE_CHECKING, Any
+
+from dymad.facade.handles import CheckpointHandle, PredictionHandle, SpectralSnapshotHandle
 from dymad.store.object_store import (
     CheckpointRecord,
     ObjectStore,
     ObjectSummary,
     PredictionRequestRecord,
+    SpectralSnapshotRecord,
 )
+
+if TYPE_CHECKING:
+    from dymad.sako.snapshot import SpectralSnapshot
+else:
+    SpectralSnapshot = Any
 
 
 class FacadeOperations:
@@ -55,6 +63,23 @@ class FacadeOperations:
     def get_checkpoint(self, handle: str) -> CheckpointRecord:
         checkpoint = CheckpointHandle.parse(handle)
         return self._store.get_checkpoint(checkpoint.value)
+
+    def register_spectral_snapshot(
+        self,
+        *,
+        checkpoint_handle: str,
+        snapshot: SpectralSnapshot,
+    ) -> ObjectSummary:
+        checkpoint = CheckpointHandle.parse(checkpoint_handle)
+        handle = self._store.put_spectral_snapshot(
+            checkpoint_handle=checkpoint.value,
+            snapshot=snapshot,
+        )
+        return self._store.summarize(handle)
+
+    def get_spectral_snapshot(self, handle: str) -> SpectralSnapshotRecord:
+        snapshot = SpectralSnapshotHandle.parse(handle)
+        return self._store.get_spectral_snapshot(snapshot.value)
 
     def describe_object(self, handle: str) -> ObjectSummary:
         return self._store.summarize(handle)

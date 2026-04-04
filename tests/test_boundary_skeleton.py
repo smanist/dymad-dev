@@ -1,7 +1,14 @@
 import pytest
+import numpy as np
 
 from dymad.exec.context import build_default_context
-from dymad.facade.handles import CheckpointHandle, HandleValidationError, PredictionHandle
+from dymad.facade.handles import (
+    CheckpointHandle,
+    HandleValidationError,
+    PredictionHandle,
+    SpectralSnapshotHandle,
+)
+from dymad.sako.snapshot import build_spectral_snapshot
 
 
 def test_checkpoint_prediction_handle_flow() -> None:
@@ -36,3 +43,39 @@ def test_handles_reject_invalid_shapes() -> None:
 
     with pytest.raises(HandleValidationError):
         PredictionHandle.parse("not_a_prediction")
+
+    with pytest.raises(HandleValidationError):
+        SpectralSnapshotHandle.parse("not_a_spectral_snapshot")
+
+
+def test_spectral_snapshot_handle_flow() -> None:
+    context = build_default_context()
+    checkpoint = context.facade.register_checkpoint(
+        model_ref="dymad.models.collections:LDM",
+        checkpoint_path="checkpoints/lti.pt",
+    )
+    snapshot = build_spectral_snapshot(
+        model_class="LDM",
+        checkpoint_path="checkpoints/lti.pt",
+        encoded_p0=np.ones((6, 3)),
+        encoded_p1=np.zeros((6, 3)),
+        weights=(np.eye(3),),
+        input_dim=2,
+        obs_dim=3,
+        metadata={"source": "boundary-test"},
+    )
+
+    summary = context.facade.register_spectral_snapshot(
+        checkpoint_handle=checkpoint.handle,
+        snapshot=snapshot,
+    )
+    handle = SpectralSnapshotHandle.parse(summary.handle)
+    record = context.facade.get_spectral_snapshot(handle.value)
+    described = context.facade.describe_object(handle.value)
+
+    assert summary.kind == "spectral_snapshot"
+    assert summary.derived_from == checkpoint.handle
+    assert record.checkpoint_handle == checkpoint.handle
+    assert record.snapshot.sample_count == 6
+    assert record.snapshot.koopman_weights.mode == "full"
+    assert described.preview == "samples=6, obs_dim=3"
