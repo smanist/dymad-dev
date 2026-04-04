@@ -1,6 +1,7 @@
 import copy
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any, Dict, List, Type
 
 import torch
@@ -11,6 +12,8 @@ from dymad.training.opt_linear import OptLinear
 from dymad.training.opt_node import OptNODE
 from dymad.training.opt_weak_form import OptWeakForm
 from dymad.training.phase_runtime import (
+    PhaseContext,
+    TrainerState,
     compose_run_state,
     run_state_to_phase_context,
     run_state_to_trainer_state,
@@ -24,11 +27,25 @@ OPT_REGISTRY: Dict[str, Type[OptBase]] = {
 }
 
 
+@dataclass
 class PhaseResult:
-    def __init__(self, name: str, run_state: RunState, hist):
-        self.name = name
-        self.run_state = run_state
-        self.hist = hist
+    """Typed output from one phase execution step."""
+
+    name: str
+    trainer_state: TrainerState
+    phase_context: PhaseContext
+    hist: Any
+
+    def to_run_state(self) -> RunState:
+        """Compatibility adapter for legacy callers expecting ``RunState``."""
+
+        return compose_run_state(self.trainer_state, self.phase_context)
+
+    @property
+    def run_state(self) -> RunState:
+        """Legacy compatibility alias. Prefer ``trainer_state``/``phase_context``."""
+
+        return self.to_run_state()
 
 
 class PhasePipeline:
@@ -94,11 +111,11 @@ class PhasePipeline:
             phase_state = trainer.export_run_state(epoch)
             trainer_state = run_state_to_trainer_state(phase_state)
             phase_context = run_state_to_phase_context(phase_state)
-            current_state = compose_run_state(trainer_state, phase_context)
             results.append(
                 PhaseResult(
                     name=phase_name,
-                    run_state=current_state,
+                    trainer_state=trainer_state,
+                    phase_context=phase_context,
                     hist=trainer.hist,
                 )
             )

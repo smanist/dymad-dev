@@ -110,11 +110,14 @@ def test_stacked_opt_uses_phase_runtime_adapters(monkeypatch):
         dtype=torch.float32,
     )
     results = opt.run(initial_state=initial_state)
+    compat_state = results[-1].to_run_state()
 
     assert calls["trainer"] >= 2
     assert calls["context"] >= 2
     assert calls["compose"] >= 2
-    assert results[-1].run_state.epoch == 4
+    assert results[-1].trainer_state.epoch == 4
+    assert results[-1].phase_context.train_loader is marker
+    assert compat_state.epoch == 4
     assert results[-1].run_state.train_loader is marker
 
 
