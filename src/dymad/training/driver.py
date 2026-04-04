@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Tuple, Type, Union
 
 from dymad.io import TrajectoryManager, TrajectoryManagerGraph
 from dymad.training.helper import aggregate_cv_results, CVResult, iter_param_grid, RunState, set_by_dotted_key
+from dymad.training.phase_runtime import PhaseContext, TrainerState, compose_run_state
 from dymad.training.trainer_run import TrainerRun
 from dymad.utils import config_logger, load_config
 
@@ -34,8 +35,8 @@ def _apply_combo_to_config(
     model_prefix = cfg["path"]["checkpoint_prefix"] + f"/{cfg['model']['name']}"
     return cfg, model_prefix
 
-def _build_data_state(fold_id: int, cfg: Dict[str, Any], train_sets, valid_sets, device) -> RunState:
-    """Setup data loaders and datasets."""
+def _build_phase_context(fold_id: int, cfg: Dict[str, Any], train_sets, valid_sets) -> PhaseContext:
+    """Setup typed phase context (datasets/loaders/metadata) for one fold."""
     trainset: TrajectoryManager | TrajectoryManagerGraph = train_sets[fold_id]
     trainset.update_config(cfg)
     train_loader, train_set, train_md = trainset.process_data()
@@ -45,15 +46,27 @@ def _build_data_state(fold_id: int, cfg: Dict[str, Any], train_sets, valid_sets,
     validset.set_transforms(trajmgr=trainset)
     valid_loader, valid_set, valid_md = validset.process_data()
 
-    return RunState(
-        config=cfg,
-        device=device,
+    return PhaseContext(
         train_loader=train_loader,
         valid_loader=valid_loader,
         train_set=train_set,
         valid_set=valid_set,
         train_md=train_md,
         valid_md=valid_md,
+    )
+
+
+def _build_data_state(fold_id: int, cfg: Dict[str, Any], train_sets, valid_sets, device) -> RunState:
+    """Compatibility shim for callers that still require a legacy ``RunState``."""
+    phase_context = _build_phase_context(
+        fold_id=fold_id,
+        cfg=cfg,
+        train_sets=train_sets,
+        valid_sets=valid_sets,
+    )
+    return compose_run_state(
+        trainer_state=TrainerState(config=cfg, device=device),
+        phase_context=phase_context,
     )
 
 def run_cv_single(args: Dict[str, Any]):
@@ -67,13 +80,17 @@ def run_cv_single(args: Dict[str, Any]):
         args['checkpoint_prefix'],
         args['results_prefix'])
 
-    # Build data-only RunState per fold+combo
-    data_state = _build_data_state(
+    # Build typed phase context first, then materialize RunState only for compatibility.
+    phase_context = _build_phase_context(
         args['fold_idx'],
         cfg,
         args['train_sets'],
         args['valid_sets'],
-        args['device'])
+    )
+    data_state = compose_run_state(
+        trainer_state=TrainerState(config=cfg, device=args['device']),
+        phase_context=phase_context,
+    )
 
     # Run one concrete trainer run for this fold+combo.
     trainer_run = TrainerRun(

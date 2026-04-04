@@ -176,6 +176,7 @@ def test_phase_result_get_metric_reads_typed_trainer_state():
 def test_run_cv_single_uses_trainer_run(monkeypatch):
     calls = {"init": 0, "run": 0, "metric": None}
     expected_metric = 0.123
+    phase_context = object()
     data_state = object()
 
     cfg = {
@@ -191,8 +192,13 @@ def test_run_cv_single_uses_trainer_run(monkeypatch):
     )
     monkeypatch.setattr(
         driver,
-        "_build_data_state",
-        lambda fold_id, cfg, train_sets, valid_sets, device: data_state,
+        "_build_phase_context",
+        lambda fold_id, cfg, train_sets, valid_sets: phase_context,
+    )
+    monkeypatch.setattr(
+        driver,
+        "compose_run_state",
+        lambda trainer_state, phase_context: data_state,
     )
 
     class _FakePhaseResult:

@@ -8,17 +8,21 @@ from typing import Any, Dict, Iterable, List, Optional
 @dataclass
 class RunState:
     """
-    States of a training run to be checkpointed and restored.
+    Legacy training state shim used at compatibility boundaries.
 
-    The usages are threefold:
+    New migration code should prefer typed `TrainerState` + `PhaseContext`
+    (`dymad.training.phase_runtime`) and only materialize `RunState` when a
+    legacy trainer/checkpoint API still requires it.
 
-        - Data-only state (only data members): For initializing an optimization in StackedOpt
-        - Augmented state (adding persistent and model): For continuing an optimization in StackedOpt
-        - Full state (adding optimizer, schedulers, criteria): For resuming an interrupted optimization
+    Compatibility usages:
 
-    It contains interfaces to and from checkpoint dictionaries, assuming full state minus data.
+        - Data-only shim for initializing legacy optimization entry points
+        - Augmented shim (persistent + model) when chaining legacy phases
+        - Full shim (optimizer/schedulers/criteria) for checkpoint resume paths
+
+    It still provides checkpoint serialization helpers for the full-state shape.
     """
-    # Persistent
+    # Persistent compatibility payload (checkpointable)
     config: Optional[Dict[str, Any]]
     device: Optional[torch.device] = None
     epoch: int = 0
@@ -28,17 +32,17 @@ class RunState:
     epoch_times: List[float] = field(default_factory=list)
     converged: bool = False
 
-    # Model
+    # Model compatibility payload (checkpointable)
     model: Optional[torch.nn.Module] = None
 
-    # Optimization states
+    # Optimizer/scheduler compatibility payload (checkpointable)
     optimizer: Optional[torch.optim.Optimizer] = None
     schedulers: List[Any] = field(default_factory=list)
     criteria: Optional[List[torch.nn.Module]] = None
     criteria_weights: Optional[List[float]] = None
     criteria_names: Optional[List[str]] = None
 
-    # Data: live objects only (not serialized)
+    # Live runtime context used by legacy trainer APIs (not serialized)
     train_set: Optional[Dataset] = None
     valid_set: Optional[Dataset] = None
     train_loader: Optional[DataLoader] = None
