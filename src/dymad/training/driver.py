@@ -1,6 +1,5 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import copy
-import logging
 import numpy as np
 import os
 import shutil
@@ -8,10 +7,11 @@ import torch
 from typing import Any, Dict, Iterable, List, Tuple, Type, Union
 
 from dymad.io import TrajectoryManager, TrajectoryManagerGraph
+from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import aggregate_cv_results, CVResult, iter_param_grid, RunState, set_by_dotted_key
 from dymad.training.phase_runtime import PhaseContext, TrainerState, compose_run_state
 from dymad.training.trainer_run import TrainerRun
-from dymad.utils import config_logger, load_config
+from dymad.utils import load_config
 
 # --------------------
 # Standalone single CV run for multi-processing compatibility
@@ -58,6 +58,7 @@ def _build_phase_context(fold_id: int, cfg: Dict[str, Any], train_sets, valid_se
 
 def _build_data_state(fold_id: int, cfg: Dict[str, Any], train_sets, valid_sets, device) -> RunState:
     """Compatibility shim for callers that still require a legacy ``RunState``."""
+    execution_services = ExecutionServices.from_config(cfg, default_device=device)
     phase_context = _build_phase_context(
         fold_id=fold_id,
         cfg=cfg,
@@ -65,7 +66,11 @@ def _build_data_state(fold_id: int, cfg: Dict[str, Any], train_sets, valid_sets,
         valid_sets=valid_sets,
     )
     return compose_run_state(
-        trainer_state=TrainerState(config=cfg, device=device),
+        trainer_state=TrainerState(
+            config=cfg,
+            execution_services=execution_services,
+            device=execution_services.device,
+        ),
         phase_context=phase_context,
     )
 
@@ -87,8 +92,13 @@ def run_cv_single(args: Dict[str, Any]):
         args['train_sets'],
         args['valid_sets'],
     )
+    execution_services = ExecutionServices.from_config(cfg, default_device=args['device'])
     data_state = compose_run_state(
-        trainer_state=TrainerState(config=cfg, device=args['device']),
+        trainer_state=TrainerState(
+            config=cfg,
+            execution_services=execution_services,
+            device=execution_services.device,
+        ),
         phase_context=phase_context,
     )
 
@@ -96,11 +106,12 @@ def run_cv_single(args: Dict[str, Any]):
     trainer_run = TrainerRun(
         config=cfg,
         model_class=args['model_class'],
-        device=args['device'],
+        device=execution_services.device,
         dtype=args['train_sets'][0].dtype,
         run_name=cfg["model"]["name"],
-        checkpoint_prefix=cfg["path"]["checkpoint_prefix"],
-        results_prefix=cfg["path"]["results_prefix"],
+        checkpoint_prefix=execution_services.checkpoint_prefix,
+        results_prefix=execution_services.results_prefix,
+        execution_services=execution_services,
     )
     results = trainer_run.run(initial_state=data_state)
 
@@ -132,7 +143,14 @@ class DriverBase:
     ):
         self.base_config = load_config(config_path, config_mod)
         self.model_class = model_class
-        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.execution_services = ExecutionServices.from_driver_config(
+            self.base_config,
+            config_path=config_path,
+            default_device=device,
+        )
+        self.base_config = self.execution_services.apply_to_config(self.base_config)
+        self.execution_services.ensure_artifact_dirs()
+        self.device = self.execution_services.device
         self.max_workers = max_workers
 
         cv_config = self.base_config.get("cv", {})
@@ -141,24 +159,17 @@ class DriverBase:
 
         # Setup paths
         self.base_name = self.base_config['model']['name']
-        _dir = os.path.dirname(config_path)
-        _dir = '.' if _dir == '' else _dir
-        os.makedirs(f'{_dir}/{self.base_name}', exist_ok=True)
-        self.checkpoint_prefix = f'{_dir}/{self.base_name}'
-        self.results_prefix = f'{_dir}/{self.base_name}'
+        self.checkpoint_prefix = self.execution_services.checkpoint_prefix
+        self.results_prefix = self.execution_services.results_prefix
 
         # Setup logging
-        log_config = self.base_config.get("log", {})
-        ifstdout = log_config.get("stdout", False)
-        self.cv_logger = logging.getLogger("dymad.cv")
-        self.cv_logger_level = log_config.get("level", "info")
-        self.cv_logger_prefix = '' if ifstdout else f"{self.results_prefix}/{self.base_name}_cv"
-
-        # Logger created here so that the initialization process is logged too
-        config_logger(
-            self.cv_logger,
-            mode=self.cv_logger_level,
-            prefix=self.cv_logger_prefix)
+        self.cv_logger_prefix = (
+            "" if self.execution_services.log_stdout else f"{self.results_prefix}/{self.base_name}_cv"
+        )
+        self.cv_logger = self.execution_services.configure_logger(
+            "dymad.cv",
+            prefix=self.cv_logger_prefix,
+        )
 
         # Initialize data sets
         self._init_trajectory_managers()

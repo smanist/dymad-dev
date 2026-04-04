@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import RunState
 
 
@@ -21,6 +22,8 @@ class TrainerState:
     """Checkpointable trainer state, split from live data context."""
 
     config: Optional[Dict[str, Any]]
+    execution_services: Optional[ExecutionServices] = None
+    # Compatibility-only fallback while migrated call sites adopt execution_services.
     device: Optional[torch.device] = None
     epoch: int = 0
     best_loss: Dict[str, float] = field(default_factory=lambda: {"valid_total": float("inf")})
@@ -53,6 +56,7 @@ def run_state_to_trainer_state(run_state: RunState) -> TrainerState:
 
     return TrainerState(
         config=copy.deepcopy(run_state.config),
+        execution_services=ExecutionServices.from_run_state(run_state),
         device=run_state.device,
         epoch=run_state.epoch,
         best_loss=copy.deepcopy(run_state.best_loss),
@@ -85,9 +89,16 @@ def run_state_to_phase_context(run_state: RunState) -> PhaseContext:
 def compose_run_state(trainer_state: TrainerState, phase_context: PhaseContext) -> RunState:
     """Temporary adapter: rebuild ``RunState`` for legacy trainer APIs."""
 
+    services = trainer_state.execution_services
+    if services is None:
+        services = ExecutionServices.from_config(
+            trainer_state.config,
+            default_device=trainer_state.device,
+        )
+
     return RunState(
-        config=copy.deepcopy(trainer_state.config),
-        device=trainer_state.device,
+        config=services.apply_to_config(trainer_state.config),
+        device=services.device,
         epoch=trainer_state.epoch,
         best_loss=copy.deepcopy(trainer_state.best_loss),
         hist=copy.deepcopy(trainer_state.hist),

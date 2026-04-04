@@ -1,11 +1,10 @@
 import copy
-import logging
-import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List, Optional, Type
 
 import torch
 
+from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 from dymad.training.opt_linear import OptLinear
@@ -18,8 +17,6 @@ from dymad.training.phase_runtime import (
     run_state_to_phase_context,
     run_state_to_trainer_state,
 )
-from dymad.utils import config_logger
-
 OPT_REGISTRY: Dict[str, Type[OptBase]] = {
     "NODE": OptNODE,
     "Weak": OptWeakForm,
@@ -62,10 +59,16 @@ class PhasePipeline:
         model_class: Type,
         device: torch.device,
         dtype: torch.dtype,
+        execution_services: Optional[ExecutionServices] = None,
     ):
         self.config = copy.deepcopy(config)
         self.model_class = model_class
-        self.device = device
+        self.execution_services = execution_services or ExecutionServices.from_config(
+            self.config,
+            default_device=device,
+        )
+        self.config = self.execution_services.apply_to_config(self.config)
+        self.device = self.execution_services.device
         self.dtype = dtype
 
         self.phases = copy.deepcopy(self.config.get("phases", []))
@@ -78,17 +81,13 @@ class PhasePipeline:
         results = []
         phase_context = run_state_to_phase_context(initial_state)
         trainer_state = run_state_to_trainer_state(initial_state)
+        active_services = trainer_state.execution_services or self.execution_services
+        trainer_state.execution_services = active_services
 
-        log_config = self.config.get("log", {})
-        ifstdout = log_config.get("stdout", False)
-        logger = logging.getLogger("dymad")
-        path = trainer_state.config["path"]["results_prefix"]
-        os.makedirs(path, exist_ok=True)
-        path += "/" + path.split("/")[-1]
-        config_logger(
-            logger,
-            mode=log_config.get("level", "info"),
-            prefix="" if ifstdout else path,
+        active_services.ensure_artifact_dirs()
+        logger = active_services.configure_logger(
+            "dymad",
+            prefix=active_services.logger_prefix(active_services.results_prefix.rstrip("/").split("/")[-1]),
         )
 
         for i, phase_cfg in enumerate(self.phases):
@@ -108,13 +107,15 @@ class PhasePipeline:
                 config_phase=phase_cfg,
                 model_class=self.model_class,
                 run_state=current_state,
-                device=self.device,
+                device=active_services.device,
                 dtype=self.dtype,
+                execution_services=active_services,
             )
 
             epoch = trainer.train()
             phase_state = trainer.export_run_state(epoch)
             trainer_state = run_state_to_trainer_state(phase_state)
+            trainer_state.execution_services = active_services
             phase_context = run_state_to_phase_context(phase_state)
             results.append(
                 PhaseResult(
@@ -126,7 +127,8 @@ class PhasePipeline:
             )
 
         logger.info("=== All phases completed ===")
-        if logger.handlers:
-            logger.removeHandler(logger.handlers[0])
+        for handler in logger.handlers[:]:
+            handler.close()
+            logger.removeHandler(handler)
 
         return results

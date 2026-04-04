@@ -3,6 +3,7 @@ import torch
 from typing import Any, Dict, Type, Union
 
 from dymad.training.batch_adapter import TrainerBatch, batch_to_runtime
+from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 from dymad.utils import make_scheduler
@@ -35,8 +36,17 @@ class OptNODE(OptBase):
         run_state: RunState,
         device: torch.device,
         dtype: torch.dtype,
+        execution_services: ExecutionServices | None = None,
     ):
-        super().__init__(config, config_phase, model_class, run_state, device, dtype)
+        super().__init__(
+            config,
+            config_phase,
+            model_class,
+            run_state,
+            device,
+            dtype,
+            execution_services=execution_services,
+        )
 
         # Trajectory chopping
         self.chop_mode = self.config_phase.get("chop_mode", "initial")

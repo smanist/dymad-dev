@@ -46,6 +46,8 @@ def test_phase_runtime_round_trip_preserves_state_and_context():
     assert rebuilt.valid_loader is marker
     assert rebuilt.train_set is marker
     assert rebuilt.valid_set is marker
+    assert trainer_state.execution_services is not None
+    assert rebuilt.device == state.device
 
 
 def test_stacked_opt_uses_phase_runtime_adapters(monkeypatch):
@@ -71,7 +73,16 @@ def test_stacked_opt_uses_phase_runtime_adapters(monkeypatch):
     monkeypatch.setattr(phase_pipeline, "compose_run_state", wrapped_compose)
 
     class _FakeTrainer:
-        def __init__(self, config, config_phase, model_class, run_state, device, dtype):
+        def __init__(
+            self,
+            config,
+            config_phase,
+            model_class,
+            run_state,
+            device,
+            dtype,
+            execution_services=None,
+        ):
             self.run_state = run_state
             self.hist = [{"phase": config_phase.get("name", "p0")}]
 
@@ -126,7 +137,7 @@ def test_stacked_opt_wraps_phase_pipeline(monkeypatch):
     calls = {"init": 0, "run": 0}
 
     class _FakePipeline:
-        def __init__(self, config, model_class, device, dtype):
+        def __init__(self, config, model_class, device, dtype, execution_services=None):
             calls["init"] += 1
             self.config = config
             self.phases = config["phases"]
@@ -210,13 +221,24 @@ def test_run_cv_single_uses_trainer_run(monkeypatch):
             raise AssertionError("run_cv_single should read metrics from PhaseResult.get_metric")
 
     class _FakeTrainerRun:
-        def __init__(self, config, model_class, device, dtype, run_name, checkpoint_prefix, results_prefix):
+        def __init__(
+            self,
+            config,
+            model_class,
+            device,
+            dtype,
+            run_name,
+            checkpoint_prefix,
+            results_prefix,
+            execution_services=None,
+        ):
             calls["init"] += 1
             calls["config"] = config
             calls["run_name"] = run_name
             calls["checkpoint_prefix"] = checkpoint_prefix
             calls["results_prefix"] = results_prefix
             calls["dtype"] = dtype
+            calls["execution_services"] = execution_services
 
         def run(self, initial_state):
             calls["run"] += 1
@@ -252,5 +274,6 @@ def test_run_cv_single_uses_trainer_run(monkeypatch):
     assert calls["checkpoint_prefix"] == "/tmp/cp"
     assert calls["results_prefix"] == "/tmp/rp"
     assert calls["dtype"] == torch.float32
+    assert calls["execution_services"] is not None
     assert calls["metric"] == "total"
     assert result["metric_value"] == expected_metric

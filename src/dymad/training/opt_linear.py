@@ -3,6 +3,7 @@ import torch
 from typing import Any, Dict, Type
 
 from dymad.training.batch_adapter import TrainerBatch, batch_to_runtime
+from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import RunState
 from dymad.training.opt_base import OptBase
 
@@ -21,8 +22,17 @@ class OptLinear(OptBase):
         run_state: RunState,
         device: torch.device,
         dtype: torch.dtype,
+        execution_services: ExecutionServices | None = None,
     ):
-        super().__init__(config, config_phase, model_class, run_state, device, dtype)
+        super().__init__(
+            config,
+            config_phase,
+            model_class,
+            run_state,
+            device,
+            dtype,
+            execution_services=execution_services,
+        )
 
         if self.config_phase['n_epochs'] > 1 or self.config_phase['save_interval'] > 1:
             logger.info("Linear training is typically one epoch, setting n_epochs=1 and save_interval=1.")

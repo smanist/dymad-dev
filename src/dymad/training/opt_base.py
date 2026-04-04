@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Type, Union
 
 from dymad.losses import LOSS_MAP
 from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_runtime
+from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import RunState
 from dymad.training.ls_update import LSUpdater
 from dymad.utils import make_scheduler, plot_hist, plot_trajectory
@@ -60,11 +61,18 @@ class OptBase:
         run_state: RunState,
         device: torch.device,
         dtype: torch.dtype,
+        execution_services: Optional[ExecutionServices] = None,
     ):
         self.config = copy.deepcopy(config)
         self.config_phase = copy.deepcopy(config_phase)
         self.model_class = model_class
-        self.device = device
+        self.execution_services = execution_services or ExecutionServices.from_config(
+            self.config,
+            default_device=device,
+        )
+        self.config = self.execution_services.apply_to_config(self.config)
+        self.execution_services.ensure_artifact_dirs()
+        self.device = self.execution_services.device
         self.dtype = dtype
 
         if 'save_interval' not in self.config_phase:
@@ -78,10 +86,9 @@ class OptBase:
 
         # Setup paths
         self.model_name = self.config["model"]["name"]
-        self.checkpoint_path = self.config["path"]["checkpoint_prefix"] + f"/{self.model_name}_checkpoint.pt"
-        self.best_model_path = self.config["path"]["checkpoint_prefix"] + f"/{self.model_name}.pt"
-        os.makedirs(self.config["path"]["results_prefix"], exist_ok=True)
-        self.results_prefix  = self.config["path"]["results_prefix"]
+        self.checkpoint_path = self.execution_services.checkpoint_file(f"{self.model_name}_checkpoint.pt")
+        self.best_model_path = self.execution_services.checkpoint_file(f"{self.model_name}.pt")
+        self.results_prefix = self.execution_services.results_prefix
 
         # Create model, optimizer, schedulers, criteria
         self.attach_run_state(run_state)
