@@ -1,7 +1,10 @@
+import pytest
+
 import dymad.models.collections as collections_module
 import dymad.models.helpers as helpers_module
 from dymad.models import LTI
 from dymad.models.model_spec import LegacyPredefinedModelAdapter, ModelSpec
+from dymad.models.prediction import predict_continuous, predict_discrete
 
 
 def test_predefined_model_routes_via_typed_model_spec(monkeypatch) -> None:
@@ -76,3 +79,32 @@ def test_build_model_from_spec_uses_typed_dispatch_for_lti(monkeypatch) -> None:
 
     assert result == "typed-dispatch-stub"
     assert calls["model_spec"] == [True, "smpl_auto", "cat", "direct", "auto", collections_module.CD_LFM]
+
+
+@pytest.mark.parametrize(
+    ("typed_model", "expected_predictor"),
+    [
+        (collections_module.LTI, predict_continuous),
+        (collections_module.DLTI, predict_discrete),
+    ],
+)
+def test_build_model_from_spec_selects_rollout_engine_from_typed_metadata(
+    monkeypatch,
+    typed_model,
+    expected_predictor,
+) -> None:
+    class DummyModel:
+        _predict = None
+
+    def fake_build_model(model_spec, model_config, data_meta, dtype=None, device=None):
+        return DummyModel()
+
+    monkeypatch.setattr(helpers_module, "build_model", fake_build_model)
+
+    model = helpers_module.build_model_from_spec(
+        typed_model.typed_spec(),
+        {"predictor_type": "exp"},
+        {"delay": 0},
+    )
+
+    assert model._predict is expected_predictor

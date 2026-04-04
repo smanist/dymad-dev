@@ -6,6 +6,7 @@ from dymad.models.components import ENC_MAP, DEC_MAP, FZU_MAP, DYN_MAP, LIN_MAP
 from dymad.models.model_spec import ModelSpec
 from dymad.models.prediction import predict_continuous, predict_continuous_exp, predict_continuous_np, \
     predict_discrete, predict_discrete_exp
+from dymad.models.rollout_engine import select_rollout_engine
 from dymad.modules import make_autoencoder, make_network
 
 logger = logging.getLogger(__name__)
@@ -270,6 +271,15 @@ def build_model_from_spec(
             legacy_spec = _build_lti_legacy_tuple(model_spec)
         else:
             legacy_spec = list(model_spec.to_legacy_tuple())
+        model = build_model(legacy_spec, model_config, data_meta, dtype, device)
+        rollout_engine = select_rollout_engine(model_spec)
+        if rollout_engine is not None and hasattr(model, "_predict"):
+            model._predict = rollout_engine.predictor
+            logger.info(
+                "Typed rollout-engine selected from model spec metadata: %s",
+                rollout_engine.source,
+            )
+        return model
     else:
         legacy_spec = model_spec
     return build_model(legacy_spec, model_config, data_meta, dtype, device)
