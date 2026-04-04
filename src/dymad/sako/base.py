@@ -9,6 +9,7 @@ from dymad.models import KBF, DKBF
 from dymad.numerics import check_orthogonality, complex_grid, complex_map, disc2cont, eig_low_rank, mode_split, scaled_eig, truncate_sequence
 from dymad.sako.rals import estimate_pseudospectrum, RALowRank
 from dymad.sako.sako import SAKO
+from dymad.sako.snapshot import SpectralSnapshot, build_spectral_snapshot
 from dymad.utils import plot_contour
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,7 @@ class SAInterface(DataInterface):
     """
     def __init__(self, model_class: Type[torch.nn.Module], checkpoint_path: str, device: Optional[torch.device] = None):
         assert model_class in [KBF, DKBF], "Spectral Analysis is currently only implemented for KBF and DKBF."
+        self._checkpoint_path = str(checkpoint_path)
 
         super().__init__(model_class=model_class, checkpoint_path=checkpoint_path, device=device)
 
@@ -110,6 +112,18 @@ class SAInterface(DataInterface):
 
         self._Ninp = self._trans_x._inp_dim
         self._Nout = self.model.koopman_dimension
+        self._snapshot = build_spectral_snapshot(
+            model_class=type(self.model).__name__,
+            checkpoint_path=self._checkpoint_path,
+            encoded_p0=self._P0,
+            encoded_p1=self._P1,
+            weights=self.get_weights(),
+            input_dim=self._Ninp,
+            obs_dim=self._Nout,
+            metadata={
+                "processor_mode": self.model.processor_net.mode,
+            },
+        )
 
     def get_weights(self) -> Tuple[np.ndarray]:
         """
@@ -121,6 +135,11 @@ class SAInterface(DataInterface):
             U = self.model.processor_net.U.data.cpu().numpy()
             V = self.model.processor_net.V.data.cpu().numpy()
             return (U, V)
+
+    @property
+    def snapshot(self) -> SpectralSnapshot:
+        """Typed spectral snapshot extracted from checkpoint-backed model state."""
+        return self._snapshot
 
 class SpectralAnalysis:
     """
