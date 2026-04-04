@@ -1,3 +1,4 @@
+from dymad.sako.adapter import SpectralAnalysisAdapter, SpectralEigensystem
 from dymad.sako.base import filter_spectrum, per_state_err, SAInterface, SpectralAnalysis
 from dymad.sako.rals import estimate_pseudospectrum, RALowRank, resolvent_analysis
 from dymad.sako.sako import SAKO
@@ -9,6 +10,8 @@ __all__ = [
     "per_state_err",
     "RALowRank",
     "resolvent_analysis",
+    "SpectralAnalysisAdapter",
+    "SpectralEigensystem",
     "SAInterface",
     "build_spectral_snapshot",
     "KoopmanWeightSnapshot",
