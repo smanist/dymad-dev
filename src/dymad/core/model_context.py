@@ -260,12 +260,24 @@ def _ensure_time_tensor(
     raise ValueError(f"Unsupported time shape {tuple(t.shape)}")
 
 
-def _split_nested_payload(payload: tuple[torch.Tensor, torch.Tensor] | None) -> list[torch.Tensor] | None:
+def _split_nested_payload(payload: Any) -> list[torch.Tensor] | None:
     if payload is None:
         return None
-    values, offsets = payload
-    nested = torch.nested.nested_tensor_from_jagged(values, offsets)
-    return [item for item in nested.unbind()]
+    if isinstance(payload, list):
+        return [torch.as_tensor(item) for item in payload]
+    if isinstance(payload, tuple):
+        values, offsets = payload
+        offsets = torch.as_tensor(offsets, dtype=torch.int64, device=values.device)
+        return [values[offsets[idx]:offsets[idx + 1]] for idx in range(offsets.numel() - 1)]
+    if getattr(payload, "is_nested", False):
+        return [item for item in payload.unbind()]
+
+    tensor = torch.as_tensor(payload)
+    if tensor.ndim in (1, 2):
+        return [tensor]
+    if tensor.ndim == 3:
+        return [item for item in tensor.unbind(0)]
+    raise ValueError(f"Unsupported nested payload shape {tuple(tensor.shape)}")
 
 
 def _infer_graph_nodes(edge_index: Any) -> int:

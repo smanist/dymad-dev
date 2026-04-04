@@ -361,6 +361,31 @@ def load_model(
     )
 
 
+def _prepare_visualize_model_input(input_data: dict[str, torch.Tensor | tuple[torch.Tensor, torch.Tensor] | None]) -> dict:
+    prepared = dict(input_data)
+
+    t = prepared.get("t")
+    if isinstance(t, torch.Tensor):
+        if t.ndim >= 2:
+            prepared["t"] = t[:, :1]
+        elif t.ndim == 1 and t.numel() > 1:
+            prepared["t"] = t[:1]
+
+    u = prepared.get("u")
+    if isinstance(u, torch.Tensor):
+        if u.ndim >= 3:
+            prepared["u"] = u[:, :1, ...]
+        elif u.ndim == 2 and u.shape[0] > 1:
+            prepared["u"] = u[:1, ...]
+
+    for key in ("ei", "ew", "ea"):
+        payload = prepared.get(key)
+        if getattr(payload, "is_nested", False):
+            prepared[key] = [item for item in payload.unbind()]
+
+    return prepared
+
+
 def visualize_model(
         mdl_class=None, checkpoint_path=None, model=None, prd_func=None,
         ref_data=None, depth=1, device='cpu', ifsave=False):
@@ -395,10 +420,7 @@ def visualize_model(
     input_data = prd_func(
         x_data, t_data, u=u_data, p=p_data, ei=ei_data, ew=ew_data, ea=ea_data,
         ret_dat=True)
-    for _k in ['ei', 'ew', 'ea']:
-        # Decompose nested tensors so that torchview can handle them
-        if getattr(input_data[_k], "is_nested", False):
-            input_data[_k] = (input_data[_k].values(), input_data[_k].offsets())
+    input_data = _prepare_visualize_model_input(input_data)
 
     model_graph = draw_graph(
         model,
