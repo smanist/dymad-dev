@@ -6,9 +6,8 @@ from typing import Optional, Tuple, Type
 
 from dymad.io import DataInterface
 from dymad.models import KBF, DKBF
-from dymad.numerics import check_orthogonality, complex_grid, complex_map, disc2cont, eig_low_rank, mode_split, scaled_eig, truncate_sequence
-from dymad.sako.rals import estimate_pseudospectrum, RALowRank
-from dymad.sako.sako import SAKO
+from dymad.numerics import check_orthogonality, complex_map, disc2cont, eig_low_rank, mode_split, scaled_eig, truncate_sequence
+from dymad.sako.adapter import SpectralAnalysisAdapter, SpectralEigensystem
 from dymad.sako.snapshot import SpectralSnapshot, build_spectral_snapshot
 from dymad.utils import plot_contour
 
@@ -157,6 +156,8 @@ class SpectralAnalysis:
                  model_class: Type[torch.nn.Module], checkpoint_path: str,
                  forder='full', dt: float = 1.0, reps: float = 1e-10, remove_one=True, etol: float = 1e-13):
         self._dt = dt
+        self._reps = reps
+        self._etol = etol
         self._reset()
 
         self._ctx = SAInterface(model_class, checkpoint_path)
@@ -164,8 +165,7 @@ class SpectralAnalysis:
         self._solve_eigs()
         logger.info(f"Orthonormality violation: {check_orthogonality(self._vl, self._vr)[1]:4.3e}")
         self._proc_eigs()
-        self._sako = SAKO(self._ctx._P0, self._ctx._P1, None, reps=reps, etol=etol)
-        self._rals = RALowRank(self._vr, np.diag(self._wc.conj()), self._vl, dt=self._dt)
+        self._refresh_adapter()
 
         self.filter_spectrum(forder, remove_one=remove_one)
 
@@ -197,8 +197,7 @@ class SpectralAnalysis:
         """
         Estimate the measure of the observable along the unit circle.
         """
-        gobs = self._ctx.apply_obs(fobs).reshape(-1)
-        return self._sako.estimate_measure(gobs, order, eps, thetas)
+        return self._adapter.estimate_measure(fobs, order, eps, thetas)
 
     def eval_eigfun(self, X, idx, rng=None):
         """
@@ -215,16 +214,10 @@ class SpectralAnalysis:
         return _P.dot(self._vl[:,idx])
 
     def eval_eigfunc_jac(self, ref=None, rng=None, **kwargs) -> np.ndarray:
-        if ref is None:
-            ref = np.zeros((1, self._ctx._Ninp))
-        _mode = self._ctx.get_forward_modes(ref, rng, **kwargs)
-        return self._vl.T.dot(_mode)
+        return self._adapter.eval_eigfunc_jac(ref=ref, rng=rng, **kwargs)
 
     def eval_eigmode_jac(self, ref=None, rng=None, **kwargs) -> np.ndarray:
-        if ref is None:
-            ref = np.zeros((1, self._ctx._Nout))
-        _mode = self._ctx.get_backward_modes(ref, rng, **kwargs)
-        return self._vr.T.dot(_mode)
+        return self._adapter.eval_eigmode_jac(ref=ref, rng=rng, **kwargs)
 
     def set_conj_map(self, J):
         """
@@ -275,6 +268,7 @@ class SpectralAnalysis:
 
         # Redo the eigenvalue processing
         self._proc_eigs()
+        self._refresh_adapter()
 
     def estimate_ps(self, grid=None, return_vec=False, mode='cont', method='standard'):
         """
@@ -292,10 +286,12 @@ class SpectralAnalysis:
             mode: 'cont' or 'disc'
         """
         logger.info(f"Estimating PS: Mode:{mode} Method:{method}")
-        _g = complex_grid(grid)
-        res = estimate_pseudospectrum(_g, self.resolvent_analysis, return_vec=return_vec, \
-            **{'mode':mode, 'method':method})
-        return _g, res
+        return self._adapter.estimate_ps(
+            grid=grid,
+            return_vec=return_vec,
+            mode=mode,
+            method=method,
+        )
 
     def resolvent_analysis(self, z, return_vec, mode, method):
         """
@@ -305,38 +301,7 @@ class SpectralAnalysis:
             method: 'standard' - The projected approach where I/O modes are all in DMD mode space,
                     which is true for a low-rank DMD operator.
         """
-        _method = method.lower()
-        _ifcont = mode.lower() == 'cont'
-
-        if _method == 'sako':
-            if _ifcont:
-                # In continuous mode, the inquiry point will be on continuous complex plane
-                # But the SAKO formulation is always for discrete time.
-                _z = np.exp(z*self._dt)
-            else:
-                _z = z
-            if return_vec:
-                _e, _v = self._sako._ps_point(_z, True)
-                # _v is the output mode, then recover the input mode by
-                # u=(K-zI)v
-                _b  = self._proj.dot(_v)
-                _ls = self._wd.conj().reshape(-1,1)
-                _u = (self._vr*_b).dot(_ls).reshape(-1)
-                _u -= _z*_v
-            else:
-                _e = self._sako._ps_point(_z, False)
-            if _ifcont:
-                # The gain is in discrete time, and we convert it back
-                _e *= self._dt
-            if return_vec:
-                return _e, _v, _u
-            return _e
-
-        elif _method == 'standard':
-            return self._rals(z, return_vec, mode)
-
-        else:
-            raise ValueError(f"Method {_method} unknown for resolvent analysis in {self._type}")
+        return self._adapter.resolvent_analysis(z, return_vec, mode, method)
 
     def _reset(self):
         # Dimensions
@@ -390,6 +355,24 @@ class SpectralAnalysis:
         self._wc = disc2cont(self._wd, self._dt)
         # self._proj = np.linalg.solve(self._vr.conj().T.dot(self._vr), self._vr.conj().T)
         self._proj = self._vl.conj().T   # Mathemetically correct, but numerically inaccurate.
+
+    def _refresh_adapter(self):
+        eigensystem = SpectralEigensystem(
+            discrete_eigs=self._wd,
+            left_eigvecs=self._vl,
+            right_eigvecs=self._vr,
+            projector=self._proj,
+            dt=self._dt,
+        )
+        self._adapter = SpectralAnalysisAdapter(
+            snapshot=self._ctx.snapshot,
+            eigensystem=eigensystem,
+            runtime=self._ctx,
+            reps=self._reps,
+            etol=self._etol,
+        )
+        self._sako = self._adapter.sako
+        self._rals = self._adapter.rals
 
     def plot_eigs(self, fig=None, plot_full='bo', plot_filt='r^', mode='disc'):
         """

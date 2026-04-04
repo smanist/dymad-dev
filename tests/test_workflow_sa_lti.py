@@ -7,7 +7,7 @@ import torch
 
 from dymad.io import load_model
 from dymad.models import DKBF, KBF
-from dymad.sako import SpectralAnalysis
+from dymad.sako import SpectralAnalysis, SpectralAnalysisAdapter
 from dymad.training import LinearTrainer, NODETrainer
 
 mdl_kb = {
@@ -144,3 +144,34 @@ def test_sa(sa_lti_data, sa_lti_test, env_setup, idx):
     sa_case(idx, env_setup)
     if os.path.exists(env_setup/'sa_model'):
         shutil.rmtree(env_setup/'sa_model')
+
+
+def test_spectral_analysis_routes_pseudospectrum_through_adapter(sa_lti_data, env_setup, monkeypatch):
+    train_case(5, sa_lti_data, env_setup)
+
+    call_counter = {"estimate_ps": 0}
+    original_estimate_ps = SpectralAnalysisAdapter.estimate_ps
+
+    def wrapped_estimate_ps(self, *args, **kwargs):
+        call_counter["estimate_ps"] += 1
+        return original_estimate_ps(self, *args, **kwargs)
+
+    monkeypatch.setattr(SpectralAnalysisAdapter, "estimate_ps", wrapped_estimate_ps)
+
+    _, model_class, _, _ = cfgs[5]
+    analysis = SpectralAnalysis(
+        model_class,
+        env_setup / "sa_model/sa_model.pt",
+        dt=dt,
+        reps=1e-10,
+        etol=1e-12,
+    )
+
+    xs = np.linspace(-1.3, 1.3, 4)
+    grid = np.vstack([xs, xs])
+    analysis.estimate_ps(grid, mode="disc", method="standard", return_vec=False)
+
+    assert call_counter["estimate_ps"] >= 1
+
+    if os.path.exists(env_setup / "sa_model"):
+        shutil.rmtree(env_setup / "sa_model")
