@@ -36,6 +36,11 @@ class PhaseResult:
     phase_context: PhaseContext
     hist: Any
 
+    def get_metric(self, metric_name: str) -> float:
+        """Read a validation metric from typed trainer state."""
+
+        return self.trainer_state.best_loss[f"valid_{metric_name}"]
+
     def to_run_state(self) -> RunState:
         """Compatibility adapter for legacy callers expecting ``RunState``."""
 

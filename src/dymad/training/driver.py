@@ -87,7 +87,7 @@ def run_cv_single(args: Dict[str, Any]):
     )
     results = trainer_run.run(initial_state=data_state)
 
-    metric_value = results[-1].to_run_state().get_metric(args['metric'])
+    metric_value = results[-1].get_metric(args['metric'])
 
     return {
         'combo_idx': args['combo_idx'],

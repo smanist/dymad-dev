@@ -158,6 +158,21 @@ def test_stacked_opt_wraps_phase_pipeline(monkeypatch):
     assert results == [state]
 
 
+def test_phase_result_get_metric_reads_typed_trainer_state():
+    state, _ = _build_data_state()
+    trainer_state = run_state_to_trainer_state(state)
+    trainer_state.best_loss = {"valid_total": 0.456}
+    phase_context = run_state_to_phase_context(state)
+    result = phase_pipeline.PhaseResult(
+        name="phase_0",
+        trainer_state=trainer_state,
+        phase_context=phase_context,
+        hist=[],
+    )
+
+    assert result.get_metric("total") == 0.456
+
+
 def test_run_cv_single_uses_trainer_run(monkeypatch):
     calls = {"init": 0, "run": 0, "metric": None}
     expected_metric = 0.123
@@ -180,14 +195,13 @@ def test_run_cv_single_uses_trainer_run(monkeypatch):
         lambda fold_id, cfg, train_sets, valid_sets, device: data_state,
     )
 
-    class _FakeFinalRunState:
+    class _FakePhaseResult:
         def get_metric(self, metric_name):
             calls["metric"] = metric_name
             return expected_metric
 
-    class _FakePhaseResult:
         def to_run_state(self):
-            return _FakeFinalRunState()
+            raise AssertionError("run_cv_single should read metrics from PhaseResult.get_metric")
 
     class _FakeTrainerRun:
         def __init__(self, config, model_class, device, dtype, run_name, checkpoint_prefix, results_prefix):
