@@ -6,6 +6,7 @@ from dymad.training.phase_runtime import (
     run_state_to_phase_context,
     run_state_to_trainer_state,
 )
+from dymad.training import phase_pipeline
 from dymad.training import stacked_opt
 
 
@@ -48,9 +49,9 @@ def test_phase_runtime_round_trip_preserves_state_and_context():
 
 def test_stacked_opt_uses_phase_runtime_adapters(monkeypatch):
     calls = {"trainer": 0, "context": 0, "compose": 0}
-    original_to_trainer = stacked_opt.run_state_to_trainer_state
-    original_to_context = stacked_opt.run_state_to_phase_context
-    original_compose = stacked_opt.compose_run_state
+    original_to_trainer = phase_pipeline.run_state_to_trainer_state
+    original_to_context = phase_pipeline.run_state_to_phase_context
+    original_compose = phase_pipeline.compose_run_state
 
     def wrapped_to_trainer(state):
         calls["trainer"] += 1
@@ -64,9 +65,9 @@ def test_stacked_opt_uses_phase_runtime_adapters(monkeypatch):
         calls["compose"] += 1
         return original_compose(trainer_state, context)
 
-    monkeypatch.setattr(stacked_opt, "run_state_to_trainer_state", wrapped_to_trainer)
-    monkeypatch.setattr(stacked_opt, "run_state_to_phase_context", wrapped_to_context)
-    monkeypatch.setattr(stacked_opt, "compose_run_state", wrapped_compose)
+    monkeypatch.setattr(phase_pipeline, "run_state_to_trainer_state", wrapped_to_trainer)
+    monkeypatch.setattr(phase_pipeline, "run_state_to_phase_context", wrapped_to_context)
+    monkeypatch.setattr(phase_pipeline, "compose_run_state", wrapped_compose)
 
     class _FakeTrainer:
         def __init__(self, config, config_phase, model_class, run_state, device, dtype):
@@ -94,7 +95,7 @@ def test_stacked_opt_uses_phase_runtime_adapters(monkeypatch):
                 valid_md=self.run_state.valid_md,
             )
 
-    monkeypatch.setitem(stacked_opt.OPT_REGISTRY, "Fake", _FakeTrainer)
+    monkeypatch.setitem(phase_pipeline.OPT_REGISTRY, "Fake", _FakeTrainer)
     initial_state, marker = _build_data_state()
     initial_state.config = {
         "path": {"results_prefix": "."},
@@ -115,3 +116,39 @@ def test_stacked_opt_uses_phase_runtime_adapters(monkeypatch):
     assert calls["compose"] >= 2
     assert results[-1].run_state.epoch == 4
     assert results[-1].run_state.train_loader is marker
+
+
+def test_stacked_opt_wraps_phase_pipeline(monkeypatch):
+    calls = {"init": 0, "run": 0}
+
+    class _FakePipeline:
+        def __init__(self, config, model_class, device, dtype):
+            calls["init"] += 1
+            self.config = config
+            self.phases = config["phases"]
+
+        def run(self, initial_state):
+            calls["run"] += 1
+            return [initial_state]
+
+    monkeypatch.setattr(stacked_opt, "PhasePipeline", _FakePipeline)
+
+    state, _ = _build_data_state()
+    state.config = {
+        "path": {"results_prefix": "."},
+        "log": {"stdout": True, "level": "warning"},
+        "phases": [{"name": "phase_0", "trainer": "Linear"}],
+    }
+
+    opt = stacked_opt.StackedOpt(
+        config=state.config,
+        model_class=object,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    results = opt.run(initial_state=state)
+
+    assert calls["init"] == 1
+    assert calls["run"] == 1
+    assert opt.phases == state.config["phases"]
+    assert results == [state]

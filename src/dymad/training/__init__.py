@@ -5,6 +5,7 @@ from dymad.training.opt_base import OptBase
 from dymad.training.opt_linear import OptLinear
 from dymad.training.opt_node import OptNODE
 from dymad.training.opt_weak_form import OptWeakForm
+from dymad.training.phase_pipeline import PhasePipeline
 from dymad.training.stacked_opt import StackedOpt
 from dymad.training.trainer import LinearTrainer, NODETrainer, WeakFormTrainer, StackedTrainer
 
@@ -20,6 +21,7 @@ __all__ = [
     "OptLinear",
     "OptNODE",
     "OptWeakForm",
+    "PhasePipeline",
     "RunState",
     "set_by_dotted_key",
     "SingleSplitDriver",
