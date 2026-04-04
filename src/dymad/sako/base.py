@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from typing import Optional, Tuple, Type
 
+from dymad.exec.context import build_default_context
 from dymad.io import DataInterface
 from dymad.models import KBF, DKBF
 from dymad.numerics import check_orthogonality, disc2cont, eig_low_rank, scaled_eig, truncate_sequence
@@ -139,6 +140,8 @@ class SpectralAnalysis:
         self._dt = dt
         self._reps = reps
         self._etol = etol
+        self._exec_context = build_default_context()
+        self._spectral_plan = None
         self._reset()
 
         self._ctx = SAInterface(model_class, checkpoint_path)
@@ -346,8 +349,17 @@ class SpectralAnalysis:
             projector=self._proj,
             dt=self._dt,
         )
-        self._adapter = SpectralAnalysisAdapter(
-            snapshot=self._ctx.snapshot,
+        if self._spectral_plan is None:
+            model = self._ctx.model
+            model_ref = f"{type(model).__module__}:{type(model).__name__}"
+            self._spectral_plan = self._exec_context.executor.plan_spectral_analysis(
+                model_ref=model_ref,
+                checkpoint_path=self._ctx.snapshot.checkpoint_path,
+                snapshot=self._ctx.snapshot,
+            )
+
+        self._adapter = self._exec_context.executor.materialize_spectral_adapter(
+            plan=self._spectral_plan,
             eigensystem=eigensystem,
             runtime=self._ctx,
             reps=self._reps,

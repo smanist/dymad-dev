@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
-from dymad.exec.state import PredictionWorkflowPlan
+from dymad.exec.state import PredictionWorkflowPlan, SpectralWorkflowPlan
 from dymad.facade.operations import FacadeOperations
+
+if TYPE_CHECKING:
+    from dymad.sako.adapter import SpectralAnalysisAdapter, SpectralEigensystem, SpectralRuntime
+    from dymad.sako.snapshot import SpectralSnapshot
 
 
 @dataclass
@@ -58,3 +62,50 @@ class CompatibilityExecutor:
         from dymad.io.checkpoint import _load_model_legacy
 
         return _load_model_legacy(model_class, checkpoint.checkpoint_path)
+
+    def plan_spectral_analysis(
+        self,
+        *,
+        model_ref: str,
+        checkpoint_path: str,
+        snapshot: SpectralSnapshot,
+    ) -> SpectralWorkflowPlan:
+        checkpoint = self.facade.register_checkpoint(
+            model_ref=model_ref,
+            checkpoint_path=checkpoint_path,
+        )
+        snapshot_summary = self.facade.register_spectral_snapshot(
+            checkpoint_handle=checkpoint.handle,
+            snapshot=snapshot,
+        )
+        return SpectralWorkflowPlan(
+            checkpoint_handle=checkpoint.handle,
+            spectral_snapshot_handle=snapshot_summary.handle,
+            entrypoint="dymad.sako.SpectralAnalysis",
+            notes=(
+                "Spectral snapshot is persisted and resolved through facade/store handles.",
+                "Numerical kernels still execute through the adapter compatibility layer.",
+            ),
+        )
+
+    def materialize_spectral_adapter(
+        self,
+        *,
+        plan: SpectralWorkflowPlan,
+        eigensystem: SpectralEigensystem,
+        runtime: SpectralRuntime | None = None,
+        reps: float = 1e-10,
+        etol: float = 1e-13,
+    ) -> SpectralAnalysisAdapter:
+        from dymad.sako.adapter import SpectralAnalysisAdapter
+
+        snapshot_record = self.facade.get_spectral_snapshot(plan.spectral_snapshot_handle)
+        if snapshot_record.checkpoint_handle != plan.checkpoint_handle:
+            raise ValueError("plan checkpoint/spectral handles are inconsistent")
+        return SpectralAnalysisAdapter(
+            snapshot=snapshot_record.snapshot,
+            eigensystem=eigensystem,
+            runtime=runtime,
+            reps=reps,
+            etol=etol,
+        )

@@ -6,6 +6,7 @@ import shutil
 import torch
 
 from dymad.io import load_model
+from dymad.exec.workflow import CompatibilityExecutor
 from dymad.models import DKBF, KBF
 from dymad.sako import SpectralAnalysis, SpectralAnalysisAdapter, SpectralPlottingAdapter
 from dymad.training import LinearTrainer, NODETrainer
@@ -201,6 +202,41 @@ def test_spectral_analysis_routes_plotting_through_adapter(sa_lti_data, env_setu
 
     assert call_counter["plot_eigs"] >= 1
     assert result == ("fig", "ax", [])
+
+    if os.path.exists(env_setup / "sa_model"):
+        shutil.rmtree(env_setup / "sa_model")
+
+
+def test_spectral_analysis_routes_snapshot_handle_flow_through_exec(sa_lti_data, env_setup, monkeypatch):
+    train_case(5, sa_lti_data, env_setup)
+
+    call_counter = {"plan_spectral": 0, "materialize_spectral": 0}
+    original_plan_spectral = CompatibilityExecutor.plan_spectral_analysis
+    original_materialize_spectral = CompatibilityExecutor.materialize_spectral_adapter
+
+    def wrapped_plan_spectral(self, *args, **kwargs):
+        call_counter["plan_spectral"] += 1
+        return original_plan_spectral(self, *args, **kwargs)
+
+    def wrapped_materialize_spectral(self, *args, **kwargs):
+        call_counter["materialize_spectral"] += 1
+        return original_materialize_spectral(self, *args, **kwargs)
+
+    monkeypatch.setattr(CompatibilityExecutor, "plan_spectral_analysis", wrapped_plan_spectral)
+    monkeypatch.setattr(CompatibilityExecutor, "materialize_spectral_adapter", wrapped_materialize_spectral)
+
+    _, model_class, _, _ = cfgs[5]
+    analysis = SpectralAnalysis(
+        model_class,
+        env_setup / "sa_model/sa_model.pt",
+        dt=dt,
+        reps=1e-10,
+        etol=1e-12,
+    )
+    analysis.estimate_ps(np.vstack([np.linspace(-1.0, 1.0, 3)] * 2), mode="disc", method="standard", return_vec=False)
+
+    assert call_counter["plan_spectral"] >= 1
+    assert call_counter["materialize_spectral"] >= 1
 
     if os.path.exists(env_setup / "sa_model"):
         shutil.rmtree(env_setup / "sa_model")

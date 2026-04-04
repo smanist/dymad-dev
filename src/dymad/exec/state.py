@@ -11,3 +11,11 @@ class PredictionWorkflowPlan:
     prediction_handle: str
     entrypoint: str
     notes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SpectralWorkflowPlan:
+    checkpoint_handle: str
+    spectral_snapshot_handle: str
+    entrypoint: str
+    notes: tuple[str, ...]
