@@ -25,6 +25,20 @@ class DecoderSpec:
 
 
 @dataclass(frozen=True)
+class RolloutSpec:
+    family: str
+    predictor: str
+    supports_control_inputs: bool
+
+
+@dataclass(frozen=True)
+class MemorySpec:
+    family: str
+    latent_state: str
+    requires_delay_window: bool
+
+
+@dataclass(frozen=True)
 class ModelSpec:
     """Typed model specification used by predefined-model compatibility adapters."""
 
@@ -34,6 +48,8 @@ class ModelSpec:
     dynamics: DynamicsSpec
     decoder: DecoderSpec
     model_cls: object
+    rollout: Optional[RolloutSpec] = None
+    memory: Optional[MemorySpec] = None
     name: Optional[str] = None
 
     @property
@@ -72,6 +88,8 @@ class LegacyPredefinedModelAdapter:
         dynamics: str,
         decoder: str,
         model_cls: object,
+        rollout: Optional[RolloutSpec] = None,
+        memory: Optional[MemorySpec] = None,
         name: Optional[str] = None,
     ) -> ModelSpec:
         return ModelSpec(
@@ -81,5 +99,7 @@ class LegacyPredefinedModelAdapter:
             dynamics=DynamicsSpec(family=dynamics),
             decoder=DecoderSpec(family=decoder),
             model_cls=model_cls,
+            rollout=rollout,
+            memory=memory,
             name=name,
         )

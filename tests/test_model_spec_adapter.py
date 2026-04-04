@@ -21,6 +21,14 @@ def test_predefined_model_routes_via_typed_model_spec(monkeypatch) -> None:
     assert isinstance(calls["model_spec"], ModelSpec)
     assert calls["model_spec"].feature.family == "cat"
     assert calls["model_spec"].dynamics.family == "direct"
+    assert calls["model_spec"].rollout is not None
+    assert calls["model_spec"].rollout.family == "lti"
+    assert calls["model_spec"].rollout.predictor == "continuous"
+    assert calls["model_spec"].rollout.supports_control_inputs is True
+    assert calls["model_spec"].memory is not None
+    assert calls["model_spec"].memory.family == "concat-latent-control"
+    assert calls["model_spec"].memory.latent_state == "cat"
+    assert calls["model_spec"].memory.requires_delay_window is True
 
 
 def test_build_model_from_spec_adapts_to_legacy_builder(monkeypatch) -> None:

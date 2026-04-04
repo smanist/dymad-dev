@@ -1,8 +1,13 @@
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
 
 from dymad.models.helpers import build_model_from_spec
-from dymad.models.model_spec import LegacyPredefinedModelAdapter, ModelSpec
+from dymad.models.model_spec import (
+    LegacyPredefinedModelAdapter,
+    MemorySpec,
+    ModelSpec,
+    RolloutSpec,
+)
 from dymad.models.recipes import CD_KM, CD_KMM, CD_KMSK, CD_LDM, CD_LFM, CD_SDM
 
 @dataclass
@@ -25,6 +30,8 @@ class PredefinedModel:
     dynamics: str
     decoder: str
     model_cls: object
+    rollout: Optional[RolloutSpec] = None
+    memory: Optional[MemorySpec] = None
 
     def __post_init__(self):
         self.model_spec = LegacyPredefinedModelAdapter.from_legacy_parts(
@@ -34,6 +41,8 @@ class PredefinedModel:
             dynamics=self.dynamics,
             decoder=self.decoder,
             model_cls=self.model_cls,
+            rollout=self.rollout,
+            memory=self.memory,
         )
         self.GRAPH = self.model_spec.graph_mode != "none"
 
@@ -93,13 +102,68 @@ GKBF  = PredefinedModel(True,  "graph_auto", "graph_blin", "direct", "graph", CD
 DGKBF = PredefinedModel(False, "graph_auto", "graph_blin", "direct", "graph", CD_LFM)
 """KBF with graph autoencoder, discrete-time."""
 
-LTI   = PredefinedModel(True,  "smpl_auto",  "cat",        "direct", "auto",  CD_LFM)
+LTI_ROLLOUT_SPEC = RolloutSpec(
+    family="lti",
+    predictor="continuous",
+    supports_control_inputs=True,
+)
+LTI_MEMORY_SPEC = MemorySpec(
+    family="concat-latent-control",
+    latent_state="cat",
+    requires_delay_window=True,
+)
+
+LTI   = PredefinedModel(
+    True,
+    "smpl_auto",
+    "cat",
+    "direct",
+    "auto",
+    CD_LFM,
+    rollout=LTI_ROLLOUT_SPEC,
+    memory=LTI_MEMORY_SPEC,
+)
 """Linear time-invariant (LTI), continuous-time."""
-DLTI  = PredefinedModel(False, "smpl_auto",  "cat",        "direct", "auto",  CD_LFM)
+DLTI  = PredefinedModel(
+    False,
+    "smpl_auto",
+    "cat",
+    "direct",
+    "auto",
+    CD_LFM,
+    rollout=RolloutSpec(
+        family="lti",
+        predictor="discrete",
+        supports_control_inputs=True,
+    ),
+    memory=LTI_MEMORY_SPEC,
+)
 """LTI, discrete-time."""
-GLTI  = PredefinedModel(True,  "graph_auto", "graph_cat",  "direct", "graph", CD_LFM)
+GLTI  = PredefinedModel(
+    True,
+    "graph_auto",
+    "graph_cat",
+    "direct",
+    "graph",
+    CD_LFM,
+    rollout=LTI_ROLLOUT_SPEC,
+    memory=LTI_MEMORY_SPEC,
+)
 """LTI with graph autoencoder, continuous-time."""
-DGLTI = PredefinedModel(False, "graph_auto", "graph_cat",  "direct", "graph", CD_LFM)
+DGLTI = PredefinedModel(
+    False,
+    "graph_auto",
+    "graph_cat",
+    "direct",
+    "graph",
+    CD_LFM,
+    rollout=RolloutSpec(
+        family="lti",
+        predictor="discrete",
+        supports_control_inputs=True,
+    ),
+    memory=LTI_MEMORY_SPEC,
+)
 """LTI with graph autoencoder, discrete-time."""
 
 #                        CONT,  encoder,      feature,      dynamics, decoder, model_cls
