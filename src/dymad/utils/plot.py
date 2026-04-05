@@ -319,6 +319,22 @@ def plot_hist(hist, crit, crit_name, model_name, ifclose=True, prefix='.'):
     if ifclose:
         plt.close()
 
+def _resolve_cv_results_path(cv_file):
+    if cv_file.endswith('.npz'):
+        return cv_file
+
+    cv_dir = os.path.dirname(cv_file)
+    cv_name = os.path.basename(cv_file)
+    candidates = [
+        os.path.join(cv_dir, f'{cv_name}_cv.npz'),
+        os.path.join(cv_file, f'{cv_name}_cv.npz'),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return candidates[0]
+
+
 def plot_cv_results(cv_file, keys=None, ifclose=True, prefix='.', value_scale='log'):
     """
     Plot cross-validation results.
@@ -409,7 +425,7 @@ def plot_cv_results(cv_file, keys=None, ifclose=True, prefix='.', value_scale='l
     return fig, ax
 
 def _collect_cv_results(cv_file, keys):
-    tmp = np.load(f"{cv_file}/{cv_file}_cv.npz", allow_pickle=True)
+    tmp = np.load(_resolve_cv_results_path(cv_file), allow_pickle=True)
     cv_res = tmp['all_results']
     metric_name = tmp['metric_name']
     best_idx = tmp['best_idx']

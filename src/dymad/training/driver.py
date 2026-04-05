@@ -11,7 +11,7 @@ from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import aggregate_cv_results, CVResult, iter_param_grid, set_by_dotted_key
 from dymad.training.phase_runtime import PhaseContext, build_initial_trainer_state
 from dymad.training.trainer_run import TrainerRun
-from dymad.utils import load_config
+from dymad.utils import load_config, plot_cv_results
 
 # --------------------
 # Standalone single CV run for multi-processing compatibility
@@ -248,6 +248,8 @@ class DriverBase:
         # Save CV results
         np.savez_compressed(file_name, all_results=all_results, metric_name=self.metric, best_idx=best_idx)
         self.cv_logger.info(f"Saved CV results to {file_name}")
+        plot_cv_results(file_name, ifclose=True, prefix=self.results_prefix)
+        self.cv_logger.info(f"Saved CV plot to {self.results_prefix}/cv_results.png")
 
         # Copy best model checkpoint to a separate file
         best_checkpoint = best_result.checkpoint_paths[0]
