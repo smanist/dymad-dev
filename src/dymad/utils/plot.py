@@ -215,7 +215,7 @@ def plot_one_trajectory(
 
     return fig, ax
 
-def plot_summary(npz_files, labels=None, ifscl=True, ifclose=True, prefix='.'):
+def plot_summary(npz_files, labels=None, ifscl=True, ifclose=True, prefix='.', output_path=None):
     """
     Plot training losses and prediction criterion for multiple summary files on the same figure.
 
@@ -224,7 +224,9 @@ def plot_summary(npz_files, labels=None, ifscl=True, ifclose=True, prefix='.'):
         labels (list): List of labels for each run (optional).
         ifscl (bool): If True, scale the loss by the first epoch loss.
         ifclose (bool): Whether to close the plot after saving.
-        prefix (str): Directory prefix for saving the plot.
+        prefix (str): Directory prefix used when output_path is not an absolute path.
+        output_path (str, optional): If provided, save the figure to this path. By default the
+            plot is not written to disk.
     """
     _files = [f"{npz}/{npz}_summary.npz" for npz in npz_files]
     npzs = [np.load(_f, allow_pickle=True) for _f in _files]
@@ -237,10 +239,15 @@ def plot_summary(npz_files, labels=None, ifscl=True, ifclose=True, prefix='.'):
     ax[0].set_title(ax[0].get_title() + "\n" + titl)
 
     plt.tight_layout()
-    if prefix != '.':
-        os.makedirs(prefix, exist_ok=True)
-    plt.savefig(f'{prefix}/node_summary.png', dpi=150, bbox_inches='tight',
-                facecolor='white', edgecolor='none')
+    if output_path is not None:
+        save_path = output_path
+        if not os.path.isabs(save_path):
+            save_path = os.path.join(prefix, save_path)
+        save_dir = os.path.dirname(save_path)
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches='tight',
+                    facecolor='white', edgecolor='none')
     if ifclose:
         plt.close()
 

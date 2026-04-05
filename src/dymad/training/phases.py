@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from dymad.core.transform_builder import build_transform_module
 from dymad.losses import LOSS_MAP
 from dymad.numerics import generate_weak_weights
 from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_runtime
@@ -31,7 +32,7 @@ from dymad.training.phase_runtime import (
     TrainerState,
     TrainingHistoryArtifact,
 )
-from dymad.utils import make_scheduler
+from dymad.utils import make_scheduler, plot_hist, plot_trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -375,6 +376,160 @@ class BasePhase:
             artifacts.put("exports", export_artifact)
         return export_artifact
 
+    def _select_export_model_state_dict(
+        self,
+        model_artifact: ModelArtifact,
+        history: TrainingHistoryArtifact | None = None,
+    ) -> Dict[str, Any]:
+        if history is not None and history.best_model_state_dict is not None:
+            return copy.deepcopy(history.best_model_state_dict)
+        return copy.deepcopy(model_artifact.model.state_dict())
+
+    def _prediction_settings(self) -> tuple[str, Dict[str, Any]]:
+        phases = self.config.get("phases", [])
+        for phase_cfg in phases:
+            if not isinstance(phase_cfg, dict):
+                continue
+            phase_type = phase_cfg.get("type")
+            trainer_name = phase_cfg.get("trainer")
+            if phase_type == "optimizer" or trainer_name in {"NODE", "Weak", "Linear"}:
+                return (
+                    phase_cfg.get("ode_method", "dopri5"),
+                    copy.deepcopy(phase_cfg.get("ode_args", {})),
+                )
+        return "dopri5", {}
+
+    def _select_plot_sample(self, phase_context: PhaseContext):
+        if phase_context.valid_set is not None and len(phase_context.valid_set) > 0:
+            return phase_context.valid_set[0], phase_context.valid_md
+        if phase_context.train_set is not None and len(phase_context.train_set) > 0:
+            return phase_context.train_set[0], phase_context.train_md
+        return None, None
+
+    def _inverse_transform_tensor(
+        self,
+        tensor: torch.Tensor,
+        transform_config: Dict[str, Any] | list[Dict[str, Any]] | None,
+        transform_state: Dict[str, Any] | None,
+    ) -> np.ndarray:
+        module = build_transform_module(transform_config, transform_state)
+        restored = module.inverse_batch([tensor.detach().cpu()])[0]
+        return restored.detach().cpu().numpy()
+
+    def _export_prediction_plot(
+        self,
+        *,
+        model_artifact: ModelArtifact,
+        history: TrainingHistoryArtifact,
+        phase_context: PhaseContext,
+        run_name: str,
+        logger: logging.Logger,
+        state_dict: Dict[str, Any] | None = None,
+    ) -> str | None:
+        if bool(getattr(model_artifact.model, "GRAPH", False)):
+            logger.info("Skipping per-run prediction plot for graph model '%s'.", run_name)
+            return None
+
+        sample, sample_md = self._select_plot_sample(phase_context)
+        if sample is None or sample_md is None:
+            logger.info("Skipping per-run prediction plot for '%s': no sample available.", run_name)
+            return None
+
+        runtime = batch_to_runtime(sample)
+        if getattr(runtime, "x", None) is None or getattr(runtime, "t", None) is None:
+            logger.info("Skipping per-run prediction plot for '%s': sample has no regular trajectory payload.", run_name)
+            return None
+
+        time_tensor = runtime.t[0] if runtime.t.ndim > 1 else runtime.t
+        state_tensor = runtime.x[0] if runtime.x.ndim > 2 else runtime.x
+        control_tensor = None
+        if getattr(runtime, "u", None) is not None:
+            control_tensor = runtime.u[0] if runtime.u.ndim > 2 else runtime.u
+
+        model = model_artifact.model
+        export_state = (
+            copy.deepcopy(state_dict)
+            if state_dict is not None
+            else self._select_export_model_state_dict(model_artifact, history)
+        )
+        original_state = copy.deepcopy(model.state_dict())
+        ode_method, ode_args = self._prediction_settings()
+
+        try:
+            model.load_state_dict(export_state)
+            model.eval()
+            with torch.no_grad():
+                prediction = model.predict(
+                    runtime.initial_state(),
+                    runtime,
+                    runtime.t,
+                    method=ode_method,
+                    **ode_args,
+                )
+        finally:
+            model.load_state_dict(original_state)
+
+        if prediction.ndim > 2 and prediction.shape[0] == 1:
+            prediction = prediction[0]
+
+        truth_np = self._inverse_transform_tensor(
+            state_tensor,
+            self.config.get("transform_x"),
+            sample_md.get("transform_x_state"),
+        )
+        pred_np = self._inverse_transform_tensor(
+            prediction,
+            self.config.get("transform_x"),
+            sample_md.get("transform_x_state"),
+        )
+        control_np = None
+        if control_tensor is not None:
+            control_np = self._inverse_transform_tensor(
+                control_tensor,
+                self.config.get("transform_u"),
+                sample_md.get("transform_u_state"),
+            )
+
+        plot_trajectory(
+            np.array([truth_np, pred_np]),
+            time_tensor.detach().cpu().numpy(),
+            model_name=run_name,
+            us=control_np,
+            labels=["Truth", "Prediction"],
+            ifclose=True,
+            prefix=self.execution_services.checkpoint_prefix,
+        )
+        return self.execution_services.checkpoint_file(f"{run_name}_prediction.png")
+
+    def _write_progress_plots(
+        self,
+        *,
+        model_artifact: ModelArtifact,
+        history: TrainingHistoryArtifact,
+        phase_context: PhaseContext,
+        run_name: str,
+        logger: logging.Logger,
+        hist_entries: list[Dict[str, list]],
+        crit_name: str | None,
+        state_dict: Dict[str, Any] | None = None,
+    ) -> None:
+        plot_hist(
+            copy.deepcopy(hist_entries),
+            copy.deepcopy(history.crit),
+            crit_name,
+            run_name,
+            ifclose=True,
+            prefix=self.execution_services.checkpoint_prefix,
+        )
+        self._export_prediction_plot(
+            model_artifact=model_artifact,
+            history=history,
+            phase_context=phase_context,
+            run_name=run_name,
+            logger=logger,
+            state_dict=state_dict,
+        )
+
     def _build_phase_record(
         self,
         trainer_state: TrainerState,
@@ -699,6 +854,7 @@ class BaseOptimizerPhase(BasePhase):
 
         n_epochs = int(self.spec.config.get("n_epochs", 1))
         save_interval = int(self.spec.config.get("save_interval", 10))
+        log_interval = int(self.spec.config.get("log_interval", save_interval))
         ode_method = self.spec.config.get("ode_method", "dopri5")
         ode_args = copy.deepcopy(self.spec.config.get("ode_args", {}))
 
@@ -737,6 +893,24 @@ class BaseOptimizerPhase(BasePhase):
             local_hist["valid_total"].append(valid_total)
             self._maybe_update_best(model_artifact.model, trainer_state, history, local_hist)
 
+            should_log = (
+                local_epoch == 0
+                or trainer_state.converged
+                or local_epoch == n_epochs - 1
+                or (log_interval > 0 and trainer_state.epoch % log_interval == 0)
+            )
+            if should_log:
+                current_lr = float(optimizer_state.optimizer.param_groups[0]["lr"])
+                logger.info(
+                    "Epoch %d/%d | train_total=%.4e | valid_total=%.4e | best_valid=%.4e | lr=%.2e",
+                    local_epoch + 1,
+                    n_epochs,
+                    train_total,
+                    valid_total,
+                    trainer_state.best_loss["valid_total"],
+                    current_lr,
+                )
+
             if trainer_state.epoch % save_interval == 0 or trainer_state.converged or local_epoch == n_epochs - 1:
                 self._update_prediction_history(
                     model_artifact.model,
@@ -745,6 +919,16 @@ class BaseOptimizerPhase(BasePhase):
                     history,
                     epoch=trainer_state.epoch - 1,
                     ode_method=ode_method,
+                )
+                self._write_progress_plots(
+                    model_artifact=model_artifact,
+                    history=history,
+                    phase_context=phase_context,
+                    run_name=run_name,
+                    logger=logger,
+                    hist_entries=[*history.hist, copy.deepcopy(local_hist)],
+                    crit_name=optimizer_state.criteria_names[-1],
+                    state_dict=model_artifact.model.state_dict(),
                 )
                 if trainer_state.converged:
                     break
@@ -1129,6 +1313,7 @@ class BestModelExportPhase(BasePhase):
         model_artifact = artifacts.require("model", ModelArtifact)
         history = self._ensure_history_artifact(artifacts)
         optimizer_state = artifacts.get("optimizer_state")
+        export_state = self._select_export_model_state_dict(model_artifact, history)
         payload = {
             "config": self.config,
             "device": self.device,
@@ -1138,7 +1323,7 @@ class BestModelExportPhase(BasePhase):
             "crit": copy.deepcopy(history.crit),
             "epoch_times": copy.deepcopy(history.epoch_times),
             "converged": trainer_state.converged,
-            "model_state_dict": copy.deepcopy(model_artifact.model.state_dict()),
+            "model_state_dict": export_state,
             "train_md": copy.deepcopy(model_artifact.train_md),
             "valid_md": copy.deepcopy(model_artifact.valid_md),
         }
@@ -1231,6 +1416,24 @@ class SummaryExportPhase(BasePhase):
         np.savez_compressed(output_path, **results)
         exports = self._ensure_export_artifact(artifacts)
         exports.outputs["summary"] = output_path
+        plot_hist(
+            copy.deepcopy(history.hist),
+            copy.deepcopy(history.crit),
+            None if evaluation is None else evaluation.criterion_name,
+            run_name,
+            ifclose=True,
+            prefix=self.execution_services.checkpoint_prefix,
+        )
+        exports.outputs["history_plot"] = self.execution_services.checkpoint_file(f"{run_name}_history.png")
+        prediction_path = self._export_prediction_plot(
+            model_artifact=artifacts.require("model", ModelArtifact),
+            history=history,
+            phase_context=phase_context,
+            run_name=run_name,
+            logger=logger,
+        )
+        if prediction_path is not None:
+            exports.outputs["prediction_plot"] = prediction_path
         metrics = {"exports_written": float(len(exports.outputs))}
         record = self._build_phase_record(trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch)
         trainer_state.phase_records.append(record)
