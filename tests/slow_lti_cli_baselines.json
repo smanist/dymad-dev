@@ -1,11 +1,146 @@
 {
+  "kbf_cv": {
+    "metrics": {
+      "best_valid_total": 1.4972914641475654e-07,
+      "crit_train_last": 1.7973835610973765e-06,
+      "crit_valid_last": 1.2429281923687086e-06,
+      "final_valid_loss": 1.4972914641475654e-07,
+      "rmse": 0.016949527080583802
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "crit_epoch_count": 30,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "model_name_prefix": "lti_kbf",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
+  "kbf_ln": {
+    "metrics": {
+      "best_valid_total": 1.14746023882617e-06,
+      "crit_train_last": 6.83006078361359e-08,
+      "crit_valid_last": 1.8813592816968594e-07,
+      "final_valid_loss": 1.14746023882617e-06,
+      "rmse": 0.024512470921826048
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "crit_epoch_count": 1,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "model_name_prefix": "lti_kbf_ln",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
+  "kbf_mcri": {
+    "metrics": {
+      "best_valid_total": 6.210726866129335e-08,
+      "crit_train_last": 2.4953915669923e-11,
+      "crit_valid_last": 5.368740174649389e-11,
+      "final_valid_loss": 6.210726866129335e-08,
+      "rmse": 0.01568127649473851
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "crit_epoch_count": 25,
+      "crit_name": "wmse",
+      "crit_series_count": 2,
+      "hist_count": 2,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "model_name_prefix": "lti_kbf_mcri",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
   "kbf_node": {
     "metrics": {
-      "best_valid_total": 8.412002865110235e-12,
-      "crit_train_last": 9.002259875046104e-12,
-      "crit_valid_last": 1.2070433194621977e-11,
-      "final_valid_loss": 9.834391981322632e-12,
-      "rmse": 0.03378457767884563
+      "best_valid_total": 4.593148617004772e-08,
+      "crit_train_last": 4.49207355757153e-08,
+      "crit_valid_last": 9.543938261913354e-08,
+      "final_valid_loss": 4.593148617004772e-08,
+      "rmse": 0.01812598182967016
     },
     "summary_signature": {
       "best_valid_loss_keys": [
@@ -44,11 +179,11 @@
   },
   "kbf_two": {
     "metrics": {
-      "best_valid_total": 1.0230048985704343e-07,
-      "crit_train_last": 2.1065632438421744e-07,
-      "crit_valid_last": 2.801438938604406e-07,
-      "final_valid_loss": 1.0230048985704343e-07,
-      "rmse": 0.024373362492634623
+      "best_valid_total": 2.999893666810749e-08,
+      "crit_train_last": 8.922264704835925e-09,
+      "crit_valid_last": 1.7447656652791466e-09,
+      "final_valid_loss": 2.999893666810749e-08,
+      "rmse": 0.021568702625279632
     },
     "summary_signature": {
       "best_valid_loss_keys": [
@@ -89,13 +224,103 @@
       ]
     }
   },
+  "kbf_wf": {
+    "metrics": {
+      "best_valid_total": 3.312481169359671e-07,
+      "crit_train_last": 0.000255383929470554,
+      "crit_valid_last": 0.00026530621107667685,
+      "final_valid_loss": 3.312481169359671e-07,
+      "rmse": 0.015511365016687786
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "crit_epoch_count": 50,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "model_name_prefix": "lti_kbf_wf",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
+  "ldm_node": {
+    "metrics": {
+      "best_valid_total": 0.06670358777046204,
+      "crit_train_last": 0.14622743427753448,
+      "crit_valid_last": 0.4481397867202759,
+      "final_valid_loss": 0.26498550176620483,
+      "rmse": 1.3020434650693087
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "crit_epoch_count": 50,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "model_name_prefix": "lti_ldm_node",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
   "ldm_wf": {
     "metrics": {
-      "best_valid_total": 0.02617902122437954,
-      "crit_train_last": 6.025991388014518e-05,
-      "crit_valid_last": 9.080702147912234e-05,
-      "final_valid_loss": 0.026179052889347076,
-      "rmse": 0.04213552507928428
+      "best_valid_total": 0.0236019529402256,
+      "crit_train_last": 0.0009561689803376794,
+      "crit_valid_last": 0.0002629851514939219,
+      "final_valid_loss": 0.023603644222021103,
+      "rmse": 0.11086455558870344
     },
     "summary_signature": {
       "best_valid_loss_keys": [
@@ -121,6 +346,96 @@
         "valid_total"
       ],
       "model_name_prefix": "lti_ldm_wf",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
+  "lti_ln": {
+    "metrics": {
+      "best_valid_total": 9.706164973977138e-07,
+      "crit_train_last": 1.0441545583717016e-07,
+      "crit_valid_last": 9.961895841570367e-08,
+      "final_valid_loss": 9.706164973977138e-07,
+      "rmse": 0.009896923808123705
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "crit_epoch_count": 1,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "model_name_prefix": "lti_lti_ln",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
+  "lti_wf": {
+    "metrics": {
+      "best_valid_total": 2.696329204354697e-07,
+      "crit_train_last": 1.4894483228999889e-06,
+      "crit_valid_last": 1.503973180660978e-06,
+      "final_valid_loss": 2.696329204354697e-07,
+      "rmse": 0.03632316533572833
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "crit_epoch_count": 50,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "model_name_prefix": "lti_lti_wf",
       "top_level_keys": [
         "avg_epoch_time",
         "best_valid_loss",

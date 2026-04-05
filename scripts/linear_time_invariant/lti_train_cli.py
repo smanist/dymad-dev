@@ -1,6 +1,7 @@
 import argparse
 import os
 from pathlib import Path
+import random
 import shutil
 
 import matplotlib.pyplot as plt
@@ -62,6 +63,14 @@ cases = [
 DEFAULT_CASES = [0, 1, 2, 3, 4, 5, 6]
 
 
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Run LTI training cases.")
     parser.add_argument(
@@ -84,6 +93,11 @@ def parse_args():
         "--workdir",
         type=Path,
         help="Run in a separate working directory and stage the needed YAML files there.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        help="Set random seeds for reproducible runs.",
     )
     parser.add_argument("--no-train", action="store_true", help="Skip training.")
     parser.add_argument("--no-plot", action="store_true", help="Skip summary plotting.")
@@ -168,6 +182,8 @@ def predict(selected):
 
 def main():
     args = parse_args()
+    if args.seed is not None:
+        set_seed(args.seed)
     root = BASE_DIR if args.workdir is None else args.workdir.resolve()
     if args.workdir is not None:
         prepare_workdir(root)

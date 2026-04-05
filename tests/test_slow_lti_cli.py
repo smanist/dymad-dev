@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 import os
@@ -13,7 +13,7 @@ import pytest
 import torch
 
 from dymad.io import load_model
-from dymad.models import KBF, LDM
+from dymad.models import KBF, LDM, LTI
 from dymad.utils import TrajectorySampler
 
 
@@ -21,6 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "linear_time_invariant"
 BASELINE_PATH = Path(__file__).with_name("slow_lti_cli_baselines.json")
 SAFETY_FACTOR = 1.5
+TEST_SEED = 12345
 ABS_TOLERANCES = {
     "best_valid_total": 1.0e-12,
     "final_valid_loss": 1.0e-12,
@@ -61,7 +62,7 @@ class SlowLTICase:
     idx: int
     model_name: str
     model_class: type
-    expected_crit_name: str | None = "dynamics"
+    metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
     def script_path(self) -> Path:
@@ -80,7 +81,7 @@ class SlowLTICase:
         return Path(self.run_dir_name) / f"{self.run_dir_name}_summary.npz"
 
 
-CASES = [
+SLOW_CASES = [
     SlowLTICase(
         script_name="lti_train_cli.py",
         idx=0,
@@ -94,15 +95,63 @@ CASES = [
         model_class=KBF,
     ),
     SlowLTICase(
+        script_name="lti_train_cli.py",
+        idx=1,
+        model_name="ldm_node",
+        model_class=LDM,
+    ),
+    SlowLTICase(
+        script_name="lti_train_cli.py",
+        idx=2,
+        model_name="kbf_wf",
+        model_class=KBF,
+    ),
+    SlowLTICase(
+        script_name="lti_train_cli.py",
+        idx=4,
+        model_name="kbf_ln",
+        model_class=KBF,
+    ),
+    SlowLTICase(
+        script_name="lti_train_cli.py",
+        idx=5,
+        model_name="lti_wf",
+        model_class=LTI,
+    ),
+    SlowLTICase(
+        script_name="lti_train_cli.py",
+        idx=6,
+        model_name="lti_ln",
+        model_class=LTI,
+        metric_factors={"rmse": 5.0},
+    ),
+    SlowLTICase(
         script_name="lti_multi_cli.py",
         idx=0,
         model_name="kbf_two",
+        model_class=KBF,
+    ),
+    SlowLTICase(
+        script_name="lti_multi_cli.py",
+        idx=1,
+        model_name="kbf_mcri",
+        model_class=KBF,
+    ),
+]
+
+EXTRA_SLOW_CASES = [
+    SlowLTICase(
+        script_name="lti_mp_cli.py",
+        idx=0,
+        model_name="kbf_cv",
         model_class=KBF,
     ),
 ]
 
 
 def _gaussian_eval_sample():
+    np.random.seed(TEST_SEED)
+    torch.manual_seed(TEST_SEED)
     sampler = TrajectorySampler(
         f,
         g,
@@ -143,6 +192,8 @@ def _run_case(case: SlowLTICase, workdir: Path) -> None:
             str(case.idx),
             "--workdir",
             str(workdir),
+            "--seed",
+            str(TEST_SEED),
             "--no-plot",
             "--no-predict",
             "--no-show",
@@ -158,8 +209,9 @@ def _load_baselines() -> dict:
         return json.load(fh)
 
 
-def _scaled_limit(metric_name: str, baseline_value: float) -> float:
-    return max(baseline_value * SAFETY_FACTOR, baseline_value + ABS_TOLERANCES[metric_name])
+def _scaled_limit(case: SlowLTICase, metric_name: str, baseline_value: float) -> float:
+    factor = case.metric_factors.get(metric_name, SAFETY_FACTOR)
+    return max(baseline_value * factor, baseline_value + ABS_TOLERANCES[metric_name])
 
 
 def _load_summary(summary_path: Path) -> dict:
@@ -249,9 +301,7 @@ def baseline_store(request):
         fh.write("\n")
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize("case", CASES, ids=lambda case: case.model_name)
-def test_lti_cli_training_regression(case: SlowLTICase, tmp_path: Path, request, baseline_store):
+def _run_and_check(case: SlowLTICase, tmp_path: Path, request, baseline_store):
     _run_case(case, tmp_path)
 
     checkpoint_path = tmp_path / case.checkpoint_path
@@ -271,4 +321,16 @@ def test_lti_cli_training_regression(case: SlowLTICase, tmp_path: Path, request,
     baseline = _load_baselines()[case.model_name]
     _assert_summary_against_baseline(summary, case, baseline)
     for metric_name, baseline_value in baseline["metrics"].items():
-        assert record["metrics"][metric_name] <= _scaled_limit(metric_name, baseline_value)
+        assert record["metrics"][metric_name] <= _scaled_limit(case, metric_name, baseline_value)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case", SLOW_CASES, ids=lambda case: case.model_name)
+def test_lti_cli_training_regression(case: SlowLTICase, tmp_path: Path, request, baseline_store):
+    _run_and_check(case, tmp_path, request, baseline_store)
+
+
+@pytest.mark.extra_slow
+@pytest.mark.parametrize("case", EXTRA_SLOW_CASES, ids=lambda case: case.model_name)
+def test_lti_cli_training_regression_extra_slow(case: SlowLTICase, tmp_path: Path, request, baseline_store):
+    _run_and_check(case, tmp_path, request, baseline_store)
