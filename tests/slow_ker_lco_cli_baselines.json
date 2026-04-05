@@ -1,0 +1,131 @@
+{
+  "dkm_ln": {
+    "metrics": {
+      "best_valid_total": 2.031466406530818e-12,
+      "crit_train_last": 4.066867528791676e-12,
+      "crit_valid_last": 3.950325457260069e-12,
+      "final_valid_loss": 2.031466406530818e-12,
+      "rmse": 1.2253918707099624e-05
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "crit_epoch_count": 1,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "model_name_prefix": "ker_dkm_ln",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
+  "dks_ln": {
+    "metrics": {
+      "best_valid_total": 6.326902372659529e-13,
+      "crit_train_last": 1.442080747467823e-13,
+      "crit_valid_last": 2.2401291366746246e-10,
+      "final_valid_loss": 6.326902372659529e-13,
+      "rmse": 1.6423237914672594e-05
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "crit_epoch_count": 1,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "model_name_prefix": "ker_dks_ln",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
+  "km_ln": {
+    "metrics": {
+      "best_valid_total": 3.104660264023993e-05,
+      "crit_train_last": 3.284103600093654e-05,
+      "crit_valid_last": 3.558906847601952e-05,
+      "final_valid_loss": 3.104660264023993e-05,
+      "rmse": 0.05018468877599669
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "crit_epoch_count": 1,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "model_name_prefix": "ker_km_ln",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  }
+}
