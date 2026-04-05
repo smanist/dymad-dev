@@ -8,6 +8,15 @@ from dymad.utils import adj_to_edge, TrajectorySampler
 
 HERE = Path(__file__).parent
 
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--record-baselines",
+        action="store_true",
+        default=False,
+        help="Record baseline metrics for slow regression tests instead of comparing against them.",
+    )
+
 A = np.array([
             [0., 1.],
             [-1., -0.1]])

@@ -1,6 +1,7 @@
 import argparse
 import os
 from pathlib import Path
+import shutil
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -59,6 +60,11 @@ def parse_args():
         action="store_true",
         help="Print available case indices and exit.",
     )
+    parser.add_argument(
+        "--workdir",
+        type=Path,
+        help="Run in a separate working directory and stage the needed YAML files there.",
+    )
     parser.add_argument("--no-train", action="store_true", help="Skip training.")
     parser.add_argument("--no-plot", action="store_true", help="Skip summary plotting.")
     parser.add_argument("--no-predict", action="store_true", help="Skip prediction plotting.")
@@ -79,11 +85,40 @@ def print_cases():
         print(f"{idx}: {case['name']} [{case['config']}]")
 
 
-def train(selected):
+def prepare_workdir(root: Path):
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "data").mkdir(exist_ok=True)
+    shutil.copy2(BASE_DIR / "lti_data.yaml", root / "lti_data.yaml")
+    for case in cases:
+        src = BASE_DIR / case["config"]
+        dst = root / case["config"]
+        if not dst.exists():
+            shutil.copy2(src, dst)
+
+
+def generate_data(root: Path):
+    (root / "data").mkdir(exist_ok=True)
+    config_chr = {
+        "control" : {
+            "kind": "chirp",
+            "params": {
+                "t1": 4.0,
+                "freq_range": (0.5, 2.0),
+                "amp_range": (0.5, 1.0),
+                "phase_range": (0.0, 360.0)}}}
+    sampler = TrajectorySampler(f, g, config=BASE_DIR / 'lti_data.yaml', config_mod=config_chr)
+    ts, xs, us, ys = sampler.sample(t_grid, batch=B)
+    out_path = root / 'data' / 'lti.npz'
+    np.savez_compressed(out_path, t=ts, x=ys, u=us)
+    print(f"Generated data: {out_path}")
+    return out_path
+
+
+def train(selected, root: Path):
     for idx in selected:
         Model = cases[idx]['model']
         Trainer = cases[idx]['trainer']
-        config_path = cases[idx]['config']
+        config_path = root / cases[idx]['config']
 
         trainer = Trainer(config_path, Model)
         trainer.train()
@@ -118,7 +153,10 @@ def predict(selected):
 
 def main():
     args = parse_args()
-    os.chdir(BASE_DIR)
+    root = BASE_DIR if args.workdir is None else args.workdir.resolve()
+    if args.workdir is not None:
+        prepare_workdir(root)
+    os.chdir(root)
 
     if args.list_cases:
         print_cases()
@@ -126,8 +164,11 @@ def main():
 
     selected = resolve_indices(args.case)
 
+    data_path = root / 'data' / 'lti.npz'
+    if args.workdir is not None and not data_path.exists():
+        generate_data(root)
     if not args.no_train:
-        train(selected)
+        train(selected, root)
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:
