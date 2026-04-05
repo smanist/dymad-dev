@@ -112,13 +112,10 @@ trn_ln = {
     "n_epochs": 1,
     "save_interval": 100,
     "load_checkpoint": False,
-    "ls_update": {
-        "method": "raw",
-        "interval": 500,
-        "times": 1}
-        }
+    "method": "raw",
+}
 trn_l1 = copy.deepcopy(trn_ln)
-trn_l1["ls_update"].update({"kwargs": {"order": 1}})
+trn_l1["kwargs"] = {"order": 1}
 
 config_path = 'ker_model.yaml'
 

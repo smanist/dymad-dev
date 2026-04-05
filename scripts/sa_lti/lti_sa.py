@@ -8,7 +8,7 @@ from dymad.io import load_model
 from dymad.models import DKBF, KBF
 from dymad.numerics import complex_plot
 from dymad.sako import estimate_pseudospectrum, resolvent_analysis, SpectralAnalysis
-from dymad.training import LinearTrainer, NODETrainer
+from dymad.training import LinearTrainer, NODETrainer, StackedTrainer
 from dymad.utils import plot_trajectory, TrajectorySampler
 
 B = 64
@@ -74,39 +74,60 @@ trn_nd = {
     "decay_rate": 0.999,
     "sweep_lengths": [2, 4],
     "sweep_epoch_step": 100,
-    "ls_update": {
-        "method": "truncated_log",
-        "params": 2,
-        "interval": 50,
-        "times": 1}
-        }
+}
 trn_dt = copy.deepcopy(trn_nd)
-trn_dt["ls_update"]["method"] = "truncated"
 ref = {
     "n_epochs": 1,
     "save_interval": 1,
     "load_checkpoint": False,}
 trn_ln = {
-    "ls_update": {
-        "method": "full"}}
+    "method": "full",
+}
 trn_ln.update(ref)
 trn_tr = {
-    "ls_update": {
-        "method": "truncated",
-        "params": 0.999}}
+    "method": "truncated",
+    "params": 0.999,
+}
 trn_tr.update(ref)
 trn_sa = {
-    "ls_update": {
-        "method": "sako",
-        "params": 9,
-        "remove_one": True}}
+    "method": "sako",
+    "params": 9,
+    "kwargs": {"remove_one": True},
+}
 trn_sa.update(ref)
+
+
+def _optimizer_phase(trainer, cfg):
+    phase = dict(cfg)
+    phase["type"] = "optimizer"
+    phase["trainer"] = trainer
+    return phase
+
+
+def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=True):
+    phase = {"type": "linear_solve", "method": method, "reset_optimizer": reset_optimizer}
+    if params is not None:
+        phase["params"] = params
+    if kwargs is not None:
+        phase["kwargs"] = kwargs
+    return phase
+
+
+def _alternating_schedule(trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None):
+    phases = []
+    for n_epochs in chunk_epochs:
+        phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs))
+        chunk_cfg = dict(base_cfg)
+        chunk_cfg["n_epochs"] = n_epochs
+        phases.append(_optimizer_phase(trainer, chunk_cfg))
+    phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs))
+    return phases
 
 config_path = 'sa_model.yaml'
 
 cfgs = [
-    ('kbf_nd',  KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
-    ('dkbf_nd', DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
+    ('kbf_nd',  KBF,  StackedTrainer,  {"model": mdl_kb, "phases" : _alternating_schedule("NODE", trn_nd, [50, 550], method="truncated_log", params=2)}),
+    ('dkbf_nd', DKBF, StackedTrainer,  {"model": mdl_kb, "phases" : _alternating_schedule("NODE", trn_dt, [50, 550], method="truncated", params=2)}),
     ('dkbf_ln', DKBF, LinearTrainer,   {"model": mdl_kl, "transform_x" : trn_kl, "training" : trn_ln}),
     ('dkbf_tr', DKBF, LinearTrainer,   {"model": mdl_kl, "transform_x" : trn_kl, "training" : trn_tr}),
     ('dkbf_sa', DKBF, LinearTrainer,   {"model": mdl_kl, "transform_x" : trn_kl, "training" : trn_sa}),

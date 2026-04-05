@@ -9,7 +9,7 @@ from dymad.io import load_model
 from dymad.exec.workflow import CompatibilityExecutor
 from dymad.models import DKBF, KBF
 from dymad.sako import SpectralAnalysis, SpectralAnalysisAdapter, SpectralPlottingAdapter
-from dymad.training import LinearTrainer, NODETrainer
+from dymad.training import LinearTrainer, NODETrainer, StackedTrainer
 
 mdl_kb = {
     "name" : 'sa_model',
@@ -43,52 +43,75 @@ trn_nd1 = {
     "decay_rate": 0.999,
     "sweep_lengths": [2, 4],
     "sweep_epoch_step": 100,
-    "ls_update": {
-        "method": "truncated_log",
-        "params": 2,
-        "interval": 50,
-        "times": 1}
-        }
+}
 trn_nd2 = copy.deepcopy(trn_nd1)
-trn_nd2["ls_update"]["method"] = "full_log"
 
 trn_dt1 = copy.deepcopy(trn_nd1)
-trn_dt1["ls_update"]["method"] = "full"
 trn_dt2 = copy.deepcopy(trn_nd1)
-trn_dt2["ls_update"]["method"] = "truncated"
 trn_dt3 = copy.deepcopy(trn_nd1)
-trn_dt3["ls_update"]["method"] = "sako"
 
 ref = {
     "n_epochs": 1,
     "save_interval": 1,
     "load_checkpoint": False,}
 trn_ln = {
-    "ls_update": {
-        "method": "full"}}
+    "method": "full",
+}
 trn_ln.update(ref)
 trn_tr = {
-    "ls_update": {
-        "method": "truncated",
-        "params": 0.999}}
+    "method": "truncated",
+    "params": 0.999,
+}
 trn_tr.update(ref)
 trn_sa = {
-    "ls_update": {
-        "method": "sako",
-        "params": 9,
-        "remove_one": True}}
+    "method": "sako",
+    "params": 9,
+    "kwargs": {"remove_one": True},
+}
 trn_sa.update(ref)
+
+
+def _optimizer_phase(trainer, cfg):
+    phase = copy.deepcopy(cfg)
+    phase.update({"type": "optimizer", "trainer": trainer})
+    return phase
+
+
+def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=True):
+    phase = {"type": "linear_solve", "method": method, "reset_optimizer": reset_optimizer}
+    if params is not None:
+        phase["params"] = params
+    if kwargs:
+        phase["kwargs"] = copy.deepcopy(kwargs)
+    return phase
+
+
+def _spectral_schedule(method, params=None, *, kwargs=None):
+    chunk = copy.deepcopy(trn_nd1)
+    chunk["n_epochs"] = 50
+    return [
+        {
+            "repeat": {
+                "times": 2,
+                "phases": [
+                    _linear_solve_phase(method, params=params, kwargs=kwargs),
+                    _optimizer_phase("NODE", chunk),
+                ],
+            }
+        },
+        _linear_solve_phase(method, params=params, kwargs=kwargs),
+    ]
 
 config_path = 'sa_model.yaml'
 
 dt = 0.5
 
 cfgs = [
-    ('kbf_nd1',  KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd1}),
-    ('kbf_nd2',  KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd2}),
-    ('dkbf_nd1', DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt1}),
-    ('dkbf_nd2', DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt2}),
-    ('dkbf_nd3', DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt3}),
+    ('kbf_nd1',  KBF,  StackedTrainer,  {"model": mdl_kb, "phases" : _spectral_schedule("truncated_log", params=2)}),
+    ('kbf_nd2',  KBF,  StackedTrainer,  {"model": mdl_kb, "phases" : _spectral_schedule("full_log")}),
+    ('dkbf_nd1', DKBF, StackedTrainer,  {"model": mdl_kb, "phases" : _spectral_schedule("full")}),
+    ('dkbf_nd2', DKBF, StackedTrainer,  {"model": mdl_kb, "phases" : _spectral_schedule("truncated", params=2)}),
+    ('dkbf_nd3', DKBF, StackedTrainer,  {"model": mdl_kb, "phases" : _spectral_schedule("sako", params=2)}),
     ('dkbf_ln',  DKBF, LinearTrainer,   {"model": mdl_kl, "transform_x" : trn_kl, "training" : trn_ln}),
     ('dkbf_tr',  DKBF, LinearTrainer,   {"model": mdl_kl, "transform_x" : trn_kl, "training" : trn_tr}),
     ('dkbf_sa',  DKBF, LinearTrainer,   {"model": mdl_kl, "transform_x" : trn_kl, "training" : trn_sa}),

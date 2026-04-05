@@ -17,7 +17,7 @@ import torch
 
 from dymad.io import load_model
 from dymad.models import DGKBF, DGKM, DGKMSK, DGLDM, GKBF, GKM, GLDM
-from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
+from dymad.training import LinearTrainer, NODETrainer, StackedTrainer, WeakFormTrainer
 
 mdl_kb = {
     "name" : 'ltga_model',
@@ -85,8 +85,6 @@ trn_nd = {
     "ode_args": {
         "rtol": 1.e-7,
         "atol": 1.e-9}}
-trn_ndls = copy.deepcopy(ls_opt)
-trn_ndls.update(trn_nd)
 trn_dt = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -96,32 +94,66 @@ trn_dt = {
     "sweep_lengths": [3, 5],
     "sweep_epoch_step": 5,
     "chop_mode": "initial"}
-trn_dtls = copy.deepcopy(ls_opt)
-trn_dtls.update(trn_dt)
 trn_ln = {
     "n_epochs": 1,
     "save_interval": 1,
     "load_checkpoint": False,
     "learning_rate": 1e-2,
     "decay_rate": 0.999,
-    "ls_update": {
     "method": "truncated",
-    "params": 2}}
+    "params": 2,
+}
 trn_l2 = copy.deepcopy(trn_ln)
-trn_l2['ls_update'] = {"method": "full"}
+trn_l2["method"] = "full"
+trn_l2.pop("params")
+
+
+def _optimizer_phase(trainer, cfg):
+    phase = copy.deepcopy(cfg)
+    phase.update({"type": "optimizer", "trainer": trainer})
+    return phase
+
+
+def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=True):
+    phase = {"type": "linear_solve", "method": method, "reset_optimizer": reset_optimizer}
+    if params is not None:
+        phase["params"] = params
+    if kwargs:
+        phase["kwargs"] = copy.deepcopy(kwargs)
+    return phase
+
+
+def _mixed_schedule(trainer, base_cfg):
+    chunk = copy.deepcopy(base_cfg)
+    chunk["n_epochs"] = 3
+    tail = copy.deepcopy(base_cfg)
+    tail["n_epochs"] = 4
+    return [
+        _optimizer_phase(trainer, chunk),
+        {
+            "repeat": {
+                "times": 2,
+                "phases": [
+                    _linear_solve_phase("full"),
+                    _optimizer_phase(trainer, chunk),
+                ],
+            }
+        },
+        _optimizer_phase(trainer, tail),
+    ]
 
 cfgs = [
     ('ldm_wf',    GLDM,  WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
     ('ldm_node',  GLDM,  NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
     ('kbf_wf',    GKBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
     ('kbf_node',  GKBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
-    ('kbf_wfls',  GKBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wfls}),
-    ('kbf_ndls',  GKBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_ndls}),
+    ('kbf_wfls',  GKBF,  StackedTrainer,  {"model": mdl_kb, "phases" : _mixed_schedule("Weak", trn_wf)}),
+    ('kbf_ndls',  GKBF,  StackedTrainer,  {"model": mdl_kb, "phases" : _mixed_schedule("NODE", trn_nd)}),
     ('kbf_ln',    GKBF,  LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
     ('km_ln',     GKM,   LinearTrainer,   {"model": mdl_km, "training" : trn_l2}),
     ('dldm_nd',   DGLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_dt}),
     ('dkbf_nd',   DGKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
-    ('dkbf_ndls', DGKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dtls}),
+    ('dkbf_ndls', DGKBF, StackedTrainer,  {"model": mdl_kb, "phases" : _mixed_schedule("NODE", trn_dt)}),
     ('dkbf_ln',   DGKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
     ('dkm_ln',    DGKM,  LinearTrainer,   {"model": mdl_km, "training" : trn_l2}),
     ('dkmsk_ln',  DGKMSK,LinearTrainer,   {"model": mdl_km, "training" : trn_l2}),

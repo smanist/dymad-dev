@@ -101,8 +101,6 @@ trn_nd = {
         "rtol": 1.e-7,
         "atol": 1.e-9}
     }
-trn_ndls = copy.deepcopy(ls_opt)
-trn_ndls.update(trn_nd)
 trn_dt = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -112,18 +110,15 @@ trn_dt = {
     "sweep_lengths": [3, 5],
     "sweep_epoch_step": 5,
     "chop_mode": "initial"}
-trn_dtls = copy.deepcopy(ls_opt)
-trn_dtls.update(trn_dt)
 trn_ln = {
     "n_epochs": 1,
     "save_interval": 1,
     "load_checkpoint": False,
     "learning_rate": 5e-3,
     "decay_rate": 0.999,
-    "ls_update": {
-        "method": "truncated",
-        "params": 2
-    }}
+    "method": "truncated",
+    "params": 2,
+}
 trn_phase = [copy.deepcopy(trn_wf),
             copy.deepcopy(trn_nd),]
 trn_phase[0]["trainer"] = "Weak"
@@ -137,17 +132,52 @@ cv = {
     "metric": "total"
 }
 
+
+def _optimizer_phase(trainer, cfg):
+    phase = copy.deepcopy(cfg)
+    phase.update({"type": "optimizer", "trainer": trainer})
+    return phase
+
+
+def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=True):
+    phase = {"type": "linear_solve", "method": method, "reset_optimizer": reset_optimizer}
+    if params is not None:
+        phase["params"] = params
+    if kwargs:
+        phase["kwargs"] = copy.deepcopy(kwargs)
+    return phase
+
+
+def _mixed_schedule(trainer, base_cfg):
+    chunk = copy.deepcopy(base_cfg)
+    chunk["n_epochs"] = 3
+    tail = copy.deepcopy(base_cfg)
+    tail["n_epochs"] = 4
+    return [
+        _optimizer_phase(trainer, chunk),
+        {
+            "repeat": {
+                "times": 2,
+                "phases": [
+                    _linear_solve_phase("truncated", params=2),
+                    _optimizer_phase(trainer, chunk),
+                ],
+            }
+        },
+        _optimizer_phase(trainer, tail),
+    ]
+
 cfgs = [
     ('ldm_wf',    LDM,  WeakFormTrainer, {"model": mdl_ld, "criterion": crit_part, "training" : trn_wf}),
     ('ldm_node',  LDM,  NODETrainer,     {"model": mdl_ld, "criterion": crit_full, "training" : trn_nd}),
     ('kbf_wf',    KBF,  WeakFormTrainer, {"model": mdl_kb, "prediction_criterion": crit_pred, "training" : trn_wf}),
     ('kbf_node',  KBF,  StackedTrainer,  {"model": mdl_kb, "phases" : trn_phase}),
-    ('kbf_wfls',  KBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wfls}),
-    ('kbf_ndls',  KBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_ndls}),
+    ('kbf_wfls',  KBF,  StackedTrainer,  {"model": mdl_kb, "phases" : _mixed_schedule("Weak", trn_wf)}),
+    ('kbf_ndls',  KBF,  StackedTrainer,  {"model": mdl_kb, "phases" : _mixed_schedule("NODE", trn_nd)}),
     ('kbf_ln',    KBF,  LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
     ('dldm_nd',   DLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_dt}),
     ('dkbf_nd',   DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt, "cv": cv}),
-    ('dkbf_ndls', DKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dtls}),
+    ('dkbf_ndls', DKBF, StackedTrainer,  {"model": mdl_kb, "phases" : _mixed_schedule("NODE", trn_dt)}),
     ('dkbf_ln',   DKBF, LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
     ]
 

@@ -33,7 +33,8 @@ criterion:
     weight: 1.0
 
 phases:
-  - trainer: 'Weak'
+  - type: 'optimizer'
+    trainer: 'Weak'
     n_epochs: 1000
     save_interval: 50
     learning_rate: 1e-2
@@ -43,7 +44,8 @@ phases:
       ordpol: 2
       ordint: 2
 
-  - trainer: 'NODE'
+  - type: 'optimizer'
+    trainer: 'NODE'
     n_epochs: 500
     save_interval: 20
     learning_rate: 1e-2

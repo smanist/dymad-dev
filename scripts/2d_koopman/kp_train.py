@@ -69,21 +69,16 @@ trn_nd = {
     "ode_args": {
         "rtol": 1.e-7,
         "atol": 1.e-9},
-    # "ls_update": {
-    #     "method": "full",
-    #     "interval": 200,
-    #     "times": 4}
-    }
+}
 trn_ln = {
     "n_epochs": 1,
     "save_interval": 1,
     "load_checkpoint": False,
     "learning_rate": 5e-3,
     "decay_rate": 0.999,
-    "ls_update": {
-        "method": "truncated",
-        "params": 8}
-    }
+    "method": "truncated",
+    "params": 8,
+}
 config_path = 'kp_model.yaml'
 
 cfgs = [

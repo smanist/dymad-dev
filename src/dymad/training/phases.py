@@ -4,6 +4,7 @@ import copy
 import logging
 import random
 import time
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Type
 
@@ -154,75 +155,40 @@ def _optimizer_spec_from_legacy(entry: Dict[str, Any], index: int, suffix: str =
     return OptimizerPhaseSpec(name=name, trainer=trainer, config=cfg)
 
 
-def _expand_legacy_ls_schedule(entry: Dict[str, Any], index: int) -> list[PhaseSpec]:
-    cfg = copy.deepcopy(entry)
-    ls_cfg = copy.deepcopy(cfg.pop("ls_update"))
-    trainer = _normalize_legacy_optimizer_name(cfg["trainer"])
-    if trainer == "Linear":
-        cfg["ls_update"] = ls_cfg
-        return [OptimizerPhaseSpec(name=cfg.get("name", f"phase_{index}"), trainer=trainer, config=cfg)]
+def _raise_legacy_ls_update_error() -> None:
+    raise PhaseSpecValidationError(
+        "'ls_update' is deprecated and no longer supported. "
+        "Use explicit 'type: linear_solve' phases, optionally inside a 'repeat' block."
+    )
 
-    n_epochs = int(cfg.get("n_epochs", 1))
-    alias_schedule = "interval" in ls_cfg or "times" in ls_cfg
-    interval = int(ls_cfg.get("update_interval", ls_cfg.get("interval", 1)))
-    if alias_schedule and "update_times" not in ls_cfg:
-        scheduled_updates = int(ls_cfg.get("times", 1))
-        start_with_ls = bool(ls_cfg.get("start_with_ls", True))
-        ls_positions = [0] if start_with_ls else []
-        ls_positions.extend(
-            position
-            for position in (interval * idx for idx in range(1, scheduled_updates + 1))
-            if position < n_epochs
-        )
-        if interval > 0 and n_epochs % interval == 0 and (not ls_positions or ls_positions[-1] != n_epochs):
-            ls_positions.append(n_epochs)
-    else:
-        update_times = int(ls_cfg.get("update_times", 1))
-        start_with_ls = bool(ls_cfg.get("start_with_ls", True))
-        ls_positions = []
-        next_position = 0 if start_with_ls else interval
-        while len(ls_positions) < update_times and next_position < n_epochs:
-            ls_positions.append(next_position)
-            next_position += interval
 
-    specs: list[PhaseSpec] = []
-    base_name = cfg.get("name", f"phase_{index}")
-    cursor = 0
-    ls_counter = 0
-    for position in ls_positions:
-        if position > cursor:
-            chunk_cfg = copy.deepcopy(cfg)
-            chunk_cfg["n_epochs"] = position - cursor
-            specs.append(
-                OptimizerPhaseSpec(
-                    name=f"{base_name}_chunk_{len(specs)}",
-                    trainer=trainer,
-                    config=chunk_cfg,
-                )
-            )
-            cursor = position
-        ls_counter += 1
-        specs.append(
-            LinearSolvePhaseSpec(
-                name=f"{base_name}_ls_{ls_counter}",
-                method=ls_cfg.get("method", "full"),
-                params=ls_cfg.get("params"),
-                kwargs=copy.deepcopy(ls_cfg.get("kwargs", {})),
-                reset_optimizer=ls_cfg.get("reset_optimizer", True),
-                config={"source_phase": base_name},
-            )
+def _with_repeat_name(entry: Dict[str, Any], index: int, suffix: str) -> Dict[str, Any]:
+    cloned = copy.deepcopy(entry)
+    if "repeat" in cloned:
+        repeat_cfg = copy.deepcopy(cloned["repeat"])
+        repeat_cfg.setdefault("name", f"repeat_{index}_{suffix}")
+        cloned["repeat"] = repeat_cfg
+        return cloned
+    base_name = cloned.get("name", f"phase_{index}")
+    cloned["name"] = f"{base_name}_{suffix}"
+    return cloned
+
+
+def _warn_if_repeat_contains_terminal_phase(spec: PhaseSpec, repeat_name: str) -> None:
+    if isinstance(spec, AnalysisPhaseSpec):
+        warnings.warn(
+            f"Repeat block '{repeat_name}' contains an analysis phase. "
+            "That is allowed, but analysis is usually more meaningful at the top level.",
+            UserWarning,
+            stacklevel=3,
         )
-    if cursor < n_epochs:
-        chunk_cfg = copy.deepcopy(cfg)
-        chunk_cfg["n_epochs"] = n_epochs - cursor
-        specs.append(
-            OptimizerPhaseSpec(
-                name=f"{base_name}_chunk_{len(specs)}",
-                trainer=trainer,
-                config=chunk_cfg,
-            )
+    if isinstance(spec, ExportPhaseSpec):
+        warnings.warn(
+            f"Repeat block '{repeat_name}' contains an export phase. "
+            "That is allowed, but export is usually more meaningful at the top level.",
+            UserWarning,
+            stacklevel=3,
         )
-    return specs
 
 
 def _normalize_explicit_phase(entry: Dict[str, Any], index: int) -> PhaseSpec:
@@ -265,6 +231,52 @@ def _normalize_explicit_phase(entry: Dict[str, Any], index: int) -> PhaseSpec:
     raise PhaseSpecValidationError(f"Unsupported explicit phase type '{phase_type}'.")
 
 
+def _normalize_phase_entry(entry: Dict[str, Any], index: int) -> list[PhaseSpec]:
+    if entry.get("ls_update") is not None:
+        _raise_legacy_ls_update_error()
+    if "repeat" in entry:
+        return _normalize_repeat_block(entry, index)
+    if "type" in entry:
+        return [_normalize_explicit_phase(entry, index)]
+    if "trainer" not in entry:
+        raise PhaseSpecValidationError(f"Phase entry {index} must define 'trainer', 'type', or 'repeat'.")
+    return [_optimizer_spec_from_legacy(entry, index)]
+
+
+def _normalize_repeat_block(entry: Dict[str, Any], index: int) -> list[PhaseSpec]:
+    if set(entry.keys()) != {"repeat"}:
+        invalid = ", ".join(sorted(key for key in entry.keys() if key != "repeat"))
+        raise PhaseSpecValidationError(
+            f"Repeat phase entry {index} may only contain the 'repeat' key; got extra keys: {invalid}."
+        )
+
+    repeat_cfg = entry["repeat"]
+    if not isinstance(repeat_cfg, dict):
+        raise PhaseSpecValidationError(f"Repeat phase entry {index} must map to a dictionary.")
+
+    if "times" not in repeat_cfg:
+        raise PhaseSpecValidationError(f"Repeat phase entry {index} must define 'times'.")
+    times = int(repeat_cfg["times"])
+    if times <= 0:
+        raise PhaseSpecValidationError(f"Repeat phase entry {index} must define a positive 'times' value.")
+
+    raw_phases = repeat_cfg.get("phases")
+    if not isinstance(raw_phases, list) or not raw_phases:
+        raise PhaseSpecValidationError(f"Repeat phase entry {index} must define a non-empty 'phases' list.")
+
+    repeat_name = repeat_cfg.get("name", f"repeat_{index}")
+    specs: list[PhaseSpec] = []
+    for iteration in range(times):
+        suffix = f"{repeat_name}_{iteration}"
+        for nested_index, nested_entry in enumerate(raw_phases):
+            named_entry = _with_repeat_name(nested_entry, nested_index, suffix)
+            nested_specs = _normalize_phase_entry(named_entry, nested_index)
+            for spec in nested_specs:
+                _warn_if_repeat_contains_terminal_phase(spec, repeat_name)
+            specs.extend(nested_specs)
+    return specs
+
+
 def normalize_phase_specs(config: Dict[str, Any]) -> list[PhaseSpec]:
     raw_phases = copy.deepcopy(config.get("phases"))
     if raw_phases is None:
@@ -277,15 +289,7 @@ def normalize_phase_specs(config: Dict[str, Any]) -> list[PhaseSpec]:
 
     specs: list[PhaseSpec] = []
     for index, entry in enumerate(raw_phases):
-        if "type" in entry:
-            specs.append(_normalize_explicit_phase(entry, index))
-            continue
-        if "trainer" not in entry:
-            raise PhaseSpecValidationError(f"Phase entry {index} must define 'trainer' or 'type'.")
-        if entry.get("ls_update"):
-            specs.extend(_expand_legacy_ls_schedule(entry, index))
-            continue
-        specs.append(_optimizer_spec_from_legacy(entry, index))
+        specs.extend(_normalize_phase_entry(entry, index))
 
     if not any(spec.kind == "analysis" for spec in specs):
         specs.append(AnalysisPhaseSpec(name="analysis"))
@@ -909,13 +913,12 @@ class LinearRegressionPhase(BaseOptimizerPhase):
         model: torch.nn.Module,
         phase_context: PhaseContext,
     ) -> LSUpdater:
-        ls_cfg = copy.deepcopy(self.spec.config.get("ls_update", {"method": "full"}))
         return LSUpdater(
-            method=ls_cfg.get("method", "full"),
+            method=self.spec.config.get("method", "full"),
             model=model,
             dt=phase_context.train_md["dt_and_n_steps"][0][0],
-            params=ls_cfg.get("params"),
-            **ls_cfg.get("kwargs", {}),
+            params=self.spec.config.get("params"),
+            **copy.deepcopy(self.spec.config.get("kwargs", {})),
         )
 
     def _compute_losses(

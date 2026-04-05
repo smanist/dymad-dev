@@ -5,7 +5,7 @@ import torch
 
 from dymad.io import load_model
 from dymad.models import DKM, DKMSK, KM
-from dymad.training import LinearTrainer, NODETrainer
+from dymad.training import LinearTrainer, NODETrainer, StackedTrainer
 from dymad.utils import plot_multi_trajs, TrajectorySampler
 
 B = 50
@@ -82,11 +82,8 @@ trn_ln = {
     "load_checkpoint": False,
     "learning_rate": 1e-2,
     "decay_rate": 0.999,
-    "ls_update": {
-        "method": "raw",
-        "interval": 500,
-        "times": 1}
-        }
+    "method": "raw",
+}
 trn_ct = {
     "n_epochs": 200,
     "save_interval": 50,
@@ -96,24 +93,41 @@ trn_ct = {
     "sweep_lengths": [4],
     "chop_mode": "initial",
     "chop_step": 0.5,
-    "ls_update": {
-        "method": "raw",
-        "interval": 50,
-        "times": 3,
-        "reset": False}
-        }
+}
 trn_dt = {
     "n_epochs": 400,
     "save_interval": 50,
     "load_checkpoint": False,
     "learning_rate": 1e-2,
     "decay_rate": 0.999,
-    "ls_update": {
-        "method": "raw",
-        "interval": 100,
-        "times": 5,
-        "reset": False}
-        }
+}
+
+
+def _optimizer_phase(trainer, cfg):
+    phase = dict(cfg)
+    phase["type"] = "optimizer"
+    phase["trainer"] = trainer
+    return phase
+
+
+def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=True):
+    phase = {"type": "linear_solve", "method": method, "reset_optimizer": reset_optimizer}
+    if params is not None:
+        phase["params"] = params
+    if kwargs is not None:
+        phase["kwargs"] = kwargs
+    return phase
+
+
+def _alternating_schedule(trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None, reset_optimizer=True):
+    phases = []
+    for n_epochs in chunk_epochs:
+        phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+        chunk_cfg = dict(base_cfg)
+        chunk_cfg["n_epochs"] = n_epochs
+        phases.append(_optimizer_phase(trainer, chunk_cfg))
+    phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+    return phases
 
 smpl = {'x0': {
     'kind': 'perturb',
@@ -123,11 +137,11 @@ config_path = 'ker_model.yaml'
 
 cfgs = [
     ('km_ln',  KM,     LinearTrainer,     {"model": mdl_kl, "training" : trn_ln}),
-    ('km_nd',  KM,     NODETrainer,       {"model": mdl_kl, "training" : trn_ct}),
+    ('km_nd',  KM,     StackedTrainer,    {"model": mdl_kl, "phases" : _alternating_schedule("NODE", trn_ct, [50, 50, 50, 50], method="raw", reset_optimizer=False)}),
     ('dkm_ln', DKM,    LinearTrainer,     {"model": mdl_kl, "training" : trn_ln}),
-    ('dkm_nd', DKM,    NODETrainer,       {"model": mdl_kl, "training" : trn_dt}),
+    ('dkm_nd', DKM,    StackedTrainer,    {"model": mdl_kl, "phases" : _alternating_schedule("NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False)}),
     ('dks_ln', DKMSK,  LinearTrainer,     {"model": mdl_kl, "training" : trn_ln}),
-    ('dks_nd', DKMSK,  NODETrainer,       {"model": mdl_kl, "training" : trn_dt}),
+    ('dks_nd', DKMSK,  StackedTrainer,    {"model": mdl_kl, "phases" : _alternating_schedule("NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False)}),
     ]
 
 # IDX = [0, 1, 2, 3, 4, 5]

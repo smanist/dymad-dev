@@ -82,9 +82,8 @@ trn_ln = {
     "load_checkpoint": False,
     "learning_rate": 1e-2,
     "decay_rate": 0.999,
-    "ls_update": {
-        "method": "truncated",
-        "params": 2}
+    "method": "truncated",
+    "params": 2,
 }
 config_path = 'ltga_model.yaml'
 

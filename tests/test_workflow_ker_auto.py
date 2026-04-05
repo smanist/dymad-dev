@@ -11,7 +11,7 @@ import torch
 
 from dymad.io import load_model
 from dymad.models import DKM, DKMSK, KM, KMM
-from dymad.training import NODETrainer, LinearTrainer
+from dymad.training import LinearTrainer, NODETrainer, StackedTrainer
 
 # Options
 ## Regular kernels
@@ -99,31 +99,52 @@ trn_ln = {
     "load_checkpoint": False,
     "learning_rate": 1e-2,
     "decay_rate": 0.999,
-    "ls_update": {
-        "method": "raw",
-        "interval": 500,
-        "times": 1}
-        }
+    "method": "raw",
+}
 trn_l1 = copy.deepcopy(trn_ln)
-trn_l1["ls_update"].update({"kwargs": {"order": 1}})
+trn_l1["kwargs"] = {"order": 1}
 trn_dt = {
     "n_epochs": 5,
     "save_interval": 50,
     "load_checkpoint": False,
     "learning_rate": 1e-2,
     "decay_rate": 0.999,
-    "ls_update": {
-        "method": "raw",
-        "interval": 5,
-        "times": 1,
-        "reset": False}
+}
+
+
+def _optimizer_phase(trainer, cfg):
+    phase = copy.deepcopy(cfg)
+    phase.update({"type": "optimizer", "trainer": trainer})
+    return phase
+
+
+def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=True):
+    phase = {"type": "linear_solve", "method": method, "reset_optimizer": reset_optimizer}
+    if params is not None:
+        phase["params"] = params
+    if kwargs:
+        phase["kwargs"] = copy.deepcopy(kwargs)
+    return phase
+
+
+trn_dt_phases = [
+    {
+        "repeat": {
+            "times": 1,
+            "phases": [
+                _linear_solve_phase("raw", reset_optimizer=False),
+                _optimizer_phase("NODE", trn_dt),
+            ],
         }
+    },
+    _linear_solve_phase("raw", reset_optimizer=False),
+]
 
 cfgs = [
     ('km_ln',  KM,     LinearTrainer,     {"model": mdl_indep, "training" : trn_ln}),
     ('dkm_ln', DKM,    LinearTrainer,     {"model": mdl_opval, "training" : trn_ln}),
     ('dks_ln', DKMSK,  LinearTrainer,     {"model": mdl_share, "training" : trn_ln}),
-    ('dks_nd', DKMSK,  NODETrainer,       {"model": mdl_share, "training" : trn_dt}),
+    ('dks_nd', DKMSK,  StackedTrainer,    {"model": mdl_share, "phases" : trn_dt_phases}),
     ('kmm_ln', KMM,    LinearTrainer,     {"model": mdl_mn,    "training" : trn_l1}),
     ]
 

@@ -56,11 +56,8 @@ mdl_dm["kernel"] = opt_dm
 
 trn_ln = {
     "n_epochs": 1,
-    "ls_update": {
-        "method": "raw",
-        "interval": 500,
-        "times": 1}
-        }
+    "method": "raw",
+}
 
 cv_rbf = {
     "param_grid": {

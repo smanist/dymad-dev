@@ -58,19 +58,19 @@ ref = {
     "save_interval": 1,
     "load_checkpoint": False,}
 trn_ln = {
-    "ls_update": {
-        "method": "full"}}
+    "method": "full",
+}
 trn_ln.update(ref)
 trn_tr = {
-    "ls_update": {
-        "method": "truncated",
-        "params": 0.999}}
+    "method": "truncated",
+    "params": 0.999,
+}
 trn_tr.update(ref)
 trn_sa = {
-    "ls_update": {
-        "method": "sako",
-        "params": 4,
-        "remove_one": True}}
+    "method": "sako",
+    "params": 4,
+    "kwargs": {"remove_one": True},
+}
 trn_sa.update(ref)
 
 config_path = 'kp_model.yaml'

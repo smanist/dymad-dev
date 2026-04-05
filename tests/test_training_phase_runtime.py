@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from dymad.training import driver
@@ -9,7 +10,14 @@ from dymad.training.phase_runtime import (
     TrainerState,
     TrainingCheckpointError,
 )
-from dymad.training.phases import AnalysisPhaseSpec, ExportPhaseSpec, LinearSolvePhaseSpec, OptimizerPhaseSpec, normalize_phase_specs
+from dymad.training.phases import (
+    AnalysisPhaseSpec,
+    ExportPhaseSpec,
+    LinearSolvePhaseSpec,
+    OptimizerPhaseSpec,
+    PhaseSpecValidationError,
+    normalize_phase_specs,
+)
 from dymad.training.trainer_run import TrainerRun
 
 
@@ -42,22 +50,29 @@ def test_phase_result_get_metric_reads_typed_trainer_state():
     assert result.get_metric("total") == 0.456
 
 
-def test_normalize_phase_specs_expands_legacy_linear_solve_schedule():
+def test_normalize_phase_specs_expands_repeat_schedule():
     specs = normalize_phase_specs(
         {
             "model": {"name": "demo"},
             "phases": [
                 {
-                    "name": "node",
-                    "trainer": "NODE",
-                    "n_epochs": 5,
-                    "ls_update": {
-                        "method": "truncated",
-                        "params": 2,
-                        "update_interval": 2,
-                        "update_times": 2,
-                        "start_with_ls": True,
-                    },
+                    "repeat": {
+                        "times": 2,
+                        "phases": [
+                            {
+                                "type": "linear_solve",
+                                "name": "ls",
+                                "method": "truncated",
+                                "params": 2,
+                            },
+                            {
+                                "type": "optimizer",
+                                "name": "node",
+                                "trainer": "NODE",
+                                "n_epochs": 5,
+                            },
+                        ],
+                    }
                 }
             ],
         }
@@ -71,6 +86,48 @@ def test_normalize_phase_specs_expands_legacy_linear_solve_schedule():
     assert isinstance(specs[-3], ExportPhaseSpec)
     assert isinstance(specs[-2], ExportPhaseSpec)
     assert isinstance(specs[-1], ExportPhaseSpec)
+
+
+def test_normalize_phase_specs_warns_for_analysis_and_export_inside_repeat():
+    with pytest.warns(UserWarning, match="Repeat block 'cycle' contains an analysis phase"):
+        with pytest.warns(UserWarning, match="Repeat block 'cycle' contains an export phase"):
+            specs = normalize_phase_specs(
+                {
+                    "model": {"name": "demo"},
+                    "phases": [
+                        {
+                            "repeat": {
+                                "name": "cycle",
+                                "times": 1,
+                                "phases": [
+                                    {"type": "analysis", "name": "inspect"},
+                                    {"type": "export", "name": "save_model", "export_kind": "best_model"},
+                                ],
+                            }
+                        }
+                    ],
+                }
+            )
+
+    assert isinstance(specs[0], AnalysisPhaseSpec)
+    assert isinstance(specs[1], ExportPhaseSpec)
+
+
+def test_normalize_phase_specs_rejects_legacy_ls_update():
+    with pytest.raises(PhaseSpecValidationError, match="'ls_update' is deprecated and no longer supported"):
+        normalize_phase_specs(
+            {
+                "model": {"name": "demo"},
+                "phases": [
+                    {
+                        "name": "node",
+                        "trainer": "NODE",
+                        "n_epochs": 5,
+                        "ls_update": {"method": "truncated", "params": 2},
+                    }
+                ],
+            }
+        )
 
 
 def test_run_cv_single_uses_trainer_run_with_typed_context(monkeypatch):

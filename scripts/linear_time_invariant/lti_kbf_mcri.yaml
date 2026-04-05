@@ -33,7 +33,8 @@ prediction_criterion:
     alpha: 0.5
 
 phases:
-  - trainer: 'Weak'
+  - type: 'optimizer'
+    trainer: 'Weak'
     n_epochs: 200
     save_interval: 10
     learning_rate: 5e-3
@@ -48,7 +49,8 @@ phases:
       recon:
         weight: 1.0
 
-  - trainer: 'NODE'
+  - type: 'optimizer'
+    trainer: 'NODE'
     n_epochs: 50
     save_interval: 10
     learning_rate: 5e-3

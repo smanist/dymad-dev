@@ -5,7 +5,7 @@ import torch
 
 from dymad.io import load_model
 from dymad.models import KBF, DKBF, DKMSK
-from dymad.training import NODETrainer, LinearTrainer
+from dymad.training import LinearTrainer, NODETrainer, StackedTrainer
 from dymad.utils import animate, compare_contour, plot_summary, setup_logging
 
 def gen_mdl_kb(e, l, k):
@@ -52,28 +52,20 @@ trn_nd = {
     "ode_args": {
         "rtol": 1.e-7,
         "atol": 1.e-9},
-    "ls_update": {
-        "method": "full",
-        "interval": 50,
-        "times": 1}
-    }
+}
 trn_ae = copy.deepcopy(trn_nd)
 trn_ae["n_epochs"] = 2000
 trn_ae["sweep_lengths"] = [2, 10, 50]
 trn_ae["sweep_epoch_step"] = 500
-trn_ae["ls_update"]["interval"] = 500
-trn_ae["ls_update"]["times"] = 2
-trn_ae["ls_update"]["reset"] = False
 
 trn_ln = {
     "n_epochs": 500,
     "save_interval": 50,
     "load_checkpoint": False,
-    "ls_update": {
-        "method": "full"}
-    }
+    "method": "full",
+}
 trn_rw = copy.deepcopy(trn_ln)
-trn_rw["ls_update"]["method"] = "raw"
+trn_rw["method"] = "raw"
 
 trn_svd = {
     "type" : "svd",
@@ -97,12 +89,39 @@ trn_dmf = {
     "mode": "full"
 }
 
+
+def _optimizer_phase(trainer, cfg):
+    phase = dict(cfg)
+    phase["type"] = "optimizer"
+    phase["trainer"] = trainer
+    return phase
+
+
+def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=True):
+    phase = {"type": "linear_solve", "method": method, "reset_optimizer": reset_optimizer}
+    if params is not None:
+        phase["params"] = params
+    if kwargs is not None:
+        phase["kwargs"] = kwargs
+    return phase
+
+
+def _alternating_schedule(trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None, reset_optimizer=True):
+    phases = []
+    for n_epochs in chunk_epochs:
+        phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+        chunk_cfg = dict(base_cfg)
+        chunk_cfg["n_epochs"] = n_epochs
+        phases.append(_optimizer_phase(trainer, chunk_cfg))
+    phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+    return phases
+
 config_path = 'vor_model.yaml'
 
 cfgs = [
-    ('kbf_node', KBF,  NODETrainer,     {"model": gen_mdl_kb(0,0,13), "criterion": crit, "training" : trn_nd, "transform_x" : [trn_svd, trn_add]}),
+    ('kbf_node', KBF,  StackedTrainer,  {"model": gen_mdl_kb(0,0,13), "criterion": crit, "phases" : _alternating_schedule("NODE", trn_nd, [50, 150], method="full"), "transform_x" : [trn_svd, trn_add]}),
     ('dkbf_ln',  DKBF, LinearTrainer,   {"model": gen_mdl_kb(0,0,13), "training" : trn_ln, "transform_x" : [trn_svd, trn_add]}),
-    ('dkbf_ae',  DKBF, NODETrainer,     {"model": gen_mdl_kb(3,64,3), "criterion": crit, "training" : trn_ae, "transform_x" : [trn_svd]}),
+    ('dkbf_ae',  DKBF, StackedTrainer,  {"model": gen_mdl_kb(3,64,3), "criterion": crit, "phases" : _alternating_schedule("NODE", trn_ae, [500, 500, 1000], method="full", reset_optimizer=False), "transform_x" : [trn_svd]}),
     ('dkbf_dm',  DKBF, LinearTrainer,   {"model": gen_mdl_kb(0,0,3),  "training" : trn_ln, "transform_x" : [trn_svd, trn_dmf]}),
     ('dks_ln',  DKMSK, LinearTrainer,   {"model": mdl_kl, "training" : trn_rw, "transform_x" : [trn_svd, trn_scl]}),
     ]

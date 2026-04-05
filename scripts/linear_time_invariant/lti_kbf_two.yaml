@@ -40,7 +40,8 @@ criterion:
       reduction: 'mean'
 
 phases:
-  - trainer: 'Weak'
+  - type: 'optimizer'
+    trainer: 'Weak'
     n_epochs: 200
     save_interval: 10
     learning_rate: 5e-3
@@ -50,7 +51,8 @@ phases:
       ordpol: 2
       ordint: 2
 
-  - trainer: 'NODE'
+  - type: 'optimizer'
+    trainer: 'NODE'
     n_epochs: 50
     save_interval: 10
     learning_rate: 5e-3
