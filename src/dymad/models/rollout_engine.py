@@ -1,12 +1,13 @@
 """Typed rollout-engine selection for migrated model-spec families."""
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable
 
-from dymad.models.model_spec import ModelSpec
+from dymad.models.model_spec import ModelSpec, ModelSpecValidationError, PredictorKey
 from dymad.models.prediction import (
     predict_continuous,
     predict_continuous_exp,
+    predict_continuous_fenc,
     predict_continuous_np,
     predict_discrete,
     predict_discrete_exp,
@@ -25,30 +26,62 @@ _PREDICTOR_BY_NAME = {
     "continuous": predict_continuous,
     "continuous_np": predict_continuous_np,
     "continuous_exp": predict_continuous_exp,
+    "continuous_fenc": predict_continuous_fenc,
     "discrete": predict_discrete,
     "discrete_exp": predict_discrete_exp,
 }
 
 
-def select_rollout_engine(model_spec: ModelSpec) -> Optional[RolloutEngineSelection]:
-    """Return a typed rollout engine for migrated families, if available."""
+def _requested_predictor_key(model_spec: ModelSpec, model_config: dict, dims: dict) -> PredictorKey:
     rollout = model_spec.rollout
-    if rollout is None:
-        return None
-    if rollout.family != "lti":
-        return None
-    predictor = _PREDICTOR_BY_NAME.get(rollout.predictor)
+    requested = model_config.get("predictor_type", "ode")
+    if rollout.default_predictor == "continuous_fenc":
+        return "continuous_fenc"
+
+    if model_spec.continuous_time:
+        if requested == "exp":
+            predictor_key: PredictorKey = "continuous_exp"
+        elif requested == "np":
+            predictor_key = "continuous_np"
+        else:
+            predictor_key = "continuous"
+    else:
+        if requested in {"exp", "np"}:
+            predictor_key = "discrete_exp"
+        else:
+            predictor_key = "discrete"
+
+    if predictor_key == "continuous_exp" and dims.get("u", 0) > 0:
+        raise ModelSpecValidationError("Exponential rollout does not support control inputs.")
+    if predictor_key == "discrete_exp" and requested == "exp" and dims.get("u", 0) > 0 and model_spec.recipe.kind == "sdm":
+        raise ModelSpecValidationError("SDM exponential rollout does not support control inputs.")
+    return predictor_key
+
+
+def select_rollout_engine(model_spec: ModelSpec, model_config: dict, dims: dict) -> RolloutEngineSelection:
+    """Resolve the rollout engine allowed by the typed model spec."""
+    predictor_key = _requested_predictor_key(model_spec, model_config, dims)
+    rollout = model_spec.rollout
+    if predictor_key not in rollout.allowed_predictors:
+        raise ModelSpecValidationError(
+            f"Predictor '{predictor_key}' is not allowed for rollout family '{rollout.family}'."
+        )
+    predictor = _PREDICTOR_BY_NAME.get(predictor_key)
     if predictor is None:
-        raise ValueError(
-            f"Unsupported typed rollout predictor '{rollout.predictor}' "
+        raise ModelSpecValidationError(
+            f"Unsupported typed rollout predictor '{predictor_key}' "
             f"for family '{rollout.family}'."
         )
-    if rollout.predictor in {"continuous", "discrete"} and not rollout.supports_control_inputs:
+    if dims.get("u", 0) > 0 and not rollout.supports_control_inputs:
+        raise ModelSpecValidationError(
+            f"Rollout family '{rollout.family}' does not support control inputs."
+        )
+    if predictor_key in {"continuous", "discrete"} and not rollout.supports_control_inputs:
         raise ValueError(
-            "Typed LTI rollout predictor requires control-input support for "
-            f"'{rollout.predictor}'."
+            "Typed rollout predictor requires control-input support for "
+            f"'{predictor_key}'."
         )
     return RolloutEngineSelection(
         predictor=predictor,
-        source=f"{rollout.family}:{rollout.predictor}",
+        source=f"{rollout.family}:{predictor_key}",
     )

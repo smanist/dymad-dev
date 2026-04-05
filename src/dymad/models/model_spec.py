@@ -1,34 +1,80 @@
-"""Typed model-spec compatibility objects for predefined model entrypoints."""
+"""Typed model-spec contracts for predefined-model construction."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Callable, Literal, Optional
+
+
+GraphMode = Literal["none", "graph", "node"]
+TimeDomain = Literal["continuous", "discrete"]
+RecipeKind = Literal["ldm", "sdm", "lfm", "km", "kmsk", "kmm"]
+EncoderKind = Literal["smpl", "raw", "graph", "node", "node_raw", "smpl_auto", "graph_auto"]
+FeatureKind = Literal["none", "cat", "blin", "graph_cat", "graph_blin"]
+DynamicsKind = Literal["direct", "skip", "graph_direct", "graph_skip"]
+DecoderKind = Literal["auto", "graph", "node"]
+PredictorKey = Literal[
+    "continuous",
+    "continuous_np",
+    "continuous_exp",
+    "continuous_fenc",
+    "discrete",
+    "discrete_exp",
+]
+
+
+class ModelSpecValidationError(ValueError):
+    """Raised when a typed model spec cannot be resolved safely."""
+
+
+@dataclass(frozen=True)
+class RecipeSpec:
+    kind: RecipeKind
+    model_cls: object
 
 
 @dataclass(frozen=True)
 class EncoderSpec:
-    family: str
+    kind: EncoderKind
+
+    @property
+    def family(self) -> EncoderKind:
+        return self.kind
 
 
 @dataclass(frozen=True)
 class FeatureSpec:
-    family: str
+    kind: FeatureKind
+
+    @property
+    def family(self) -> FeatureKind:
+        return self.kind
 
 
 @dataclass(frozen=True)
 class DynamicsSpec:
-    family: str
+    kind: DynamicsKind
+
+    @property
+    def family(self) -> DynamicsKind:
+        return self.kind
 
 
 @dataclass(frozen=True)
 class DecoderSpec:
-    family: str
+    kind: DecoderKind
+
+    @property
+    def family(self) -> DecoderKind:
+        return self.kind
 
 
 @dataclass(frozen=True)
 class RolloutSpec:
     family: str
-    predictor: str
-    supports_control_inputs: bool
+    default_predictor: PredictorKey
+    allowed_predictors: tuple[PredictorKey, ...]
+    supports_control_inputs: bool = True
 
 
 @dataclass(frozen=True)
@@ -40,66 +86,43 @@ class MemorySpec:
 
 @dataclass(frozen=True)
 class ModelSpec:
-    """Typed model specification used by predefined-model compatibility adapters."""
+    """Authoritative typed model specification for model construction."""
 
-    continuous_time: bool
+    recipe: RecipeSpec
+    time_domain: TimeDomain
+    graph_mode: GraphMode
     encoder: EncoderSpec
     feature: FeatureSpec
     dynamics: DynamicsSpec
     decoder: DecoderSpec
-    model_cls: object
-    rollout: Optional[RolloutSpec] = None
+    rollout: RolloutSpec
     memory: Optional[MemorySpec] = None
     name: Optional[str] = None
 
     @property
-    def graph_mode(self) -> str:
-        """Return whether the spec represents a graph-aware model."""
-        fields = (
-            self.encoder.family,
-            self.decoder.family,
-            self.dynamics.family,
-        )
-        if any("graph" in field or "node" in field for field in fields):
-            return "graph"
-        return "none"
+    def continuous_time(self) -> bool:
+        return self.time_domain == "continuous"
 
-    def to_legacy_tuple(self) -> tuple[bool, str, str, str, str, object]:
-        """Expose the temporary legacy helper contract."""
-        return (
-            self.continuous_time,
-            self.encoder.family,
-            self.feature.family,
-            self.dynamics.family,
-            self.decoder.family,
-            self.model_cls,
-        )
+    @property
+    def model_cls(self) -> object:
+        return self.recipe.model_cls
 
 
-class LegacyPredefinedModelAdapter:
-    """Compatibility adapter from legacy predefined names to typed ModelSpec."""
+@dataclass(frozen=True)
+class ResolvedModelSpec:
+    """Normalized construction plan produced from a :class:`ModelSpec`."""
 
-    @staticmethod
-    def from_legacy_parts(
-        *,
-        continuous_time: bool,
-        encoder: str,
-        feature: str,
-        dynamics: str,
-        decoder: str,
-        model_cls: object,
-        rollout: Optional[RolloutSpec] = None,
-        memory: Optional[MemorySpec] = None,
-        name: Optional[str] = None,
-    ) -> ModelSpec:
-        return ModelSpec(
-            continuous_time=continuous_time,
-            encoder=EncoderSpec(family=encoder),
-            feature=FeatureSpec(family=feature),
-            dynamics=DynamicsSpec(family=dynamics),
-            decoder=DecoderSpec(family=decoder),
-            model_cls=model_cls,
-            rollout=rollout,
-            memory=memory,
-            name=name,
-        )
+    model_spec: ModelSpec
+    dims: dict[str, Any]
+    encoder_key: str
+    feature_key: str
+    dynamics_key: str
+    decoder_key: str
+    predictor_key: PredictorKey
+    predictor: Callable[..., Any]
+    input_order: Optional[str]
+    processor_net: object
+    graph_mode: GraphMode
+    linear_mode: Literal["smpl", "graph"]
+    continuous_time: bool
+

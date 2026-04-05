@@ -18,6 +18,8 @@ import torch
 
 from dymad.io import load_model
 from dymad.models import DKBF, DLDM, DLTI, DSDM, KBF, LDM, LTI
+from dymad.models.model_spec import ModelSpec
+import dymad.models.collections as model_collections
 from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
 
 trx = [
@@ -178,3 +180,25 @@ def test_lti(lti_data, lti_gau, env_setup, idx):
     predict_case(idx, lti_gau, env_setup, ifdl=ifdl)
     if os.path.exists(env_setup/'lti_model'):
         shutil.rmtree(env_setup/'lti_model')
+
+
+def test_checkpoint_load_uses_typed_build_model_for_regular_models(lti_data, lti_gau, env_setup, monkeypatch):
+    train_case(7, lti_data, env_setup)
+
+    calls = {"build_model": 0}
+    real_build_model = model_collections.build_model
+
+    def traced_build_model(model_spec, model_config, data_meta, dtype=None, device=None):
+        assert isinstance(model_spec, ModelSpec)
+        calls["build_model"] += 1
+        return real_build_model(model_spec, model_config, data_meta, dtype=dtype, device=device)
+
+    monkeypatch.setattr(model_collections, "build_model", traced_build_model)
+
+    try:
+        predict_case(7, lti_gau, env_setup, ifdl=False)
+    finally:
+        if os.path.exists(env_setup / 'lti_model'):
+            shutil.rmtree(env_setup / 'lti_model')
+
+    assert calls["build_model"] >= 1

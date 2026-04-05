@@ -1,67 +1,60 @@
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict
 
-from dymad.models.helpers import build_model_from_spec
+from dymad.models.helpers import build_model
 from dymad.models.model_spec import (
-    LegacyPredefinedModelAdapter,
+    DecoderSpec,
+    DynamicsSpec,
+    EncoderSpec,
+    FeatureSpec,
     MemorySpec,
     ModelSpec,
+    RecipeSpec,
     RolloutSpec,
 )
 from dymad.models.recipes import CD_KM, CD_KMM, CD_KMSK, CD_LDM, CD_LFM, CD_SDM
 
+
+def _spec(
+    *,
+    recipe_kind: str,
+    model_cls: object,
+    time_domain: str,
+    graph_mode: str,
+    encoder: str,
+    feature: str,
+    dynamics: str,
+    decoder: str,
+    rollout: RolloutSpec,
+    memory: MemorySpec | None = None,
+    name: str | None = None,
+) -> ModelSpec:
+    return ModelSpec(
+        recipe=RecipeSpec(kind=recipe_kind, model_cls=model_cls),
+        time_domain=time_domain,
+        graph_mode=graph_mode,
+        encoder=EncoderSpec(kind=encoder),
+        feature=FeatureSpec(kind=feature),
+        dynamics=DynamicsSpec(kind=dynamics),
+        decoder=DecoderSpec(kind=decoder),
+        rollout=rollout,
+        memory=memory,
+        name=name,
+    )
+
+
 @dataclass
 class PredefinedModel:
-    """
-    Predefined model specification for easy building of common models.
+    """Compatibility wrapper around one typed predefined model spec."""
 
-    Args:
-        CONT (bool): Whether the model is continuous-time
-        encoder (str): Encoder type
-        feature (str): Feature type
-        dynamics (str): Dynamics type
-        decoder (str): Decoder type
-        model_cls (object): Model class, expected to be subclass of ComposedDynamics
-          with a `build_core` class method.
-    """
-    CONT: bool
-    encoder: str
-    feature: str
-    dynamics: str
-    decoder: str
-    model_cls: object
-    rollout: Optional[RolloutSpec] = None
-    memory: Optional[MemorySpec] = None
+    model_spec: ModelSpec
 
     def __post_init__(self):
-        self.model_spec = LegacyPredefinedModelAdapter.from_legacy_parts(
-            continuous_time=self.CONT,
-            encoder=self.encoder,
-            feature=self.feature,
-            dynamics=self.dynamics,
-            decoder=self.decoder,
-            model_cls=self.model_cls,
-            rollout=self.rollout,
-            memory=self.memory,
-        )
         self.GRAPH = self.model_spec.graph_mode != "none"
+        self.CONT = self.model_spec.continuous_time
 
-    def __call__(
-            self,
-            model_config: Dict, data_meta: Dict,
-            dtype=None, device=None):
-        """
-        Build the model based on the predefined specification.
-        Essentially a wrapper of :func:`~dymad.models.helpers.build_model`.
-
-        This interface is designed such that the predefined model
-        can be directly called to build the model as if initialization.
-
-        For example, when `LDM` is instantiated from `PredefinedModel`,
-        calling `LDM(model_config, data_meta, dtype, device)` would behave like
-        instantiating a class by `__init__`, but actually invokes this `__call__` method.
-        """
-        return build_model_from_spec(
+    def __call__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
+        return build_model(
             self.model_spec,
             model_config,
             data_meta,
@@ -70,41 +63,37 @@ class PredefinedModel:
         )
 
     def typed_spec(self) -> ModelSpec:
-        """Expose the typed model spec behind this compatibility wrapper."""
         return self.model_spec
 
-#                       CONT,  encoder,    feature, dynamics,       decoder, model_cls
-LDM   = PredefinedModel(True,  "smpl",     "none",  "direct",       "auto",  CD_LDM)
-"""Latent dynamics model (LDM), continuous-time."""
-DLDM  = PredefinedModel(False, "smpl",     "none",  "direct",       "auto",  CD_LDM)
-"""LDM, discrete-time."""
-GLDM  = PredefinedModel(True,  "graph",    "none",  "direct",       "graph", CD_LDM)
-"""LDM with graph autoencoder, continuous-time."""
-DGLDM = PredefinedModel(False, "graph",    "none",  "direct",       "graph", CD_LDM)
-"""LDM with graph autoencoder, discrete-time."""
-LDMG  = PredefinedModel(True,  "node",     "none",  "graph_direct", "node",  CD_LDM)
-"""LDM with graph dynamics, continuous-time."""
-DLDMG = PredefinedModel(False, "node",     "none",  "graph_direct", "node",  CD_LDM)
-"""LDM with graph dynamics, discrete-time."""
 
-DSDM  = PredefinedModel(False, "raw",      "none",  "direct",       "auto",  CD_SDM)
-"""Sequential dynamics model (SDM), always discrete-time."""
-DSDMG = PredefinedModel(False, "node_raw", "none",  "graph_direct", "node",  CD_SDM)
-"""SDM with graph dynamics, discrete-time."""
-
-#                       CONT,  encoder,      feature,      dynamics, decoder, model_cls
-KBF   = PredefinedModel(True,  "smpl_auto",  "blin",       "direct", "auto",  CD_LFM)
-"""Koopman bilinear form (KBF), continuous-time."""
-DKBF  = PredefinedModel(False, "smpl_auto",  "blin",       "direct", "auto",  CD_LFM)
-"""KBF, discrete-time."""
-GKBF  = PredefinedModel(True,  "graph_auto", "graph_blin", "direct", "graph", CD_LFM)
-"""KBF with graph autoencoder, continuous-time."""
-DGKBF = PredefinedModel(False, "graph_auto", "graph_blin", "direct", "graph", CD_LFM)
-"""KBF with graph autoencoder, discrete-time."""
-
-LTI_ROLLOUT_SPEC = RolloutSpec(
+DEFAULT_CONT_ROLLOUT = RolloutSpec(
+    family="default",
+    default_predictor="continuous",
+    allowed_predictors=("continuous", "continuous_np", "continuous_exp"),
+    supports_control_inputs=True,
+)
+DEFAULT_DISC_ROLLOUT = RolloutSpec(
+    family="default",
+    default_predictor="discrete",
+    allowed_predictors=("discrete", "discrete_exp"),
+    supports_control_inputs=True,
+)
+LTI_CONT_ROLLOUT = RolloutSpec(
     family="lti",
-    predictor="continuous",
+    default_predictor="continuous",
+    allowed_predictors=("continuous", "continuous_np", "continuous_exp"),
+    supports_control_inputs=True,
+)
+LTI_DISC_ROLLOUT = RolloutSpec(
+    family="lti",
+    default_predictor="discrete",
+    allowed_predictors=("discrete", "discrete_exp"),
+    supports_control_inputs=True,
+)
+KMM_ROLLOUT = RolloutSpec(
+    family="kmm",
+    default_predictor="continuous_fenc",
+    allowed_predictors=("continuous_fenc",),
     supports_control_inputs=True,
 )
 LTI_MEMORY_SPEC = MemorySpec(
@@ -113,71 +102,357 @@ LTI_MEMORY_SPEC = MemorySpec(
     requires_delay_window=True,
 )
 
-LTI   = PredefinedModel(
-    True,
-    "smpl_auto",
-    "cat",
-    "direct",
-    "auto",
-    CD_LFM,
-    rollout=LTI_ROLLOUT_SPEC,
-    memory=LTI_MEMORY_SPEC,
+
+LDM = PredefinedModel(
+    _spec(
+        recipe_kind="ldm",
+        model_cls=CD_LDM,
+        time_domain="continuous",
+        graph_mode="none",
+        encoder="smpl",
+        feature="none",
+        dynamics="direct",
+        decoder="auto",
+        rollout=DEFAULT_CONT_ROLLOUT,
+        name="LDM",
+    )
+)
+"""Latent dynamics model (LDM), continuous-time."""
+DLDM = PredefinedModel(
+    _spec(
+        recipe_kind="ldm",
+        model_cls=CD_LDM,
+        time_domain="discrete",
+        graph_mode="none",
+        encoder="smpl",
+        feature="none",
+        dynamics="direct",
+        decoder="auto",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DLDM",
+    )
+)
+"""LDM, discrete-time."""
+GLDM = PredefinedModel(
+    _spec(
+        recipe_kind="ldm",
+        model_cls=CD_LDM,
+        time_domain="continuous",
+        graph_mode="graph",
+        encoder="graph",
+        feature="none",
+        dynamics="direct",
+        decoder="graph",
+        rollout=DEFAULT_CONT_ROLLOUT,
+        name="GLDM",
+    )
+)
+"""LDM with graph autoencoder, continuous-time."""
+DGLDM = PredefinedModel(
+    _spec(
+        recipe_kind="ldm",
+        model_cls=CD_LDM,
+        time_domain="discrete",
+        graph_mode="graph",
+        encoder="graph",
+        feature="none",
+        dynamics="direct",
+        decoder="graph",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DGLDM",
+    )
+)
+"""LDM with graph autoencoder, discrete-time."""
+LDMG = PredefinedModel(
+    _spec(
+        recipe_kind="ldm",
+        model_cls=CD_LDM,
+        time_domain="continuous",
+        graph_mode="node",
+        encoder="node",
+        feature="none",
+        dynamics="graph_direct",
+        decoder="node",
+        rollout=DEFAULT_CONT_ROLLOUT,
+        name="LDMG",
+    )
+)
+"""LDM with graph dynamics, continuous-time."""
+DLDMG = PredefinedModel(
+    _spec(
+        recipe_kind="ldm",
+        model_cls=CD_LDM,
+        time_domain="discrete",
+        graph_mode="node",
+        encoder="node",
+        feature="none",
+        dynamics="graph_direct",
+        decoder="node",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DLDMG",
+    )
+)
+"""LDM with graph dynamics, discrete-time."""
+
+DSDM = PredefinedModel(
+    _spec(
+        recipe_kind="sdm",
+        model_cls=CD_SDM,
+        time_domain="discrete",
+        graph_mode="none",
+        encoder="raw",
+        feature="none",
+        dynamics="direct",
+        decoder="auto",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DSDM",
+    )
+)
+"""Sequential dynamics model (SDM), always discrete-time."""
+DSDMG = PredefinedModel(
+    _spec(
+        recipe_kind="sdm",
+        model_cls=CD_SDM,
+        time_domain="discrete",
+        graph_mode="node",
+        encoder="node_raw",
+        feature="none",
+        dynamics="graph_direct",
+        decoder="node",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DSDMG",
+    )
+)
+"""SDM with graph dynamics, discrete-time."""
+
+KBF = PredefinedModel(
+    _spec(
+        recipe_kind="lfm",
+        model_cls=CD_LFM,
+        time_domain="continuous",
+        graph_mode="none",
+        encoder="smpl_auto",
+        feature="blin",
+        dynamics="direct",
+        decoder="auto",
+        rollout=DEFAULT_CONT_ROLLOUT,
+        name="KBF",
+    )
+)
+"""Koopman bilinear form (KBF), continuous-time."""
+DKBF = PredefinedModel(
+    _spec(
+        recipe_kind="lfm",
+        model_cls=CD_LFM,
+        time_domain="discrete",
+        graph_mode="none",
+        encoder="smpl_auto",
+        feature="blin",
+        dynamics="direct",
+        decoder="auto",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DKBF",
+    )
+)
+"""KBF, discrete-time."""
+GKBF = PredefinedModel(
+    _spec(
+        recipe_kind="lfm",
+        model_cls=CD_LFM,
+        time_domain="continuous",
+        graph_mode="graph",
+        encoder="graph_auto",
+        feature="graph_blin",
+        dynamics="direct",
+        decoder="graph",
+        rollout=DEFAULT_CONT_ROLLOUT,
+        name="GKBF",
+    )
+)
+"""KBF with graph autoencoder, continuous-time."""
+DGKBF = PredefinedModel(
+    _spec(
+        recipe_kind="lfm",
+        model_cls=CD_LFM,
+        time_domain="discrete",
+        graph_mode="graph",
+        encoder="graph_auto",
+        feature="graph_blin",
+        dynamics="direct",
+        decoder="graph",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DGKBF",
+    )
+)
+"""KBF with graph autoencoder, discrete-time."""
+
+LTI = PredefinedModel(
+    _spec(
+        recipe_kind="lfm",
+        model_cls=CD_LFM,
+        time_domain="continuous",
+        graph_mode="none",
+        encoder="smpl_auto",
+        feature="cat",
+        dynamics="direct",
+        decoder="auto",
+        rollout=LTI_CONT_ROLLOUT,
+        memory=LTI_MEMORY_SPEC,
+        name="LTI",
+    )
 )
 """Linear time-invariant (LTI), continuous-time."""
-DLTI  = PredefinedModel(
-    False,
-    "smpl_auto",
-    "cat",
-    "direct",
-    "auto",
-    CD_LFM,
-    rollout=RolloutSpec(
-        family="lti",
-        predictor="discrete",
-        supports_control_inputs=True,
-    ),
-    memory=LTI_MEMORY_SPEC,
+DLTI = PredefinedModel(
+    _spec(
+        recipe_kind="lfm",
+        model_cls=CD_LFM,
+        time_domain="discrete",
+        graph_mode="none",
+        encoder="smpl_auto",
+        feature="cat",
+        dynamics="direct",
+        decoder="auto",
+        rollout=LTI_DISC_ROLLOUT,
+        memory=LTI_MEMORY_SPEC,
+        name="DLTI",
+    )
 )
 """LTI, discrete-time."""
-GLTI  = PredefinedModel(
-    True,
-    "graph_auto",
-    "graph_cat",
-    "direct",
-    "graph",
-    CD_LFM,
-    rollout=LTI_ROLLOUT_SPEC,
-    memory=LTI_MEMORY_SPEC,
+GLTI = PredefinedModel(
+    _spec(
+        recipe_kind="lfm",
+        model_cls=CD_LFM,
+        time_domain="continuous",
+        graph_mode="graph",
+        encoder="graph_auto",
+        feature="graph_cat",
+        dynamics="direct",
+        decoder="graph",
+        rollout=LTI_CONT_ROLLOUT,
+        memory=LTI_MEMORY_SPEC,
+        name="GLTI",
+    )
 )
 """LTI with graph autoencoder, continuous-time."""
 DGLTI = PredefinedModel(
-    False,
-    "graph_auto",
-    "graph_cat",
-    "direct",
-    "graph",
-    CD_LFM,
-    rollout=RolloutSpec(
-        family="lti",
-        predictor="discrete",
-        supports_control_inputs=True,
-    ),
-    memory=LTI_MEMORY_SPEC,
+    _spec(
+        recipe_kind="lfm",
+        model_cls=CD_LFM,
+        time_domain="discrete",
+        graph_mode="graph",
+        encoder="graph_auto",
+        feature="graph_cat",
+        dynamics="direct",
+        decoder="graph",
+        rollout=LTI_DISC_ROLLOUT,
+        memory=LTI_MEMORY_SPEC,
+        name="DGLTI",
+    )
 )
 """LTI with graph autoencoder, discrete-time."""
 
-#                        CONT,  encoder,      feature,      dynamics, decoder, model_cls
-KM     = PredefinedModel(True,  "smpl_auto",  "blin",       "direct", "auto",  CD_KM)
+KM = PredefinedModel(
+    _spec(
+        recipe_kind="km",
+        model_cls=CD_KM,
+        time_domain="continuous",
+        graph_mode="none",
+        encoder="smpl_auto",
+        feature="blin",
+        dynamics="direct",
+        decoder="auto",
+        rollout=DEFAULT_CONT_ROLLOUT,
+        name="KM",
+    )
+)
 """Kernel machine (KM), continuous-time."""
-KMM    = PredefinedModel(True,  "smpl_auto",  "blin",       "direct", "auto",  CD_KMM)
+KMM = PredefinedModel(
+    _spec(
+        recipe_kind="kmm",
+        model_cls=CD_KMM,
+        time_domain="continuous",
+        graph_mode="none",
+        encoder="smpl_auto",
+        feature="blin",
+        dynamics="direct",
+        decoder="auto",
+        rollout=KMM_ROLLOUT,
+        name="KMM",
+    )
+)
 """Kernel machine on manifold (KMM), continuous-time."""
-DKM    = PredefinedModel(False, "smpl_auto",  "blin",       "direct", "auto",  CD_KM)
+DKM = PredefinedModel(
+    _spec(
+        recipe_kind="km",
+        model_cls=CD_KM,
+        time_domain="discrete",
+        graph_mode="none",
+        encoder="smpl_auto",
+        feature="blin",
+        dynamics="direct",
+        decoder="auto",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DKM",
+    )
+)
 """KM, discrete-time."""
-GKM    = PredefinedModel(True,  "graph_auto", "graph_blin", "direct", "graph", CD_KM)
+GKM = PredefinedModel(
+    _spec(
+        recipe_kind="km",
+        model_cls=CD_KM,
+        time_domain="continuous",
+        graph_mode="graph",
+        encoder="graph_auto",
+        feature="graph_blin",
+        dynamics="direct",
+        decoder="graph",
+        rollout=DEFAULT_CONT_ROLLOUT,
+        name="GKM",
+    )
+)
 """KM with graph autoencoder, continuous-time."""
-DGKM   = PredefinedModel(False, "graph_auto", "graph_blin", "direct", "graph", CD_KM)
+DGKM = PredefinedModel(
+    _spec(
+        recipe_kind="km",
+        model_cls=CD_KM,
+        time_domain="discrete",
+        graph_mode="graph",
+        encoder="graph_auto",
+        feature="graph_blin",
+        dynamics="direct",
+        decoder="graph",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DGKM",
+    )
+)
 """KM with graph autoencoder, discrete-time."""
-DKMSK  = PredefinedModel(False, "smpl_auto",  "blin",       "skip",   "auto",  CD_KMSK)
-"""Kernel machine with skip-connection (KMSK), continuous-time."""
-DGKMSK = PredefinedModel(False, "graph_auto", "graph_blin", "skip",   "graph", CD_KMSK)
+DKMSK = PredefinedModel(
+    _spec(
+        recipe_kind="kmsk",
+        model_cls=CD_KMSK,
+        time_domain="discrete",
+        graph_mode="none",
+        encoder="smpl_auto",
+        feature="blin",
+        dynamics="skip",
+        decoder="auto",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DKMSK",
+    )
+)
+"""Kernel machine with skip-connection (KMSK), discrete-time."""
+DGKMSK = PredefinedModel(
+    _spec(
+        recipe_kind="kmsk",
+        model_cls=CD_KMSK,
+        time_domain="discrete",
+        graph_mode="graph",
+        encoder="graph_auto",
+        feature="graph_blin",
+        dynamics="skip",
+        decoder="graph",
+        rollout=DEFAULT_DISC_ROLLOUT,
+        name="DGKMSK",
+    )
+)
 """KMSK with graph autoencoder, discrete-time."""

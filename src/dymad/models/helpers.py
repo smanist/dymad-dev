@@ -1,11 +1,9 @@
 import copy
 import logging
-from typing import Dict, List, Union
+from typing import Dict
 
 from dymad.models.components import ENC_MAP, DEC_MAP, FZU_MAP, DYN_MAP, LIN_MAP
-from dymad.models.model_spec import ModelSpec
-from dymad.models.prediction import predict_continuous, predict_continuous_exp, predict_continuous_np, \
-    predict_discrete, predict_discrete_exp
+from dymad.models.model_spec import ModelSpec, ModelSpecValidationError, ResolvedModelSpec
 from dymad.models.rollout_engine import select_rollout_engine
 from dymad.modules import make_autoencoder, make_network
 
@@ -123,23 +121,6 @@ def build_processor(model_config, dims, dtype, device, ifgnn = False):
     return processor_net
 
 
-def build_predictor(CONT, predictor_type, n_total_control_features):
-    if CONT:
-        if predictor_type == "exp":
-            # Does not support inputs
-            assert n_total_control_features == 0, "Exponential predictor does not support control inputs."
-            return predict_continuous_exp
-        elif predictor_type == "np":
-            return predict_continuous_np
-        else:
-            return predict_continuous
-    else:
-        if predictor_type in ["exp", 'np']:
-            return predict_discrete_exp
-        else:
-            return predict_discrete
-
-
 def fzu_selector(fzu_type, n_total_control_features, const_term):
     _type = fzu_type
     if n_total_control_features > 0:
@@ -155,131 +136,85 @@ def fzu_selector(fzu_type, n_total_control_features, const_term):
 
 
 def build_model(
-        model_spec: List,
+        model_spec: ModelSpec,
         model_config: Dict, data_meta: Dict,
         dtype=None, device=None):
     """
-    Build a model based on the provided specification.
-    
-    The function expects `model_cls` to have a
-    :func:`~dymad.models.model_base.ComposedDynamics.build_core` class method,
-    which generates class-specific components.  Then it builds necessary networks,
-    instantiate the model class, and hooks all components together.
-
-    Args:
-        model_spec (List): List specifying the model components in order:
-            [CONT (bool), encoder (str), feature (str), dynamics (str), decoder (str), model_cls (object)]
-        model_config (Dict): Model configuration dictionary
-        data_meta (Dict): Data metadata dictionary
-        dtype: Data type for model parameters
-        device: Device for model parameters
+    Build a model from a typed :class:`~dymad.models.model_spec.ModelSpec`.
     """
-    cont, enc_type, fzu_type, dyn_type, dec_type, model_cls = model_spec
+    if not isinstance(model_spec, ModelSpec):
+        raise ModelSpecValidationError(
+            f"build_model expects ModelSpec, got {type(model_spec).__name__}."
+        )
 
-    # Validate graph compatibility
-    graph_ae  = enc_type.startswith("graph")
-    graph_dyn = dyn_type.startswith("graph")
-    tmp = dec_type.startswith("graph")
-    assert graph_ae == tmp, "Encoder/Decoder graph compatibility mismatch."
+    from dymad.models.recipes import resolve_recipe
 
-    # Class specific processing
-    # `build_core` is a class method that returns:
-    # 1) dims: class-specific dimension dictionary
-    # 2) (enc_type, fzu_type, dec_type, prd_type): finalized type strings
-    # 3) processor_net: network for the dynamics processor
-    # 4) input_order: input order string for the predictor
-    dims, (enc_type, fzu_type, dec_type, prd_type), processor_net, input_order = \
-        model_cls.build_core(
-            (enc_type, fzu_type, dec_type),
-            model_config, data_meta, dtype, device, ifgnn = graph_dyn)
+    recipe_resolution = resolve_recipe(model_spec, model_config, data_meta, dtype, device)
+    rollout_engine = select_rollout_engine(model_spec, model_config, recipe_resolution.dims)
+    resolved = ResolvedModelSpec(
+        model_spec=model_spec,
+        dims=recipe_resolution.dims,
+        encoder_key=recipe_resolution.encoder_key,
+        feature_key=recipe_resolution.feature_key,
+        dynamics_key=recipe_resolution.dynamics_key,
+        decoder_key=recipe_resolution.decoder_key,
+        predictor_key=rollout_engine.source.split(":", 1)[1],
+        predictor=rollout_engine.predictor,
+        input_order=recipe_resolution.input_order,
+        processor_net=recipe_resolution.processor_net,
+        graph_mode=model_spec.graph_mode,
+        linear_mode="graph" if model_spec.graph_mode != "none" else "smpl",
+        continuous_time=model_spec.continuous_time,
+    )
+    graph_ae = resolved.encoder_key.startswith("graph")
 
     # Autoencoder
     encoder_net, decoder_net = build_autoencoder(
-        model_config, dims, dtype, device, ifgnn = graph_ae)
+        model_config,
+        resolved.dims,
+        dtype,
+        device,
+        ifgnn=graph_ae,
+    )
 
-    # Prediction
-    predict = build_predictor(cont, prd_type, dims['u'])
+    predict = resolved.predictor
 
     # The full model
-    model = model_cls(
-        encoder  = ENC_MAP[enc_type],
-        dynamics = (FZU_MAP[fzu_type], DYN_MAP[dyn_type]),
-        decoder  = DEC_MAP[dec_type],
-        predict  = (predict, input_order),
-        model_config = copy.deepcopy(model_config),
-        dims     = copy.deepcopy(dims)
+    model = model_spec.model_cls(
+        encoder=ENC_MAP[resolved.encoder_key],
+        dynamics=(FZU_MAP[resolved.feature_key], DYN_MAP[resolved.dynamics_key]),
+        decoder=DEC_MAP[resolved.decoder_key],
+        predict=(predict, resolved.input_order),
+        model_config=copy.deepcopy(model_config),
+        dims=copy.deepcopy(resolved.dims),
     )
-    model.CONT  = cont
-    model.GRAPH = graph_ae or graph_dyn
-    if model.GRAPH:
-        lin_eval, lin_feat = LIN_MAP["graph"]
-    else:
-        lin_eval, lin_feat = LIN_MAP["smpl"]
-    model.encoder_net      = encoder_net
-    model.processor_net    = processor_net
-    model.decoder_net      = decoder_net
-    model._linear_eval     = lin_eval
+    model.CONT = resolved.continuous_time
+    model.GRAPH = resolved.graph_mode != "none"
+    lin_eval, lin_feat = LIN_MAP[resolved.linear_mode]
+    model.encoder_net = encoder_net
+    model.processor_net = resolved.processor_net
+    model.decoder_net = decoder_net
+    model._linear_eval = lin_eval
     model._linear_features = lin_feat
-    model.dtype            = dtype
-    model.device           = device
+    model.dtype = dtype
+    model.device = device
+    model.model_spec = model_spec
+    model.resolved_model_spec = resolved
 
-    logger.info(f"Built model: {model_cls.__name__}")
-    logger.info(f"- Encoder: {enc_type}, Dynamics: {dyn_type}, Decoder: {dec_type}, Features: {fzu_type}")
-    logger.info(f"- Using predictor: {predict.__name__}, input order: {input_order}")
+    logger.info(f"Built model: {model_spec.model_cls.__name__}")
+    logger.info(
+        f"- Encoder: {resolved.encoder_key}, Dynamics: {resolved.dynamics_key}, "
+        f"Decoder: {resolved.decoder_key}, Features: {resolved.feature_key}"
+    )
+    logger.info(f"- Using predictor: {predict.__name__}, input order: {resolved.input_order}")
     logger.info(f"- If graph model: {model.GRAPH}, continuous-time: {model.CONT}")
 
     return model
 
 
-def _is_lti_typed_family(model_spec: ModelSpec) -> bool:
-    if model_spec.rollout is None or model_spec.memory is None:
-        return False
-    if model_spec.rollout.family != "lti":
-        return False
-    if model_spec.dynamics.family != "direct":
-        return False
-    return model_spec.memory.latent_state == "cat"
-
-
-def _build_lti_legacy_tuple(model_spec: ModelSpec) -> List:
-    expected_predictor = "continuous" if model_spec.continuous_time else "discrete"
-    if model_spec.rollout is None:
-        raise ValueError("LTI typed dispatch requires rollout metadata.")
-    if model_spec.rollout.predictor != expected_predictor:
-        raise ValueError(
-            f"LTI typed dispatch predictor mismatch: expected {expected_predictor}, "
-            f"got {model_spec.rollout.predictor}.")
-    if not model_spec.rollout.supports_control_inputs:
-        raise ValueError("LTI typed dispatch requires control-input support.")
-    return [
-        model_spec.continuous_time,
-        model_spec.encoder.family,
-        model_spec.feature.family,
-        model_spec.dynamics.family,
-        model_spec.decoder.family,
-        model_spec.model_cls,
-    ]
-
-
 def build_model_from_spec(
-        model_spec: Union[ModelSpec, List],
+        model_spec: ModelSpec,
         model_config: Dict, data_meta: Dict,
         dtype=None, device=None):
-    """Build a model from a typed ModelSpec compatibility object."""
-    if isinstance(model_spec, ModelSpec):
-        if _is_lti_typed_family(model_spec):
-            legacy_spec = _build_lti_legacy_tuple(model_spec)
-        else:
-            legacy_spec = list(model_spec.to_legacy_tuple())
-        model = build_model(legacy_spec, model_config, data_meta, dtype, device)
-        rollout_engine = select_rollout_engine(model_spec)
-        if rollout_engine is not None and hasattr(model, "_predict"):
-            model._predict = rollout_engine.predictor
-            logger.info(
-                "Typed rollout-engine selected from model spec metadata: %s",
-                rollout_engine.source,
-            )
-        return model
-    else:
-        legacy_spec = model_spec
-    return build_model(legacy_spec, model_config, data_meta, dtype, device)
+    """Compatibility alias for the typed-only build path."""
+    return build_model(model_spec, model_config, data_meta, dtype, device)

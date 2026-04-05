@@ -67,7 +67,7 @@ class ComposedDynamics(nn.Module):
     The class can be used in two ways:
 
     - Through predefined models and :func:`~dymad.models.helpers.build_model` function.
-      User defines :func:`~dymad.models.model_base.ComposedDynamics.build_core` class method,
+      User defines :func:`~dymad.models.model_base.ComposedDynamics.resolve_spec` class method,
       as needed by :func:`~dymad.models.helpers.build_model`.
     - By directly instantiating the class and hooking the functions and networks.  User needs to
       define all components manually with an initializer like:
@@ -119,18 +119,9 @@ class ComposedDynamics(nn.Module):
         self._linear_features = None
 
     @classmethod
-    def build_core(cls, model_config, dtype, device, ifgnn=False):
+    def resolve_spec(cls, model_spec, model_config, data_meta, dtype, device):
         """
-        Typically used together with predefined models, and the unified build_model function.
-
-        Should return:
-
-        - dims: class-specific dimension dictionary
-        - (enc_type, fzu_type, dec_type, prd_type): finalized type strings
-        - processor_net: network for the dynamics processor
-        - input_order: input order string for the predictor
-
-        See :func:`~dymad.models.helpers.build_model` for details.
+        Resolve a typed model spec into concrete build-time components.
         """
         raise NotImplementedError("This is the base class.")
 

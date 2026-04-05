@@ -30,8 +30,12 @@ from dymad.models.model_spec import (
     DynamicsSpec,
     EncoderSpec,
     FeatureSpec,
-    LegacyPredefinedModelAdapter,
+    MemorySpec,
     ModelSpec,
+    ModelSpecValidationError,
+    RecipeSpec,
+    ResolvedModelSpec,
+    RolloutSpec,
 )
 
 __all__ = [
@@ -63,9 +67,13 @@ __all__ = [
     "build_model_from_spec",
     "get_dims",
     "ModelSpec",
+    "RecipeSpec",
+    "RolloutSpec",
+    "ResolvedModelSpec",
+    "ModelSpecValidationError",
     "EncoderSpec",
     "FeatureSpec",
     "DynamicsSpec",
     "DecoderSpec",
-    "LegacyPredefinedModelAdapter",
+    "MemorySpec",
 ]

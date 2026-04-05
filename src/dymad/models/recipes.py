@@ -1,21 +1,43 @@
+from dataclasses import dataclass
 import numpy as np
 import torch
-from typing import Union, Tuple
+from typing import Tuple
 
-from dymad.core.model_context import ModelRuntimePayload
 from dymad.models.helpers import build_processor, fzu_selector, get_dims
 from dymad.models.model_base import ComposedDynamics
-from dymad.models.prediction import predict_continuous_fenc
+from dymad.models.model_spec import ModelSpec, ModelSpecValidationError
 from dymad.models.runtime_view import ComponentInputPayload
 from dymad.modules import FlexLinear, make_krr
 from dymad.numerics import Manifold
+
+
+@dataclass(frozen=True)
+class RecipeResolution:
+    dims: dict
+    encoder_key: str
+    feature_key: str
+    dynamics_key: str
+    decoder_key: str
+    processor_net: object
+    input_order: str | None
+
 
 class CD_LDM(ComposedDynamics):
     """Latent Dynamics Model (LDM) class."""
 
     @classmethod
-    def build_core(cls, types, model_config, data_meta, dtype, device, ifgnn=False):
-        enc_type, fzu_type, dec_type = types
+    def resolve_spec(
+        cls,
+        model_spec: ModelSpec,
+        model_config,
+        data_meta,
+        dtype,
+        device,
+    ) -> RecipeResolution:
+        enc_type = model_spec.encoder.kind
+        fzu_type = model_spec.feature.kind
+        dec_type = model_spec.decoder.kind
+        ifgnn = model_spec.dynamics.kind.startswith("graph")
 
         # Dimensions
         dims = get_dims(model_config, data_meta)
@@ -32,17 +54,33 @@ class CD_LDM(ComposedDynamics):
 
         # Prediction options
         input_order = model_config.get('input_order', 'cubic')
-        prd_type = model_config.get('predictor_type', 'ode')
-
-        return dims, (enc_type, fzu_type, dec_type, prd_type), processor_net, input_order
+        return RecipeResolution(
+            dims=dims,
+            encoder_key=enc_type,
+            feature_key=fzu_type,
+            dynamics_key=model_spec.dynamics.kind,
+            decoder_key=dec_type,
+            processor_net=processor_net,
+            input_order=input_order,
+        )
 
 
 class CD_SDM(ComposedDynamics):
     """Sequential Dynamics Model (SDM) class."""
 
     @classmethod
-    def build_core(cls, types, model_config, data_meta, dtype, device, ifgnn=False):
-        enc_type, fzu_type, dec_type = types
+    def resolve_spec(
+        cls,
+        model_spec: ModelSpec,
+        model_config,
+        data_meta,
+        dtype,
+        device,
+    ) -> RecipeResolution:
+        enc_type = model_spec.encoder.kind
+        fzu_type = model_spec.feature.kind
+        dec_type = model_spec.decoder.kind
+        ifgnn = model_spec.dynamics.kind.startswith("graph")
 
         # Dimensions
         dims = get_dims(model_config, data_meta)
@@ -68,7 +106,15 @@ class CD_SDM(ComposedDynamics):
         if prd_type == 'exp':
             assert dims['u'] == 0, "SDM with control cannot use predict_discrete_exp."
 
-        return dims, (enc_type, fzu_type, dec_type, prd_type), processor_net, input_order
+        return RecipeResolution(
+            dims=dims,
+            encoder_key=enc_type,
+            feature_key=fzu_type,
+            dynamics_key=model_spec.dynamics.kind,
+            decoder_key=dec_type,
+            processor_net=processor_net,
+            input_order=input_order,
+        )
 
     def dynamics(self, z, w):
         """Customized dynamics for SDM.
@@ -91,8 +137,17 @@ class CD_LFM(ComposedDynamics):
         self.koopman_dimension = dims['z']
 
     @classmethod
-    def build_core(cls, types, model_config, data_meta, dtype, device, ifgnn=False):
-        enc_type, fzu_type, dec_type = types
+    def resolve_spec(
+        cls,
+        model_spec: ModelSpec,
+        model_config,
+        data_meta,
+        dtype,
+        device,
+    ) -> RecipeResolution:
+        enc_type = model_spec.encoder.kind
+        fzu_type = model_spec.feature.kind
+        dec_type = model_spec.decoder.kind
 
         # Options
         const_term = model_config.get('const_term', True)
@@ -126,17 +181,32 @@ class CD_LFM(ComposedDynamics):
 
         # Prediction options
         input_order = model_config.get('input_order', 'cubic')
-        prd_type = model_config.get('predictor_type', 'ode')
-
-        return dims, (enc_type, fzu_type, dec_type, prd_type), processor_net, input_order
+        return RecipeResolution(
+            dims=dims,
+            encoder_key=enc_type,
+            feature_key=fzu_type,
+            dynamics_key=model_spec.dynamics.kind,
+            decoder_key=dec_type,
+            processor_net=processor_net,
+            input_order=input_order,
+        )
 
 
 class CD_KM(ComposedDynamics):
     """Kernel Machine (KM) class."""
 
     @classmethod
-    def build_core(cls, types, model_config, data_meta, dtype, device, ifgnn=False):
-        enc_type, fzu_type, dec_type = types
+    def resolve_spec(
+        cls,
+        model_spec: ModelSpec,
+        model_config,
+        data_meta,
+        dtype,
+        device,
+    ) -> RecipeResolution:
+        enc_type = model_spec.encoder.kind
+        fzu_type = model_spec.feature.kind
+        dec_type = model_spec.decoder.kind
 
         # Options
         const_term = model_config.get('const_term', True)
@@ -164,9 +234,15 @@ class CD_KM(ComposedDynamics):
 
         # Prediction options
         input_order = model_config.get('input_order', 'cubic')
-        prd_type = model_config.get('predictor_type', 'ode')
-
-        return dims, (enc_type, fzu_type, dec_type, prd_type), processor_net, input_order
+        return RecipeResolution(
+            dims=dims,
+            encoder_key=enc_type,
+            feature_key=fzu_type,
+            dynamics_key=model_spec.dynamics.kind,
+            decoder_key=dec_type,
+            processor_net=processor_net,
+            input_order=input_order,
+        )
 
     def linear_solve(self, inp: torch.Tensor, out: torch.Tensor, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -253,10 +329,6 @@ class CD_KMM(CD_KM):
         residual = self.processor_net.fit()
         return self.processor_net._alphas, residual
 
-    def predict(self, x0: torch.Tensor, w: ModelRuntimePayload, ts: Union[np.ndarray, torch.Tensor], **kwargs) -> torch.Tensor:
-        """Predict trajectory using discrete-time iterations."""
-        return predict_continuous_fenc(self, x0, ts, w, **kwargs)
-
     def fenc_step(self, z: torch.Tensor, w: ComponentInputPayload, dt: float) -> torch.Tensor:
         """
         First-order Euler step with Normal Correction.
@@ -290,3 +362,28 @@ class CD_KMM(CD_KM):
         self.processor_net.kernel._manifold = self._manifold
 
         return res
+
+
+RECIPE_REGISTRY = {
+    "ldm": CD_LDM,
+    "sdm": CD_SDM,
+    "lfm": CD_LFM,
+    "km": CD_KM,
+    "kmsk": CD_KMSK,
+    "kmm": CD_KMM,
+}
+
+
+def resolve_recipe(
+    model_spec: ModelSpec,
+    model_config,
+    data_meta,
+    dtype,
+    device,
+) -> RecipeResolution:
+    recipe_cls = model_spec.model_cls
+    if not hasattr(recipe_cls, "resolve_spec"):
+        raise ModelSpecValidationError(
+            f"Recipe class {recipe_cls!r} does not implement typed spec resolution."
+        )
+    return recipe_cls.resolve_spec(model_spec, model_config, data_meta, dtype, device)
