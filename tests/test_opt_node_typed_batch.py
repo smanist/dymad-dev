@@ -2,7 +2,8 @@ import torch
 
 from dymad.core.series import RegularSeries
 from dymad.core.trainer_batch import RegularTrainerBatch
-from dymad.training.opt_node import OptNODE
+from dymad.training.phase_runtime import OptimizerStateArtifact
+from dymad.training.phases import NodeOptimizerPhase, OptimizerPhaseSpec
 
 
 class _SweepScheduler:
@@ -18,18 +19,18 @@ class _IdentityPredictModel:
         return runtime.x
 
 
-def _build_opt_node(*, chop_mode: str, sweep_length=None) -> OptNODE:
-    opt = object.__new__(OptNODE)
+def _build_opt_node(*, chop_mode: str, sweep_length=None) -> NodeOptimizerPhase:
+    opt = object.__new__(NodeOptimizerPhase)
     opt.schedulers = [object(), _SweepScheduler(sweep_length)]
-    opt.chop_mode = chop_mode
-    opt.chop_step = 0.5
     opt.device = torch.device("cpu")
     opt.model = _IdentityPredictModel()
-    opt.criteria = [torch.nn.MSELoss()]
-    opt.criteria_weights = [1.0]
-    opt.criteria_names = ["dynamics"]
     opt.ode_method = "dopri5"
     opt.ode_args = {}
+    opt.spec = OptimizerPhaseSpec(
+        name="node",
+        trainer="NODE",
+        config={"chop_mode": chop_mode, "chop_step": 0.5},
+    )
     return opt
 
 
@@ -44,8 +45,15 @@ def _build_regular_batch(n_steps: int = 6) -> RegularTrainerBatch:
 def test_opt_node_accepts_typed_regular_batch_initial_mode():
     opt = _build_opt_node(chop_mode="initial")
     batch = _build_regular_batch()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.Adam([torch.nn.Parameter(torch.tensor(0.0))]),
+        schedulers=opt.schedulers,
+        criteria=[torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics"],
+    )
 
-    losses = opt._process_batch(batch)
+    losses = opt._compute_losses(opt.model, optimizer_state, batch, opt.ode_method, opt.ode_args)
 
     assert len(losses) == 1
     assert torch.isclose(losses[0], torch.tensor(0.0))
@@ -54,8 +62,15 @@ def test_opt_node_accepts_typed_regular_batch_initial_mode():
 def test_opt_node_accepts_typed_regular_batch_unfold_mode():
     opt = _build_opt_node(chop_mode="unfold", sweep_length=4)
     batch = _build_regular_batch(n_steps=6)
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.Adam([torch.nn.Parameter(torch.tensor(0.0))]),
+        schedulers=opt.schedulers,
+        criteria=[torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics"],
+    )
 
-    losses = opt._process_batch(batch)
+    losses = opt._compute_losses(opt.model, optimizer_state, batch, opt.ode_method, opt.ode_args)
 
     assert len(losses) == 1
     assert torch.isclose(losses[0], torch.tensor(0.0))

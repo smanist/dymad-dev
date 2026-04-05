@@ -8,8 +8,8 @@ from typing import Any, Dict, Iterable, List, Tuple, Type, Union
 
 from dymad.io import TrajectoryManager, TrajectoryManagerGraph
 from dymad.training.execution_services import ExecutionServices
-from dymad.training.helper import aggregate_cv_results, CVResult, iter_param_grid, RunState, set_by_dotted_key
-from dymad.training.phase_runtime import PhaseContext, TrainerState, compose_run_state
+from dymad.training.helper import aggregate_cv_results, CVResult, iter_param_grid, set_by_dotted_key
+from dymad.training.phase_runtime import PhaseContext, build_initial_trainer_state
 from dymad.training.trainer_run import TrainerRun
 from dymad.utils import load_config
 
@@ -56,24 +56,6 @@ def _build_phase_context(fold_id: int, cfg: Dict[str, Any], train_sets, valid_se
     )
 
 
-def _build_data_state(fold_id: int, cfg: Dict[str, Any], train_sets, valid_sets, device) -> RunState:
-    """Compatibility shim for callers that still require a legacy ``RunState``."""
-    execution_services = ExecutionServices.from_config(cfg, default_device=device)
-    phase_context = _build_phase_context(
-        fold_id=fold_id,
-        cfg=cfg,
-        train_sets=train_sets,
-        valid_sets=valid_sets,
-    )
-    return compose_run_state(
-        trainer_state=TrainerState(
-            config=cfg,
-            execution_services=execution_services,
-            device=execution_services.device,
-        ),
-        phase_context=phase_context,
-    )
-
 def run_cv_single(args: Dict[str, Any]):
     # Apply hyperparameter overrides to this fold's config
     cfg, model_prefix = _apply_combo_to_config(
@@ -85,7 +67,7 @@ def run_cv_single(args: Dict[str, Any]):
         args['checkpoint_prefix'],
         args['results_prefix'])
 
-    # Build typed phase context first, then materialize RunState only for compatibility.
+    # Build the typed context for this concrete run.
     phase_context = _build_phase_context(
         args['fold_idx'],
         cfg,
@@ -93,13 +75,9 @@ def run_cv_single(args: Dict[str, Any]):
         args['valid_sets'],
     )
     execution_services = ExecutionServices.from_config(cfg, default_device=args['device'])
-    data_state = compose_run_state(
-        trainer_state=TrainerState(
-            config=cfg,
-            execution_services=execution_services,
-            device=execution_services.device,
-        ),
-        phase_context=phase_context,
+    trainer_state = build_initial_trainer_state(
+        cfg,
+        execution_services=execution_services,
     )
 
     # Run one concrete trainer run for this fold+combo.
@@ -113,7 +91,10 @@ def run_cv_single(args: Dict[str, Any]):
         results_prefix=execution_services.results_prefix,
         execution_services=execution_services,
     )
-    results = trainer_run.run(initial_state=data_state)
+    results = trainer_run.run(
+        initial_context=phase_context,
+        initial_state=trainer_state,
+    )
 
     metric_value = results[-1].get_metric(args['metric'])
 

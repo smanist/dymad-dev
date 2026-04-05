@@ -128,10 +128,8 @@ def test_native_hot_paths_do_not_route_through_legacy_runtime():
     files = [
         root / "models" / "prediction.py",
         root / "models" / "runtime_view.py",
-        root / "training" / "opt_base.py",
-        root / "training" / "opt_node.py",
-        root / "training" / "opt_weak_form.py",
-        root / "training" / "opt_linear.py",
+        root / "training" / "phases.py",
+        root / "training" / "phase_pipeline.py",
         root / "training" / "ls_update.py",
     ]
 

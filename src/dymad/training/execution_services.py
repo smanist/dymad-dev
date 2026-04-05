@@ -4,14 +4,11 @@ import copy
 import logging
 import os
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Any, Dict, Optional
 
 import torch
 
 from dymad.utils import config_logger
-
-if TYPE_CHECKING:
-    from dymad.training.helper import RunState
 
 
 @dataclass(frozen=True)
@@ -70,10 +67,6 @@ class ExecutionServices:
             log_level=log_cfg.get("level", "info"),
             log_stdout=log_cfg.get("stdout", False),
         )
-
-    @classmethod
-    def from_run_state(cls, run_state: "RunState") -> "ExecutionServices":
-        return cls.from_config(run_state.config, default_device=run_state.device)
 
     def with_paths(
         self,

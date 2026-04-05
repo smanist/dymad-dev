@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import copy
+import torch
 
 from dymad.core import GraphSeries, GraphTrainerBatch, RegularSeries, RegularTrainerBatch
 from dymad.io.trajectory_manager import TrajectoryManager, TrajectoryManagerGraph
-from dymad.training.driver import _build_data_state
+from dymad.training.driver import _build_phase_context
 
 
 def test_build_data_state_uses_regular_typed_batches_for_linear_only(tmp_path) -> None:
@@ -37,11 +38,11 @@ def test_build_data_state_uses_regular_typed_batches_for_linear_only(tmp_path) -
     train.set_data_index([0, 1])
     valid.set_data_index([0, 1])
 
-    state = _build_data_state(0, cfg, [train], [valid], device=train.device)
-    batch = next(iter(state.train_loader))
+    context = _build_phase_context(0, cfg, [train], [valid])
+    batch = next(iter(context.train_loader))
 
     assert isinstance(batch, RegularTrainerBatch)
-    assert isinstance(state.train_set[0], RegularSeries)
+    assert isinstance(context.train_set[0], RegularSeries)
 
 
 def test_build_data_state_uses_graph_typed_batches_for_linear_only(ltg_data) -> None:
@@ -64,8 +65,8 @@ def test_build_data_state_uses_graph_typed_batches_for_linear_only(ltg_data) -> 
     train.set_data_index([0, 1])
     valid.set_data_index([0, 1])
 
-    state = _build_data_state(0, cfg, [train], [valid], device=train.device)
-    batch = next(iter(state.train_loader))
+    context = _build_phase_context(0, cfg, [train], [valid])
+    batch = next(iter(context.train_loader))
 
     assert isinstance(batch, GraphTrainerBatch)
-    assert isinstance(state.train_set[0], GraphSeries)
+    assert isinstance(context.train_set[0], GraphSeries)

@@ -93,9 +93,7 @@ class LinearTrainer(SingleSplitDriver):
 
 class StackedTrainer(SingleSplitDriver):
     """
-    Simple interface for single-split single-stage training by a sequence of trainers.
-
-    A wrapper of StackedOpt.
+    Simple interface for single-split phased training.
     """
     def __init__(
         self,

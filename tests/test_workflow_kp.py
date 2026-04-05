@@ -177,9 +177,9 @@ def test_non_linear_kp_workflow_routes_through_trainer_run(kp_data, env_setup, m
             calls["run_name"] = kwargs["run_name"]
             super().__init__(*args, **kwargs)
 
-        def run(self, initial_state):
+        def run(self, *args, **kwargs):
             calls["run"] += 1
-            return super().run(initial_state)
+            return super().run(*args, **kwargs)
 
     monkeypatch.setattr(training_driver, "TrainerRun", _InstrumentedTrainerRun)
 

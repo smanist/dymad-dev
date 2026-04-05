@@ -1,47 +1,164 @@
-"""Phase/state runtime primitives for staged training-layer migration.
-
-The adapters in this module are temporary compatibility seams while trainers
-still consume ``RunState`` directly.
-"""
-
 from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, Optional
 
 import torch
 from torch.utils.data import DataLoader, Dataset
 
 from dymad.training.execution_services import ExecutionServices
-from dymad.training.helper import RunState
+
+
+class TrainingCheckpointError(ValueError):
+    """Raised when a typed training checkpoint cannot be loaded."""
+
+
+@dataclass
+class ModelArtifact:
+    model: torch.nn.Module
+    config: Dict[str, Any]
+    train_md: Dict[str, Any]
+    valid_md: Dict[str, Any]
+    dtype: torch.dtype
+
+
+@dataclass
+class OptimizerStateArtifact:
+    optimizer: torch.optim.Optimizer
+    schedulers: list[Any] = field(default_factory=list)
+    criteria: list[torch.nn.Module] = field(default_factory=list)
+    criteria_weights: list[float] = field(default_factory=list)
+    criteria_names: list[str] = field(default_factory=list)
+    owner_phase: str = ""
+
+
+@dataclass
+class TrainingHistoryArtifact:
+    hist: list[Any] = field(default_factory=list)
+    crit: list[Any] = field(default_factory=list)
+    epoch_times: list[float] = field(default_factory=list)
+    best_loss: Dict[str, float] = field(default_factory=lambda: {"valid_total": float("inf")})
+    best_model_state_dict: Dict[str, Any] | None = None
+    convergence_epoch: int | None = None
+
+
+@dataclass
+class LinearSolveRecord:
+    phase_name: str
+    method: str
+    loss: float
+    updated_parameters: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LinearSolveReportArtifact:
+    records: list[LinearSolveRecord] = field(default_factory=list)
+
+
+@dataclass
+class EvaluationArtifact:
+    metrics: Dict[str, float] = field(default_factory=dict)
+    split: str = "valid"
+    criterion_name: str = "total"
+
+
+@dataclass
+class ExportArtifact:
+    outputs: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class ArtifactRegistry:
+    """Typed intermediate artifacts shared across phases."""
+
+    _artifacts: Dict[str, Any] = field(default_factory=dict)
+
+    def put(self, key: str, artifact: Any) -> Any:
+        self._artifacts[key] = artifact
+        return artifact
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._artifacts.get(key, default)
+
+    def require(self, key: str, expected_type: type | tuple[type, ...] | None = None) -> Any:
+        if key not in self._artifacts:
+            raise KeyError(f"Missing required artifact '{key}'.")
+        artifact = self._artifacts[key]
+        if expected_type is not None and not isinstance(artifact, expected_type):
+            raise TypeError(f"Artifact '{key}' must be {expected_type}, got {type(artifact)}.")
+        return artifact
+
+    def keys(self) -> Iterable[str]:
+        return self._artifacts.keys()
+
+    def checkpoint_payload(self) -> Dict[str, Any]:
+        return dict(self._artifacts)
+
+    @classmethod
+    def from_checkpoint_payload(cls, payload: Dict[str, Any] | None) -> "ArtifactRegistry":
+        return cls(_artifacts={} if payload is None else dict(payload))
+
+
+@dataclass
+class PhaseRecord:
+    name: str
+    kind: str
+    started_epoch: int
+    completed_epoch: int
+    metrics: Dict[str, float] = field(default_factory=dict)
+    artifact_keys: list[str] = field(default_factory=list)
 
 
 @dataclass
 class TrainerState:
-    """Checkpointable trainer state, split from live data context."""
+    """Checkpointable training state."""
 
     config: Optional[Dict[str, Any]]
     execution_services: Optional[ExecutionServices] = None
-    # Compatibility-only fallback while migrated call sites adopt execution_services.
     device: Optional[torch.device] = None
     epoch: int = 0
     best_loss: Dict[str, float] = field(default_factory=lambda: {"valid_total": float("inf")})
-    hist: List[Any] = field(default_factory=list)
-    crit: List[Any] = field(default_factory=list)
-    epoch_times: List[float] = field(default_factory=list)
     converged: bool = False
-    model: Optional[torch.nn.Module] = None
-    optimizer: Optional[torch.optim.Optimizer] = None
-    schedulers: List[Any] = field(default_factory=list)
-    criteria: Optional[List[torch.nn.Module]] = None
-    criteria_weights: Optional[List[float]] = None
-    criteria_names: Optional[List[str]] = None
+    convergence_epoch: int | None = None
+    phase_cursor: int = 0
+    phase_records: list[PhaseRecord] = field(default_factory=list)
+
+    def checkpoint_payload(self) -> Dict[str, Any]:
+        return {
+            "config": copy.deepcopy(self.config),
+            "device": self.device,
+            "epoch": self.epoch,
+            "best_loss": copy.deepcopy(self.best_loss),
+            "converged": self.converged,
+            "convergence_epoch": self.convergence_epoch,
+            "phase_cursor": self.phase_cursor,
+            "phase_records": copy.deepcopy(self.phase_records),
+        }
+
+    @classmethod
+    def from_checkpoint_payload(
+        cls,
+        payload: Dict[str, Any],
+        *,
+        execution_services: ExecutionServices | None = None,
+    ) -> "TrainerState":
+        return cls(
+            config=payload.get("config"),
+            execution_services=execution_services,
+            device=payload.get("device"),
+            epoch=payload.get("epoch", 0),
+            best_loss=copy.deepcopy(payload.get("best_loss", {"valid_total": float("inf")})),
+            converged=payload.get("converged", False),
+            convergence_epoch=payload.get("convergence_epoch"),
+            phase_cursor=payload.get("phase_cursor", 0),
+            phase_records=copy.deepcopy(payload.get("phase_records", [])),
+        )
 
 
 @dataclass
 class PhaseContext:
-    """Live phase context (datasets, loaders, metadata) for one run."""
+    """Live phase context for one run."""
 
     train_set: Optional[Dataset] = None
     valid_set: Optional[Dataset] = None
@@ -51,70 +168,34 @@ class PhaseContext:
     valid_md: Optional[Dict[str, Any]] = None
 
 
-def run_state_to_trainer_state(run_state: RunState) -> TrainerState:
-    """Temporary adapter: project legacy ``RunState`` into ``TrainerState``."""
+@dataclass
+class PhaseResult:
+    """Typed phase outcome."""
 
+    name: str
+    kind: str
+    trainer_state: TrainerState
+    phase_context: PhaseContext
+    artifacts: ArtifactRegistry
+    metrics: Dict[str, float] = field(default_factory=dict)
+    record: PhaseRecord | None = None
+
+    def get_metric(self, metric_name: str) -> float:
+        key = f"valid_{metric_name}"
+        if key in self.trainer_state.best_loss:
+            return self.trainer_state.best_loss[key]
+        if metric_name in self.metrics:
+            return self.metrics[metric_name]
+        raise KeyError(f"Metric '{metric_name}' not found in phase result '{self.name}'.")
+
+
+def build_initial_trainer_state(
+    config: Dict[str, Any],
+    *,
+    execution_services: ExecutionServices,
+) -> TrainerState:
     return TrainerState(
-        config=copy.deepcopy(run_state.config),
-        execution_services=ExecutionServices.from_run_state(run_state),
-        device=run_state.device,
-        epoch=run_state.epoch,
-        best_loss=copy.deepcopy(run_state.best_loss),
-        hist=copy.deepcopy(run_state.hist),
-        crit=copy.deepcopy(run_state.crit),
-        epoch_times=copy.deepcopy(run_state.epoch_times),
-        converged=run_state.converged,
-        model=run_state.model,
-        optimizer=run_state.optimizer,
-        schedulers=list(run_state.schedulers),
-        criteria=None if run_state.criteria is None else list(run_state.criteria),
-        criteria_weights=None if run_state.criteria_weights is None else list(run_state.criteria_weights),
-        criteria_names=None if run_state.criteria_names is None else list(run_state.criteria_names),
-    )
-
-
-def run_state_to_phase_context(run_state: RunState) -> PhaseContext:
-    """Temporary adapter: extract live context from legacy ``RunState``."""
-
-    return PhaseContext(
-        train_set=run_state.train_set,
-        valid_set=run_state.valid_set,
-        train_loader=run_state.train_loader,
-        valid_loader=run_state.valid_loader,
-        train_md=run_state.train_md,
-        valid_md=run_state.valid_md,
-    )
-
-
-def compose_run_state(trainer_state: TrainerState, phase_context: PhaseContext) -> RunState:
-    """Temporary adapter: rebuild ``RunState`` for legacy trainer APIs."""
-
-    services = trainer_state.execution_services
-    if services is None:
-        services = ExecutionServices.from_config(
-            trainer_state.config,
-            default_device=trainer_state.device,
-        )
-
-    return RunState(
-        config=services.apply_to_config(trainer_state.config),
-        device=services.device,
-        epoch=trainer_state.epoch,
-        best_loss=copy.deepcopy(trainer_state.best_loss),
-        hist=copy.deepcopy(trainer_state.hist),
-        crit=copy.deepcopy(trainer_state.crit),
-        epoch_times=copy.deepcopy(trainer_state.epoch_times),
-        converged=trainer_state.converged,
-        model=trainer_state.model,
-        optimizer=trainer_state.optimizer,
-        schedulers=list(trainer_state.schedulers),
-        criteria=None if trainer_state.criteria is None else list(trainer_state.criteria),
-        criteria_weights=None if trainer_state.criteria_weights is None else list(trainer_state.criteria_weights),
-        criteria_names=None if trainer_state.criteria_names is None else list(trainer_state.criteria_names),
-        train_set=phase_context.train_set,
-        valid_set=phase_context.valid_set,
-        train_loader=phase_context.train_loader,
-        valid_loader=phase_context.valid_loader,
-        train_md=phase_context.train_md,
-        valid_md=phase_context.valid_md,
+        config=execution_services.apply_to_config(config),
+        execution_services=execution_services,
+        device=execution_services.device,
     )

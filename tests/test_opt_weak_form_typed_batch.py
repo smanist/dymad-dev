@@ -2,8 +2,8 @@ import torch
 
 from dymad.core.series import RegularSeries
 from dymad.core.trainer_batch import RegularTrainerBatch
-from dymad.training.opt_base import OptBase
-from dymad.training.opt_weak_form import OptWeakForm
+from dymad.training.phase_runtime import OptimizerStateArtifact
+from dymad.training.phases import NodeOptimizerPhase, OptimizerPhaseSpec, WeakFormOptimizerPhase
 
 
 class _IdentityPredictModel:
@@ -29,32 +29,42 @@ def _build_regular_batch(n_steps: int = 6) -> RegularTrainerBatch:
 
 
 def test_opt_weak_form_accepts_typed_regular_batch():
-    opt = object.__new__(OptWeakForm)
+    opt = object.__new__(WeakFormOptimizerPhase)
     opt.device = torch.device("cpu")
     opt.model = _IdentityPredictModel()
-    opt.criteria = [torch.nn.MSELoss()]
-    opt.criteria_weights = [1.0]
-    opt.criteria_names = ["dynamics"]
-    opt.N = 3
-    opt.dN = 1
-    opt.C = torch.ones((3, 1), dtype=torch.float32)
-    opt.D = torch.ones((3, 1), dtype=torch.float32)
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.Adam([torch.nn.Parameter(torch.tensor(0.0))]),
+        criteria=[torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics"],
+    )
+    optimizer_state._weak_N = 3
+    optimizer_state._weak_dN = 1
+    optimizer_state._weak_C = torch.ones((3, 1), dtype=torch.float32)
+    optimizer_state._weak_D = torch.ones((3, 1), dtype=torch.float32)
 
-    losses = opt._process_batch(_build_regular_batch())
+    losses = opt._compute_losses(opt.model, optimizer_state, _build_regular_batch(), "dopri5", {})
 
     assert len(losses) == 1
     assert torch.isclose(losses[0], torch.tensor(0.0))
 
 
 def test_opt_base_prediction_criterion_accepts_typed_regular_batch():
-    opt = object.__new__(OptBase)
+    opt = object.__new__(NodeOptimizerPhase)
     opt.model = _IdentityPredictModel()
-    opt.criteria = [torch.nn.MSELoss()]
-    opt.criteria_names = ["mse"]
-    opt.model_name = "typed-test"
-    opt.results_prefix = "."
-    opt.config = {}
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.Adam([torch.nn.Parameter(torch.tensor(0.0))]),
+        criteria=[torch.nn.MSELoss(), torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+    )
+    opt.spec = OptimizerPhaseSpec(name="node", trainer="NODE", config={})
 
-    score = opt.evaluate_prediction_criterion_single(_build_regular_batch(), plot=False)
+    score = opt._evaluate_prediction_criterion_single(
+        opt.model,
+        optimizer_state,
+        _build_regular_batch(),
+        method="dopri5",
+    )
 
     assert score == 0.0
