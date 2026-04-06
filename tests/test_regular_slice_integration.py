@@ -19,12 +19,14 @@ class DummyPredictModel:
         self.md = md
         self.state_dict_loaded = None
         self.predict_calls = []
+        self.predict_times = []
 
     def load_state_dict(self, state_dict):
         self.state_dict_loaded = state_dict
 
     def predict(self, x0, data, t, **kwargs):
         self.predict_calls.append(kwargs)
+        self.predict_times.append(t.detach().clone())
         steps = t.shape[-1]
         if x0.ndim == 1:
             return x0.unsqueeze(0).repeat(steps, 1)
@@ -274,3 +276,35 @@ def test_checkpoint_prediction_explicit_kwargs_override_saved_defaults(monkeypat
     assert prediction.shape == (3, 2)
     assert model.predict_calls[-1]["method"] == "dopri5"
     assert model.predict_calls[-1]["step_size"] == 0.1
+
+
+def test_checkpoint_prediction_aligns_full_time_for_delayed_runtime(monkeypatch, tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "dummy.pt"
+    checkpoint_path.write_text("placeholder", encoding="utf-8")
+
+    import dymad.io.checkpoint as checkpoint_module
+
+    payload = _build_checkpoint_payload()
+    delayed = make_transform({"type": "delay", "delay": 1})
+    delayed.fit([
+        np.array([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=float),
+        np.array([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=float),
+    ])
+    payload["config"]["transform_x"] = {"type": "delay", "delay": 1}
+    payload["train_md"]["transform_x_state"] = delayed.state_dict()
+
+    monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
+
+    model, predict_fn = load_model(DummyPredictModel, checkpoint_path)
+    x0 = np.array([[1.0, 3.0], [2.0, 4.0], [3.0, 5.0]], dtype=float)
+    u = np.array([[0.2], [0.6], [0.8]], dtype=float)
+    t = np.array([0.0, 1.0, 2.0], dtype=float)
+
+    prediction = predict_fn(x0, t, u=u)
+
+    assert prediction.shape == (3, 2)
+    assert model.predict_times[-1].shape[0] == 2
+    assert torch.allclose(
+        model.predict_times[-1],
+        torch.tensor([1.0, 2.0], dtype=model.predict_times[-1].dtype),
+    )

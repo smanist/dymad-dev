@@ -90,15 +90,16 @@ if ifprd:
     t_data = ts[0]
     u_data = us[0]
 
-    res = [x_data]
+    preds = []
     for _i in IDX:
         mdl, MDL = cases[_i]['name'], cases[_i]['model']
         _, prd_func = load_model(MDL, f'ltd_{mdl}.pt')
 
         with torch.no_grad():
             _pred = prd_func(x_data, t_data[:-1], u=u_data)
-        res.append(_pred)
+        preds.append(_pred)
 
+    res = [x_data] + preds
     plot_trajectory(
         np.array(res), t_data, "LTI",
         us=u_data, labels=['Truth']+labels, ifclose=False)

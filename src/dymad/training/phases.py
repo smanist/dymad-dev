@@ -490,11 +490,16 @@ class BasePhase:
                 sample_md.get("transform_u_state"),
             )
 
+        time_np = time_tensor.detach().cpu().numpy()
+        plot_len = min(len(time_np), truth_np.shape[0], pred_np.shape[0])
+        if control_np is not None:
+            plot_len = min(plot_len, control_np.shape[0])
+
         plot_trajectory(
-            np.array([truth_np, pred_np]),
-            time_tensor.detach().cpu().numpy(),
+            np.array([truth_np[:plot_len], pred_np[:plot_len]]),
+            time_np[:plot_len],
             model_name=run_name,
-            us=control_np,
+            us=None if control_np is None else control_np[:plot_len],
             labels=["Truth", "Prediction"],
             ifclose=True,
             prefix=self.execution_services.checkpoint_prefix,

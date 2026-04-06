@@ -117,6 +117,52 @@ def _runtime_with_params(runtime: TypedRuntime, params: torch.Tensor | None) -> 
     return runtime
 
 
+def _runtime_prediction_delay(runtime: TypedRuntime) -> int:
+    metas = tuple(getattr(runtime, "meta", ()) or ())
+    delays = {
+        int(meta.get("delay", 0))
+        for meta in metas
+        if isinstance(meta, dict) and meta.get("delay", 0)
+    }
+    if not delays:
+        return 0
+    if len(delays) == 1:
+        return next(iter(delays))
+    return max(delays)
+
+
+def _align_prediction_time_input(t, runtime: TypedRuntime):
+    delay = _runtime_prediction_delay(runtime)
+    if delay <= 0 or t is None:
+        return t
+
+    n_steps = getattr(runtime, "n_steps", None)
+    if n_steps is None:
+        return t
+
+    if isinstance(t, torch.Tensor):
+        if t.ndim == 1:
+            if t.shape[0] == n_steps + delay:
+                return t[delay:]
+            return t
+        if t.ndim == 2:
+            if t.shape[1] == n_steps + delay:
+                return t[:, delay:]
+            return t
+        return t
+
+    array = np.asarray(t)
+    if array.ndim == 1:
+        if array.shape[0] == n_steps + delay:
+            return array[delay:]
+        return t
+    if array.ndim == 2:
+        if array.shape[1] == n_steps + delay:
+            return array[:, delay:]
+        return t
+    return t
+
+
 def _prediction_defaults_from_config(config: dict | None) -> dict:
     if not isinstance(config, dict):
         return {}
@@ -331,6 +377,7 @@ def _load_model_legacy(model_class, checkpoint_path):
             _data,
             None if p is None else torch.as_tensor(p, dtype=dtype, device=device),
         )
+        pred_t = _align_prediction_time_input(t, _data)
 
         if ret_dat:
             return {
@@ -346,7 +393,7 @@ def _load_model_legacy(model_class, checkpoint_path):
         with torch.no_grad():
             effective_predict_kwargs = dict(prediction_defaults)
             effective_predict_kwargs.update(predict_kwargs)
-            pred = model.predict(_x0, _data, t, **effective_predict_kwargs).cpu().numpy()
+            pred = model.predict(_x0, _data, pred_t, **effective_predict_kwargs).cpu().numpy()
 
         if _has_graph:
             # Some hacking to handle graph data
