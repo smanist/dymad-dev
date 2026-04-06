@@ -71,17 +71,16 @@ def predict(selected: list[int], root: Path):
     control = None
     for idx in selected:
         case = cases[idx]
-        model, prd_func = load_model(case["model"], f"{case['name']}.pt")
-        delay = model.seq_len - 1
+        _, prd_func = load_model(case["model"], f"{case['name']}.pt")
         with torch.no_grad():
             pred = np.stack(
                 [
                     prd_func(
                         x_data[j],
-                        t_data[delay:],
+                        t_data,
                         u=u_data[j],
-                        ei=ei_data[j][delay:],
-                        ew=ew_data[j][delay:],
+                        ei=ei_data[j],
+                        ew=ew_data[j],
                     )
                     for j in range(len(x_data))
                 ],

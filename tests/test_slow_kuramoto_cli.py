@@ -75,24 +75,22 @@ def _eval_rmse(case: Case, workdir: Path, checkpoint_path: Path) -> float:
     t_data = np.arange(x_data.shape[1]) * 0.01
     u_data = dat["u"]
     ei_data, ew_data = adj_to_edge(dat["adj"])
-    model, predict_fn = load_model(case.model_class, checkpoint_path)
-    delay = model.seq_len - 1
+    _, predict_fn = load_model(case.model_class, checkpoint_path)
     with torch.no_grad():
         pred = np.stack(
             [
                 predict_fn(
                     x_data[j],
-                    t_data[delay:],
+                    t_data,
                     u=u_data[j],
-                    ei=ei_data[j][delay:],
-                    ew=ew_data[j][delay:],
+                    ei=ei_data[j],
+                    ew=ew_data[j],
                 )
                 for j in range(len(x_data))
             ],
             axis=0,
         )
-    truth = x_data[:, -pred.shape[1]:]
-    return float(np.sqrt(np.mean((pred - truth) ** 2)))
+    return float(np.sqrt(np.mean((pred - x_data) ** 2)))
 
 
 @pytest.fixture(scope="session")

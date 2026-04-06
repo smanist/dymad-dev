@@ -47,6 +47,12 @@ def _infer_graph_nodes(edge_index) -> int:
     if isinstance(edge_index, (np.ndarray, torch.Tensor)):
         tensor = torch.as_tensor(edge_index)
         return int(tensor.max().item()) + 1
+    if isinstance(edge_index, (list, tuple)) and edge_index and isinstance(edge_index[0], (np.ndarray, torch.Tensor, list, tuple)):
+        if isinstance(edge_index[0], (list, tuple)):
+            values = [torch.as_tensor(step).max().item() for step in edge_index]
+        else:
+            values = [torch.as_tensor(step).max().item() for step in edge_index]
+        return int(max(values)) + 1
     if isinstance(edge_index, list) and edge_index and isinstance(edge_index[0], (np.ndarray, torch.Tensor)):
         values = [torch.as_tensor(step).max().item() for step in edge_index]
         return int(max(values)) + 1
@@ -81,6 +87,37 @@ def _ensure_param_batch(data):
     if array.ndim == 1:
         return np.expand_dims(array, axis=0)
     return array
+
+
+def _infer_prediction_delay(*, raw_state, transformed_state, raw_control=None, transformed_control=None) -> int:
+    raw_state_batch = _ensure_regular_batch(raw_state)
+    delays = [int(raw_state_batch.shape[1] - transformed_state.shape[1])]
+    if raw_control is not None and transformed_control is not None:
+        raw_control_batch = _ensure_regular_batch(raw_control)
+        delays.append(int(raw_control_batch.shape[1] - transformed_control.shape[1]))
+    valid = [delay for delay in delays if delay > 0]
+    return max(valid) if valid else 0
+
+
+def _trim_graph_temporal_payload(payload, *, delay: int, target_steps: int):
+    if payload is None or delay <= 0:
+        return payload
+    if isinstance(payload, list):
+        if len(payload) == target_steps + delay:
+            return payload[delay:]
+        return payload
+    if isinstance(payload, tuple):
+        if len(payload) == target_steps + delay:
+            return payload[delay:]
+        return payload
+    if isinstance(payload, torch.Tensor):
+        if payload.ndim >= 1 and payload.shape[0] == target_steps + delay:
+            return payload[delay:]
+        return payload
+    array = np.asarray(payload)
+    if array.ndim >= 1 and array.shape[0] == target_steps + delay:
+        return array[delay:]
+    return payload
 
 def _to_tensor_batch(
     data,
@@ -296,23 +333,43 @@ def _load_model_legacy(model_class, checkpoint_path):
         if _has_u and u is not None:
             control = _transform_graph_node_payload(u, nnd, _data_transform_u, dtype, device)
         p_batch = None if p is None else _ensure_param_batch(p)
+        delay = _infer_prediction_delay(
+            raw_state=x0,
+            transformed_state=node_state,
+            raw_control=u,
+            transformed_control=control,
+        )
 
         edge_weight_payloads = _normalize_graph_batch_payload(_proc_ew(ew, device), batch_size)
         edge_attr_payloads = _normalize_graph_batch_payload(_proc_ea(ea, device), batch_size)
 
         items = []
         for index in range(node_state.shape[0]):
+            target_steps = int(node_state.shape[1])
             items.append(
                 SeriesAdapter.from_graph_arrays(
-                    np.arange(node_state.shape[1], dtype=np.int64),
+                    np.arange(target_steps, dtype=np.int64),
                     node_state[index],
-                    edge_index=edge_index_payloads[index],
+                    edge_index=_trim_graph_temporal_payload(
+                        edge_index_payloads[index],
+                        delay=delay,
+                        target_steps=target_steps,
+                    ),
                     control=None if control is None else control[index],
                     params=None if p_batch is None else p_batch[index, 0],
-                    edge_weight=edge_weight_payloads[index],
-                    edge_attr=edge_attr_payloads[index],
+                    edge_weight=_trim_graph_temporal_payload(
+                        edge_weight_payloads[index],
+                        delay=delay,
+                        target_steps=target_steps,
+                    ),
+                    edge_attr=_trim_graph_temporal_payload(
+                        edge_attr_payloads[index],
+                        delay=delay,
+                        target_steps=target_steps,
+                    ),
                     dtype=dtype,
                     device=device,
+                    meta={"delay": delay} if delay > 0 else None,
                 )
             )
         return build_model_context(GraphSeriesBatch.collate(items))

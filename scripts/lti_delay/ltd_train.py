@@ -96,7 +96,7 @@ if ifprd:
         _, prd_func = load_model(MDL, f'ltd_{mdl}.pt')
 
         with torch.no_grad():
-            _pred = prd_func(x_data, t_data[:-1], u=u_data)
+            _pred = prd_func(x_data, t_data, u=u_data)
         preds.append(_pred)
 
     res = [x_data] + preds

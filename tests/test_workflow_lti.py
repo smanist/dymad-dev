@@ -184,8 +184,6 @@ cfgs = [
     ('dkbf_ln',   DKBF, LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
     ]
 
-IDX_DL = [0, 1, 2, 3]
-
 def train_case(idx, data, path):
     _, MDL, Trainer, opt = cfgs[idx]
     opt.update({"data": {"path": data}})
@@ -193,21 +191,17 @@ def train_case(idx, data, path):
     trainer = Trainer(config_path, MDL, config_mod=opt)
     trainer.train()
 
-def predict_case(idx, sample, path, ifdl = False):
+def predict_case(idx, sample, path):
     x_data, t_data, u_data = sample
     _, MDL, _, opt = cfgs[idx]
     _, prd_func = load_model(MDL, path/'lti_model/lti_model.pt')
     with torch.no_grad():
-        if ifdl:
-            prd_func(x_data, t_data[:-1], u=u_data)
-        else:
-            prd_func(x_data, t_data, u=u_data)
+        prd_func(x_data, t_data, u=u_data)
 
 @pytest.mark.parametrize("idx", range(len(cfgs)))
 def test_lti(lti_data, lti_gau, env_setup, idx):
-    ifdl = idx in IDX_DL
     train_case(idx, lti_data, env_setup)
-    predict_case(idx, lti_gau, env_setup, ifdl=ifdl)
+    predict_case(idx, lti_gau, env_setup)
     if os.path.exists(env_setup/'lti_model'):
         shutil.rmtree(env_setup/'lti_model')
 

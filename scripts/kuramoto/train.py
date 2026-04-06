@@ -158,17 +158,16 @@ def main():
         res = [x_data]
         for i in IDX:
             mdl, MDL, Trainer, opt = cfgs[i]
-            model, prd_func = load_model(MDL, f'{mdl}.pt')
-            _d = model.seq_len - 1
+            _, prd_func = load_model(MDL, f'{mdl}.pt')
             with torch.no_grad():
                 pred = np.stack(
                     [
                         prd_func(
                             x_data[j],
-                            t_data[_d:],
+                            t_data,
                             u=u_data[j],
-                            ei=ei_data[j][_d:],
-                            ew=ew_data[j][_d:],
+                            ei=ei_data[j],
+                            ew=ew_data[j],
                         )
                         for j in range(len(x_data))
                     ],

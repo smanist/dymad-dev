@@ -178,8 +178,6 @@ cfgs = [
     ('dkmsk_ln',  DGKMSK,LinearTrainer,   {"model": mdl_km, "training" : trn_ln}),
     ]
 
-IDX_DL = [0, 1]
-
 def train_case(idx, data, path):
     _, MDL, Trainer, opt = cfgs[idx]
     opt.update({"data": {"path": data}})
@@ -187,21 +185,17 @@ def train_case(idx, data, path):
     trainer = Trainer(config_path, MDL, config_mod=opt)
     trainer.train()
 
-def predict_case(idx, sample, path, ifdl = False):
+def predict_case(idx, sample, path):
     x_data, t_data, u_data, edge_index = sample
     _, MDL, _, opt = cfgs[idx]
     _, prd_func = load_model(MDL, path/'ltg_model/ltg_model.pt')
     with torch.no_grad():
-        if ifdl:
-            prd_func(x_data, t_data[:-1], u=u_data, ei=torch.tensor(edge_index))
-        else:
-            prd_func(x_data, t_data, u=u_data, ei=torch.tensor(edge_index))
+        prd_func(x_data, t_data, u=u_data, ei=torch.tensor(edge_index))
 
 @pytest.mark.parametrize("idx", range(len(cfgs)))
 def test_ltg(ltg_data, ltg_gau, env_setup, idx):
-    ifdl = idx in IDX_DL
     train_case(idx, ltg_data, env_setup)
-    predict_case(idx, ltg_gau, env_setup, ifdl=ifdl)
+    predict_case(idx, ltg_gau, env_setup)
     if os.path.exists(env_setup/'ltg_model'):
         shutil.rmtree(env_setup/'ltg_model')
 

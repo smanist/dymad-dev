@@ -308,3 +308,48 @@ def test_checkpoint_prediction_aligns_full_time_for_delayed_runtime(monkeypatch,
         model.predict_times[-1],
         torch.tensor([1.0, 2.0], dtype=model.predict_times[-1].dtype),
     )
+
+
+def test_graph_checkpoint_prediction_aligns_full_time_for_delayed_runtime(monkeypatch, tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "dummy.pt"
+    checkpoint_path.write_text("placeholder", encoding="utf-8")
+
+    import dymad.io.checkpoint as checkpoint_module
+
+    payload = _build_checkpoint_payload()
+    delayed = make_transform({"type": "delay", "delay": 1})
+    delayed.fit([
+        np.array([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=float),
+        np.array([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=float),
+    ])
+    payload["config"]["transform_x"] = {"type": "delay", "delay": 1}
+    payload["train_md"]["transform_x_state"] = delayed.state_dict()
+
+    monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
+
+    model, predict_fn = load_model(DummyPredictModel, checkpoint_path)
+    x0 = np.array([[1.0, 3.0, 5.0, 7.0], [2.0, 4.0, 6.0, 8.0], [3.0, 5.0, 7.0, 9.0]], dtype=float)
+    u = np.array([[0.2, 0.4], [0.6, 0.8], [0.9, 1.1]], dtype=float)
+    t = np.array([0.0, 1.0, 2.0], dtype=float)
+    edge_index = (
+        np.array([[0, 1], [1, 0]], dtype=int),
+        np.array([[0, 1], [1, 0]], dtype=int),
+        np.array([[0, 1], [1, 0]], dtype=int),
+    )
+    edge_weight = np.array(
+        [
+            [1.0, 1.0],
+            [1.0, 1.0],
+            [1.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    prediction = predict_fn(x0, t, u=u, ei=edge_index, ew=edge_weight)
+
+    assert prediction.shape == (3, 4)
+    assert model.predict_times[-1].shape[0] == 2
+    assert torch.allclose(
+        model.predict_times[-1],
+        torch.tensor([1.0, 2.0], dtype=model.predict_times[-1].dtype),
+    )
