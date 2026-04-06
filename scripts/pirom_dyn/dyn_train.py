@@ -5,7 +5,7 @@ import torch
 from typing import Tuple, Union
 
 from dymad.io import load_model, visualize_model
-from dymad.models import TemplateCorrDif
+from dymad.models.recipes_corr import TemplateCorrDif
 from dymad.training import NODETrainer
 from dymad.utils import JaxWrapper, plot_multi_trajs, TrajectorySampler
 
@@ -92,52 +92,59 @@ cfgs = [
 IDX = [0, 1]
 labels = [cfgs[i][0] for i in IDX]
 
-ifdat = 0
-iftrn = 1
-ifviz = 1
-ifprd = 1
+def main():
+    ifdat = 0
+    iftrn = 1
+    ifviz = 1
+    ifprd = 1
 
-if ifdat:
-    sampler = TrajectorySampler(f, g, config='dyn_data.yaml')
-    ts, xs, us, ys, ps = sampler.sample(t_grid, batch=B)
-    np.savez_compressed('data/dyn.npz', t=ts, x=ys, u=us, p=ps)
+    if ifdat:
+        sampler = TrajectorySampler(f, g, config='dyn_data.yaml')
+        ts, xs, us, ys, ps = sampler.sample(t_grid, batch=B)
+        np.savez_compressed('data/dyn.npz', t=ts, x=ys, u=us, p=ps)
 
-    plot_multi_trajs(
-        np.array([xs]), ts[0], "DP", us=us,
-        labels=['Truth'], ifclose=False)
+        plot_multi_trajs(
+            np.array([xs]), ts[0], "DP", us=us,
+            labels=['Truth'], ifclose=False)
 
-if iftrn:
-    for i in IDX:
-        mdl, MDL, Trainer, opt = cfgs[i]
-        opt["model"]["name"] = f"dyn_{mdl}"
-        trainer = Trainer(config_path, MDL, config_mod=opt)
-        trainer.train()
+    if iftrn:
+        for i in IDX:
+            mdl, MDL, Trainer, opt = cfgs[i]
+            opt["model"]["name"] = f"dyn_{mdl}"
+            trainer = Trainer(config_path, MDL, config_mod=opt)
+            trainer.train()
 
-if ifviz:
-    for i in IDX:
-        mdl, MDL, _, _ = cfgs[i]
-        model_graph = visualize_model(
-            mdl_class=MDL, checkpoint_path=f'dyn_{mdl}.pt', ref_data='data/dyn.npz',
-            depth=1, ifsave=True)
+    if ifviz:
+        for i in IDX:
+            mdl, MDL, _, _ = cfgs[i]
+            visualize_model(
+                mdl_class=MDL, checkpoint_path=f'dyn_{mdl}.pt', ref_data='data/dyn.npz',
+                depth=1, ifsave=True)
 
-if ifprd:
-    sampler = TrajectorySampler(f, g, config='dyn_test.yaml')
-    ts, xs, us, ys, ps = sampler.sample(t_grid, batch=5)
-    x_data = ys
-    u_data = us
-    t_data = ts[0]
-    p_data = ps
+    if ifprd:
+        sampler = TrajectorySampler(f, g, config='dyn_test.yaml')
+        ts, xs, us, ys, ps = sampler.sample(t_grid, batch=5)
+        x_data = ys
+        u_data = us
+        t_data = ts[0]
 
-    res = [x_data]
-    for i in IDX:
-        mdl, MDL, _, _ = cfgs[i]
-        _, prd_func = load_model(MDL, f'dyn_{mdl}.pt')
-        with torch.no_grad():
-            pred = prd_func(x_data, t_data, u=u_data, p=p_data)
-        res.append(pred)
+        res = [x_data]
+        for i in IDX:
+            mdl, MDL, _, _ = cfgs[i]
+            _, prd_func = load_model(MDL, f'dyn_{mdl}.pt')
+            with torch.no_grad():
+                pred = np.stack(
+                    [prd_func(x_data[j], t_data, u=u_data[j], p=ps[j]) for j in range(len(x_data))],
+                    axis=0,
+                )
+            res.append(pred)
 
-    plot_multi_trajs(
-        np.array(res), t_data, "DP", us=u_data,
-        labels=['Truth'] + labels, ifclose=False)
+        plot_multi_trajs(
+            np.array(res), t_data, "DP", us=u_data,
+            labels=['Truth'] + labels, ifclose=False)
 
-plt.show()
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

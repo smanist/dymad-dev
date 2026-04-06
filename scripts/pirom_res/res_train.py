@@ -5,7 +5,7 @@ import torch
 from typing import Tuple, Union
 
 from dymad.io import load_model
-from dymad.models import TemplateCorrAlg
+from dymad.models.recipes_corr import TemplateCorrAlg
 from dymad.training import WeakFormTrainer, NODETrainer
 from dymad.utils import JaxWrapper, plot_multi_trajs, plot_summary, TrajectorySampler
 
@@ -89,64 +89,71 @@ cfgs = [
 IDX = [0, 1, 2, 3]
 labels = [cfgs[i][0] for i in IDX]
 
-ifdat = 0
-iftrn = 1
-ifplt = 1
-ifprd = 1
+def main():
+    ifdat = 0
+    iftrn = 1
+    ifplt = 1
+    ifprd = 1
 
-if ifdat:
-    sampler = TrajectorySampler(f, config='res_data.yaml')
-    ts, xs, ys, ps = sampler.sample(t_grid, batch=B, save='./data/res.npz')
+    if ifdat:
+        sampler = TrajectorySampler(f, config='res_data.yaml')
+        ts, xs, ys, ps = sampler.sample(t_grid, batch=B, save='./data/res.npz')
 
-    fig = plt.figure(figsize=(8, 6))
-    ax = fig.add_subplot(111)
-    for i in range(B):
-        ax.plot(xs[i, :, 0], xs[i, :, 1], alpha=0.5)
-    ax.set_xlabel('x1')
-    ax.set_ylabel('x2')
-    ax.set_title('2D Trajectories')
-    plt.tight_layout()
+        fig = plt.figure(figsize=(8, 6))
+        ax = fig.add_subplot(111)
+        for i in range(B):
+            ax.plot(xs[i, :, 0], xs[i, :, 1], alpha=0.5)
+        ax.set_xlabel('x1')
+        ax.set_ylabel('x2')
+        ax.set_title('2D Trajectories')
+        plt.tight_layout()
 
-    fig, axs = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
-    for i in range(B):
-        axs[0].plot(ts[i], xs[i, :, 0], alpha=0.5)
-        axs[1].plot(ts[i], xs[i, :, 1], alpha=0.5)
-    axs[0].set_ylabel('x1')
-    axs[1].set_xlabel('Time')
-    axs[1].set_ylabel('x2')
-    plt.tight_layout()
+        fig, axs = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
+        for i in range(B):
+            axs[0].plot(ts[i], xs[i, :, 0], alpha=0.5)
+            axs[1].plot(ts[i], xs[i, :, 1], alpha=0.5)
+        axs[0].set_ylabel('x1')
+        axs[1].set_xlabel('Time')
+        axs[1].set_ylabel('x2')
+        plt.tight_layout()
 
-if iftrn:
-    for i in IDX:
-        mdl, MDL, Trainer, opt = cfgs[i]
-        opt["model"]["name"] = f"res_{mdl}"
-        trainer = Trainer(config_path, MDL, config_mod=opt)
-        trainer.train()
+    if iftrn:
+        for i in IDX:
+            mdl, MDL, Trainer, opt = cfgs[i]
+            opt["model"]["name"] = f"res_{mdl}"
+            trainer = Trainer(config_path, MDL, config_mod=opt)
+            trainer.train()
 
-if ifplt:
-    npz_files = [f'res_{l}' for l in labels]
-    npzs = plot_summary(npz_files, labels=labels, ifclose=False)
+    if ifplt:
+        npz_files = [f'res_{l}' for l in labels]
+        npzs = plot_summary(npz_files, labels=labels, ifclose=False)
 
-    for lbl, npz in zip(labels, npzs):
-        print(f"Epoch time {lbl}: {npz['avg_epoch_time']}")
+        for lbl, npz in zip(labels, npzs):
+            print(f"Epoch time {lbl}: {npz['avg_epoch_time']}")
 
-if ifprd:
-    sampler = TrajectorySampler(f, config='res_test.yaml')
-    ts, xs, ys, ps = sampler.sample(t_grid, batch=5)
-    x_data = xs
-    t_data = ts[0]
-    p_data = ps
+    if ifprd:
+        sampler = TrajectorySampler(f, config='res_test.yaml')
+        ts, xs, ys, ps = sampler.sample(t_grid, batch=5)
+        x_data = xs
+        t_data = ts[0]
 
-    res = [x_data]
-    for i in IDX:
-        mdl, MDL, _, _ = cfgs[i]
-        _, prd_func = load_model(MDL, f'res_{mdl}.pt')
-        with torch.no_grad():
-            pred = prd_func(x_data, t_data, p=p_data)
-        res.append(pred)
+        res = [x_data]
+        for i in IDX:
+            mdl, MDL, _, _ = cfgs[i]
+            _, prd_func = load_model(MDL, f'res_{mdl}.pt')
+            with torch.no_grad():
+                pred = np.stack(
+                    [prd_func(x_data[j], t_data, p=ps[j]) for j in range(len(x_data))],
+                    axis=0,
+                )
+            res.append(pred)
 
-    plot_multi_trajs(
-        np.array(res), t_data, "DP",
-        labels=['Truth'] + labels, ifclose=False)
+        plot_multi_trajs(
+            np.array(res), t_data, "DP",
+            labels=['Truth'] + labels, ifclose=False)
 
-plt.show()
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

@@ -155,6 +155,8 @@ class ComposedDynamics(nn.Module):
             This interface is provided for model inspection and analysis.
         """
         w = materialize_model_base_forward_payload(t=t, x=x, u=u, p=p, ei=ei, ew=ew, ea=ea)
+        if hasattr(w, "to_runtime"):
+            w = w.to_runtime().get_step(0)
         z = self.encoder(w)
         z_dot = self.dynamics(z, w)
         x_hat = self.decoder(z, w)

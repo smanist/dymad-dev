@@ -9,6 +9,10 @@ from dymad.models.runtime_view import ComponentInputPayload, build_component_inp
 from dymad.modules import MLP
 
 
+def _unused_composer(*args):
+    return args[0] if args else None
+
+
 class TemplateCorrAlg(ComposedDynamics):
     """
     Template class for dynamics modeling with algebraic corrections.
@@ -64,7 +68,7 @@ class TemplateCorrAlg(ComposedDynamics):
             **opts
         )
         self.features = FZU_MAP[fzu_type]
-        self.composer = lambda x: x     # Placeholder, not used
+        self.composer = _unused_composer  # Placeholder, not used
 
         # Prediction options
         self.input_order = model_config.get('input_order', 'cubic')
@@ -214,7 +218,7 @@ class TemplateCorrDif(ComposedDynamics):
             **opts
         )
         self.features = FZU_MAP[fzu_type]
-        self.composer = lambda x: x     # Placeholder, not used
+        self.composer = _unused_composer  # Placeholder, not used
 
         # Prediction options
         self.input_order = model_config.get('input_order', 'cubic')
