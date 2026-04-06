@@ -24,6 +24,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+dev = [
+  "pyright>=1.1.408",
+  "ruff>=0.15.7",
+]
 docs = [
   # keep this list short; matches docs/requirements.txt
   "sphinx>=7",
@@ -60,3 +64,46 @@ markers = [
   "slow: marks tests as slow",
   "extra_slow: marks tests as extra slow"
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src"]
+include = ["*.py", "*.pyi"]
+exclude = [
+  ".git",
+  ".ruff_cache",
+  ".venv",
+  "__pycache__",
+  "build",
+  "dist",
+  "docs/_build",
+  "src/dymad.egg-info",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+include = ["src/dymad"]
+exclude = [
+  ".git",
+  ".ruff_cache",
+  ".venv",
+  "__pycache__",
+  "build",
+  "dist",
+  "docs",
+  "examples",
+  "scripts",
+  "src/dymad.egg-info",
+  "tests",
+]
+extraPaths = ["src"]
+reportMissingTypeStubs = "none"

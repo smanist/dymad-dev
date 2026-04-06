@@ -12,6 +12,11 @@ pip install -e .
 ```
 so that edits in the source are applied directly.
 
+For the full local developer toolchain, install:
+```
+pip install -e ".[test,dev]"
+```
+
 **Tests:** To run the tests, stay in the root and
 ```
 pytest
@@ -23,6 +28,27 @@ pytest [filename]
 For specific case in specific test script
 ```
 pytest [filename]::[casename]
+```
+
+## Developer Checks
+
+Use Ruff for linting, import sorting, and formatting, and Pyright for type checking:
+```
+make lint
+make lint-fix
+make format
+make format-check
+make typecheck
+make check
+```
+
+Equivalent direct commands:
+```
+ruff check .
+ruff check . --fix
+ruff format .
+ruff format . --check
+pyright
 ```
 
 **Documentation:** Generate the document by
