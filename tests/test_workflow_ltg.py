@@ -236,7 +236,7 @@ def test_checkpoint_load_uses_typed_build_model_for_graph_models(
     monkeypatch.setattr(model_collections, "build_model", traced_build_model)
 
     try:
-        predict_case(5, ltg_gau, env_setup, ifdl=False)
+        predict_case(5, ltg_gau, env_setup)
     finally:
         if os.path.exists(env_setup / "ltg_model"):
             shutil.rmtree(env_setup / "ltg_model")
