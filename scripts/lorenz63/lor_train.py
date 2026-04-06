@@ -84,10 +84,11 @@ cfgs = [
 IDX = [0, 1]
 labels = [cfgs[i][0] for i in IDX]
 
-ifdat = 1
+ifdat = 0
 iftrn = 1
 ifplt = 1
 ifprd = 1
+resume_training = False
 
 if ifdat:
     sampler = TrajectorySampler(f, config='lor_data.yaml')
@@ -114,7 +115,7 @@ if iftrn:
         mdl, MDL, Trainer, opt = cfgs[i]
         opt["model"]["name"] = f"lor_{mdl}"
         trainer = Trainer(config_path, MDL, config_mod=opt)
-        trainer.train(continue_training=True)
+        trainer.train(continue_training=resume_training)
 
 if ifplt:
     for _i in IDX:
