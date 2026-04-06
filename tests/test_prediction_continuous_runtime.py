@@ -2,7 +2,7 @@ import torch
 
 from dymad.core.runtime import runtime_from_series
 from dymad.core.series import RegularSeries
-from dymad.models.prediction import predict_continuous
+from dymad.models.prediction import predict_continuous, predict_continuous_np
 
 
 class _RuntimeAwareModel:
@@ -48,3 +48,39 @@ def test_predict_continuous_passes_interpolated_control_to_dynamics(monkeypatch)
 
     assert model.seen_u is not None
     assert torch.allclose(model.seen_u, torch.tensor([[0.5]]))
+
+
+def test_predict_continuous_np_retries_underflow_with_rk4(monkeypatch):
+    series = RegularSeries(
+        time=torch.tensor([0.0, 1.0]),
+        state=torch.tensor([[0.0], [0.0]]),
+        control=torch.tensor([[0.0], [0.0]]),
+    )
+    runtime = runtime_from_series(series)
+    model = _RuntimeAwareModel()
+    calls = []
+
+    def fake_odeint(func, z0, ts, method=None, **kwargs):
+        calls.append((method, kwargs))
+        if len(calls) == 1:
+            raise AssertionError("underflow in dt 0.0")
+        return z0.unsqueeze(0).expand(ts.shape[0], *z0.shape)
+
+    monkeypatch.setattr("dymad.models.prediction.odeint", fake_odeint)
+
+    pred = predict_continuous_np(
+        model,
+        x0=series.state[0],
+        ts=series.time,
+        ws=runtime,
+        method="dopri5",
+        order="linear",
+        rtol=1e-7,
+        atol=1e-9,
+    )
+
+    assert pred.shape == (2, 1)
+    assert calls[0][0] == "dopri5"
+    assert calls[1][0] == "rk4"
+    assert "rtol" not in calls[1][1]
+    assert "atol" not in calls[1][1]

@@ -18,11 +18,13 @@ class DummyPredictModel:
         self.config = config
         self.md = md
         self.state_dict_loaded = None
+        self.predict_calls = []
 
     def load_state_dict(self, state_dict):
         self.state_dict_loaded = state_dict
 
-    def predict(self, x0, data, t):
+    def predict(self, x0, data, t, **kwargs):
+        self.predict_calls.append(kwargs)
         steps = t.shape[-1]
         if x0.ndim == 1:
             return x0.unsqueeze(0).repeat(steps, 1)
@@ -216,3 +218,59 @@ def test_regular_slice_integration_touches_typed_transform_seam(monkeypatch, tmp
     assert len(manager.dataset) == 2
     assert apply_events == [2, 1]
     assert prediction.shape == (6, 2)
+
+
+def test_checkpoint_prediction_uses_saved_ode_defaults(monkeypatch, tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "dummy.pt"
+    checkpoint_path.write_text("placeholder", encoding="utf-8")
+
+    import dymad.io.checkpoint as checkpoint_module
+
+    payload = _build_checkpoint_payload()
+    payload["config"]["phases"] = [
+        {
+            "name": "NODE",
+            "trainer": "NODE",
+            "ode_method": "rk4",
+            "ode_args": {"step_size": 0.05},
+        }
+    ]
+
+    monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
+
+    model, predict_fn = load_model(DummyPredictModel, checkpoint_path)
+    x0 = np.array([[1.0, 3.0], [2.0, 4.0]], dtype=float)
+    u = np.array([[0.2], [0.6]], dtype=float)
+    t = np.array([0.0, 1.0, 2.0], dtype=float)
+
+    prediction = predict_fn(x0, t, u=u)
+
+    assert prediction.shape == (3, 2)
+    assert model.predict_calls[-1]["method"] == "rk4"
+    assert model.predict_calls[-1]["step_size"] == 0.05
+
+
+def test_checkpoint_prediction_explicit_kwargs_override_saved_defaults(monkeypatch, tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "dummy.pt"
+    checkpoint_path.write_text("placeholder", encoding="utf-8")
+
+    import dymad.io.checkpoint as checkpoint_module
+
+    payload = _build_checkpoint_payload()
+    payload["config"]["training"] = {
+        "ode_method": "rk4",
+        "ode_args": {"step_size": 0.05},
+    }
+
+    monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
+
+    model, predict_fn = load_model(DummyPredictModel, checkpoint_path)
+    x0 = np.array([[1.0, 3.0], [2.0, 4.0]], dtype=float)
+    u = np.array([[0.2], [0.6]], dtype=float)
+    t = np.array([0.0, 1.0, 2.0], dtype=float)
+
+    prediction = predict_fn(x0, t, u=u, method="dopri5", step_size=0.1)
+
+    assert prediction.shape == (3, 2)
+    assert model.predict_calls[-1]["method"] == "dopri5"
+    assert model.predict_calls[-1]["step_size"] == 0.1

@@ -73,6 +73,15 @@ def _ensure_regular_batch(data):
         return np.expand_dims(array, axis=0)
     return array
 
+
+def _ensure_param_batch(data):
+    array = np.asarray(data)
+    if array.ndim == 0:
+        return np.expand_dims(array, axis=(0, 1))
+    if array.ndim == 1:
+        return np.expand_dims(array, axis=0)
+    return array
+
 def _to_tensor_batch(
     data,
     *,
@@ -107,6 +116,36 @@ def _runtime_with_params(runtime: TypedRuntime, params: torch.Tensor | None) -> 
         return replace(runtime, params=params)
     return runtime
 
+
+def _prediction_defaults_from_config(config: dict | None) -> dict:
+    if not isinstance(config, dict):
+        return {}
+
+    if isinstance(config.get("training"), dict):
+        training_cfg = config["training"]
+        defaults = {}
+        if "ode_method" in training_cfg:
+            defaults["method"] = training_cfg["ode_method"]
+        defaults.update(copy.deepcopy(training_cfg.get("ode_args", {})))
+        return defaults
+
+    phases = config.get("phases")
+    if not isinstance(phases, list):
+        return {}
+
+    for phase in reversed(phases):
+        if not isinstance(phase, dict):
+            continue
+        if "trainer" not in phase:
+            continue
+        defaults = {}
+        if "ode_method" in phase:
+            defaults["method"] = phase["ode_method"]
+        defaults.update(copy.deepcopy(phase.get("ode_args", {})))
+        if defaults:
+            return defaults
+    return {}
+
 def _load_model_legacy(model_class, checkpoint_path):
     """
     Load a model from a checkpoint file.
@@ -130,6 +169,7 @@ def _load_model_legacy(model_class, checkpoint_path):
     chkpt = torch.load(chkpt_path, weights_only=False)
     cfg = chkpt['config']
     md = chkpt['train_md']
+    prediction_defaults = _prediction_defaults_from_config(cfg)
     dtype = torch.double if cfg['data'].get('double_precision', False) else torch.float
     torch.set_default_dtype(dtype)   # GNNs use the default dtype, so we need to set it here
 
@@ -180,7 +220,7 @@ def _load_model_legacy(model_class, checkpoint_path):
     def _build_regular_prediction_payload(x0, u, p, device):
         x_batch = _ensure_regular_batch(x0)
         u_batch = _ensure_regular_batch(u) if u is not None else None
-        p_batch = _ensure_regular_batch(p) if p is not None else None
+        p_batch = _ensure_param_batch(p) if p is not None else None
         items = []
         for index in range(x_batch.shape[0]):
             control = None if u_batch is None else u_batch[index]
@@ -209,7 +249,7 @@ def _load_model_legacy(model_class, checkpoint_path):
         control = None
         if _has_u and u is not None:
             control = _transform_graph_node_payload(u, nnd, _data_transform_u, dtype, device)
-        p_batch = None if p is None else _ensure_regular_batch(p)
+        p_batch = None if p is None else _ensure_param_batch(p)
 
         edge_weight_payloads = _normalize_graph_batch_payload(_proc_ew(ew, device), batch_size)
         edge_attr_payloads = _normalize_graph_batch_payload(_proc_ea(ea, device), batch_size)
@@ -231,7 +271,7 @@ def _load_model_legacy(model_class, checkpoint_path):
             )
         return build_model_context(GraphSeriesBatch.collate(items))
 
-    _proc_ew = lambda ew, device: None
+    _proc_ew = lambda ew, device: ew
     if _has_ew:
         def _proc_ew(ew, device):
             if isinstance(ew, list) and not isinstance(ew[0], list):
@@ -248,7 +288,7 @@ def _load_model_legacy(model_class, checkpoint_path):
                 raise ValueError("Edge weights format not recognized.")
             return _ew
 
-    _proc_ea = lambda ea, device: None
+    _proc_ea = lambda ea, device: ea
     if _has_ea:
         def _proc_ea(ea, device):
             if isinstance(ea, list) and not isinstance(ea[0], list):
@@ -273,7 +313,7 @@ def _load_model_legacy(model_class, checkpoint_path):
         return result
 
     # Prediction in data space
-    def predict_fn(x0, t, u=None, p=None, ei=None, ew=None, ea=None, device="cpu", ret_dat=False):
+    def predict_fn(x0, t, u=None, p=None, ei=None, ew=None, ea=None, device="cpu", ret_dat=False, **predict_kwargs):
         """Predict trajectory in data space."""
         if isinstance(t, np.ndarray):
             t = torch.from_numpy(t).to(device=device)
@@ -304,7 +344,9 @@ def _load_model_legacy(model_class, checkpoint_path):
             }
 
         with torch.no_grad():
-            pred = model.predict(_x0, _data, t).cpu().numpy()
+            effective_predict_kwargs = dict(prediction_defaults)
+            effective_predict_kwargs.update(predict_kwargs)
+            pred = model.predict(_x0, _data, t, **effective_predict_kwargs).cpu().numpy()
 
         if _has_graph:
             # Some hacking to handle graph data

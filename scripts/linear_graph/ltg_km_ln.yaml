@@ -36,3 +36,4 @@ training:
   learning_rate: 5e-3
   decay_rate: 0.999
   method: "full"
+  ode_method: "rk4"

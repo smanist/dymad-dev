@@ -48,10 +48,10 @@ cases = [
     {"name": "ldm_node", "model" : GLDM, "trainer": NODETrainer,     "config": 'ltg_ldm_node.yaml'},
     {"name": "kbf_wf",   "model" : GKBF, "trainer": WeakFormTrainer, "config": 'ltg_kbf_wf.yaml'},
     {"name": "kbf_node", "model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'},
-    {"name": "kbf_ln",   "model" : GKBF, "trainer": LinearTrainer,   "config": 'ltg_kbf_ln.yaml'},
+    {"name": "kbf_ln",   "model" : GKBF, "trainer": LinearTrainer,   "config": 'ltg_kbf_ln.yaml'},  # Explodes
     {"name": "lti_wf",   "model" : GLTI, "trainer": WeakFormTrainer, "config": 'ltg_lti_wf.yaml'},
     {"name": "lti_ln",   "model" : GLTI, "trainer": LinearTrainer,   "config": 'ltg_lti_ln.yaml'},
-    {"name": "km_ln",    "model" : GKM,  "trainer": LinearTrainer,   "config": 'ltg_km_ln.yaml'}
+    {"name": "km_ln",    "model" : GKM,  "trainer": LinearTrainer,   "config": 'ltg_km_ln.yaml'}    # Explodes
 ]
 # IDX = [0, 1]
 IDX = [2, 3]
