@@ -4,7 +4,10 @@ import textwrap as tw
 import torch
 
 from dymad.io import load_model
-from dymad.models import ComposedDynamics, ENC_MAP, DEC_MAP, get_dims, predict_discrete
+from dymad.models.components import DEC_MAP, ENC_MAP
+from dymad.models.helpers import get_dims
+from dymad.models.model_base import ComposedDynamics
+from dymad.models.prediction import predict_discrete
 from dymad.modules import make_network
 from dymad.training import NODETrainer
 from dymad.utils import adj_to_edge, plot_multi_trajs
@@ -112,13 +115,13 @@ mdl_sdm = {
     }
 
 trn_nd = {
-    "n_epochs": 1000,
+    "n_epochs": 200,
     "save_interval": 50,
     "load_checkpoint": False,
     "learning_rate": 5e-3,
     "decay_rate": 0.999,
     "sweep_lengths": [2, 3, 5, 7],
-    "sweep_epoch_step": 1000,
+    "sweep_epoch_step": 200,
     "chop_mode": "unfold",
     "chop_step": 0.5,
     }
@@ -134,38 +137,57 @@ cfgs = [
 IDX = [0]
 labels = [cfgs[i][0] for i in IDX]
 
-iftrn = 0
-ifprd = 1
+def main():
+    iftrn = 1
+    ifprd = 1
 
-if iftrn:
-    for _i in IDX:
-        mdl, MDL, Trainer, opt = cfgs[_i]
-        opt['model']['name'] = mdl
-        trainer = Trainer(config_path, MDL, config_mod=opt)
-        trainer.train()
+    if iftrn:
+        for _i in IDX:
+            mdl, MDL, Trainer, opt = cfgs[_i]
+            opt['model']['name'] = mdl
+            trainer = Trainer(config_path, MDL, config_mod=opt)
+            trainer.train()
 
-if ifprd:
-    dat = np.load(data_path + '_test.npz', allow_pickle=True)
-    x_data = dat['x']
-    t_data = np.arange(x_data.shape[1]) * 0.01
-    u_data = dat['u']
-    ei_data, ew_data = adj_to_edge(dat['adj'])
+    if ifprd:
+        dat = np.load(data_path + '_test.npz', allow_pickle=True)
+        x_data = dat['x']
+        t_data = np.arange(x_data.shape[1]) * 0.01
+        u_data = dat['u']
+        ei_data, ew_data = adj_to_edge(dat['adj'])
 
-    res = [x_data]
-    for i in IDX:
-        mdl, MDL, Trainer, opt = cfgs[i]
-        model, prd_func = load_model(MDL, f'{mdl}.pt')
-        _d = model.seq_len - 1
-        ei = [_e[_d:] for _e in ei_data]
-        ew = [_e[_d:] for _e in ew_data]
-
-        with torch.no_grad():
-            pred = prd_func(x_data, t_data[_d:], u=u_data, ei=ei, ew=ew)
+        res = [x_data]
+        for i in IDX:
+            mdl, MDL, Trainer, opt = cfgs[i]
+            model, prd_func = load_model(MDL, f'{mdl}.pt')
+            _d = model.seq_len - 1
+            with torch.no_grad():
+                pred = np.stack(
+                    [
+                        prd_func(
+                            x_data[j],
+                            t_data[_d:],
+                            u=u_data[j],
+                            ei=ei_data[j][_d:],
+                            ew=ew_data[j][_d:],
+                        )
+                        for j in range(len(x_data))
+                    ],
+                    axis=0,
+                )
             res.append(pred)
 
-    plot_multi_trajs(
-        np.array(res), t_data, "LTI",
-        us=u_data, labels=['Truth']+labels, ifclose=False,
-        xidx=[0, 1, 2, 3, 4], uidx=[0])
+        plot_len = min(item.shape[1] for item in res)
+        time_plot = t_data[-plot_len:]
+        control_plot = u_data[:, -plot_len:]
+        res = [item[:, -plot_len:] for item in res]
 
-plt.show()
+        plot_multi_trajs(
+            np.array(res), time_plot, "LTI",
+            us=control_plot, labels=['Truth']+labels, ifclose=False,
+            xidx=[0, 1, 2, 3, 4], uidx=[0])
+
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

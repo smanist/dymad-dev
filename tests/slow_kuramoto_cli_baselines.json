@@ -1,0 +1,45 @@
+{
+  "sdm_skip": {
+    "metrics": {
+      "best_valid_total": 9.865148146964974e-08,
+      "crit_train_last": 0.33974188845434267,
+      "crit_valid_last": 0.3260567872145956,
+      "final_valid_loss": 3.890810111977602e-07,
+      "rmse": 0.5391729309178038
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "crit_epoch_count": 4,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "model_name_prefix": "sdm_skip",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  }
+}
