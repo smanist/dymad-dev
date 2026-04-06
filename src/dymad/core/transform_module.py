@@ -268,8 +268,26 @@ class SeriesTransformPipeline(nn.Module):
         if not field_delays:
             return replace(series, meta=dict(series.meta))
 
-        aligned = replace(series, time=series.time[self.delay :], meta=dict(series.meta))
+        aligned_updates = {"time": series.time[self.delay :], "meta": dict(series.meta)}
+        pretrimmed_fields: set[str] = set()
+        if isinstance(series, GraphSeries):
+            if isinstance(series.edge_index, tuple):
+                aligned_updates["edge_index"] = series.edge_index[self.delay :]
+            for graph_field, min_ndim in (("edge_weight", 2), ("edge_attr", 3)):
+                payload = getattr(series, graph_field)
+                trim = self.delay - field_delays.get(graph_field, 0)
+                if payload is None or trim <= 0:
+                    continue
+                if isinstance(payload, tuple):
+                    aligned_updates[graph_field] = payload[trim:]
+                    pretrimmed_fields.add(graph_field)
+                elif payload.ndim >= min_ndim and payload.shape[0] == series.time.shape[0]:
+                    aligned_updates[graph_field] = payload[trim:]
+                    pretrimmed_fields.add(graph_field)
+        aligned = replace(series, **aligned_updates)
         for field, field_delay in field_delays.items():
+            if field in pretrimmed_fields:
+                continue
             trim = self.delay - field_delay
             if trim <= 0:
                 continue

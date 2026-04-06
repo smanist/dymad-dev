@@ -15,6 +15,15 @@ from dymad.utils.graph import adj_to_edge
 
 logger = logging.getLogger("dymad.cv")
 
+
+def _stack_if_uniform(data):
+    if data is None:
+        return None
+    try:
+        return np.stack(data, axis=0)
+    except ValueError:
+        return list(data)
+
 def _process_data(data, x, label, base_dim=1, offset=0):
     """
     x as reference data, list of arrays.
@@ -854,8 +863,8 @@ class TrajectoryManagerGraph(TrajectoryManager):
             target = np.swapaxes(self._graph_data_reshape(self.y[index], forward=True), 0, 1) if self.metadata["n_aux_features"] > 0 else None
             control = np.swapaxes(self._graph_data_reshape(self.u[index], forward=True), 0, 1) if self.metadata["n_control_features"] > 0 else None
             params = self.p[index] if self.metadata["n_parameters"] > 0 else None
-            edge_weight = np.stack(self.ew[index], axis=0) if self.metadata["n_edge_weights"] > 0 else None
-            edge_attr = np.stack(self.ea[index], axis=0) if self.metadata["n_edge_features"] > 0 else None
+            edge_weight = _stack_if_uniform(self.ew[index]) if self.metadata["n_edge_weights"] > 0 else None
+            edge_attr = _stack_if_uniform(self.ea[index]) if self.metadata["n_edge_features"] > 0 else None
             dataset.append(
                 SeriesAdapter.from_graph_arrays(
                     time=self.t[index],

@@ -45,6 +45,11 @@ iftrn = 1
 ifplt = 1
 ifprd = 1
 
+
+def _load_case_data(path):
+    data = np.load(path, allow_pickle=True)
+    return data.item() if isinstance(data, np.ndarray) and data.shape == () else data
+
 if iftrn:
     for _i in IDX:
         mdl, MDL, Trainer, opt = cfgs[_i]
@@ -57,7 +62,7 @@ if ifplt:
 
 if ifprd:
     data_path = './data/data_n2_s3_k4_s20.pkl'
-    data = np.load(data_path, allow_pickle=True)
+    data = _load_case_data(data_path)
     tdx = 10
     x_data = data['x'][tdx]
     t_data = np.arange(0, x_data.shape[0])

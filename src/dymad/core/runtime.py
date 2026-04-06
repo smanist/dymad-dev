@@ -144,26 +144,25 @@ def _stack_graph_steps(
     if max_steps is None:
         max_steps = lengths[0]
 
-    edge_counts = {
+    ref_dtype = step_payloads[0][0][0].dtype
+    ref_device = step_payloads[0][0][0].device
+    have_weight = any(weight is not None for _, weight, _ in step_payloads)
+    edge_counts = [
         int(step.shape[1])
         for edge_index, _, _ in step_payloads
         for step in edge_index
-    }
-    if len(edge_counts) != 1:
+    ]
+    if len(set(edge_counts)) != 1 and not have_weight:
         raise ValueError(
-            "Native graph runtime currently requires a consistent edge count across the batch and time axis."
+            "Native graph runtime currently requires a consistent edge count unless edge weights are provided."
         )
-    n_edges = edge_counts.pop()
-
-    ref_dtype = step_payloads[0][0][0].dtype
-    ref_device = step_payloads[0][0][0].device
+    n_edges = max(edge_counts)
     edge_index = torch.zeros(
         (len(series_items), max_steps, n_edges, 2),
         dtype=ref_dtype,
         device=ref_device,
     )
 
-    have_weight = any(weight is not None for _, weight, _ in step_payloads)
     edge_weight = None
     if have_weight:
         ref_weight = next(weight[0] for _, weight, _ in step_payloads if weight is not None)
@@ -192,17 +191,25 @@ def _stack_graph_steps(
         fill_attr = edge_attr_steps[0] if edge_attr_steps is not None else None
         for step in range(max_steps):
             if step < valid_steps:
-                edge_index[batch_index, step] = edge_index_steps[step].transpose(0, 1)
+                edge_count = int(edge_index_steps[step].shape[1])
+                edge_index[batch_index, step, :edge_count] = edge_index_steps[step].transpose(0, 1)
                 if edge_weight is not None and edge_weight_steps is not None:
-                    edge_weight[batch_index, step] = edge_weight_steps[step]
+                    weight_step = edge_weight_steps[step]
+                    if weight_step.ndim > 1 and weight_step.shape[-1] == 1:
+                        weight_step = weight_step.squeeze(-1)
+                    edge_weight[batch_index, step, :edge_count] = weight_step
                 if edge_attr is not None and edge_attr_steps is not None:
-                    edge_attr[batch_index, step] = edge_attr_steps[step]
+                    edge_attr[batch_index, step, :edge_count] = edge_attr_steps[step]
             else:
-                edge_index[batch_index, step] = fill_edge.transpose(0, 1)
+                edge_count = int(fill_edge.shape[1])
+                edge_index[batch_index, step, :edge_count] = fill_edge.transpose(0, 1)
                 if edge_weight is not None and fill_weight is not None:
-                    edge_weight[batch_index, step] = fill_weight
+                    weight_step = fill_weight
+                    if weight_step.ndim > 1 and weight_step.shape[-1] == 1:
+                        weight_step = weight_step.squeeze(-1)
+                    edge_weight[batch_index, step, :edge_count] = weight_step
                 if edge_attr is not None and fill_attr is not None:
-                    edge_attr[batch_index, step] = fill_attr
+                    edge_attr[batch_index, step, :edge_count] = fill_attr
 
     return edge_index, edge_weight, edge_attr
 
