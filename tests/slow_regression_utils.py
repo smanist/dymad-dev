@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 
 import numpy as np
@@ -24,7 +25,30 @@ def load_baselines(path: Path) -> dict:
 
 def scaled_limit(metric_name: str, baseline_value: float, factor: float | None = None) -> float:
     use_factor = SAFETY_FACTOR if factor is None else factor
-    return max(baseline_value * use_factor, baseline_value + ABS_TOLERANCES[metric_name])
+    abs_tol = ABS_TOLERANCES.get(metric_name, 1.0e-9)
+    return max(baseline_value * use_factor, baseline_value + abs_tol)
+
+
+def build_mpl_env(workdir: Path) -> dict[str, str]:
+    mpl_dir = workdir / ".mpl"
+    mpl_dir.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["MPLBACKEND"] = "Agg"
+    env["MPLCONFIGDIR"] = str(mpl_dir)
+    return env
+
+
+def load_baseline_store(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    with open(path, "r") as fh:
+        return json.load(fh)
+
+
+def write_baseline_store(path: Path, store: dict) -> None:
+    with open(path, "w") as fh:
+        json.dump(store, fh, indent=2, sort_keys=True)
+        fh.write("\n")
 
 
 def load_summary(summary_path: Path) -> dict:
@@ -93,3 +117,10 @@ def extract_record(summary: dict, rmse: float) -> dict:
         "summary_signature": summary_signature(summary),
         "metrics": metrics,
     }
+
+
+def compare_record_metrics(record: dict, baseline: dict, metric_factors: dict[str, float] | None = None) -> None:
+    metric_factors = metric_factors or {}
+    for metric_name, baseline_value in baseline["metrics"].items():
+        factor = metric_factors.get(metric_name)
+        assert record["metrics"][metric_name] <= scaled_limit(metric_name, baseline_value, factor)
