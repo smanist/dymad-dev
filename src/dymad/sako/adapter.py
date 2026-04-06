@@ -16,14 +16,11 @@ from dymad.sako.snapshot import SpectralSnapshot
 class SpectralRuntime(Protocol):
     """Runtime hooks needed by measure and Jacobian compatibility methods."""
 
-    def apply_obs(self, fobs: Any) -> np.ndarray:
-        ...
+    def apply_obs(self, fobs: Any) -> np.ndarray: ...
 
-    def get_forward_modes(self, ref: np.ndarray, rng: Any = None, **kwargs: Any) -> np.ndarray:
-        ...
+    def get_forward_modes(self, ref: np.ndarray, rng: Any = None, **kwargs: Any) -> np.ndarray: ...
 
-    def get_backward_modes(self, ref: np.ndarray, rng: Any = None, **kwargs: Any) -> np.ndarray:
-        ...
+    def get_backward_modes(self, ref: np.ndarray, rng: Any = None, **kwargs: Any) -> np.ndarray: ...
 
 
 @dataclass(frozen=True)
@@ -80,7 +77,9 @@ class SpectralAnalysisAdapter:
     def rals(self) -> RALowRank:
         return self._rals
 
-    def estimate_ps(self, grid=None, return_vec: bool = False, mode: str = "cont", method: str = "standard"):
+    def estimate_ps(
+        self, grid=None, return_vec: bool = False, mode: str = "cont", method: str = "standard"
+    ):
         """Estimate pseudospectrum over a grid via the current adapter kernels."""
         _grid = complex_grid(grid)
         result = estimate_pseudospectrum(

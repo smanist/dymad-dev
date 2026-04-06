@@ -1,9 +1,9 @@
 import argparse
 import copy
 import os
-from pathlib import Path
 import random
 import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,7 +13,6 @@ from dymad.io import load_model
 from dymad.models import KBF
 from dymad.training import NODETrainer
 from dymad.utils import TrajectorySampler, plot_summary, plot_trajectory
-
 
 BASE_DIR = Path(__file__).resolve().parent
 B = 256
@@ -27,8 +26,27 @@ def f(t, x):
     return np.array([mu * x[0], lm * (x[1] - x[0] ** 2)])
 
 
-mdl_kb = {"name": "kp_model", "encoder_layers": 2, "decoder_layers": 2, "hidden_dimension": 32, "koopman_dimension": 4, "autoencoder_type": "cat", "activation": "prelu", "weight_init": "xavier_uniform"}
-trn_ref = {"n_epochs": 400, "save_interval": 20, "load_checkpoint": False, "learning_rate": 5e-3, "decay_rate": 0.999, "ode_method": "dopri5", "ode_args": {"rtol": 1.e-7, "atol": 1.e-9}, "sweep_epoch_step": 100, "sweep_lengths": [10, 20, 30, 50]}
+mdl_kb = {
+    "name": "kp_model",
+    "encoder_layers": 2,
+    "decoder_layers": 2,
+    "hidden_dimension": 32,
+    "koopman_dimension": 4,
+    "autoencoder_type": "cat",
+    "activation": "prelu",
+    "weight_init": "xavier_uniform",
+}
+trn_ref = {
+    "n_epochs": 400,
+    "save_interval": 20,
+    "load_checkpoint": False,
+    "learning_rate": 5e-3,
+    "decay_rate": 0.999,
+    "ode_method": "dopri5",
+    "ode_args": {"rtol": 1.0e-7, "atol": 1.0e-9},
+    "sweep_epoch_step": 100,
+    "sweep_lengths": [10, 20, 30, 50],
+}
 trn_nd1 = dict(trn_ref)
 trn_nd2 = {"sweep_tols": [0.4, 0.1], **trn_ref}
 trn_nd3 = {"sweep_tols": [0.4, 0.1], "sweep_mode": "full", **trn_ref}
@@ -69,7 +87,7 @@ def resolve_indices(values):
 
 def print_cases():
     for idx in DEFAULT_CASES:
-        print(f"{idx}: nd{idx+1}")
+        print(f"{idx}: nd{idx + 1}")
 
 
 def prepare_workdir(root: Path):
@@ -88,13 +106,13 @@ def generate_data(root: Path):
 def train(selected):
     for i in selected:
         opt = {"model": copy.deepcopy(mdl_kb), "training": copy.deepcopy(trn_opts[i])}
-        opt["model"]["name"] = f"kp_nd{i+1}"
+        opt["model"]["name"] = f"kp_nd{i + 1}"
         trainer = NODETrainer("kp_model.yaml", KBF, config_mod=opt)
         trainer.train()
 
 
 def plot(selected):
-    labels = [f"nd{i+1}" for i in selected]
+    labels = [f"nd{i + 1}" for i in selected]
     npz_files = [f"kp_{label}" for label in labels]
     plot_summary(npz_files, labels=labels, ifscl=False, ifclose=False)
 
@@ -106,11 +124,17 @@ def predict(selected):
     t_data = ts[0]
     res = [x_data]
     for i in selected:
-        _, prd_func = load_model(KBF, f"kp_nd{i+1}.pt")
+        _, prd_func = load_model(KBF, f"kp_nd{i + 1}.pt")
         with torch.no_grad():
             pred = prd_func(x_data, t_data)
         res.append(pred)
-    plot_trajectory(np.array(res), t_data, "KP", labels=["Truth"] + [f"nd{i+1}" for i in selected], ifclose=False)
+    plot_trajectory(
+        np.array(res),
+        t_data,
+        "KP",
+        labels=["Truth"] + [f"nd{i + 1}" for i in selected],
+        ifclose=False,
+    )
 
 
 def main():

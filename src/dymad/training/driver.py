@@ -1,24 +1,33 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import copy
-import numpy as np
 import os
 import shutil
+from collections.abc import Iterable
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import Any
+
+import numpy as np
 import torch
-from typing import Any, Dict, Iterable, List, Tuple, Type, Union
 
 from dymad.io import TrajectoryManager, TrajectoryManagerGraph
 from dymad.training.execution_services import ExecutionServices
-from dymad.training.helper import aggregate_cv_results, CVResult, iter_param_grid, set_by_dotted_key
+from dymad.training.helper import CVResult, aggregate_cv_results, iter_param_grid, set_by_dotted_key
 from dymad.training.phase_runtime import PhaseContext, build_initial_trainer_state
 from dymad.training.trainer_run import TrainerRun
 from dymad.utils import load_config, plot_cv_results
+
 
 # --------------------
 # Standalone single CV run for multi-processing compatibility
 # --------------------
 def _apply_combo_to_config(
-        combo_idx, fold_id: int, cfg: Dict[str, Any], combo: Dict[str, Any],
-        base_name, checkpoint_prefix, results_prefix) -> Dict[str, Any]:
+    combo_idx,
+    fold_id: int,
+    cfg: dict[str, Any],
+    combo: dict[str, Any],
+    base_name,
+    checkpoint_prefix,
+    results_prefix,
+) -> dict[str, Any]:
     """
     Apply dotted-key hyperparameters in combo onto a deep-copied config.
     """
@@ -27,15 +36,19 @@ def _apply_combo_to_config(
         set_by_dotted_key(cfg, dotted_key, value)
     _suffix = f"_c{combo_idx}_f{fold_id}"
     cfg["model"]["name"] = f"{base_name}{_suffix}"
-    cfg.update({
-        "path" : {
-            "checkpoint_prefix": f"{checkpoint_prefix}/{_suffix}",
-            "results_prefix": f"{results_prefix}/{_suffix}"
-        }})
+    cfg.update(
+        {
+            "path": {
+                "checkpoint_prefix": f"{checkpoint_prefix}/{_suffix}",
+                "results_prefix": f"{results_prefix}/{_suffix}",
+            }
+        }
+    )
     model_prefix = cfg["path"]["checkpoint_prefix"] + f"/{cfg['model']['name']}"
     return cfg, model_prefix
 
-def _build_phase_context(fold_id: int, cfg: Dict[str, Any], train_sets, valid_sets) -> PhaseContext:
+
+def _build_phase_context(fold_id: int, cfg: dict[str, Any], train_sets, valid_sets) -> PhaseContext:
     """Setup typed phase context (datasets/loaders/metadata) for one fold."""
     trainset: TrajectoryManager | TrajectoryManagerGraph = train_sets[fold_id]
     trainset.update_config(cfg)
@@ -56,25 +69,26 @@ def _build_phase_context(fold_id: int, cfg: Dict[str, Any], train_sets, valid_se
     )
 
 
-def run_cv_single(args: Dict[str, Any]):
+def run_cv_single(args: dict[str, Any]):
     # Apply hyperparameter overrides to this fold's config
     cfg, model_prefix = _apply_combo_to_config(
-        args['combo_idx'],
-        args['fold_idx'],
-        args['fold_cfg'],
-        args['combo'],
-        args['base_name'],
-        args['checkpoint_prefix'],
-        args['results_prefix'])
+        args["combo_idx"],
+        args["fold_idx"],
+        args["fold_cfg"],
+        args["combo"],
+        args["base_name"],
+        args["checkpoint_prefix"],
+        args["results_prefix"],
+    )
 
     # Build the typed context for this concrete run.
     phase_context = _build_phase_context(
-        args['fold_idx'],
+        args["fold_idx"],
         cfg,
-        args['train_sets'],
-        args['valid_sets'],
+        args["train_sets"],
+        args["valid_sets"],
     )
-    execution_services = ExecutionServices.from_config(cfg, default_device=args['device'])
+    execution_services = ExecutionServices.from_config(cfg, default_device=args["device"])
     trainer_state = build_initial_trainer_state(
         cfg,
         execution_services=execution_services,
@@ -83,9 +97,9 @@ def run_cv_single(args: Dict[str, Any]):
     # Run one concrete trainer run for this fold+combo.
     trainer_run = TrainerRun(
         config=cfg,
-        model_class=args['model_class'],
+        model_class=args["model_class"],
         device=execution_services.device,
-        dtype=args['train_sets'][0].dtype,
+        dtype=args["train_sets"][0].dtype,
         run_name=cfg["model"]["name"],
         checkpoint_prefix=execution_services.checkpoint_prefix,
         results_prefix=execution_services.results_prefix,
@@ -96,14 +110,15 @@ def run_cv_single(args: Dict[str, Any]):
         initial_state=trainer_state,
     )
 
-    metric_value = results[-1].get_metric(args['metric'])
+    metric_value = results[-1].get_metric(args["metric"])
 
     return {
-        'combo_idx': args['combo_idx'],
-        'fold_idx': args['fold_idx'],
-        'combo': args['combo'],
-        'metric_value': metric_value,
-        'model_prefix': model_prefix}
+        "combo_idx": args["combo_idx"],
+        "fold_idx": args["fold_idx"],
+        "combo": args["combo"],
+        "metric_value": metric_value,
+        "model_prefix": model_prefix,
+    }
 
 
 # --------------------
@@ -117,8 +132,8 @@ class DriverBase:
     def __init__(
         self,
         config_path: str,
-        model_class: Type[torch.nn.Module],
-        config_mod: Dict[str, Any] | None = None,
+        model_class: type[torch.nn.Module],
+        config_mod: dict[str, Any] | None = None,
         device: torch.device | None = None,
         max_workers: int = 1,
     ):
@@ -135,17 +150,19 @@ class DriverBase:
         self.max_workers = max_workers
 
         cv_config = self.base_config.get("cv", {})
-        self.param_grid = cv_config.get("param_grid", None)   # None = single combo
+        self.param_grid = cv_config.get("param_grid", None)  # None = single combo
         self.metric = cv_config.get("metric", "total")
 
         # Setup paths
-        self.base_name = self.base_config['model']['name']
+        self.base_name = self.base_config["model"]["name"]
         self.checkpoint_prefix = self.execution_services.checkpoint_prefix
         self.results_prefix = self.execution_services.results_prefix
 
         # Setup logging
         self.cv_logger_prefix = (
-            "" if self.execution_services.log_stdout else f"{self.results_prefix}/{self.base_name}_cv"
+            ""
+            if self.execution_services.log_stdout
+            else f"{self.results_prefix}/{self.base_name}_cv"
         )
         self.cv_logger = self.execution_services.configure_logger(
             "dymad.cv",
@@ -172,7 +189,7 @@ class DriverBase:
         """
         raise NotImplementedError
 
-    def iter_folds(self) -> Iterable[Tuple[int, Dict[str, Any]]]:
+    def iter_folds(self) -> Iterable[tuple[int, dict[str, Any]]]:
         """
         Yield (fold_id, fold_config) pairs.
 
@@ -185,7 +202,7 @@ class DriverBase:
     # The main training loop
     # --------------------
 
-    def train(self, continue_training: bool = False) -> Tuple[int, CVResult, List[CVResult]]:
+    def train(self, continue_training: bool = False) -> tuple[int, CVResult, list[CVResult]]:
         """
         Core loop over hyperparameter and folds combinations.
 
@@ -199,19 +216,22 @@ class DriverBase:
             self.cv_logger.info(f"Continuing training from existing CV results {file_name}.")
             if os.path.exists(file_name):
                 loaded = np.load(file_name, allow_pickle=True)
-                assert loaded["metric_name"] == self.metric, \
+                assert loaded["metric_name"] == self.metric, (
                     f"Metric mismatch: existing {loaded['metric_name']} vs current {self.metric}"
-                prev_all_results = loaded['all_results'].tolist()
-                prev_best_result = prev_all_results[loaded['best_idx']]
+                )
+                prev_all_results = loaded["all_results"].tolist()
+                prev_best_result = prev_all_results[loaded["best_idx"]]
                 combo_offset = len(prev_all_results)
                 self.cv_logger.info(f"Found {combo_offset} previous results.")
-                self.cv_logger.info(f"Previous best: {prev_best_result.params} with {self.metric} = {prev_best_result.mean_metric:.4e}")
+                self.cv_logger.info(
+                    f"Previous best: {prev_best_result.params} with {self.metric} = {prev_best_result.mean_metric:.4e}"
+                )
             else:
                 self.cv_logger.info(f"CV results {file_name} not found, starting from scratch.")
 
         # empty grid => treat as single combo with no overrides
         if self.param_grid is None:
-            combos = [ {} ]
+            combos = [{}]
         else:
             combos = list(iter_param_grid(self.param_grid))
 
@@ -219,18 +239,18 @@ class DriverBase:
         for combo_idx, combo in enumerate(combos):
             for fold_idx, fold_cfg in self.iter_folds():
                 args = {
-                    'combo_idx': combo_idx + combo_offset,
-                    'fold_idx': fold_idx,
-                    'fold_cfg': fold_cfg,
-                    'combo': combo,
-                    'base_name': self.base_name,
-                    'checkpoint_prefix': self.checkpoint_prefix,
-                    'results_prefix': self.results_prefix,
-                    'train_sets': self.train_sets,
-                    'valid_sets': self.valid_sets,
-                    'model_class': self.model_class,
-                    'device': self.device,
-                    'metric': self.metric,
+                    "combo_idx": combo_idx + combo_offset,
+                    "fold_idx": fold_idx,
+                    "fold_cfg": fold_cfg,
+                    "combo": combo,
+                    "base_name": self.base_name,
+                    "checkpoint_prefix": self.checkpoint_prefix,
+                    "results_prefix": self.results_prefix,
+                    "train_sets": self.train_sets,
+                    "valid_sets": self.valid_sets,
+                    "model_class": self.model_class,
+                    "device": self.device,
+                    "metric": self.metric,
                 }
                 trial_args_list.append(args)
 
@@ -243,10 +263,14 @@ class DriverBase:
         # Select best, assuming lower is better
         best_idx = int(np.argmin([r.mean_metric for r in all_results]))
         best_result = all_results[best_idx]
-        self.cv_logger.info(f"Best combo: {best_result.params} with {self.metric} = {best_result.mean_metric:.4e}")
+        self.cv_logger.info(
+            f"Best combo: {best_result.params} with {self.metric} = {best_result.mean_metric:.4e}"
+        )
 
         # Save CV results
-        np.savez_compressed(file_name, all_results=all_results, metric_name=self.metric, best_idx=best_idx)
+        np.savez_compressed(
+            file_name, all_results=all_results, metric_name=self.metric, best_idx=best_idx
+        )
         self.cv_logger.info(f"Saved CV results to {file_name}")
         plot_cv_results(file_name, ifclose=True, prefix=self.results_prefix)
         self.cv_logger.info(f"Saved CV plot to {self.results_prefix}/cv_results.png")
@@ -255,9 +279,11 @@ class DriverBase:
         best_checkpoint = best_result.checkpoint_paths[0]
         best_model = f"{self.checkpoint_prefix}/{self.base_name}.pt"
         best_summary = f"{self.checkpoint_prefix}/{self.base_name}_summary.npz"
-        shutil.copy2(best_checkpoint + '.pt', best_model)
-        shutil.copy2(best_checkpoint + '_summary.npz', best_summary)
-        self.cv_logger.info(f"Copied best model {best_checkpoint} to {best_model} and {best_summary}")
+        shutil.copy2(best_checkpoint + ".pt", best_model)
+        shutil.copy2(best_checkpoint + "_summary.npz", best_summary)
+        self.cv_logger.info(
+            f"Copied best model {best_checkpoint} to {best_model} and {best_summary}"
+        )
 
         # Close the logger to flush buffers and release file handles
         for handler in self.cv_logger.handlers[:]:
@@ -270,8 +296,10 @@ class DriverBase:
     # Helper functions
     # --------------------
 
-    def _create_trajectory_manager(self, data_key: str) -> Union[TrajectoryManager, TrajectoryManagerGraph]:
-        md = {'config': copy.deepcopy(self.base_config)}
+    def _create_trajectory_manager(
+        self, data_key: str
+    ) -> TrajectoryManager | TrajectoryManagerGraph:
+        md = {"config": copy.deepcopy(self.base_config)}
         if self.model_class.GRAPH:
             tm = TrajectoryManagerGraph(md, data_key=data_key, device=self.device)
         else:
@@ -279,13 +307,10 @@ class DriverBase:
         tm.prepare_data()
         return tm
 
-    def _parallel_run(self, trial_args_list: List[Dict[str, Any]]) -> List[CVResult]:
+    def _parallel_run(self, trial_args_list: list[dict[str, Any]]) -> list[CVResult]:
         results = []
         with ProcessPoolExecutor(max_workers=self.max_workers) as ex:
-            futures = [
-                ex.submit(run_cv_single, args)
-                for args in trial_args_list
-            ]
+            futures = [ex.submit(run_cv_single, args) for args in trial_args_list]
 
             for fut in as_completed(futures):
                 res = fut.result()
@@ -294,11 +319,12 @@ class DriverBase:
                 self.cv_logger.info(
                     f"Combo {res['combo_idx']}, fold {res['fold_idx']}: "
                     f"{self.metric} = {res['metric_value']:.4e} "
-                    f"Params {res['combo']}")
+                    f"Params {res['combo']}"
+                )
         all_results = aggregate_cv_results(results)
         return all_results
 
-    def _serial_run(self, trial_args_list: List[Dict[str, Any]]) -> List[CVResult]:
+    def _serial_run(self, trial_args_list: list[dict[str, Any]]) -> list[CVResult]:
         results = []
         for args in trial_args_list:
             res = run_cv_single(args)
@@ -307,7 +333,8 @@ class DriverBase:
             self.cv_logger.info(
                 f"Combo {res['combo_idx']}, fold {res['fold_idx']}: "
                 f"{self.metric} = {res['metric_value']:.4e} "
-                f"Params {res['combo']}")
+                f"Params {res['combo']}"
+            )
         all_results = aggregate_cv_results(results)
         return all_results
 
@@ -316,10 +343,10 @@ class KFoldDriver(DriverBase):
     def __init__(
         self,
         config_path: str,
-        model_class: Type[torch.nn.Module],
+        model_class: type[torch.nn.Module],
         k_folds: int = 5,
         base_seed: int = 123,
-        config_mod: Dict[str, Any] | None = None,
+        config_mod: dict[str, Any] | None = None,
         device: torch.device | None = None,
         max_workers: int = 1,
     ):
@@ -328,7 +355,7 @@ class KFoldDriver(DriverBase):
             model_class=model_class,
             config_mod=config_mod,
             device=device,
-            max_workers=max_workers
+            max_workers=max_workers,
         )
         self.k_folds = k_folds
         self.base_seed = base_seed
@@ -361,8 +388,8 @@ class SingleSplitDriver(DriverBase):
     def __init__(
         self,
         config_path: str,
-        model_class: Type[torch.nn.Module],
-        config_mod: Dict[str, Any] | None = None,
+        model_class: type[torch.nn.Module],
+        config_mod: dict[str, Any] | None = None,
         device: torch.device | None = None,
         max_workers: int = 1,
     ):
@@ -371,7 +398,7 @@ class SingleSplitDriver(DriverBase):
             model_class=model_class,
             config_mod=config_mod,
             device=device,
-            max_workers=max_workers
+            max_workers=max_workers,
         )
 
     def iter_folds(self):
@@ -382,17 +409,17 @@ class SingleSplitDriver(DriverBase):
         yield 0, fold_cfg
 
     def _init_trajectory_managers(self):
-        assert 'data' in self.base_config, "Config must contain 'data' section."
-        if 'data_valid' in self.base_config:
+        assert "data" in self.base_config, "Config must contain 'data' section."
+        if "data_valid" in self.base_config:
             # A separate validation dataset is specified
             # This is necessary esp when valid set format is different from train set
-            self.train_sets = [self._create_trajectory_manager(data_key='train')]
-            self.valid_sets = [self._create_trajectory_manager(data_key='valid')]
+            self.train_sets = [self._create_trajectory_manager(data_key="train")]
+            self.valid_sets = [self._create_trajectory_manager(data_key="valid")]
         else:
             # The same dataset is used for training and validation
             # We will adjust later
-            self.train_sets = [self._create_trajectory_manager(data_key='train')]
-            self.valid_sets = [self._create_trajectory_manager(data_key='train')]
+            self.train_sets = [self._create_trajectory_manager(data_key="train")]
+            self.valid_sets = [self._create_trajectory_manager(data_key="train")]
 
     def _init_fold_split(self):
         """
@@ -401,11 +428,11 @@ class SingleSplitDriver(DriverBase):
         The training fraction is specified in the YAML config (default 0.75).
         The split is performed by shuffling whole trajectories.
         """
-        if 'data_valid' in self.base_config:
+        if "data_valid" in self.base_config:
             # A separate validation dataset is specified
             # No need to split
-            self.train_set_index = torch.arange(self.train_sets[0].metadata['n_samples'])
-            self.valid_set_index = torch.arange(self.valid_sets[0].metadata['n_samples'])
+            self.train_set_index = torch.arange(self.train_sets[0].metadata["n_samples"])
+            self.valid_set_index = torch.arange(self.valid_sets[0].metadata["n_samples"])
             self.train_sets[0].set_data_index(self.train_set_index)
             self.valid_sets[0].set_data_index(self.valid_set_index)
             return
@@ -413,7 +440,7 @@ class SingleSplitDriver(DriverBase):
         # Otherwise, split the training dataset into train/valid
         split_cfg = self.base_config.get("split", {})
         train_frac = split_cfg.get("train_frac", 0.75)
-        n_samples = self.train_sets[0].metadata['n_samples']
+        n_samples = self.train_sets[0].metadata["n_samples"]
         if train_frac >= 1.0:
             n_train = n_samples
             n_val = n_samples

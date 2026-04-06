@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 def wmse_loss(predictions, targets, alpha=0):
     _p = torch.as_tensor(predictions)
     _t = torch.as_tensor(targets)
@@ -10,9 +11,10 @@ def wmse_loss(predictions, targets, alpha=0):
         return torch.mean(loss) / n_steps
     weights = torch.exp(-alpha * torch.arange(n_steps, device=_p.device, dtype=_p.dtype))
     weights = weights / weights.sum()
-    weights = weights.view(*[1]*(_p.dim()-2), -1, 1)
+    weights = weights.view(*[1] * (_p.dim() - 2), -1, 1)
     loss = weights * (_p - _t) ** 2
     return torch.mean(loss)
+
 
 class WMSELoss(nn.Module):
     r"""Weighted Mean Squared Error Loss
@@ -26,6 +28,7 @@ class WMSELoss(nn.Module):
     When alpha=0, this reduces to the standard MSE loss.
     Note that alpha can be both positive and negative, favoring early or late steps
     """
+
     def __init__(self, alpha=0) -> None:
         super().__init__()
         self.register_buffer("alpha", torch.tensor(alpha, dtype=torch.float64))
@@ -36,6 +39,7 @@ class WMSELoss(nn.Module):
     def forward(self, predictions, targets):
         return wmse_loss(predictions, targets, alpha=self.alpha.item())
 
+
 def _vpt_loss(predictions, targets):
     _p = torch.as_tensor(predictions)
     _t = torch.as_tensor(targets)
@@ -43,20 +47,22 @@ def _vpt_loss(predictions, targets):
     # Per-step error
     std = torch.std(_t, dim=-2, keepdim=True)
     std = torch.clamp(std, min=1e-8)  # Avoid division by zero
-    E_ik = (_p - _t) ** 2 / (std ** 2)
+    E_ik = (_p - _t) ** 2 / (std**2)
     E_k = torch.sqrt(torch.mean(E_ik, dim=-1))
 
     return E_k
+
 
 def vpt_loss(predictions, targets, gamma=0.1):
     """Exact version of VPT loss (not differentiable)"""
     with torch.no_grad():
         E_k = _vpt_loss(predictions, targets)
-        E_k = torch.cat([E_k, torch.full((E_k.shape[0], 1), float('inf'))], dim=-1)
+        E_k = torch.cat([E_k, torch.full((E_k.shape[0], 1), float("inf"))], dim=-1)
         msk = E_k < gamma
         vpt = torch.argmin(msk.float(), dim=-1)
         avg_vpt = torch.mean(vpt.float())
     return vpt, avg_vpt
+
 
 class VPTLoss(nn.Module):
     r"""Valid Prediction Time Loss
@@ -74,6 +80,7 @@ class VPTLoss(nn.Module):
     For training, we estimate k by softmax, average the VPT over trajectories,
     and minimize the loss defined as 1/VPT.
     """
+
     def __init__(self, gamma=0.1, scl=10.0) -> None:
         super().__init__()
         self.register_buffer("gamma", torch.tensor(gamma, dtype=torch.float64))
@@ -86,7 +93,7 @@ class VPTLoss(nn.Module):
 
     def forward(self, predictions, targets):
         E_k = _vpt_loss(predictions, targets)
-        E_k = torch.cat([E_k, torch.full((E_k.shape[0], 1), float('inf'))], dim=-1)
+        E_k = torch.cat([E_k, torch.full((E_k.shape[0], 1), float("inf"))], dim=-1)
         B, T = E_k.shape
 
         # Soft probability that step k is still valid
@@ -97,20 +104,21 @@ class VPTLoss(nn.Module):
         s_shifted = torch.cat(
             [torch.ones(B, 1, device=E_k.device, dtype=E_k.dtype), s[:, :-1]],
             dim=-1,
-        )                                           # (B, T)
-        survival = torch.cumprod(s_shifted, dim=-1) # (B, T)
+        )  # (B, T)
+        survival = torch.cumprod(s_shifted, dim=-1)  # (B, T)
 
         # Hazard: first failure at k ≈ (1 - s_k) * survival_{k}
-        q = (1.0 - s) * survival                    # (B, T)
+        q = (1.0 - s) * survival  # (B, T)
 
         # Expected first failure index
         time_idx = torch.arange(T, device=E_k.device, dtype=E_k.dtype)  # (T,)
-        expected_vpt = (q * time_idx).sum(dim=-1)    # (B,)
-        avg_vpt = expected_vpt.mean()                # scalar
+        expected_vpt = (q * time_idx).sum(dim=-1)  # (B,)
+        avg_vpt = expected_vpt.mean()  # scalar
 
         loss = 1.0 / (avg_vpt + 1e-8)
 
         return loss
+
 
 #: Mapping of loss names to loss classes.
 LOSS_MAP = {

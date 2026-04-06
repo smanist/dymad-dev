@@ -3,14 +3,14 @@ from pathlib import Path
 import torch
 
 from dymad.core import (
+    FixedGraphSeries,
     GraphModelContext,
     GraphTrainerBatch,
-    FixedGraphSeries,
     RaggedRegularRuntime,
     RegularModelContext,
-    RegularTrainerBatch,
     RegularSeries,
     RegularSeriesBatch,
+    RegularTrainerBatch,
     UniformGraphRuntime,
     UniformRegularRuntime,
 )
@@ -155,7 +155,9 @@ def test_fixed_topology_graph_runtime_keeps_shared_edge_storage():
         ),
     ]
 
-    runtime = GraphModelContext.from_batch(GraphTrainerBatch.collate_series(series).series).to_runtime()
+    runtime = GraphModelContext.from_batch(
+        GraphTrainerBatch.collate_series(series).series
+    ).to_runtime()
 
     assert isinstance(runtime, UniformGraphRuntime)
     assert runtime.is_fixed_topology

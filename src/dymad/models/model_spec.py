@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional
-
+from typing import Any, Literal
 
 GraphMode = Literal["none", "graph", "node"]
 TimeDomain = Literal["continuous", "discrete"]
@@ -96,8 +96,8 @@ class ModelSpec:
     dynamics: DynamicsSpec
     decoder: DecoderSpec
     rollout: RolloutSpec
-    memory: Optional[MemorySpec] = None
-    name: Optional[str] = None
+    memory: MemorySpec | None = None
+    name: str | None = None
 
     @property
     def continuous_time(self) -> bool:
@@ -120,9 +120,8 @@ class ResolvedModelSpec:
     decoder_key: str
     predictor_key: PredictorKey
     predictor: Callable[..., Any]
-    input_order: Optional[str]
+    input_order: str | None
     processor_net: object
     graph_mode: GraphMode
     linear_mode: Literal["smpl", "graph"]
     continuous_time: bool
-

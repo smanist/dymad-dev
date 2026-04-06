@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 import torch
 
@@ -22,14 +22,14 @@ class TrainerRun:
 
     def __init__(
         self,
-        config: Dict[str, Any],
-        model_class: Type,
+        config: dict[str, Any],
+        model_class: type,
         device: torch.device,
         dtype: torch.dtype,
         run_name: str,
         checkpoint_prefix: str,
         results_prefix: str,
-        execution_services: Optional[ExecutionServices] = None,
+        execution_services: ExecutionServices | None = None,
     ):
         self.run_name = run_name
         self.execution_services = execution_services or ExecutionServices.from_config(
@@ -105,7 +105,7 @@ class TrainerRun:
         initial_context: PhaseContext,
         initial_state: TrainerState | None = None,
         artifacts: ArtifactRegistry | None = None,
-    ) -> List[PhaseResult]:
+    ) -> list[PhaseResult]:
         resumed_state, resumed_artifacts = self._maybe_resume()
         if resumed_state is not None:
             active_state = resumed_state

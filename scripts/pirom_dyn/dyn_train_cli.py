@@ -1,8 +1,8 @@
 import argparse
 import copy
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,14 +12,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.cli_helpers import add_common_cli_args, print_case_table, resolve_case_indices, set_seed, stage_workdir
+from scripts.cli_helpers import (
+    add_common_cli_args,
+    print_case_table,
+    resolve_case_indices,
+    set_seed,
+    stage_workdir,
+)
+from scripts.pirom_dyn.dyn_train import DPJ, DPT, f, g, mdl_kl, t_grid, trn_nd
 
 from dymad.io import load_model
 from dymad.training import NODETrainer
 from dymad.utils import TrajectorySampler, plot_multi_trajs, plot_summary
-
-from scripts.pirom_dyn.dyn_train import DPT, DPJ, f, g, mdl_kl, t_grid, trn_nd
-
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -37,13 +41,19 @@ def parse_args():
 
 
 def prepare_workdir(root: Path):
-    stage_workdir(root, BASE_DIR, ["dyn_model.yaml", "dyn_test.yaml", "data/dyn.npz"], data_dir=True)
+    stage_workdir(
+        root, BASE_DIR, ["dyn_model.yaml", "dyn_test.yaml", "data/dyn.npz"], data_dir=True
+    )
 
 
 def train(selected: list[int], root: Path):
     for idx in selected:
         case = cases[idx]
-        opt = {"data": {"path": str(root / "data" / "dyn.npz")}, "model": copy.deepcopy(mdl_kl), "training": copy.deepcopy(trn_nd)}
+        opt = {
+            "data": {"path": str(root / "data" / "dyn.npz")},
+            "model": copy.deepcopy(mdl_kl),
+            "training": copy.deepcopy(trn_nd),
+        }
         opt["model"]["name"] = f"dyn_{case['name']}"
         trainer = case["trainer"](root / case["config"], case["model"], config_mod=opt)
         trainer.train()
@@ -53,7 +63,7 @@ def plot(selected: list[int]):
     labels = [cases[idx]["name"] for idx in selected]
     npz_files = [f"dyn_{label}" for label in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
-    for label, npz in zip(labels, npzs):
+    for label, npz in zip(labels, npzs, strict=False):
         print(f"Epoch time {label}: {npz['avg_epoch_time']}")
 
 
@@ -75,7 +85,14 @@ def predict(selected: list[int]):
             )
         res.append(pred)
 
-    plot_multi_trajs(np.array(res), t_data, "DP", us=u_data, labels=["Truth"] + [cases[idx]["name"] for idx in selected], ifclose=False)
+    plot_multi_trajs(
+        np.array(res),
+        t_data,
+        "DP",
+        us=u_data,
+        labels=["Truth"] + [cases[idx]["name"] for idx in selected],
+        ifclose=False,
+    )
 
 
 def main():

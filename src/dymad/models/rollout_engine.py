@@ -1,7 +1,7 @@
 """Typed rollout-engine selection for migrated model-spec families."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from dymad.models.model_spec import ModelSpec, ModelSpecValidationError, PredictorKey
 from dymad.models.prediction import (
@@ -53,12 +53,19 @@ def _requested_predictor_key(model_spec: ModelSpec, model_config: dict, dims: di
 
     if predictor_key == "continuous_exp" and dims.get("u", 0) > 0:
         raise ModelSpecValidationError("Exponential rollout does not support control inputs.")
-    if predictor_key == "discrete_exp" and requested == "exp" and dims.get("u", 0) > 0 and model_spec.recipe.kind == "sdm":
+    if (
+        predictor_key == "discrete_exp"
+        and requested == "exp"
+        and dims.get("u", 0) > 0
+        and model_spec.recipe.kind == "sdm"
+    ):
         raise ModelSpecValidationError("SDM exponential rollout does not support control inputs.")
     return predictor_key
 
 
-def select_rollout_engine(model_spec: ModelSpec, model_config: dict, dims: dict) -> RolloutEngineSelection:
+def select_rollout_engine(
+    model_spec: ModelSpec, model_config: dict, dims: dict
+) -> RolloutEngineSelection:
     """Resolve the rollout engine allowed by the typed model spec."""
     predictor_key = _requested_predictor_key(model_spec, model_config, dims)
     rollout = model_spec.rollout
@@ -69,8 +76,7 @@ def select_rollout_engine(model_spec: ModelSpec, model_config: dict, dims: dict)
     predictor = _PREDICTOR_BY_NAME.get(predictor_key)
     if predictor is None:
         raise ModelSpecValidationError(
-            f"Unsupported typed rollout predictor '{predictor_key}' "
-            f"for family '{rollout.family}'."
+            f"Unsupported typed rollout predictor '{predictor_key}' for family '{rollout.family}'."
         )
     if dims.get("u", 0) > 0 and not rollout.supports_control_inputs:
         raise ModelSpecValidationError(
@@ -78,8 +84,7 @@ def select_rollout_engine(model_spec: ModelSpec, model_config: dict, dims: dict)
         )
     if predictor_key in {"continuous", "discrete"} and not rollout.supports_control_inputs:
         raise ValueError(
-            "Typed rollout predictor requires control-input support for "
-            f"'{predictor_key}'."
+            f"Typed rollout predictor requires control-input support for '{predictor_key}'."
         )
     return RolloutEngineSelection(
         predictor=predictor,

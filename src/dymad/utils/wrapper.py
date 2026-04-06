@@ -1,10 +1,11 @@
+from functools import lru_cache
+
+import jax
 import torch
+from jax import dlpack as jax_dlpack
 from torch.autograd import Function
 from torch.utils import dlpack as torch_dlpack
 
-import jax
-from jax import dlpack as jax_dlpack
-from functools import lru_cache
 
 # ---- Torch <-> JAX via DLPack ----
 def torch_to_jax(t: torch.Tensor) -> "jax.Array":
@@ -14,9 +15,11 @@ def torch_to_jax(t: torch.Tensor) -> "jax.Array":
         t = t.contiguous()
     return jax_dlpack.from_dlpack(t.detach())
 
+
 def jax_to_torch(a: "jax.Array", device: torch.device, dtype: torch.dtype) -> torch.Tensor:
     t = torch_dlpack.from_dlpack(a)
     return t.to(device=device, dtype=dtype)
+
 
 # -------------------- (Optional) tiny jit cache by id(f) --------------------
 @lru_cache(maxsize=128)
@@ -25,7 +28,9 @@ def _jit_by_identity(fid: int, static: bool) -> callable:
     f = _FUNC_REG[fid]
     return jax.jit(f) if static else f
 
+
 _FUNC_REG = {}
+
 
 def _get_jitted(f: callable, jit: bool) -> callable:
     if not jit:
@@ -33,6 +38,7 @@ def _get_jitted(f: callable, jit: bool) -> callable:
     fid = id(f)
     _FUNC_REG[fid] = f
     return _jit_by_identity(fid, True)
+
 
 # -------------------- The interface --------------------
 class JaxMultiInFn(Function):
@@ -44,24 +50,24 @@ class JaxMultiInFn(Function):
         """
         # Save input metadata for dtype/device restoration
         in_devices = [None if t is None else t.device for t in x_torch]
-        in_dtypes  = [None if t is None else t.dtype  for t in x_torch]
+        in_dtypes = [None if t is None else t.dtype for t in x_torch]
 
         # Torch -> JAX (zero-copy when possible)
         xs_jax = [torch_to_jax(t) for t in x_torch]
 
         # (Optionally) JIT the callable with a small cache by identity
         f_used = _get_jitted(f_jax, jit_flag)
-    
+
         # y, pullback
         y_jax, pullback = jax.vjp(f_used, *xs_jax)
         ctx.pullback = pullback
 
         # Save input dtypes/devices for backward mapping
         ctx.in_devices = in_devices
-        ctx.in_dtypes  = in_dtypes
+        ctx.in_dtypes = in_dtypes
 
         out_device = next((d for d in in_devices if d is not None), in_devices[-1])
-        out_dtype  = next((d for d in in_dtypes if d is not None), in_dtypes[-1])
+        out_dtype = next((d for d in in_dtypes if d is not None), in_dtypes[-1])
 
         ctx.out_is_tuple = isinstance(y_jax, tuple)
 
@@ -89,12 +95,13 @@ class JaxMultiInFn(Function):
 
         # Map JAX grads back to Torch per-input device/dtype
         grads = []
-        for gx_jax, dev, dt in zip(gx_jax_tuple, ctx.in_devices, ctx.in_dtypes):
+        for gx_jax, dev, dt in zip(gx_jax_tuple, ctx.in_devices, ctx.in_dtypes, strict=False):
             if gx_jax is None:
                 grads.append(None)
             else:
                 grads.append(jax_to_torch(gx_jax, dev, dt))
         return (None, None, *grads)
+
 
 # -------------------- Convenience nn.Module wrapper --------------------
 class JaxWrapper(torch.nn.Module):
@@ -102,5 +109,6 @@ class JaxWrapper(torch.nn.Module):
         super().__init__()
         self.f_jax = f_jax
         self.jit = jit
+
     def forward(self, *xs: torch.Tensor):
         return JaxMultiInFn.apply(self.f_jax, self.jit, *xs)

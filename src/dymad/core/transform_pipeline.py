@@ -61,12 +61,18 @@ class RegularSeriesTransformPipeline:
         control_transform: Transform | None = None,
         target_transform: Transform | None = None,
         params_transform: Transform | None = None,
-    ) -> "RegularSeriesTransformPipeline":
+    ) -> RegularSeriesTransformPipeline:
         return cls(
             state=FieldTransform("state", state_transform, time_varying=True),
-            control=FieldTransform("control", control_transform, time_varying=True) if control_transform is not None else None,
-            target=FieldTransform("target", target_transform, time_varying=True) if target_transform is not None else None,
-            params=FieldTransform("params", params_transform, time_varying=False) if params_transform is not None else None,
+            control=FieldTransform("control", control_transform, time_varying=True)
+            if control_transform is not None
+            else None,
+            target=FieldTransform("target", target_transform, time_varying=True)
+            if target_transform is not None
+            else None,
+            params=FieldTransform("params", params_transform, time_varying=False)
+            if params_transform is not None
+            else None,
         )
 
     @property
@@ -77,7 +83,7 @@ class RegularSeriesTransformPipeline:
                 delays.append(field.delay)
         return max(delays) if delays else 0
 
-    def fit(self, batch: RegularSeriesBatch) -> "RegularSeriesTransformPipeline":
+    def fit(self, batch: RegularSeriesBatch) -> RegularSeriesTransformPipeline:
         self.state.transform.fit([_to_numpy(series.state) for series in batch])
         if self.control is not None:
             controls = [_to_numpy(series.control) for series in batch if series.control is not None]
@@ -114,7 +120,9 @@ class RegularSeriesTransformPipeline:
             items.append(
                 RegularSeries(
                     time=self._trim_time(series.time),
-                    state=self._convert_time_varying(state_out[index], series.state, self.state.delay),
+                    state=self._convert_time_varying(
+                        state_out[index], series.state, self.state.delay
+                    ),
                     control=self._convert_optional_time_varying(
                         control_out[index] if control_out is not None else None,
                         series.control,

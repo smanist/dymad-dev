@@ -1,42 +1,42 @@
 import copy
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
 from dymad.io import load_model
-from dymad.models import KBF, DKBF, DKMSK
-from dymad.training import LinearTrainer, NODETrainer, StackedTrainer
+from dymad.models import DKBF, DKMSK, KBF
+from dymad.training import LinearTrainer, StackedTrainer
 from dymad.utils import animate, compare_contour, plot_summary, setup_logging
+
 
 def gen_mdl_kb(e, l, k):
     return {
-        "name" : 'vor_model',
-        "encoder_layers" : e,
-        "decoder_layers" : e,
-        "hidden_dimension" : l,
-        "koopman_dimension" : k,
-        "activation" : "prelu",
-        "weight_init" : "xavier_uniform",
-        "predictor_type" : "exp"}
+        "name": "vor_model",
+        "encoder_layers": e,
+        "decoder_layers": e,
+        "hidden_dimension": l,
+        "koopman_dimension": k,
+        "activation": "prelu",
+        "weight_init": "xavier_uniform",
+        "predictor_type": "exp",
+    }
+
 
 mdl_kl = {
-    "name" : 'ker_model',
-    "encoder_layers" : 0,
-    "decoder_layers" : 0,
-    "kernel_dimension" : 12,
+    "name": "ker_model",
+    "encoder_layers": 0,
+    "decoder_layers": 0,
+    "kernel_dimension": 12,
     "type": "share",
-    "kernel": {
-        "type": "sc_dm",
-        "input_dim": 12,
-        "eps_init": None
-    },
+    "kernel": {"type": "sc_dm", "input_dim": 12, "eps_init": None},
     "dtype": torch.float64,
-    "ridge_init": 1e-10
-    }
+    "ridge_init": 1e-10,
+}
 
 crit = {
     "dynamics": {"weight": 1.0},
-    "recon":    {"weight": 1.0},
+    "recon": {"weight": 1.0},
 }
 trn_nd = {
     "n_epochs": 200,
@@ -49,9 +49,7 @@ trn_nd = {
     "chop_mode": "unfold",
     "chop_step": 1,
     "ode_method": "dopri5",
-    "ode_args": {
-        "rtol": 1.e-7,
-        "atol": 1.e-9},
+    "ode_args": {"rtol": 1.0e-7, "atol": 1.0e-9},
 }
 trn_ae = copy.deepcopy(trn_nd)
 trn_ae["n_epochs"] = 2000
@@ -67,26 +65,20 @@ trn_ln = {
 trn_rw = copy.deepcopy(trn_ln)
 trn_rw["method"] = "raw"
 
-trn_svd = {
-    "type" : "svd",
-    "ifcen": True,
-    "order": 12
-}
+trn_svd = {"type": "svd", "ifcen": True, "order": 12}
 trn_scl = {
-    "type" : "scaler",
-    "mode" : "std",
+    "type": "scaler",
+    "mode": "std",
 }
-trn_add = {
-    "type" : "add_one"
-}
+trn_add = {"type": "add_one"}
 trn_dmf = {
-    "type" : "dm",
+    "type": "dm",
     "edim": 3,
-    "Knn" : 15,
+    "Knn": 15,
     "Kphi": 3,
     "inverse": "gmls",
     "order": 1,
-    "mode": "full"
+    "mode": "full",
 }
 
 
@@ -106,25 +98,71 @@ def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=Tru
     return phase
 
 
-def _alternating_schedule(trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None, reset_optimizer=True):
+def _alternating_schedule(
+    trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None, reset_optimizer=True
+):
     phases = []
     for n_epochs in chunk_epochs:
-        phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+        phases.append(
+            _linear_solve_phase(
+                method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer
+            )
+        )
         chunk_cfg = dict(base_cfg)
         chunk_cfg["n_epochs"] = n_epochs
         phases.append(_optimizer_phase(trainer, chunk_cfg))
-    phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+    phases.append(
+        _linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer)
+    )
     return phases
 
-config_path = 'vor_model.yaml'
+
+config_path = "vor_model.yaml"
 
 cfgs = [
-    ('kbf_node', KBF,  StackedTrainer,  {"model": gen_mdl_kb(0,0,13), "criterion": crit, "phases" : _alternating_schedule("NODE", trn_nd, [50, 150], method="full"), "transform_x" : [trn_svd, trn_add]}),
-    ('dkbf_ln',  DKBF, LinearTrainer,   {"model": gen_mdl_kb(0,0,13), "training" : trn_ln, "transform_x" : [trn_svd, trn_add]}),
-    ('dkbf_ae',  DKBF, StackedTrainer,  {"model": gen_mdl_kb(3,64,3), "criterion": crit, "phases" : _alternating_schedule("NODE", trn_ae, [500, 500, 1000], method="full", reset_optimizer=False), "transform_x" : [trn_svd]}),
-    ('dkbf_dm',  DKBF, LinearTrainer,   {"model": gen_mdl_kb(0,0,3),  "training" : trn_ln, "transform_x" : [trn_svd, trn_dmf]}),
-    ('dks_ln',  DKMSK, LinearTrainer,   {"model": mdl_kl, "training" : trn_rw, "transform_x" : [trn_svd, trn_scl]}),
-    ]
+    (
+        "kbf_node",
+        KBF,
+        StackedTrainer,
+        {
+            "model": gen_mdl_kb(0, 0, 13),
+            "criterion": crit,
+            "phases": _alternating_schedule("NODE", trn_nd, [50, 150], method="full"),
+            "transform_x": [trn_svd, trn_add],
+        },
+    ),
+    (
+        "dkbf_ln",
+        DKBF,
+        LinearTrainer,
+        {"model": gen_mdl_kb(0, 0, 13), "training": trn_ln, "transform_x": [trn_svd, trn_add]},
+    ),
+    (
+        "dkbf_ae",
+        DKBF,
+        StackedTrainer,
+        {
+            "model": gen_mdl_kb(3, 64, 3),
+            "criterion": crit,
+            "phases": _alternating_schedule(
+                "NODE", trn_ae, [500, 500, 1000], method="full", reset_optimizer=False
+            ),
+            "transform_x": [trn_svd],
+        },
+    ),
+    (
+        "dkbf_dm",
+        DKBF,
+        LinearTrainer,
+        {"model": gen_mdl_kb(0, 0, 3), "training": trn_ln, "transform_x": [trn_svd, trn_dmf]},
+    ),
+    (
+        "dks_ln",
+        DKMSK,
+        LinearTrainer,
+        {"model": mdl_kl, "training": trn_rw, "transform_x": [trn_svd, trn_scl]},
+    ),
+]
 
 IDX = [0, 1, 2, 3, 4]
 
@@ -141,19 +179,19 @@ if iftrn:
 
 if ifplt:
     labels = [cfgs[i][0] for i in IDX]
-    npz_files = [f'kp_{l}' for l in labels]
+    npz_files = [f"kp_{l}" for l in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
 
 if ifprd:
     # dat = np.load('./data/test.npz')
-    dat = np.load('./data/cylinder.npz')
-    x_data, t_data = dat['x'], dat['t']
+    dat = np.load("./data/cylinder.npz")
+    x_data, t_data = dat["x"], dat["t"]
     Nx, Ny = 199, 449
 
     res = [x_data]
     for i in IDX:
         mdl, MDL, Trainer, _ = cfgs[i]
-        model, prd_func = load_model(MDL, f'kp_{mdl}.pt')
+        model, prd_func = load_model(MDL, f"kp_{mdl}.pt")
         with torch.no_grad():
             pred = prd_func(x_data, t_data)
         res.append(pred)
@@ -161,14 +199,20 @@ if ifprd:
     setup_logging()
 
     N = len(IDX)
+
     def contour_fig(j):
-        fig, ax = plt.subplots(N, 3, sharex=True, sharey=True, figsize=(12, 1.5*N))
+        fig, ax = plt.subplots(N, 3, sharex=True, sharey=True, figsize=(12, 1.5 * N))
         colorbar = j == 0
         for i in range(N):
             compare_contour(
-                res[0][j].reshape(Nx, Ny), res[i+1][j].reshape(Nx, Ny), vmin=-12, vmax=12,
-                axes=(fig, ax[i]), colorbar=colorbar)
-            ax[i,1].set_title(cfgs[IDX[i]][0])
+                res[0][j].reshape(Nx, Ny),
+                res[i + 1][j].reshape(Nx, Ny),
+                vmin=-12,
+                vmax=12,
+                axes=(fig, ax[i]),
+                colorbar=colorbar,
+            )
+            ax[i, 1].set_title(cfgs[IDX[i]][0])
         for _ax in ax.flatten():
             _ax.set_axis_off()
         return fig, ax

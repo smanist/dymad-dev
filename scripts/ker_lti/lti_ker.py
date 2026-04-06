@@ -4,54 +4,52 @@ import torch
 
 from dymad.io import load_model
 from dymad.models import DKM, DKMSK, KM
-from dymad.training import LinearTrainer, NODETrainer, StackedTrainer
-from dymad.utils import plot_trajectory, TrajectorySampler
+from dymad.training import LinearTrainer, StackedTrainer
+from dymad.utils import TrajectorySampler, plot_trajectory
 
 B = 30
 N = 41
 t_grid = np.linspace(0, 2, N)
 
-A = np.array([
-            [0., 1.],
-            [-1., -0.1]])
+A = np.array([[0.0, 1.0], [-1.0, -0.1]])
+
+
 def f(t, x, u):
     return (x @ A.T) + u
-g = lambda t, x, u: x
+
+
+def g(t, x, u):
+    return x
+
 
 config_chr = {
-    "control" : {
+    "control": {
         "kind": "chirp",
         "params": {
             "t1": 4.0,
             "freq_range": (0.5, 2.0),
             "amp_range": (0.5, 1.0),
-            "phase_range": (0.0, 360.0)}}}
+            "phase_range": (0.0, 360.0),
+        },
+    }
+}
 
 # Training options
 RIDGE = 1e-10
-opt_rbf1 = {
-    "type": "sc_rbf",
-    "input_dim": 2,
-    "lengthscale_init": 1.0
-}
+opt_rbf1 = {"type": "sc_rbf", "input_dim": 2, "lengthscale_init": 1.0}
 opt_opk1 = {
     "type": "op_sep",
     "input_dim": 2,
     "output_dim": 2,
     "kopts": [opt_rbf1],
-    "Ls": np.array([[[1, 0], [0, 1]]])
+    "Ls": np.array([[[1, 0], [0, 1]]]),
 }
-opt_share = {
-    "type": "share",
-    "kernel": opt_rbf1,
-    "dtype": torch.float64,
-    "ridge_init": RIDGE
-}
+opt_share = {"type": "share", "kernel": opt_rbf1, "dtype": torch.float64, "ridge_init": RIDGE}
 opt_indep = {
     "type": "indep",
     "kernel": [opt_rbf1, opt_rbf1],
     "dtype": torch.float64,
-    "ridge_init": RIDGE
+    "ridge_init": RIDGE,
 }
 opt_opval = {
     "type": "opval",
@@ -63,12 +61,7 @@ opt_opval = {
 # opt_krr = opt_share
 # opt_krr = opt_indep
 opt_krr = opt_opval
-mdl_kl = {
-    "name" : 'ker_model',
-    "encoder_layers" : 0,
-    "decoder_layers" : 0,
-    "kernel_dimension" : 2
-    }
+mdl_kl = {"name": "ker_model", "encoder_layers": 0, "decoder_layers": 0, "kernel_dimension": 2}
 mdl_kl.update(**opt_krr)
 
 trn_ln = {
@@ -114,26 +107,65 @@ def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=Tru
     return phase
 
 
-def _alternating_schedule(trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None, reset_optimizer=True):
+def _alternating_schedule(
+    trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None, reset_optimizer=True
+):
     phases = []
     for n_epochs in chunk_epochs:
-        phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+        phases.append(
+            _linear_solve_phase(
+                method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer
+            )
+        )
         chunk_cfg = dict(base_cfg)
         chunk_cfg["n_epochs"] = n_epochs
         phases.append(_optimizer_phase(trainer, chunk_cfg))
-    phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+    phases.append(
+        _linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer)
+    )
     return phases
 
-config_path = 'ker_model.yaml'
+
+config_path = "ker_model.yaml"
 
 cfgs = [
-    ('km_ln',  KM,     LinearTrainer,     {"model": mdl_kl, "training" : trn_ln}),
-    ('km_nd',  KM,     StackedTrainer,    {"model": mdl_kl, "phases" : _alternating_schedule("NODE", trn_ct, [50, 50, 50, 50], method="raw", reset_optimizer=False)}),
-    ('dkm_ln', DKM,    LinearTrainer,     {"model": mdl_kl, "training" : trn_ln}),
-    ('dkm_nd', DKM,    StackedTrainer,    {"model": mdl_kl, "phases" : _alternating_schedule("NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False)}),
-    ('dks_ln', DKMSK,  LinearTrainer,     {"model": mdl_kl, "training" : trn_ln}),
-    ('dks_nd', DKMSK,  StackedTrainer,    {"model": mdl_kl, "phases" : _alternating_schedule("NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False)}),
-    ]
+    ("km_ln", KM, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
+    (
+        "km_nd",
+        KM,
+        StackedTrainer,
+        {
+            "model": mdl_kl,
+            "phases": _alternating_schedule(
+                "NODE", trn_ct, [50, 50, 50, 50], method="raw", reset_optimizer=False
+            ),
+        },
+    ),
+    ("dkm_ln", DKM, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
+    (
+        "dkm_nd",
+        DKM,
+        StackedTrainer,
+        {
+            "model": mdl_kl,
+            "phases": _alternating_schedule(
+                "NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False
+            ),
+        },
+    ),
+    ("dks_ln", DKMSK, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
+    (
+        "dks_nd",
+        DKMSK,
+        StackedTrainer,
+        {
+            "model": mdl_kl,
+            "phases": _alternating_schedule(
+                "NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False
+            ),
+        },
+    ),
+]
 
 # IDX = [0, 1, 2, 3, 4, 5]
 # IDX = [0, 1]
@@ -146,8 +178,8 @@ iftrn = 1
 ifprd = 1
 
 if ifdat:
-    sampler = TrajectorySampler(f, g, config='ker_data.yaml', config_mod=config_chr)
-    ts, xs, us, ys = sampler.sample(t_grid, batch=B, save='./data/ker.npz')
+    sampler = TrajectorySampler(f, g, config="ker_data.yaml", config_mod=config_chr)
+    ts, xs, us, ys = sampler.sample(t_grid, batch=B, save="./data/ker.npz")
 
     for i in range(B):
         plt.plot(ys[i, :, 0], ys[i, :, 1])
@@ -160,7 +192,7 @@ if iftrn:
         trainer.train()
 
 if ifprd:
-    sampler = TrajectorySampler(f, g, config='ker_data.yaml', config_mod=config_chr)
+    sampler = TrajectorySampler(f, g, config="ker_data.yaml", config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -169,13 +201,13 @@ if ifprd:
     res = [x_data]
     for _i in IDX:
         mdl, MDL, _, _ = cfgs[_i]
-        _, prd_func = load_model(MDL, f'ker_{mdl}.pt')
+        _, prd_func = load_model(MDL, f"ker_{mdl}.pt")
         with torch.no_grad():
             pred = prd_func(x_data, t_data, u=u_data)
         res.append(pred)
 
     plot_trajectory(
-        np.array(res), t_data, "LTI",
-        us=u_data, labels=['Truth']+labels, ifclose=False)
+        np.array(res), t_data, "LTI", us=u_data, labels=["Truth"] + labels, ifclose=False
+    )
 
 plt.show()

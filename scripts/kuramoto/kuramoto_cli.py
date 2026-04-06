@@ -1,8 +1,8 @@
 import argparse
 import copy
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,14 +12,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.cli_helpers import add_common_cli_args, print_case_table, resolve_case_indices, set_seed, stage_workdir
+from scripts.cli_helpers import (
+    add_common_cli_args,
+    print_case_table,
+    resolve_case_indices,
+    set_seed,
+    stage_workdir,
+)
+from scripts.kuramoto.train import DSDMSKG, mdl_sdm, trn_nd
 
 from dymad.io import load_model
 from dymad.training import NODETrainer
 from dymad.utils import adj_to_edge, plot_multi_trajs
-
-from scripts.kuramoto.train import DSDMSKG, mdl_sdm, trn_nd
-
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_STEM = "data/data_n4_s5_k4_s5"
@@ -37,11 +41,18 @@ def parse_args():
 
 
 def prepare_workdir(root: Path):
-    stage_workdir(root, BASE_DIR, ["kur_seq.yaml", f"{DATA_STEM}_train.npz", f"{DATA_STEM}_test.npz"], data_dir=True)
+    stage_workdir(
+        root,
+        BASE_DIR,
+        ["kur_seq.yaml", f"{DATA_STEM}_train.npz", f"{DATA_STEM}_test.npz"],
+        data_dir=True,
+    )
 
 
 def stage_data(root: Path):
-    stage_workdir(root, BASE_DIR, [f"{DATA_STEM}_train.npz", f"{DATA_STEM}_test.npz"], data_dir=True)
+    stage_workdir(
+        root, BASE_DIR, [f"{DATA_STEM}_train.npz", f"{DATA_STEM}_test.npz"], data_dir=True
+    )
     print(f"Staged data under: {root / 'data'}")
 
 
@@ -91,11 +102,20 @@ def predict(selected: list[int], root: Path):
             time = t_data[-plot_len:]
             control = u_data[:, -plot_len:]
             res.append(x_data[:, -plot_len:])
-        pred = pred[:, -len(time):]
+        pred = pred[:, -len(time) :]
         res.append(pred)
         labels.append(case["name"])
 
-    plot_multi_trajs(np.array(res), time, "KURA", us=control, labels=labels, ifclose=False, xidx=[0, 1, 2, 3, 4], uidx=[0])
+    plot_multi_trajs(
+        np.array(res),
+        time,
+        "KURA",
+        us=control,
+        labels=labels,
+        ifclose=False,
+        xidx=[0, 1, 2, 3, 4],
+        uidx=[0],
+    )
 
 
 def main():

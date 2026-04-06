@@ -1,9 +1,9 @@
 import argparse
 import copy
 import os
-from pathlib import Path
 import random
 import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,7 +13,6 @@ from dymad.io import load_model
 from dymad.models import DKMSK, KM, KMM
 from dymad.training import LinearTrainer
 from dymad.utils import TrajectorySampler, plot_trajectory
-
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -47,7 +46,9 @@ def f(t, x, u):
     return np.vstack([-_r * _s + _d * _c, _r * _c + _d * _s]).T.squeeze()
 
 
-g = lambda t, x, u: x
+def g(t, x, u):
+    return x
+
 
 config_chr = {
     "control": {
@@ -173,7 +174,14 @@ def predict(selected):
         with torch.no_grad():
             pred = prd_func(x_data, t_data, u=u_data)
         res.append(pred)
-    plot_trajectory(np.array(res), t_data, "S1U", us=u_data, labels=["Truth"] + [cfgs[i][0] for i in selected], ifclose=False)
+    plot_trajectory(
+        np.array(res),
+        t_data,
+        "S1U",
+        us=u_data,
+        labels=["Truth"] + [cfgs[i][0] for i in selected],
+        ifclose=False,
+    )
 
 
 def main():

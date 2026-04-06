@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import Any, Iterable, TypeAlias
+from typing import Any
 
 import torch
 
 from dymad.core.graph_series import (
-    FixedGraphSeries,
     GraphSeries,
     GraphSeriesBatch,
     RaggedGraphSeriesBatch,
     UniformLengthGraphSeriesBatch,
-    VariableEdgeGraphSeries,
 )
 from dymad.core.series import (
     RaggedRegularSeriesBatch,
@@ -50,7 +49,14 @@ def _pad_optional(
 
 def _pad_regular_batch(
     batch: RaggedRegularSeriesBatch,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None, torch.Tensor]:
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor,
+]:
     items = tuple(batch)
     if not items:
         empty = torch.empty(0)
@@ -58,7 +64,9 @@ def _pad_regular_batch(
     lengths = batch.step_lengths
     max_steps = max(lengths)
     state_dim = items[0].state.shape[-1]
-    time = torch.zeros((len(items), max_steps), dtype=items[0].time.dtype, device=items[0].time.device)
+    time = torch.zeros(
+        (len(items), max_steps), dtype=items[0].time.dtype, device=items[0].time.device
+    )
     state = torch.zeros(
         (len(items), max_steps, state_dim),
         dtype=items[0].state.dtype,
@@ -100,8 +108,7 @@ def _graph_edge_steps(
     if isinstance(series.edge_index, torch.Tensor):
         if series.edge_index.ndim == 3 and series.edge_index.shape[0] == n_steps:
             edge_index = tuple(
-                step if step.shape[0] == 2 else step.transpose(0, 1)
-                for step in series.edge_index
+                step if step.shape[0] == 2 else step.transpose(0, 1) for step in series.edge_index
             )
         else:
             edge_index = tuple(series.edge_index for _ in range(n_steps))
@@ -147,11 +154,7 @@ def _stack_graph_steps(
     ref_dtype = step_payloads[0][0][0].dtype
     ref_device = step_payloads[0][0][0].device
     have_weight = any(weight is not None for _, weight, _ in step_payloads)
-    edge_counts = [
-        int(step.shape[1])
-        for edge_index, _, _ in step_payloads
-        for step in edge_index
-    ]
+    edge_counts = [int(step.shape[1]) for edge_index, _, _ in step_payloads for step in edge_index]
     if len(set(edge_counts)) != 1 and not have_weight:
         raise ValueError(
             "Native graph runtime currently requires a consistent edge count unless edge weights are provided."
@@ -183,7 +186,7 @@ def _stack_graph_steps(
         )
 
     for batch_index, (series, (edge_index_steps, edge_weight_steps, edge_attr_steps)) in enumerate(
-        zip(series_items, step_payloads)
+        zip(series_items, step_payloads, strict=False)
     ):
         valid_steps = int(series.time.shape[0])
         fill_edge = edge_index_steps[0]
@@ -304,9 +307,13 @@ def _graph_window_tensor(
     if tensor is None:
         return None
     if tensor.ndim != time_ndim:
-        return tensor.unsqueeze(1).expand(tensor.shape[0], n_windows, *tensor.shape[1:]).reshape(
-            tensor.shape[0] * n_windows,
-            *tensor.shape[1:],
+        return (
+            tensor.unsqueeze(1)
+            .expand(tensor.shape[0], n_windows, *tensor.shape[1:])
+            .reshape(
+                tensor.shape[0] * n_windows,
+                *tensor.shape[1:],
+            )
         )
     parts = [tensor[:, start : start + window] for start in starts]
     return torch.stack(parts, dim=1).reshape(tensor.shape[0] * n_windows, window, *tensor.shape[2:])
@@ -354,10 +361,10 @@ class RegularRuntimeStep:
     def p(self) -> torch.Tensor | None:
         return self.params
 
-    def set_x(self, value: torch.Tensor) -> "RegularRuntimeStep":
+    def set_x(self, value: torch.Tensor) -> RegularRuntimeStep:
         return replace(self, state=value)
 
-    def set_u(self, value: torch.Tensor | None = None) -> "RegularRuntimeStep":
+    def set_u(self, value: torch.Tensor | None = None) -> RegularRuntimeStep:
         if value is None:
             return self
         return replace(self, control=value)
@@ -367,7 +374,7 @@ class RegularRuntimeStep:
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
         non_blocking: bool = False,
-    ) -> "RegularRuntimeStep":
+    ) -> RegularRuntimeStep:
         def _move(tensor: torch.Tensor | None) -> torch.Tensor | None:
             if tensor is None:
                 return None
@@ -471,10 +478,10 @@ class GraphRuntimeStep:
     def G(self, value: torch.Tensor) -> torch.Tensor:
         return value.reshape(*value.shape[:-2], -1)
 
-    def set_x(self, value: torch.Tensor) -> "GraphRuntimeStep":
+    def set_x(self, value: torch.Tensor) -> GraphRuntimeStep:
         return replace(self, node_state=self.g(value) if value.ndim == 2 else value)
 
-    def set_u(self, value: torch.Tensor | None = None) -> "GraphRuntimeStep":
+    def set_u(self, value: torch.Tensor | None = None) -> GraphRuntimeStep:
         if value is None:
             return self
         return replace(self, control=self.g(value) if value.ndim == 2 else value)
@@ -484,7 +491,7 @@ class GraphRuntimeStep:
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
         non_blocking: bool = False,
-    ) -> "GraphRuntimeStep":
+    ) -> GraphRuntimeStep:
         def _move(tensor: torch.Tensor | None) -> torch.Tensor | None:
             if tensor is None:
                 return None
@@ -563,7 +570,7 @@ class EmptyRegularRuntime:
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
         non_blocking: bool = False,
-    ) -> "EmptyRegularRuntime":
+    ) -> EmptyRegularRuntime:
         return self
 
 
@@ -643,7 +650,7 @@ class UniformRegularRuntime:
             meta=self.meta,
         )
 
-    def truncate(self, num_steps: int) -> "UniformRegularRuntime":
+    def truncate(self, num_steps: int) -> UniformRegularRuntime:
         return replace(
             self,
             time=self.time[:, :num_steps],
@@ -652,7 +659,7 @@ class UniformRegularRuntime:
             target=self.target[:, :num_steps] if self.target is not None else None,
         )
 
-    def window(self, window: int, stride: int) -> "UniformRegularRuntime":
+    def window(self, window: int, stride: int) -> UniformRegularRuntime:
         if window <= 0:
             raise ValueError("window must be positive")
         if stride <= 0:
@@ -676,15 +683,21 @@ class UniformRegularRuntime:
         state = state.reshape(self.batch_size * n_windows, window, *self.state.shape[2:])
         control = None
         if self.control is not None:
-            control = torch.stack([self.control[:, start : start + window] for start in starts], dim=1)
+            control = torch.stack(
+                [self.control[:, start : start + window] for start in starts], dim=1
+            )
             control = control.reshape(self.batch_size * n_windows, window, *self.control.shape[2:])
         target = None
         if self.target is not None:
-            target = torch.stack([self.target[:, start : start + window] for start in starts], dim=1)
+            target = torch.stack(
+                [self.target[:, start : start + window] for start in starts], dim=1
+            )
             target = target.reshape(self.batch_size * n_windows, window, *self.target.shape[2:])
         params = None
         if self.params is not None:
-            params = self.params.unsqueeze(1).expand(self.batch_size, n_windows, *self.params.shape[1:])
+            params = self.params.unsqueeze(1).expand(
+                self.batch_size, n_windows, *self.params.shape[1:]
+            )
             params = params.reshape(self.batch_size * n_windows, *self.params.shape[1:])
         meta = tuple(dict(self.meta[idx]) for idx in range(self.batch_size) for _ in starts)
         return UniformRegularRuntime(
@@ -712,7 +725,7 @@ class UniformRegularRuntime:
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
         non_blocking: bool = False,
-    ) -> "UniformRegularRuntime":
+    ) -> UniformRegularRuntime:
         def _move(tensor: torch.Tensor | None) -> torch.Tensor | None:
             if tensor is None:
                 return None
@@ -794,7 +807,7 @@ class RaggedRegularRuntime:
             meta=self.meta,
         )
 
-    def truncate(self, num_steps: int) -> "RaggedRegularRuntime":
+    def truncate(self, num_steps: int) -> RaggedRegularRuntime:
         step_lengths = tuple(min(length, num_steps) for length in self.step_lengths)
         return replace(
             self,
@@ -806,7 +819,7 @@ class RaggedRegularRuntime:
             target=self.target[:, :num_steps] if self.target is not None else None,
         )
 
-    def window(self, window: int, stride: int) -> "TypedRuntime":
+    def window(self, window: int, stride: int) -> TypedRuntime:
         if window <= 0:
             raise ValueError("window must be positive")
         if stride <= 0:
@@ -826,7 +839,13 @@ class RaggedRegularRuntime:
             parts = []
             for item in items:
                 if item.control is None:
-                    parts.append(torch.zeros((item.batch_size, item.n_steps, *ref.shape[2:]), dtype=ref.dtype, device=ref.device))
+                    parts.append(
+                        torch.zeros(
+                            (item.batch_size, item.n_steps, *ref.shape[2:]),
+                            dtype=ref.dtype,
+                            device=ref.device,
+                        )
+                    )
                 else:
                     parts.append(item.control)
             stacked_control = torch.cat(parts, dim=0)
@@ -836,7 +855,13 @@ class RaggedRegularRuntime:
             parts = []
             for item in items:
                 if item.target is None:
-                    parts.append(torch.zeros((item.batch_size, item.n_steps, *ref.shape[2:]), dtype=ref.dtype, device=ref.device))
+                    parts.append(
+                        torch.zeros(
+                            (item.batch_size, item.n_steps, *ref.shape[2:]),
+                            dtype=ref.dtype,
+                            device=ref.device,
+                        )
+                    )
                 else:
                     parts.append(item.target)
             stacked_target = torch.cat(parts, dim=0)
@@ -846,7 +871,11 @@ class RaggedRegularRuntime:
             parts = []
             for item in items:
                 if item.params is None:
-                    parts.append(torch.zeros((item.batch_size, *ref.shape[1:]), dtype=ref.dtype, device=ref.device))
+                    parts.append(
+                        torch.zeros(
+                            (item.batch_size, *ref.shape[1:]), dtype=ref.dtype, device=ref.device
+                        )
+                    )
                 else:
                     parts.append(item.params)
             stacked_params = torch.cat(parts, dim=0)
@@ -876,7 +905,7 @@ class RaggedRegularRuntime:
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
         non_blocking: bool = False,
-    ) -> "RaggedRegularRuntime":
+    ) -> RaggedRegularRuntime:
         def _move(tensor: torch.Tensor | None) -> torch.Tensor | None:
             if tensor is None:
                 return None
@@ -1011,7 +1040,7 @@ class UniformGraphRuntime:
             meta=self.meta,
         )
 
-    def truncate(self, num_steps: int) -> "UniformGraphRuntime":
+    def truncate(self, num_steps: int) -> UniformGraphRuntime:
         return replace(
             self,
             time=self.time[:, :num_steps],
@@ -1023,7 +1052,7 @@ class UniformGraphRuntime:
             edge_attr=_graph_truncate_tensor(self.edge_attr, num_steps=num_steps, time_ndim=4),
         )
 
-    def window(self, window: int, stride: int) -> "UniformGraphRuntime":
+    def window(self, window: int, stride: int) -> UniformGraphRuntime:
         if window <= 0:
             raise ValueError("window must be positive")
         if stride <= 0:
@@ -1045,24 +1074,40 @@ class UniformGraphRuntime:
         starts = list(range(0, self.n_steps - window + 1, stride))
         n_windows = len(starts)
         time = torch.stack([self.time[:, start : start + window] for start in starts], dim=1)
-        node_state = torch.stack([self.node_state[:, start : start + window] for start in starts], dim=1)
+        node_state = torch.stack(
+            [self.node_state[:, start : start + window] for start in starts], dim=1
+        )
         time = time.reshape(self.batch_size * n_windows, window)
-        node_state = node_state.reshape(self.batch_size * n_windows, window, *self.node_state.shape[2:])
+        node_state = node_state.reshape(
+            self.batch_size * n_windows, window, *self.node_state.shape[2:]
+        )
         control = None
         if self.control is not None:
-            control = torch.stack([self.control[:, start : start + window] for start in starts], dim=1)
+            control = torch.stack(
+                [self.control[:, start : start + window] for start in starts], dim=1
+            )
             control = control.reshape(self.batch_size * n_windows, window, *self.control.shape[2:])
         target = None
         if self.target is not None:
-            target = torch.stack([self.target[:, start : start + window] for start in starts], dim=1)
+            target = torch.stack(
+                [self.target[:, start : start + window] for start in starts], dim=1
+            )
             target = target.reshape(self.batch_size * n_windows, window, *self.target.shape[2:])
         params = None
         if self.params is not None:
-            params = self.params.unsqueeze(1).expand(self.batch_size, n_windows, *self.params.shape[1:])
+            params = self.params.unsqueeze(1).expand(
+                self.batch_size, n_windows, *self.params.shape[1:]
+            )
             params = params.reshape(self.batch_size * n_windows, *self.params.shape[1:])
-        edge_index = _graph_window_tensor(self.edge_index, n_windows=n_windows, starts=starts, window=window, time_ndim=4)
-        edge_weight = _graph_window_tensor(self.edge_weight, n_windows=n_windows, starts=starts, window=window, time_ndim=3)
-        edge_attr = _graph_window_tensor(self.edge_attr, n_windows=n_windows, starts=starts, window=window, time_ndim=4)
+        edge_index = _graph_window_tensor(
+            self.edge_index, n_windows=n_windows, starts=starts, window=window, time_ndim=4
+        )
+        edge_weight = _graph_window_tensor(
+            self.edge_weight, n_windows=n_windows, starts=starts, window=window, time_ndim=3
+        )
+        edge_attr = _graph_window_tensor(
+            self.edge_attr, n_windows=n_windows, starts=starts, window=window, time_ndim=4
+        )
         meta = tuple(dict(self.meta[idx]) for idx in range(self.batch_size) for _ in starts)
         return UniformGraphRuntime(
             time=time,
@@ -1101,7 +1146,7 @@ class UniformGraphRuntime:
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
         non_blocking: bool = False,
-    ) -> "UniformGraphRuntime":
+    ) -> UniformGraphRuntime:
         def _move(tensor: torch.Tensor | None) -> torch.Tensor | None:
             if tensor is None:
                 return None
@@ -1230,7 +1275,7 @@ class RaggedGraphRuntime:
             meta=self.meta,
         )
 
-    def truncate(self, num_steps: int) -> "RaggedGraphRuntime":
+    def truncate(self, num_steps: int) -> RaggedGraphRuntime:
         step_lengths = tuple(min(length, num_steps) for length in self.step_lengths)
         return replace(
             self,
@@ -1245,7 +1290,7 @@ class RaggedGraphRuntime:
             edge_attr=_graph_truncate_tensor(self.edge_attr, num_steps=num_steps, time_ndim=4),
         )
 
-    def window(self, window: int, stride: int) -> "GraphRuntime":
+    def window(self, window: int, stride: int) -> GraphRuntime:
         if window <= 0:
             raise ValueError("window must be positive")
         if stride <= 0:
@@ -1268,7 +1313,11 @@ class RaggedGraphRuntime:
                 [
                     item.control
                     if item.control is not None
-                    else torch.zeros((item.batch_size, item.n_steps, *ref.shape[2:]), dtype=ref.dtype, device=ref.device)
+                    else torch.zeros(
+                        (item.batch_size, item.n_steps, *ref.shape[2:]),
+                        dtype=ref.dtype,
+                        device=ref.device,
+                    )
                     for item in items
                 ],
                 dim=0,
@@ -1280,7 +1329,11 @@ class RaggedGraphRuntime:
                 [
                     item.target
                     if item.target is not None
-                    else torch.zeros((item.batch_size, item.n_steps, *ref.shape[2:]), dtype=ref.dtype, device=ref.device)
+                    else torch.zeros(
+                        (item.batch_size, item.n_steps, *ref.shape[2:]),
+                        dtype=ref.dtype,
+                        device=ref.device,
+                    )
                     for item in items
                 ],
                 dim=0,
@@ -1292,7 +1345,9 @@ class RaggedGraphRuntime:
                 [
                     item.params
                     if item.params is not None
-                    else torch.zeros((item.batch_size, *ref.shape[1:]), dtype=ref.dtype, device=ref.device)
+                    else torch.zeros(
+                        (item.batch_size, *ref.shape[1:]), dtype=ref.dtype, device=ref.device
+                    )
                     for item in items
                 ],
                 dim=0,
@@ -1305,7 +1360,9 @@ class RaggedGraphRuntime:
                 [
                     item.edge_weight
                     if item.edge_weight is not None
-                    else torch.zeros((item.batch_size, *ref.shape[1:]), dtype=ref.dtype, device=ref.device)
+                    else torch.zeros(
+                        (item.batch_size, *ref.shape[1:]), dtype=ref.dtype, device=ref.device
+                    )
                     for item in items
                 ],
                 dim=0,
@@ -1317,7 +1374,9 @@ class RaggedGraphRuntime:
                 [
                     item.edge_attr
                     if item.edge_attr is not None
-                    else torch.zeros((item.batch_size, *ref.shape[1:]), dtype=ref.dtype, device=ref.device)
+                    else torch.zeros(
+                        (item.batch_size, *ref.shape[1:]), dtype=ref.dtype, device=ref.device
+                    )
                     for item in items
                 ],
                 dim=0,
@@ -1340,12 +1399,18 @@ class RaggedGraphRuntime:
             yield UniformGraphRuntime(
                 time=self.time[idx : idx + 1, :length],
                 node_state=self.node_state[idx : idx + 1, :length],
-                edge_index=_graph_batch_tensor(self.edge_index, index=idx, length=length, time_ndim=4),
+                edge_index=_graph_batch_tensor(
+                    self.edge_index, index=idx, length=length, time_ndim=4
+                ),
                 control=self.control[idx : idx + 1, :length] if self.control is not None else None,
                 target=self.target[idx : idx + 1, :length] if self.target is not None else None,
                 params=self.params[idx : idx + 1] if self.params is not None else None,
-                edge_weight=_graph_batch_tensor(self.edge_weight, index=idx, length=length, time_ndim=3),
-                edge_attr=_graph_batch_tensor(self.edge_attr, index=idx, length=length, time_ndim=4),
+                edge_weight=_graph_batch_tensor(
+                    self.edge_weight, index=idx, length=length, time_ndim=3
+                ),
+                edge_attr=_graph_batch_tensor(
+                    self.edge_attr, index=idx, length=length, time_ndim=4
+                ),
                 meta=(dict(self.meta[idx]),) if self.meta else (),
             )
 
@@ -1360,7 +1425,7 @@ class RaggedGraphRuntime:
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
         non_blocking: bool = False,
-    ) -> "RaggedGraphRuntime":
+    ) -> RaggedGraphRuntime:
         def _move(tensor: torch.Tensor | None) -> torch.Tensor | None:
             if tensor is None:
                 return None
@@ -1382,10 +1447,10 @@ class RaggedGraphRuntime:
         )
 
 
-RegularRuntime: TypeAlias = EmptyRegularRuntime | UniformRegularRuntime | RaggedRegularRuntime
-GraphRuntime: TypeAlias = UniformGraphRuntime | RaggedGraphRuntime
-TypedRuntime: TypeAlias = RegularRuntime | GraphRuntime
-TypedRuntimeStep: TypeAlias = RegularRuntimeStep | GraphRuntimeStep
+type RegularRuntime = EmptyRegularRuntime | UniformRegularRuntime | RaggedRegularRuntime
+type GraphRuntime = UniformGraphRuntime | RaggedGraphRuntime
+type TypedRuntime = RegularRuntime | GraphRuntime
+type TypedRuntimeStep = RegularRuntimeStep | GraphRuntimeStep
 
 
 def to_padded_regular_runtime(batch: RegularSeriesBatch) -> RegularRuntime:

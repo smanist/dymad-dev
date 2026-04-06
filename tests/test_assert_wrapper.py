@@ -1,16 +1,17 @@
 import jax.numpy as jnp
 import torch
-from typing import Tuple, Union
 
 from dymad.utils import JaxWrapper
 
+
 def test_jax_wrapper():
     # JAX function
-    def f_jax(*xs: jnp.ndarray) -> Union[jnp.ndarray, Tuple[jnp.ndarray, ...]]:
+    def f_jax(*xs: jnp.ndarray) -> jnp.ndarray | tuple[jnp.ndarray, ...]:
         x, w = xs
         y1 = jnp.tanh(x @ w)
         y2 = jnp.sum(x**2, axis=-1)
         return y1, y2
+
     jax_layer = JaxWrapper(f_jax, jit=True)
 
     # Torch reference
@@ -20,6 +21,7 @@ def test_jax_wrapper():
             y1 = torch.tanh(x @ w)
             y2 = torch.sum(x**2, axis=-1)
             return y1, y2
+
     tor_layer = TorchMultiInLayer()
 
     # Run two functions

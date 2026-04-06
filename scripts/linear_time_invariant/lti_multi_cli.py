@@ -1,8 +1,8 @@
 import argparse
 import os
-from pathlib import Path
 import random
 import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,37 +13,33 @@ from dymad.models import KBF
 from dymad.training import StackedTrainer
 from dymad.utils import TrajectorySampler, plot_multi_trajs, plot_summary
 
-
 BASE_DIR = Path(__file__).resolve().parent
 
 B = 128
 N = 501
 t_grid = np.linspace(0, 5, N)
 
-A = np.array([
-            [0., 1.],
-            [-1., -0.1]])
+A = np.array([[0.0, 1.0], [-1.0, -0.1]])
 
 
 def f(t, x, u):
     return (x @ A.T) + u
 
 
-g = lambda t, x, u: x
+def g(t, x, u):
+    return x
+
 
 config_gau = {
-    "control" : {
+    "control": {
         "kind": "gaussian",
-        "params": {
-            "mean": 0.5,
-            "std":  1.0,
-            "t1":   4.0,
-            "dt":   0.2,
-            "mode": "zoh"}}}
+        "params": {"mean": 0.5, "std": 1.0, "t1": 4.0, "dt": 0.2, "mode": "zoh"},
+    }
+}
 
 cases = [
-    {"name": "kbf_two",  "model" : KBF, "trainer": StackedTrainer, "config": 'lti_kbf_two.yaml'},
-    {"name": "kbf_mcri", "model" : KBF, "trainer": StackedTrainer, "config": 'lti_kbf_mcri.yaml'},
+    {"name": "kbf_two", "model": KBF, "trainer": StackedTrainer, "config": "lti_kbf_two.yaml"},
+    {"name": "kbf_mcri", "model": KBF, "trainer": StackedTrainer, "config": "lti_kbf_mcri.yaml"},
 ]
 DEFAULT_CASES = [0, 1]
 
@@ -113,16 +109,19 @@ def prepare_workdir(root: Path):
 def generate_data(root: Path):
     (root / "data").mkdir(exist_ok=True)
     config_chr = {
-        "control" : {
+        "control": {
             "kind": "chirp",
             "params": {
                 "t1": 4.0,
                 "freq_range": (0.5, 2.0),
                 "amp_range": (0.5, 1.0),
-                "phase_range": (0.0, 360.0)}}}
-    sampler = TrajectorySampler(f, g, config=BASE_DIR / 'lti_data.yaml', config_mod=config_chr)
+                "phase_range": (0.0, 360.0),
+            },
+        }
+    }
+    sampler = TrajectorySampler(f, g, config=BASE_DIR / "lti_data.yaml", config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
-    out_path = root / 'data' / 'lti.npz'
+    out_path = root / "data" / "lti.npz"
     np.savez_compressed(out_path, t=ts, x=ys, u=us)
     print(f"Generated data: {out_path}")
     return out_path
@@ -130,39 +129,44 @@ def generate_data(root: Path):
 
 def train(selected, root: Path):
     for idx in selected:
-        Model = cases[idx]['model']
-        Trainer = cases[idx]['trainer']
-        config_path = root / cases[idx]['config']
+        Model = cases[idx]["model"]
+        Trainer = cases[idx]["trainer"]
+        config_path = root / cases[idx]["config"]
 
         trainer = Trainer(config_path, Model)
         trainer.train()
 
 
 def plot(selected):
-    labels = [cases[idx]['name'] for idx in selected]
-    npz_files = [f'lti_{label}' for label in labels]
+    labels = [cases[idx]["name"] for idx in selected]
+    npz_files = [f"lti_{label}" for label in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
-    for label, npz in zip(labels, npzs):
+    for label, npz in zip(labels, npzs, strict=False):
         print(f"Epoch time: {label} - {npz['avg_epoch_time']}")
 
 
 def predict(selected):
-    sampler = TrajectorySampler(f, g, config='lti_data.yaml', config_mod=config_gau)
+    sampler = TrajectorySampler(f, g, config="lti_data.yaml", config_mod=config_gau)
     ts, xs, us, ys = sampler.sample(t_grid, batch=3)
 
     res = [xs]
     for idx in selected:
-        mdl = cases[idx]['name']
-        MDL = cases[idx]['model']
-        _, prd_func = load_model(MDL, f'lti_{mdl}.pt')
+        mdl = cases[idx]["name"]
+        MDL = cases[idx]["model"]
+        _, prd_func = load_model(MDL, f"lti_{mdl}.pt")
 
         with torch.no_grad():
             _pred = prd_func(xs, ts, u=us)
         res.append(_pred)
 
     plot_multi_trajs(
-        np.array(res), ts[0], "LTI",
-        us=us, labels=['Truth'] + [cases[idx]['name'] for idx in selected], ifclose=False)
+        np.array(res),
+        ts[0],
+        "LTI",
+        us=us,
+        labels=["Truth"] + [cases[idx]["name"] for idx in selected],
+        ifclose=False,
+    )
 
 
 def main():
@@ -180,7 +184,7 @@ def main():
 
     selected = resolve_indices(args.case)
 
-    data_path = root / 'data' / 'lti.npz'
+    data_path = root / "data" / "lti.npz"
     if args.workdir is not None and not data_path.exists():
         generate_data(root)
     if not args.no_train:

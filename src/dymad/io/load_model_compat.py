@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from os import PathLike
-from typing import Any, Callable
+from typing import Any
 
 from dymad.exec.context import ExecutionContext, build_default_context
 from dymad.exec.state import PredictionWorkflowPlan
@@ -43,8 +44,12 @@ def load_model_compat(
         model_class=model_class,
     )
     if return_trace:
-        return model, predict_fn, BoundaryLoadTrace(
-            plan=plan,
-            model_ref=model_ref,
+        return (
+            model,
+            predict_fn,
+            BoundaryLoadTrace(
+                plan=plan,
+                model_ref=model_ref,
+            ),
         )
     return model, predict_fn

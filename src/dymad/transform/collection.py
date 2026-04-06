@@ -1,11 +1,12 @@
 import logging
-import numpy as np
-from typing import Any, Dict, List, Union
+from typing import Any
 
-from dymad.transform.base import AddOne, DelayEmbedder, Identity, Lift, Scaler, SVD, Transform
+import numpy as np
+
+from dymad.transform.base import SVD, AddOne, DelayEmbedder, Identity, Lift, Scaler, Transform
 from dymad.transform.ndr import DiffMap, DiffMapVB, Isomap
 
-Array = List[np.ndarray]
+Array = list[np.ndarray]
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +16,11 @@ _TYPE_ALIASES = {
     "isomap": "isomap",
 }
 
+
 class Compose(Transform):
     """Apply transforms in order.  Inverse is applied in reverse."""
-    def __init__(self, transforms: List[Transform] = None):
+
+    def __init__(self, transforms: list[Transform] = None):
         super().__init__()
 
         if transforms is None:
@@ -30,8 +33,10 @@ class Compose(Transform):
 
         _n = self._T_names.count("delay")
         if _n > 1:
-            raise ValueError(f"Compose: Multiple delay transforms ({_n}) are not allowed. "
-                             "Please use only one delay transform in the composition.")
+            raise ValueError(
+                f"Compose: Multiple delay transforms ({_n}) are not allowed. "
+                "Please use only one delay transform in the composition."
+            )
             # This is to reduce bookkeeping complexity in trajectory manager.
         elif _n == 1:
             _k = self._T_names.index("delay")
@@ -41,8 +46,8 @@ class Compose(Transform):
 
     def __str__(self):
         return "compose"
-    
-    def _proc_rng(self, rng: Union[List, None]) -> List:
+
+    def _proc_rng(self, rng: list | None) -> list:
         if rng is not None:
             assert len(rng) == 2, "Range should be a list of two integers [start, end]."
             assert 0 <= rng[0] < rng[1] <= self.NT, f"Range should be within [0, {self.NT}]."
@@ -60,10 +65,11 @@ class Compose(Transform):
         self._inp_dim = self.T[0]._inp_dim
         self._out_dim = self.T[-1]._out_dim
 
-        for _i in range(len(self.T)-1):
-            assert self.T[_i]._out_dim == self.T[_i+1]._inp_dim, \
-                f"Compose: Output dimension of transform {_i} ({self.T[_i]._out_dim}) " \
-                f"does not match input dimension of transform {_i+1} ({self.T[_i+1]._inp_dim})."
+        for _i in range(len(self.T) - 1):
+            assert self.T[_i]._out_dim == self.T[_i + 1]._inp_dim, (
+                f"Compose: Output dimension of transform {_i} ({self.T[_i]._out_dim}) "
+                f"does not match input dimension of transform {_i + 1} ({self.T[_i + 1]._inp_dim})."
+            )
 
     def append(self, t: Transform) -> None:
         """Append a transform to the composition."""
@@ -71,15 +77,19 @@ class Compose(Transform):
             raise ValueError("Can only append Transform objects.")
         if self.NT > 0:
             if self.T[-1]._out_dim != t._inp_dim:
-                raise ValueError(f"Compose: Output dimension of last transform ({self.T[-1]._out_dim}) "
-                                 f"does not match input dimension of new transform ({t._inp_dim}).")
+                raise ValueError(
+                    f"Compose: Output dimension of last transform ({self.T[-1]._out_dim}) "
+                    f"does not match input dimension of new transform ({t._inp_dim})."
+                )
         self.T.append(t)
         self._T_names.append(str(t))
         self.NT += 1
         if str(t) == "delay":
             if self.delay > 0:
-                raise ValueError("Compose: Multiple delay transforms are not allowed. "
-                                 "Please use only one delay transform in the composition.")
+                raise ValueError(
+                    "Compose: Multiple delay transforms are not allowed. "
+                    "Please use only one delay transform in the composition."
+                )
             self.delay = t.delay
         self._out_dim = self.T[-1]._out_dim
 
@@ -95,38 +105,38 @@ class Compose(Transform):
         self._out_dim = self.T[-1]._out_dim
         return t
 
-    def transform(self, data: Array, rng: Union[List, None] = None) -> Array:
+    def transform(self, data: Array, rng: list | None = None) -> Array:
         """"""
         _rng = self._proc_rng(rng)
         for _i in range(_rng[0], _rng[1]):
             data = self.T[_i].transform(data)
         return data
 
-    def inverse_transform(self, data: Array, rng: Union[List, None] = None) -> Array:
+    def inverse_transform(self, data: Array, rng: list | None = None) -> Array:
         """"""
         _rng = self._proc_rng(rng)
-        for _i in range(_rng[1]-1, _rng[0]-1, -1):
+        for _i in range(_rng[1] - 1, _rng[0] - 1, -1):
             data = self.T[_i].inverse_transform(data)
         return data
 
-    def get_forward_modes(self, ref=None, rng: Union[List, None] = None, **kwargs) -> np.ndarray:
+    def get_forward_modes(self, ref=None, rng: list | None = None, **kwargs) -> np.ndarray:
         """"""
         _rng = self._proc_rng(rng)
         modes = self.T[_rng[0]].get_forward_modes(ref, **kwargs)
-        for _i in range(_rng[0]+1, _rng[1]):
+        for _i in range(_rng[0] + 1, _rng[1]):
             if ref is not None:
-                ref = self.T[_i-1].transform([ref])[0]
+                ref = self.T[_i - 1].transform([ref])[0]
             tmp = self.T[_i].get_forward_modes(ref, **kwargs)
             modes = tmp.dot(modes)
         return modes
 
-    def get_backward_modes(self, ref=None, rng: Union[List, None] = None, **kwargs) -> np.ndarray:
+    def get_backward_modes(self, ref=None, rng: list | None = None, **kwargs) -> np.ndarray:
         """"""
         _rng = self._proc_rng(rng)
-        modes = self.T[_rng[1]-1].get_backward_modes(ref, **kwargs)
-        for _i in range(_rng[1]-2, _rng[0]-1, -1):
+        modes = self.T[_rng[1] - 1].get_backward_modes(ref, **kwargs)
+        for _i in range(_rng[1] - 2, _rng[0] - 1, -1):
             if ref is not None:
-                ref = self.T[_i+1].inverse_transform([ref])[0]
+                ref = self.T[_i + 1].inverse_transform([ref])[0]
             tmp = self.T[_i].get_backward_modes(ref, **kwargs)
             modes = modes.dot(tmp)
         return modes
@@ -140,14 +150,14 @@ class Compose(Transform):
             "children": [t.state_dict() for t in self.T],
             "inp": self._inp_dim,
             "out": self._out_dim,
-            }
+        }
 
     def load_state_dict(self, d) -> None:
         """"""
-        logger.info(f"Compose: Loading parameters from checkpoint")
+        logger.info("Compose: Loading parameters from checkpoint")
         self._T_names = d["names"]
         self.T = []
-        for name, sd in zip(self._T_names, d["children"]):
+        for name, sd in zip(self._T_names, d["children"], strict=False):
             if name not in TRN_MAP:
                 raise ValueError(f"Unknown transform type in Compose: {name}")
             self.T.append(TRN_MAP[name]())
@@ -157,21 +167,23 @@ class Compose(Transform):
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
 
+
 #: Mapping of transform names to classes.
 TRN_MAP = {
-    str(AddOne()):        AddOne,
-    str(Compose()):       Compose,
+    str(AddOne()): AddOne,
+    str(Compose()): Compose,
     str(DelayEmbedder()): DelayEmbedder,
-    str(DiffMap()):       DiffMap,
-    str(DiffMapVB()):     DiffMapVB,
-    str(Identity()):      Identity,
-    str(Isomap()):        Isomap,
-    str(Lift()):          Lift,
-    str(Scaler()):        Scaler,
-    str(SVD()):           SVD,
+    str(DiffMap()): DiffMap,
+    str(DiffMapVB()): DiffMapVB,
+    str(Identity()): Identity,
+    str(Isomap()): Isomap,
+    str(Lift()): Lift,
+    str(Scaler()): Scaler,
+    str(SVD()): SVD,
 }
 
-def make_transform(config: List[Dict[str, Any]]) -> Transform:
+
+def make_transform(config: list[dict[str, Any]]) -> Transform:
     """
     Create a transform object based on the provided configuration.
 

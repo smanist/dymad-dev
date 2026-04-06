@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
-from typing import Iterable, Literal, Sequence
+from typing import Literal
 
 import numpy as np
 import torch
@@ -69,7 +70,7 @@ class TransformModule(nn.Module, ABC):
         self.invertibility = invertibility
         self.supports_gradients = supports_gradients
 
-    def fit(self, data: Sequence[torch.Tensor]) -> "TransformModule":
+    def fit(self, data: Sequence[torch.Tensor]) -> TransformModule:
         return self
 
     @abstractmethod
@@ -119,7 +120,7 @@ class LegacyTransformModuleAdapter(TransformModule):
         self.input_dim = int(getattr(self.legacy_transform, "_inp_dim", 0) or 0) or None
         self.output_dim = int(getattr(self.legacy_transform, "_out_dim", 0) or 0) or None
 
-    def fit(self, data: Sequence[torch.Tensor]) -> "LegacyTransformModuleAdapter":
+    def fit(self, data: Sequence[torch.Tensor]) -> LegacyTransformModuleAdapter:
         payloads = []
         for item in data:
             converted = self._to_legacy(item)
@@ -185,13 +186,15 @@ class FieldTransformModule(nn.Module):
         super().__init__()
         self.field = field
         self.transform = transform
-        self.time_varying = field in _TIME_VARYING_FIELDS if time_varying is None else bool(time_varying)
+        self.time_varying = (
+            field in _TIME_VARYING_FIELDS if time_varying is None else bool(time_varying)
+        )
 
     @property
     def delay(self) -> int:
         return self.transform.delay if self.time_varying else 0
 
-    def fit(self, batch: SeriesBatch) -> "FieldTransformModule":
+    def fit(self, batch: SeriesBatch) -> FieldTransformModule:
         payloads = []
         for series in batch:
             payload = getattr(series, self.field)
@@ -235,7 +238,7 @@ class SeriesTransformPipeline(nn.Module):
         delays = [stage.delay for stage in self.stages if stage.time_varying]
         return max(delays) if delays else 0
 
-    def fit(self, batch: SeriesBatch) -> "SeriesTransformPipeline":
+    def fit(self, batch: SeriesBatch) -> SeriesTransformPipeline:
         for stage in self.stages:
             stage.fit(batch)
         return self

@@ -1,10 +1,11 @@
 import logging
-import numpy as np
 import os
+from collections.abc import Callable
+
+import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.interpolate import interp1d, CubicSpline
+from scipy.interpolate import CubicSpline, interp1d
 from scipy.signal import chirp
-from typing import Callable, Dict, Tuple, Union
 
 from dymad.utils.misc import load_config
 
@@ -12,18 +13,21 @@ Array = np.ndarray
 
 logger = logging.getLogger(__name__)
 
+
 # -----------------------
 # Control Samplers
 # -----------------------
 # Basic samplers
-def chirp_control(*,
-                  t1:           float,
-                  dim:          int,
-                  freq_range:   Tuple[float,float]  = (0.1, 2.0),
-                  amp_range:    Tuple[float,float]  = (0.5, 1.0),
-                  phase_range:  Tuple[float,float]  = (0.0, 360.),    # In deg
-                  method:       str = "linear",
-                  rng:          np.random.Generator = None) -> Callable:
+def chirp_control(
+    *,
+    t1: float,
+    dim: int,
+    freq_range: tuple[float, float] = (0.1, 2.0),
+    amp_range: tuple[float, float] = (0.5, 1.0),
+    phase_range: tuple[float, float] = (0.0, 360.0),  # In deg
+    method: str = "linear",
+    rng: np.random.Generator = None,
+) -> Callable:
     """
     Generate a chirp control signal.
 
@@ -46,23 +50,27 @@ def chirp_control(*,
     A = rng.uniform(*amp_range)
     P = rng.uniform(*phase_range)
     amplitude = np.broadcast_to(A, (dim,))
+
     def _sampler(t_grid: Array, i: int) -> Array:
-        base = chirp(t_grid, f0=f0, f1=f1, t1=t1,
-                     method=method, phi=P)
+        base = chirp(t_grid, f0=f0, f1=f1, t1=t1, method=method, phi=P)
         if isinstance(t_grid, float):
             return base * amplitude
         else:
             return base[:, None] * amplitude
+
     return _sampler
 
-def gaussian_control(*,
-                     mean: Union[float, Array],
-                     std:  Union[float, Array],
-                     t1:   float,
-                     dt:   float,
-                     dim:  int,
-                     mode: str = "zoh",
-                     rng:  np.random.Generator = None) -> Callable:
+
+def gaussian_control(
+    *,
+    mean: float | Array,
+    std: float | Array,
+    t1: float,
+    dt: float,
+    dim: int,
+    mode: str = "zoh",
+    rng: np.random.Generator = None,
+) -> Callable:
     """
     Generate a Gaussian control signal.
 
@@ -88,22 +96,27 @@ def gaussian_control(*,
             A callable that takes a time grid and returns the Gaussian signal.
     """
     mean = np.broadcast_to(mean, (dim,))
-    std  = np.broadcast_to(std,  (dim,))
-    Nt   = int(np.ceil(t1 / dt)) + 1
-    ts   = np.arange(Nt) * dt
-    us   = rng.normal(mean, std, size=(ts.size, dim))
+    std = np.broadcast_to(std, (dim,))
+    Nt = int(np.ceil(t1 / dt)) + 1
+    ts = np.arange(Nt) * dt
+    us = rng.normal(mean, std, size=(ts.size, dim))
     _int = _build_interpolant(ts, us, mode)
-    def _sampler(t_grid: Union[float, Array], i: int, _rng=rng) -> Array:
+
+    def _sampler(t_grid: float | Array, i: int, _rng=rng) -> Array:
         return _int(t_grid)
+
     return _sampler
 
-def sine_control(*,
-                 dim:            int,
-                 num_components: int                 = 1,
-                 freq_range:     Tuple[float,float]  = (0.1, 2.0),     # In Hz,
-                 amp_range:      Tuple[float,float]  = (0.5, 1.0),
-                 phase_range:    Tuple[float,float]  = (0.0, 360.),    # In deg,
-                 rng:            np.random.Generator = None) -> Callable:
+
+def sine_control(
+    *,
+    dim: int,
+    num_components: int = 1,
+    freq_range: tuple[float, float] = (0.1, 2.0),  # In Hz,
+    amp_range: tuple[float, float] = (0.5, 1.0),
+    phase_range: tuple[float, float] = (0.0, 360.0),  # In deg,
+    rng: np.random.Generator = None,
+) -> Callable:
     """
     Generate a sine control signal with multiple components.
 
@@ -119,24 +132,31 @@ def sine_control(*,
         Callable:
             A callable that takes a time grid and returns the sine signal.
     """
-    A = rng.uniform(*amp_range,   size=(dim, num_components))
-    F = rng.uniform(*freq_range,  size=(dim, num_components))
-    P = rng.uniform(*phase_range, size=(dim, num_components))/180*np.pi
-    def _sampler(t_grid: Union[float, Array], i: int) -> Array:
+    A = rng.uniform(*amp_range, size=(dim, num_components))
+    F = rng.uniform(*freq_range, size=(dim, num_components))
+    P = rng.uniform(*phase_range, size=(dim, num_components)) / 180 * np.pi
+
+    def _sampler(t_grid: float | Array, i: int) -> Array:
         if isinstance(t_grid, float):
-            return np.sum(A*np.sin(2*np.pi*F*t_grid + P)).reshape(dim,)
+            return np.sum(A * np.sin(2 * np.pi * F * t_grid + P)).reshape(
+                dim,
+            )
         else:
             t = t_grid[:, None, None]
-            return np.sum(A*np.sin(2*np.pi*F*t + P), axis=(1,2)).reshape(-1, dim)
+            return np.sum(A * np.sin(2 * np.pi * F * t + P), axis=(1, 2)).reshape(-1, dim)
+
     return _sampler
 
-def sphere_control(*,
-                   radius: Union[float, Array],
-                   t1:   float,
-                   dt:   float,
-                   dim:  int,
-                   mode: str = "zoh",
-                   rng:  np.random.Generator = None) -> Callable:
+
+def sphere_control(
+    *,
+    radius: float | Array,
+    t1: float,
+    dt: float,
+    dim: int,
+    mode: str = "zoh",
+    rng: np.random.Generator = None,
+) -> Callable:
     """
     Generate a control signal on the surface of a sphere.
 
@@ -156,39 +176,46 @@ def sphere_control(*,
         Callable:
             A callable that takes a time grid and returns the control signal on the sphere.
     """
-    rad  = np.broadcast_to(radius, (dim,))
-    Nt   = int(np.ceil(t1 / dt)) + 1
-    ts   = np.arange(Nt) * dt
-    us   = rng.normal(0, 1, size=(ts.size, dim))
-    us  /= np.maximum(np.linalg.norm(us, axis=1, keepdims=True), 1e-15)
-    us  *= rad
+    rad = np.broadcast_to(radius, (dim,))
+    Nt = int(np.ceil(t1 / dt)) + 1
+    ts = np.arange(Nt) * dt
+    us = rng.normal(0, 1, size=(ts.size, dim))
+    us /= np.maximum(np.linalg.norm(us, axis=1, keepdims=True), 1e-15)
+    us *= rad
     _int = _build_interpolant(ts, us, mode)
-    def _sampler(t_grid: Union[float, Array], i: int, _rng=rng) -> Array:
+
+    def _sampler(t_grid: float | Array, i: int, _rng=rng) -> Array:
         return _int(t_grid)
+
     return _sampler
+
 
 #: Mapping of control sampler names to functions.
 CTRL_MAP = {
-    "chirp"    : chirp_control,
-    "gaussian" : gaussian_control,
-    "sine"     : sine_control,
-    "sphere"   : sphere_control,
+    "chirp": chirp_control,
+    "gaussian": gaussian_control,
+    "sine": sine_control,
+    "sphere": sphere_control,
 }
+
 
 # Helper function
 def _build_interpolant(t: Array, u: Array, mode: str) -> Callable:
     """Return callable u(t_query) according to interpolation mode."""
     mode = mode.lower()
     if mode == "zoh":
+
         def _u(tq):
             idx = np.searchsorted(t, tq, side="right") - 1
-            idx = np.clip(idx, 0, len(t)-1)
+            idx = np.clip(idx, 0, len(t) - 1)
             return u[idx]
+
         return _u
 
     if mode == "linear":
-        interp = interp1d(t, u, axis=0, bounds_error=False,
-                            fill_value="extrapolate", assume_sorted=True)
+        interp = interp1d(
+            t, u, axis=0, bounds_error=False, fill_value="extrapolate", assume_sorted=True
+        )
         return lambda tq: interp(tq).astype(float)
 
     if mode == "cubic":
@@ -197,15 +224,19 @@ def _build_interpolant(t: Array, u: Array, mode: str) -> Callable:
 
     raise ValueError(f"Unknown interpolation mode '{mode}'.")
 
+
 # -----------------------
 # Initial Condition / Parameter Samplers
 # -----------------------
 
-def gaussian_x0(*,
-                mean: Union[float, Array],
-                std:  Union[float, Array],
-                dim:  int,
-                rng:  np.random.Generator = None) -> Callable:
+
+def gaussian_x0(
+    *,
+    mean: float | Array,
+    std: float | Array,
+    dim: int,
+    rng: np.random.Generator = None,
+) -> Callable:
     """
     Generate a Gaussian initial condition sampler.
 
@@ -228,16 +259,17 @@ def gaussian_x0(*,
             A callable that returns a sample from the Gaussian distribution.
     """
     mean = np.broadcast_to(mean, (dim,))
-    std  = np.broadcast_to(std,  (dim,))
+    std = np.broadcast_to(std, (dim,))
+
     def _sampler(i: int, _rng=rng) -> Array:
         return _rng.normal(mean, std, size=(dim,))
+
     return _sampler
 
-def grid_x0(*,
-            bounds: Union[float, Array],
-            dim:  int,
-            n_points: int = 3,
-            rng:  np.random.Generator = None) -> Callable:
+
+def grid_x0(
+    *, bounds: float | Array, dim: int, n_points: int = 3, rng: np.random.Generator = None
+) -> Callable:
     """
     Generate a grid-based initial condition sampler.
 
@@ -255,19 +287,19 @@ def grid_x0(*,
         Callable:
             A callable that takes an index and returns a sample from the grid-based initial condition.
     """
-    bounds = np.broadcast_to(bounds, (dim,2))
+    bounds = np.broadcast_to(bounds, (dim, 2))
     n_points = np.broadcast_to(n_points, (dim,))
-    xs   = [np.linspace(bounds[i,0], bounds[i,1], n_points[i]) for i in range(dim)]
-    msh  = np.meshgrid(*xs, indexing='ij')
-    arr  = np.stack(msh, axis=-1).reshape(-1, dim)
+    xs = [np.linspace(bounds[i, 0], bounds[i, 1], n_points[i]) for i in range(dim)]
+    msh = np.meshgrid(*xs, indexing="ij")
+    arr = np.stack(msh, axis=-1).reshape(-1, dim)
+
     def _sampler(i: int, _arr=arr) -> Array:
         return _arr[i]
+
     return _sampler
 
-def uniform_x0(*,
-               bounds: Union[float, Array],
-               dim:  int,
-               rng:  np.random.Generator = None) -> Callable:
+
+def uniform_x0(*, bounds: float | Array, dim: int, rng: np.random.Generator = None) -> Callable:
     """
     Generate a uniformly random initial condition sampler.
 
@@ -284,16 +316,17 @@ def uniform_x0(*,
         Callable:
             A callable that takes an index and returns a sample from the uniform distribution.
     """
-    bounds = np.broadcast_to(bounds, (dim,2)).T
+    bounds = np.broadcast_to(bounds, (dim, 2)).T
+
     def _sampler(i: int, _rng=rng) -> Array:
         return _rng.uniform(low=bounds[0], high=bounds[1], size=(dim,))
+
     return _sampler
 
-def perturb_x0(*,
-               bounds: Union[float, Array],
-               dim:  int,
-               ref:  Array,
-               rng:  np.random.Generator = None) -> Callable:
+
+def perturb_x0(
+    *, bounds: float | Array, dim: int, ref: Array, rng: np.random.Generator = None
+) -> Callable:
     """
     Generate a uniformly random initial condition sampler around a reference trajectory.
 
@@ -312,18 +345,22 @@ def perturb_x0(*,
             A callable that takes an index and returns a perturbed sample.
     """
     bounds = np.broadcast_to(bounds, (dim, 2)).T
+
     def _sampler(i: int, _rng=rng, _ref=ref) -> Array:
         _j = _rng.integers(0, _ref.shape[0])
         return _ref[_j] + _rng.uniform(low=bounds[0], high=bounds[1], size=(dim,))
+
     return _sampler
+
 
 #: Mapping of initial condition sampler names to functions.
 X0_MAP = {
-    "gaussian" : gaussian_x0,
-    "grid"     : grid_x0,
-    "perturb"  : perturb_x0,
-    "uniform"  : uniform_x0,
+    "gaussian": gaussian_x0,
+    "grid": grid_x0,
+    "perturb": perturb_x0,
+    "uniform": uniform_x0,
 }
+
 
 # -----------------------
 # Trajectory Samplers
@@ -371,14 +408,17 @@ class TrajectorySampler:
         config_mod (Dict, optional): Additional configuration parameters to modify the loaded configuration.
             This should be a dictionary that updates or overrides the values in the loaded configuration.
     """
-    def __init__(self,
-                 f: Callable[[float, Array, Array], Array],
-                 g: Callable[[float, Array, Array], Array] = None,
-                 config: Union[str, Dict] = None,
-                 rng: Union[int, np.random.Generator, None] = None,
-                 config_mod: Dict = None):
-        self.f   = f
-        self.g   = (lambda t, x, u=None: x) if g is None else g
+
+    def __init__(
+        self,
+        f: Callable[[float, Array, Array], Array],
+        g: Callable[[float, Array, Array], Array] = None,
+        config: str | dict = None,
+        rng: int | np.random.Generator | None = None,
+        config_mod: dict = None,
+    ):
+        self.f = f
+        self.g = (lambda t, x, u=None: x) if g is None else g
         self.rng = np.random.default_rng(rng)
 
         self.config = load_config(config, config_mod)
@@ -388,7 +428,7 @@ class TrajectorySampler:
             raise ValueError("Config must specify 'dims' (state/observation/input dimensions).")
         self.dims = [tmp["states"], tmp["inputs"], tmp["observations"], tmp.get("parameters", 0)]
 
-        self._is_autonomous = (self.dims[1] == 0)
+        self._is_autonomous = self.dims[1] == 0
         if self._is_autonomous:
             self.sample = self._sample_auto
         else:
@@ -397,9 +437,11 @@ class TrajectorySampler:
         self._n_skip = self.config.get("postprocess", {}).get("n_skip", 0)
         self._shift_t = self.config.get("postprocess", {}).get("shift_t", False)
 
-        logger.info(f"TrajectorySampler initialized with dims: "
-                    f"states={self.dims[0]}, inputs={self.dims[1]}, "
-                    f"observations={self.dims[2]}, parameters={self.dims[3]}.")
+        logger.info(
+            f"TrajectorySampler initialized with dims: "
+            f"states={self.dims[0]}, inputs={self.dims[1]}, "
+            f"observations={self.dims[2]}, parameters={self.dims[3]}."
+        )
         if self._is_autonomous:
             logger.info("Sampler is autonomous (no control inputs).")
         else:
@@ -409,10 +451,11 @@ class TrajectorySampler:
         logger.info(f"Solver config: {self.config.get('solver', None)}")
         logger.info(f"Postprocess config: {self.config.get('postprocess', None)}")
 
-    def _create_control_sampler(self,
-                                t_grid: Array,
-                                traj_idx: int,
-                                ) -> Tuple[Callable[[float], Array], Array]:
+    def _create_control_sampler(
+        self,
+        t_grid: Array,
+        traj_idx: int,
+    ) -> tuple[Callable[[float], Array], Array]:
         """
         Returns (u_callable, u_grid).  Choice depends on u_spec.
         Supported modes: 'zoh', 'linear', 'cubic'.
@@ -424,15 +467,18 @@ class TrajectorySampler:
 
         if callable(u_spec):
             # Externally supplied function
-            u_call = lambda t, idx=traj_idx: np.asarray(u_spec(t, idx))
+            def u_call(t, idx=traj_idx):
+                return np.asarray(u_spec(t, idx))
+
             u_grid = np.stack([u_call(t) for t in t_grid])
             return u_call, u_grid
 
         if isinstance(u_spec, Array):
             # Externally supplied array data
             U_vec = u_spec if u_spec.ndim == 2 else u_spec[traj_idx]
-            assert t_grid.size == U_vec.shape[0], \
+            assert t_grid.size == U_vec.shape[0], (
                 f"t_grid size {t_grid.size} does not match U_vec size {U_vec.shape[0]}"
+            )
             mode = u_spec.get("mode", "cubic").lower()
             u_call = _build_interpolant(t_grid, U_vec, mode)
             return u_call, U_vec
@@ -443,17 +489,18 @@ class TrajectorySampler:
             if kind not in CTRL_MAP:
                 raise KeyError(f"Unknown control kind '{kind}'. Available: {list(CTRL_MAP)}")
             params = u_spec.get("params", {})
-            params.update({
-                "dim": self.dims[1],
-                "rng": self.rng})
+            params.update({"dim": self.dims[1], "rng": self.rng})
             u_func = CTRL_MAP[kind](**params)
-            u_call = lambda t, i=traj_idx: u_func(t, i)
+
+            def u_call(t, i=traj_idx):
+                return u_func(t, i)
+
             U_vec = u_call(t_grid)
             return u_call, U_vec.reshape(-1, self.dims[1])
 
         raise TypeError("Unrecognised u_spec type.")
 
-    def _sample_xp(self, traj_num: int, pref='x0', dims=None) -> Array:
+    def _sample_xp(self, traj_num: int, pref="x0", dims=None) -> Array:
         x0_spec = self.config.get(pref, None)
         if x0_spec is None:
             return None
@@ -475,19 +522,13 @@ class TrajectorySampler:
             if kind not in X0_MAP:
                 raise KeyError(f"Unknown {pref} kind '{kind}'. Available: {list(X0_MAP)}")
             params = x0_spec.get("params", {})
-            params.update({
-                "dim": dims,
-                "rng": self.rng})
+            params.update({"dim": dims, "rng": self.rng})
             x0_func = X0_MAP[kind](**params)
-            return np.asarray(
-                [x0_func(_i) for _i in range(traj_num)])
+            return np.asarray([x0_func(_i) for _i in range(traj_num)])
 
         raise TypeError("Unrecognised x0_spec type.")
 
-    def _sample_ctrl(self,
-                     t_samples: Array,
-                     batch: int = 1,
-                     save = None) -> dict:
+    def _sample_ctrl(self, t_samples: Array, batch: int = 1, save=None) -> dict:
         """
         Sample trajectories with control for a given time grid.
 
@@ -510,42 +551,42 @@ class TrajectorySampler:
         tt = np.asarray(t_samples)
         Nt = tt.size - self._n_skip
         if Nt <= 0:
-            raise ValueError(f"Time samples must be longer than n_skip.  Got {Nt} vs skip={self._n_skip}.")
+            raise ValueError(
+                f"Time samples must be longer than n_skip.  Got {Nt} vs skip={self._n_skip}."
+            )
         opts = self.config.get("solver", {})
 
         ts = np.zeros((batch, Nt))
         xs = np.zeros((batch, Nt, self.dims[0]))
         us = np.zeros((batch, Nt, self.dims[1]))
         ys = np.zeros((batch, Nt, self.dims[2]))
-        x0s = self._sample_xp(batch, pref='x0', dims=self.dims[0])
-        ps = self._sample_xp(batch, pref='p', dims=self.dims[3])
+        x0s = self._sample_xp(batch, pref="x0", dims=self.dims[0])
+        ps = self._sample_xp(batch, pref="p", dims=self.dims[3])
 
         for i in range(batch):
-            logger.info(f"Generating trajectory {i+1}/{batch}...")
+            logger.info(f"Generating trajectory {i + 1}/{batch}...")
 
             fu, uu = self._create_control_sampler(tt, i)
             if ps is None:
+
                 def rhs(t, x):
                     return self.f(t, x, fu(t))
             else:
+
                 def rhs(t, x):
                     return self.f(t, x, fu(t), ps[i])
 
-            sol = solve_ivp(rhs,
-                            (tt[0], tt[-1]),
-                            x0s[i],
-                            t_eval=tt,
-                            **opts)
+            sol = solve_ivp(rhs, (tt[0], tt[-1]), x0s[i], t_eval=tt, **opts)
             if not sol.success:
                 raise RuntimeError(f"Integration failed on traj {i}: {sol.message}")
             xx = sol.y.T
             yy = self.g(tt, xx, uu)
 
             if self._shift_t:
-                ts[i] = tt[self._n_skip:] - tt[self._n_skip]
+                ts[i] = tt[self._n_skip :] - tt[self._n_skip]
             else:
-                ts[i] = tt[self._n_skip:]
-            xs[i], us[i], ys[i] = xx[self._n_skip:], uu[self._n_skip:], yy[self._n_skip:]
+                ts[i] = tt[self._n_skip :]
+            xs[i], us[i], ys[i] = xx[self._n_skip :], uu[self._n_skip :], yy[self._n_skip :]
 
         if save is not None:
             assert isinstance(save, str), "Save path must be a string."
@@ -559,10 +600,7 @@ class TrajectorySampler:
             return ts, xs, us, ys
         return ts, xs, us, ys, ps
 
-    def _sample_auto(self,
-                     t_samples: Array,
-                     batch: int = 1,
-                     save = None) -> dict:
+    def _sample_auto(self, t_samples: Array, batch: int = 1, save=None) -> dict:
         """
         Sample trajectories without control for a given time grid.
 
@@ -585,35 +623,32 @@ class TrajectorySampler:
         tt = np.asarray(t_samples)
         Nt = tt.size - self._n_skip
         if Nt <= 0:
-            raise ValueError(f"Time samples must be longer than n_skip.  Got {Nt} vs skip={self._n_skip}.")
+            raise ValueError(
+                f"Time samples must be longer than n_skip.  Got {Nt} vs skip={self._n_skip}."
+            )
         opts = self.config.get("solver", {})
 
         ts = np.zeros((batch, Nt))
         xs = np.zeros((batch, Nt, self.dims[0]))
         ys = np.zeros((batch, Nt, self.dims[2]))
-        x0s = self._sample_xp(batch, pref='x0', dims=self.dims[0])
-        ps = self._sample_xp(batch, pref='p', dims=self.dims[3])
+        x0s = self._sample_xp(batch, pref="x0", dims=self.dims[0])
+        ps = self._sample_xp(batch, pref="p", dims=self.dims[3])
 
         for i in range(batch):
-            logger.info(f"Generating trajectory {i+1}/{batch}...")
+            logger.info(f"Generating trajectory {i + 1}/{batch}...")
 
             args = None if ps is None else (ps[i],)
-            sol = solve_ivp(self.f,
-                            (tt[0], tt[-1]),
-                            x0s[i],
-                            t_eval=tt,
-                            args=args,
-                            **opts)
+            sol = solve_ivp(self.f, (tt[0], tt[-1]), x0s[i], t_eval=tt, args=args, **opts)
             if not sol.success:
                 raise RuntimeError(f"Integration failed on traj {i}: {sol.message}")
             xx = sol.y.T
             yy = self.g(tt, xx)
 
             if self._shift_t:
-                ts[i] = tt[self._n_skip:] - tt[self._n_skip]
+                ts[i] = tt[self._n_skip :] - tt[self._n_skip]
             else:
-                ts[i] = tt[self._n_skip:]
-            xs[i], ys[i] = xx[self._n_skip:], yy[self._n_skip:]
+                ts[i] = tt[self._n_skip :]
+            xs[i], ys[i] = xx[self._n_skip :], yy[self._n_skip :]
 
         if save is not None:
             assert isinstance(save, str), "Save path must be a string."

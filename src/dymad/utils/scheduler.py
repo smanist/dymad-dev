@@ -1,7 +1,7 @@
 import logging
-from typing import Tuple
 
 logger = logging.getLogger(__name__)
+
 
 class SchedulerBase:
     """
@@ -10,6 +10,7 @@ class SchedulerBase:
     As wrapper of standard schedulers, with customized inputs and outputs.
     Also for other custom schedulers.
     """
+
     def step(self, **kwargs) -> bool:
         """
         Step through the scheduler logic.
@@ -36,6 +37,7 @@ class SchedulerBase:
         """Load the state dictionary."""
         raise NotImplementedError("Subclasses should implement this method.")
 
+
 class StandardScheduler(SchedulerBase):
     """
     Standard scheduler that wraps a PyTorch scheduler.
@@ -43,13 +45,14 @@ class StandardScheduler(SchedulerBase):
     Args:
         scheduler (torch.optim.lr_scheduler._LRScheduler): PyTorch scheduler instance.
     """
+
     def __init__(self, scheduler):
         self.scheduler = scheduler
 
     def diagnostic_info(self):
         return str(self.state_dict())
 
-    def step(self, **kwargs) -> Tuple[bool, bool]:
+    def step(self, **kwargs) -> tuple[bool, bool]:
         """Step through the wrapped scheduler."""
         self.scheduler.step()
         return False, False
@@ -57,10 +60,11 @@ class StandardScheduler(SchedulerBase):
     def state_dict(self) -> dict:
         """Return the state dictionary of the wrapped scheduler."""
         return self.scheduler.state_dict()
-    
+
     def load_state_dict(self, state_dict: dict):
         """Load the state dictionary into the wrapped scheduler."""
         self.scheduler.load_state_dict(state_dict)
+
 
 class SweepScheduler(SchedulerBase):
     """
@@ -87,20 +91,26 @@ class SweepScheduler(SchedulerBase):
         mode (str): Mode of operation ('full' or 'skip'). Default is 'skip'.
     """
 
-    def __init__(self, sweep_lengths: list = None, sweep_tols: list = None, epoch_step: int = 10, mode: str = 'skip'):
+    def __init__(
+        self,
+        sweep_lengths: list = None,
+        sweep_tols: list = None,
+        epoch_step: int = 10,
+        mode: str = "skip",
+    ):
         assert epoch_step > 0, "epoch_step must be a positive integer."
 
         self.sweep_lengths = sweep_lengths
-        self.epoch_step    = epoch_step
+        self.epoch_step = epoch_step
         if sweep_tols is not None:
             self.sweep_tols = [float(tol) for tol in sweep_tols]
         else:
             self.sweep_tols = None
-        self.mode          = mode.lower()
+        self.mode = mode.lower()
         self.current_epoch = 0
-        self.sweep_epoch   = 0
-        self.current_len   = 0
-        self.current_tol   = 0
+        self.sweep_epoch = 0
+        self.current_len = 0
+        self.current_tol = 0
 
         self._init_params()
 
@@ -108,17 +118,19 @@ class SweepScheduler(SchedulerBase):
         self._Nlen = len(self.sweep_lengths) if self.sweep_lengths is not None else 0
         self._Ntol = len(self.sweep_tols) if self.sweep_tols is not None else 0
 
-        if self.mode == 'full':
+        if self.mode == "full":
             self._step_with_tolerance = self._step_with_tolerance_full
-        elif self.mode == 'skip':
+        elif self.mode == "skip":
             self._step_with_tolerance = self._step_with_tolerance_skip
         else:
             raise ValueError(f"Unknown mode '{self.mode}'. Supported modes are 'full' and 'skip'.")
 
     def diagnostic_info(self):
-        return (f"SweepScheduler(sweep_lengths={self.sweep_lengths}, "
-                f"epoch_step={self.epoch_step}, "
-                f"sweep_tols={self.sweep_tols})")
+        return (
+            f"SweepScheduler(sweep_lengths={self.sweep_lengths}, "
+            f"epoch_step={self.epoch_step}, "
+            f"sweep_tols={self.sweep_tols})"
+        )
 
     def step(self, eploss: float = None) -> bool:
         self.current_epoch += 1
@@ -130,7 +142,7 @@ class SweepScheduler(SchedulerBase):
             elif self._Ntol > 0:
                 changed = self._step_with_tolerance(eploss)
 
-                if (self.current_len == self._Nlen-1 and self.current_tol == self._Ntol-1):
+                if self.current_len == self._Nlen - 1 and self.current_tol == self._Ntol - 1:
                     if eploss < self.sweep_tols[-1]:
                         logger.info("Reached the last sweep length and tolerance. Stopping sweep.")
                         flag = True
@@ -144,9 +156,11 @@ class SweepScheduler(SchedulerBase):
         """Handle stepping when no tolerances are provided."""
         index = self.current_epoch // self.epoch_step
         old_index = self.current_len
-        self.current_len = min(index, self._Nlen-1)
+        self.current_len = min(index, self._Nlen - 1)
         if old_index != self.current_len:
-            logger.info(f"Switching to sweep length {self.sweep_lengths[self.current_len]} at epoch {self.current_epoch}")
+            logger.info(
+                f"Switching to sweep length {self.sweep_lengths[self.current_len]} at epoch {self.current_epoch}"
+            )
             return True
         return False
 
@@ -158,13 +172,15 @@ class SweepScheduler(SchedulerBase):
             self.sweep_epoch = 0
             self.current_len += 1
             if self.current_len >= self._Nlen:
-                self.current_len = self._Nlen-1
-                if self.current_tol < self._Ntol-1:
+                self.current_len = self._Nlen - 1
+                if self.current_tol < self._Ntol - 1:
                     self.current_tol += 1
                 else:
                     logger.info("Reached end of sweep lengths and tolerances. Stopping sweep.")
-            logger.info(f"Switching to sweep length {self.sweep_lengths[self.current_len]} "
-                        f"at epoch {self.current_epoch} with loss {eploss:.4e} with tolerance {current_tol:.4e}")
+            logger.info(
+                f"Switching to sweep length {self.sweep_lengths[self.current_len]} "
+                f"at epoch {self.current_epoch} with loss {eploss:.4e} with tolerance {current_tol:.4e}"
+            )
             return True
         return False
 
@@ -177,14 +193,18 @@ class SweepScheduler(SchedulerBase):
             self.current_len += 1
             if self.current_len >= self._Nlen:
                 self.current_len = 0
-                if self.current_tol < self._Ntol-1:
+                if self.current_tol < self._Ntol - 1:
                     self.current_tol += 1
-                    logger.info("Resetting to first sweep length after reaching end of list. " \
-                                f"Current tolerance {self.sweep_tols[self.current_tol]}")
+                    logger.info(
+                        "Resetting to first sweep length after reaching end of list. "
+                        f"Current tolerance {self.sweep_tols[self.current_tol]}"
+                    )
                 else:
                     logger.info("Reached end of sweep lengths and tolerances. Stopping sweep.")
-            logger.info(f"Switching to sweep length {self.sweep_lengths[self.current_len]} "
-                        f"at epoch {self.current_epoch} with loss {eploss:.4e} with tolerance {current_tol:.4e}")
+            logger.info(
+                f"Switching to sweep length {self.sweep_lengths[self.current_len]} "
+                f"at epoch {self.current_epoch} with loss {eploss:.4e} with tolerance {current_tol:.4e}"
+            )
             return True
         return False
 
@@ -194,30 +214,31 @@ class SweepScheduler(SchedulerBase):
     def state_dict(self) -> dict:
         """Return the state dictionary for saving."""
         return {
-            'epoch_step':    self.epoch_step,
-            'sweep_tols':    self.sweep_tols,
-            'sweep_epoch':   self.sweep_epoch,
-            'sweep_lengths': self.sweep_lengths,
-            'current_epoch': self.current_epoch,
-            'current_len':   self.current_len,
-            'current_tol':   self.current_tol,
-            'mode':          self.mode
+            "epoch_step": self.epoch_step,
+            "sweep_tols": self.sweep_tols,
+            "sweep_epoch": self.sweep_epoch,
+            "sweep_lengths": self.sweep_lengths,
+            "current_epoch": self.current_epoch,
+            "current_len": self.current_len,
+            "current_tol": self.current_tol,
+            "mode": self.mode,
         }
 
     def load_state_dict(self, state_dict: dict):
         """Load the state dictionary."""
-        self.epoch_step    = state_dict['epoch_step']
-        self.sweep_tols    = state_dict['sweep_tols']
-        self.sweep_epoch   = state_dict['sweep_epoch']
-        self.sweep_lengths = state_dict['sweep_lengths']
-        self.current_epoch = state_dict['current_epoch']
-        self.current_len   = state_dict['current_len']
-        self.current_tol   = state_dict['current_tol']
-        self.mode          = state_dict['mode']
+        self.epoch_step = state_dict["epoch_step"]
+        self.sweep_tols = state_dict["sweep_tols"]
+        self.sweep_epoch = state_dict["sweep_epoch"]
+        self.sweep_lengths = state_dict["sweep_lengths"]
+        self.current_epoch = state_dict["current_epoch"]
+        self.current_len = state_dict["current_len"]
+        self.current_tol = state_dict["current_tol"]
+        self.mode = state_dict["mode"]
 
         self._init_params()
 
-def make_scheduler(scheduler=None, scheduler_type: str="", **kwargs) -> SchedulerBase:
+
+def make_scheduler(scheduler=None, scheduler_type: str = "", **kwargs) -> SchedulerBase:
     """
     Factory function to create a scheduler instance.
 
@@ -230,7 +251,7 @@ def make_scheduler(scheduler=None, scheduler_type: str="", **kwargs) -> Schedule
     """
     if scheduler is not None:
         return StandardScheduler(scheduler)
-    elif scheduler_type == 'sweep':
+    elif scheduler_type == "sweep":
         return SweepScheduler(**kwargs)
     else:
         raise ValueError(f"Unknown scheduler type: {scheduler_type}")

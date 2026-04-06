@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -15,9 +15,13 @@ import torch
 from dymad.io import load_model
 from dymad.models import DKM, DKMSK, KM
 from dymad.utils import TrajectorySampler
-
-from tests.slow_regression_utils import assert_summary_against_baseline, extract_record, load_baselines, load_summary, scaled_limit
-
+from tests.slow_regression_utils import (
+    assert_summary_against_baseline,
+    extract_record,
+    load_baselines,
+    load_summary,
+    scaled_limit,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "ker_lco"
@@ -35,7 +39,10 @@ def f(t, x):
     return np.array([_y, mu * (1 - _x**2) * _y - _x])
 
 
-g = lambda t, x: x
+def g(t, x):
+    return x
+
+
 _Nt = 161
 _ts = np.linspace(0, 40.0, 8 * _Nt)
 _res = spi.solve_ivp(f, [0, _ts[-1]], [2, 2], t_eval=_ts)
@@ -86,9 +93,12 @@ def _run_case(case: Case, workdir: Path) -> None:
         [
             sys.executable,
             str(SCRIPT_ROOT / "ker_lco_cli.py"),
-            "--case", str(case.idx),
-            "--workdir", str(workdir),
-            "--seed", str(TEST_SEED),
+            "--case",
+            str(case.idx),
+            "--workdir",
+            str(workdir),
+            "--seed",
+            str(TEST_SEED),
             "--no-plot",
             "--no-predict",
             "--no-show",
@@ -106,7 +116,7 @@ def baseline_store(request):
         return
     store = {}
     if BASELINE_PATH.exists():
-        with open(BASELINE_PATH, "r") as fh:
+        with open(BASELINE_PATH) as fh:
             store = json.load(fh)
     yield store
     with open(BASELINE_PATH, "w") as fh:

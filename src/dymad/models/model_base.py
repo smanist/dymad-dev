@@ -1,12 +1,13 @@
-import numpy as np
 import textwrap as tw
+from collections.abc import Callable
+from typing import Any
+
+import numpy as np
 import torch
 import torch.nn as nn
-from typing import Any, Callable, Dict, Tuple, Union
 
 from dymad.core.model_context import materialize_model_base_forward_payload
 from dymad.models.runtime_view import ComponentInputPayload
-
 
 Encoder = Callable[[nn.Module, ComponentInputPayload], torch.Tensor]
 """encoder(net, w) -> x"""
@@ -20,7 +21,10 @@ Composer = Callable[[nn.Module, torch.Tensor, torch.Tensor, ComponentInputPayloa
 Decoder = Callable[[nn.Module, torch.Tensor, ComponentInputPayload], torch.Tensor]
 """decoder(net, z, w) -> x"""
 
-Predictor = Callable[[torch.Tensor, ComponentInputPayload, Union[np.ndarray, torch.Tensor], Any], Tuple[torch.Tensor, torch.Tensor]]
+Predictor = Callable[
+    [torch.Tensor, ComponentInputPayload, np.ndarray | torch.Tensor, Any],
+    tuple[torch.Tensor, torch.Tensor],
+]
 r"""predict(x0, w, ts, \*\*kwargs) -> (x_pred, z_pred)"""
 
 
@@ -82,40 +86,42 @@ class ComposedDynamics(nn.Module):
         model_config (Dict, optional): Model configuration dictionary
         dims (Dict, optional): Dimensions dictionary, usually generated from :func:`~dymad.models.helpers.get_dims`
     """
-    GRAPH = None   # True for graph compatible models
-    CONT  = None   # True for continuous-time models, otherwise discrete-time
+
+    GRAPH = None  # True for graph compatible models
+    CONT = None  # True for continuous-time models, otherwise discrete-time
 
     def __init__(
-            self,
-            encoder: Encoder | None = None,
-            dynamics: Tuple[Features, Composer] | None = None,
-            decoder: Decoder | None = None,
-            predict: Tuple[Predictor, str] | None = None,
-            model_config: Dict | None = None,
-            dims: Dict | None = None):
+        self,
+        encoder: Encoder | None = None,
+        dynamics: tuple[Features, Composer] | None = None,
+        decoder: Decoder | None = None,
+        predict: tuple[Predictor, str] | None = None,
+        model_config: dict | None = None,
+        dims: dict | None = None,
+    ):
         super().__init__()
 
-        self._encoder = encoder    # Hooked encoder function
-        self._decoder = decoder    # Hooked decoder function
-        if dynamics is not None:   # Hooked feature and composer functions
+        self._encoder = encoder  # Hooked encoder function
+        self._decoder = decoder  # Hooked decoder function
+        if dynamics is not None:  # Hooked feature and composer functions
             self.features, self.composer = dynamics
-        if predict is not None:    # Hooked prediction function and input order
+        if predict is not None:  # Hooked prediction function and input order
             self._predict, self.input_order = predict
 
         if dims is not None:
-            self.n_total_state_features = dims['x']
-            self.latent_dimension = dims['z']
-            self.seq_len = dims['seq']
+            self.n_total_state_features = dims["x"]
+            self.latent_dimension = dims["z"]
+            self.seq_len = dims["seq"]
         else:
             self.n_total_state_features = -1
             self.latent_dimension = -1
             self.seq_len = -1
 
         # To be assigned
-        self.encoder_net   = None  # Network to be used by self._encoder
+        self.encoder_net = None  # Network to be used by self._encoder
         self.processor_net = None  # Network to be used inside self.dynamics
-        self.decoder_net   = None  # Network to be used by self._decoder
-        self._linear_eval  = None  # Functions for linear solver, to be hooked
+        self.decoder_net = None  # Network to be used by self._decoder
+        self._linear_eval = None  # Functions for linear solver, to be hooked
         self._linear_features = None
 
     @classmethod
@@ -133,18 +139,25 @@ class ComposedDynamics(nn.Module):
             str: String with model details
         """
         ind = "          "
-        fin = lambda net: tw.indent(f"{net}", ind)
-        return f"Model parameters: {sum(p.numel() for p in self.parameters())}\n" + \
-               f"Encoder:  {self._encoder.__name__}\n{fin(self.encoder_net)}\n" + \
-               f"Dynamics: {self.features.__name__}\n" + \
-               f"{fin(self.processor_net)}\n" + \
-               f"{ind}{self.composer.__name__}\n" + \
-               f"Decoder:  {self._decoder.__name__}\n{fin(self.decoder_net)}\n" + \
-               f"Prediction: {self._predict.__name__}\n" + \
-               f"Continuous-time: {self.CONT}, Graph-compatible: {self.GRAPH}, " + \
-               f"Sequence length: {self.seq_len}\n"
 
-    def forward(self, t=None, x=None, u=None, p=None, ei=None, ew=None, ea=None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        def fin(net):
+            return tw.indent(f"{net}", ind)
+
+        return (
+            f"Model parameters: {sum(p.numel() for p in self.parameters())}\n"
+            + f"Encoder:  {self._encoder.__name__}\n{fin(self.encoder_net)}\n"
+            + f"Dynamics: {self.features.__name__}\n"
+            + f"{fin(self.processor_net)}\n"
+            + f"{ind}{self.composer.__name__}\n"
+            + f"Decoder:  {self._decoder.__name__}\n{fin(self.decoder_net)}\n"
+            + f"Prediction: {self._predict.__name__}\n"
+            + f"Continuous-time: {self.CONT}, Graph-compatible: {self.GRAPH}, "
+            + f"Sequence length: {self.seq_len}\n"
+        )
+
+    def forward(
+        self, t=None, x=None, u=None, p=None, ei=None, ew=None, ea=None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through the full model: encode, dynamics, decode.
 
@@ -178,7 +191,7 @@ class ComposedDynamics(nn.Module):
         """Decode the latent states into outputs."""
         return self._decoder(self.decoder_net, z, w)
 
-    def linear_eval(self, w: ComponentInputPayload) -> Tuple[torch.Tensor, torch.Tensor]:
+    def linear_eval(self, w: ComponentInputPayload) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute linear evaluation, dz, and states, z, for the model.
 
         dz = Af(z)
@@ -187,7 +200,7 @@ class ComposedDynamics(nn.Module):
         """
         return self._linear_eval(self, w)
 
-    def linear_features(self, w: ComponentInputPayload) -> Tuple[torch.Tensor, torch.Tensor]:
+    def linear_features(self, w: ComponentInputPayload) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute linear features, f, and outputs, dz, for the model.
 
         dz = Af(z)
@@ -196,13 +209,19 @@ class ComposedDynamics(nn.Module):
         """
         return self._linear_features(self, w)
 
-    def set_linear_weights(self,
-        W: torch.Tensor | None = None, b: torch.Tensor | None = None,
-        U: torch.Tensor | None = None, V: torch.Tensor | None = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def set_linear_weights(
+        self,
+        W: torch.Tensor | None = None,
+        b: torch.Tensor | None = None,
+        U: torch.Tensor | None = None,
+        V: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Set the weights of the linear dynamics module."""
         return self.processor_net.set_weights(W, b, U, V)
 
-    def linear_solve(self, inp: torch.Tensor, out: torch.Tensor, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
+    def linear_solve(
+        self, inp: torch.Tensor, out: torch.Tensor, **kwargs
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Solve for linear dynamics weights given input-output pairs.
 
@@ -210,11 +229,17 @@ class ComposedDynamics(nn.Module):
         """
         raise NotImplementedError("This is the base class.")
 
-    def predict(self, x0: torch.Tensor, w: ComponentInputPayload, ts: Union[np.ndarray, torch.Tensor],
-                method= 'dopri5', **kwargs) -> torch.Tensor:
+    def predict(
+        self,
+        x0: torch.Tensor,
+        w: ComponentInputPayload,
+        ts: np.ndarray | torch.Tensor,
+        method="dopri5",
+        **kwargs,
+    ) -> torch.Tensor:
         """
         Predict trajectory using specified method.
-        
+
         This function essentially determines whether the model is continuous-time or discrete-time.
         """
         return self._predict(self, x0, ts, w, method=method, order=self.input_order, **kwargs)

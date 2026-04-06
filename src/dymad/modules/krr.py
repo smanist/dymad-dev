@@ -5,6 +5,7 @@ import torch.nn.functional as F
 
 from dymad.modules.kernel import KernelOpTangent
 
+
 class KRRBase(nn.Module):
     """
     Base class for Kernel Ridge Regression, in particular:
@@ -18,13 +19,14 @@ class KRRBase(nn.Module):
         - _ensure_solved(self)
         - _predict_from_solution(self, Xnew) -> (M, Dy)
     """
+
     def __init__(self, kernel, ridge_init=0, jitter=1e-10, device=None):
         super().__init__()
         self.kernel = kernel
         if isinstance(kernel, (nn.ModuleList, list)):
-            self.dtype  = kernel[0].dtype
+            self.dtype = kernel[0].dtype
         else:
-            self.dtype  = kernel.dtype
+            self.dtype = kernel.dtype
         self.device = device
 
         self.ridge_init = ridge_init
@@ -37,9 +39,16 @@ class KRRBase(nn.Module):
 
         # Placeholder for nn.Parameter
         # To be materialized in subclasses
-        self.register_parameter("_ridge_unconstrained", nn.Parameter(torch.empty(0, dtype=self.dtype, device=self.device)))
-        self.register_parameter("_alphas", nn.Parameter(torch.empty(0, dtype=self.dtype, device=self.device)))
-        self.register_parameter("_Xref", nn.Parameter(torch.empty(0, dtype=self.dtype, device=self.device)))
+        self.register_parameter(
+            "_ridge_unconstrained",
+            nn.Parameter(torch.empty(0, dtype=self.dtype, device=self.device)),
+        )
+        self.register_parameter(
+            "_alphas", nn.Parameter(torch.empty(0, dtype=self.dtype, device=self.device))
+        )
+        self.register_parameter(
+            "_Xref", nn.Parameter(torch.empty(0, dtype=self.dtype, device=self.device))
+        )
 
     @property
     def ridge(self):
@@ -85,29 +94,33 @@ class KRRBase(nn.Module):
     def _predict_from_solution(self, Xnew: torch.Tensor):
         raise NotImplementedError("This is the base class.")
 
+
 class KRRMultiOutputShared(KRRBase):
     """
     Scalar KRR for multiple outputs but one single kernel
 
         - One NxN Cholesky; solve `Dy` outputs together. One lambda (scalar) by default.
     """
+
     def __init__(self, kernel, ridge_init=0, jitter=1e-10, device=None):
         assert not kernel.is_operator_valued, "kernel should be scalar-valued."
 
         super().__init__(kernel, ridge_init=ridge_init, jitter=jitter, device=device)
 
         self._ridge_unconstrained = nn.Parameter(
-            torch.tensor(ridge_init, dtype=self.dtype, device=self.device).log())
+            torch.tensor(ridge_init, dtype=self.dtype, device=self.device).log()
+        )
 
     def __repr__(self) -> str:
         _s = self.kernel.__repr__()
-        return f"KRRMultiOutputShared(\n\tridge={self.ridge},\n\tjitter={self.jitter},\n\tdtype={self.dtype})" \
-                f"\n\twith:\n\t\tkernel={_s}"
+        return (
+            f"KRRMultiOutputShared(\n\tridge={self.ridge},\n\tjitter={self.jitter},\n\tdtype={self.dtype})"
+            f"\n\twith:\n\t\tkernel={_s}"
+        )
 
     def _on_set_train_data(self):
         self._alphas.requires_grad = False
-        self._alphas.set_(
-            torch.empty((self._Ndat, self._Dy), dtype=self.dtype, device=self.device))
+        self._alphas.set_(torch.empty((self._Ndat, self._Dy), dtype=self.dtype, device=self.device))
         self._alphas.requires_grad = True
         self._Xref.requires_grad = False
         self._Xref.set_(self.X_train)
@@ -131,7 +144,8 @@ class KRRMultiOutputShared(KRRBase):
 
     def _predict_from_solution(self, Xnew: torch.Tensor):
         Kxz = self.kernel(Xnew, self._Xref)  # (M,N)
-        return Kxz @ self._alphas            # (M,Dy)
+        return Kxz @ self._alphas  # (M,Dy)
+
 
 class KRRMultiOutputIndep(KRRBase):
     """
@@ -140,6 +154,7 @@ class KRRMultiOutputIndep(KRRBase):
         - A ModuleList of `Dy` scalar kernels (one per output).
         - `Dy` independent NxN Choleskys; `Dy` ridges (vector).
     """
+
     def __init__(self, kernel, ridge_init=0, jitter=1e-10, device=None):
         assert isinstance(kernel, (nn.ModuleList, list)), "kernel should be a list of kernels."
         for _k in kernel:
@@ -151,12 +166,11 @@ class KRRMultiOutputIndep(KRRBase):
         _r = self.ridge_init if self.X_train is None else self.ridge
         _b = f", \n\tridge={_r},\n\tjitter={self.jitter},\n\tdtype={self.dtype})"
         _s = [k.__repr__() for k in self.kernel]
-        return f"KRRMultiOutputIndep(" + _b + f"\n\twith:\n\t\t" + "\n\t\t".join(_s)
+        return "KRRMultiOutputIndep(" + _b + "\n\twith:\n\t\t" + "\n\t\t".join(_s)
 
     def _on_set_train_data(self):
         self._alphas.requires_grad = False
-        self._alphas.set_(
-            torch.empty((self._Ndat, self._Dy), dtype=self.dtype, device=self.device))
+        self._alphas.set_(torch.empty((self._Ndat, self._Dy), dtype=self.dtype, device=self.device))
         self._alphas.requires_grad = True
         self._Xref.requires_grad = False
         self._Xref.set_(self.X_train)
@@ -167,11 +181,15 @@ class KRRMultiOutputIndep(KRRBase):
             self._ridge_unconstrained.requires_grad = False
             if isinstance(self.ridge_init, (float, int)):
                 self._ridge_unconstrained.set_(
-                    torch.full((self._Dy,), self.ridge_init, dtype=self.dtype, device=self.device).log())
+                    torch.full(
+                        (self._Dy,), self.ridge_init, dtype=self.dtype, device=self.device
+                    ).log()
+                )
             else:
                 assert len(self.ridge_init) == self._Dy
                 self._ridge_unconstrained.set_(
-                    torch.tensor(self.ridge_init, dtype=self.dtype, device=self.device).log())
+                    torch.tensor(self.ridge_init, dtype=self.dtype, device=self.device).log()
+                )
 
     def _ensure_solved(self):
         if self._residual is not None:
@@ -186,7 +204,7 @@ class KRRMultiOutputIndep(KRRBase):
         for d in range(self._Dy):
             Kxx = self.kernel[d](X, None)  # (N,N)
             L = torch.linalg.cholesky(Kxx + (self.ridge[d] + self.jitter) * I)
-            A[:, d] = torch.cholesky_solve(Y[:, d:d+1], L).squeeze(-1)
+            A[:, d] = torch.cholesky_solve(Y[:, d : d + 1], L).squeeze(-1)
         self._alphas.data.copy_(A)
 
         self._residual = self._comp_residual()
@@ -201,19 +219,22 @@ class KRRMultiOutputIndep(KRRBase):
             Yhat[..., d] = Kxz @ self._alphas[:, d]
         return Yhat
 
+
 class KRROperatorValued(KRRBase):
     """
     Operator-valued kernel K(X,Z) -> (N,M,Dy,Dy).
 
     Solves (Kxx + lambda I) vec(alpha) = vec(Y), using a single (N*Dy)x(N*Dy) Cholesky.
     """
+
     def __init__(self, kernel, ridge_init=0, jitter=1e-10, device=None):
         assert kernel.is_operator_valued, "kernel must be operator-valued."
 
         super().__init__(kernel, ridge_init=ridge_init, jitter=jitter, device=device)
 
         self._ridge_unconstrained = nn.Parameter(
-            torch.tensor(ridge_init, dtype=self.dtype, device=self.device).log())
+            torch.tensor(ridge_init, dtype=self.dtype, device=self.device).log()
+        )
 
     def __repr__(self) -> str:
         _s = self.kernel.__repr__()
@@ -221,8 +242,7 @@ class KRROperatorValued(KRRBase):
 
     def _on_set_train_data(self):
         self._alphas.requires_grad = False
-        self._alphas.set_(
-            torch.empty(self._Ndat * self._Dy, dtype=self.dtype, device=self.device))
+        self._alphas.set_(torch.empty(self._Ndat * self._Dy, dtype=self.dtype, device=self.device))
         self._alphas.requires_grad = True
         self._Xref.requires_grad = False
         self._Xref.set_(self.X_train)
@@ -236,10 +256,14 @@ class KRROperatorValued(KRRBase):
 
         X, Y = self.X_train, self.Y_train
 
-        Kxx = self.kernel(X, None)            # (N,N,Dy,Dy)
-        Kflat = Kxx.reshape(self._Ndat*self._Dy, self._Ndat*self._Dy)
-        A = Kflat + self.ridge * torch.eye(self._Ndat * self._Dy, dtype=self.dtype, device=self.device)
-        L = torch.linalg.cholesky(A + self.jitter * torch.eye(A.size(0), dtype=self.dtype, device=self.device))
+        Kxx = self.kernel(X, None)  # (N,N,Dy,Dy)
+        Kflat = Kxx.reshape(self._Ndat * self._Dy, self._Ndat * self._Dy)
+        A = Kflat + self.ridge * torch.eye(
+            self._Ndat * self._Dy, dtype=self.dtype, device=self.device
+        )
+        L = torch.linalg.cholesky(
+            A + self.jitter * torch.eye(A.size(0), dtype=self.dtype, device=self.device)
+        )
         _tmp = torch.cholesky_solve(Y.reshape(-1, 1), L).squeeze(-1)  # (N*Dy,)
         self._alphas.data.copy_(_tmp)
 
@@ -248,11 +272,12 @@ class KRROperatorValued(KRRBase):
 
     def _predict_from_solution(self, Xnew: torch.Tensor):
         dim = Xnew.shape[:-2]
-        Kxz = self.kernel(Xnew, self._Xref)   # (...,M,Dy,N,Dy)
+        Kxz = self.kernel(Xnew, self._Xref)  # (...,M,Dy,N,Dy)
         M, D, N, _ = Kxz.shape[-4:]
-        Kflat = Kxz.reshape(*dim, M*D, N*D)   # (..., M*Dy, N*Dy)
-        ynew_vec = Kflat @ self._alphas       # (..., M*Dy)
-        return ynew_vec.reshape(*dim, M, D)   # (..., M, Dy)
+        Kflat = Kxz.reshape(*dim, M * D, N * D)  # (..., M*Dy, N*Dy)
+        ynew_vec = Kflat @ self._alphas  # (..., M*Dy)
+        return ynew_vec.reshape(*dim, M, D)  # (..., M, Dy)
+
 
 class KRRTangent(KRRBase):
     """
@@ -267,13 +292,15 @@ class KRRTangent(KRRBase):
 
         (kxx + lambda I) vec(alpha) = vec(T^T * Y)
     """
+
     def __init__(self, kernel, ridge_init=0, jitter=1e-10, device=None):
         assert isinstance(kernel, KernelOpTangent), "kernel must be KernelOpTangent."
 
         super().__init__(kernel, ridge_init=ridge_init, jitter=jitter, device=device)
 
         self._ridge_unconstrained = nn.Parameter(
-            torch.tensor(ridge_init, dtype=self.dtype, device=self.device).log())
+            torch.tensor(ridge_init, dtype=self.dtype, device=self.device).log()
+        )
 
     def __repr__(self) -> str:
         _s = self.kernel.__repr__()
@@ -291,7 +318,8 @@ class KRRTangent(KRRBase):
 
         self._alphas.requires_grad = False
         self._alphas.set_(
-            torch.empty(self._Ndat * manifold._Nman, dtype=self.dtype, device=self.device))
+            torch.empty(self._Ndat * manifold._Nman, dtype=self.dtype, device=self.device)
+        )
         self._alphas.requires_grad = True
 
     def _ensure_solved(self):
@@ -302,13 +330,15 @@ class KRRTangent(KRRBase):
 
         X, Y = self.X_train, self.Y_train
 
-        Kxx, Tx, _ = self.kernel(X, None)               # (N,N,d,d), (N,d,Dy)
-        _Y = torch.matmul(Tx, Y[...,None]).squeeze(-1)  # (N,d), the effective targets
+        Kxx, Tx, _ = self.kernel(X, None)  # (N,N,d,d), (N,d,Dy)
+        _Y = torch.matmul(Tx, Y[..., None]).squeeze(-1)  # (N,d), the effective targets
         _d = _Y.shape[-1]
 
-        Kflat = Kxx.reshape(self._Ndat*_d, self._Ndat*_d)
+        Kflat = Kxx.reshape(self._Ndat * _d, self._Ndat * _d)
         A = Kflat + self.ridge * torch.eye(self._Ndat * _d, dtype=self.dtype, device=self.device)
-        L = torch.linalg.cholesky(A + self.jitter * torch.eye(A.size(0), dtype=self.dtype, device=self.device))
+        L = torch.linalg.cholesky(
+            A + self.jitter * torch.eye(A.size(0), dtype=self.dtype, device=self.device)
+        )
         _tmp = torch.cholesky_solve(_Y.reshape(-1, 1), L).squeeze(-1)  # (N*d,)
         self._alphas.data.copy_(_tmp)
 
@@ -317,9 +347,9 @@ class KRRTangent(KRRBase):
 
     def _predict_from_solution(self, Xnew: torch.Tensor):
         dim = Xnew.shape[:-2]
-        Kxz, Tx, _ = self.kernel(Xnew, self._Xref)   # (...,M,d,N,d), (...,M,d,Dy), (N,d,Dy)
+        Kxz, Tx, _ = self.kernel(Xnew, self._Xref)  # (...,M,d,N,d), (...,M,d,Dy), (N,d,Dy)
         M, D, N, _ = Kxz.shape[-4:]
-        Kflat = Kxz.reshape(*dim, M*D, N*D)   # (..., M*d, N*d)
-        ynew_vec = Kflat @ self._alphas       # (..., M*d)
-        _ynew = ynew_vec.reshape(*dim, M, D)   # (..., M, d)
-        return torch.matmul(_ynew[...,None,:], Tx).squeeze(-2)  # (..., M, Dy)
+        Kflat = Kxz.reshape(*dim, M * D, N * D)  # (..., M*d, N*d)
+        ynew_vec = Kflat @ self._alphas  # (..., M*d)
+        _ynew = ynew_vec.reshape(*dim, M, D)  # (..., M, d)
+        return torch.matmul(_ynew[..., None, :], Tx).squeeze(-2)  # (..., M, Dy)

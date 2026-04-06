@@ -1,13 +1,14 @@
 import copy
 import logging
-import numpy as np
 import os
-import torch
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Callable, Dict, List, Optional, Union, Tuple, Type
 
-from dymad.core.model_context import build_model_context
+import numpy as np
+import torch
+
 from dymad.core.graph_series import GraphSeriesBatch
+from dymad.core.model_context import build_model_context
 from dymad.core.runtime import (
     RaggedGraphRuntime,
     RaggedRegularRuntime,
@@ -15,8 +16,8 @@ from dymad.core.runtime import (
     UniformGraphRuntime,
     UniformRegularRuntime,
 )
-from dymad.core.transform_builder import build_transform_module
 from dymad.core.series import RegularSeriesBatch
+from dymad.core.transform_builder import build_transform_module
 from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline
 from dymad.io.series_adapter import SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManager
@@ -25,10 +26,12 @@ from dymad.utils.misc import load_config
 
 logger = logging.getLogger(__name__)
 
+
 def _atleast_3d(x):
     if x.ndim == 2:
         return np.expand_dims(x, axis=0)
     return x
+
 
 def graph_data_prep(data, nnd):
     # Some hacking to preprocess graph data for data transforms
@@ -37,9 +40,9 @@ def graph_data_prep(data, nnd):
     # where ... is the batch size or None
     # We need to reshape to node-wise data (all_nodes, T, n_states_per_node)
     shp = data.shape[:-1]
-    tmp = data.reshape(*shp, nnd, -1)          # [..., T, n_nodes, n_states_per_node]
-    tmp = np.swapaxes(tmp, -3, -2)             # [..., n_nodes, T, n_states_per_node]  Needed for time delay
-    tmp = tmp.reshape(-1, *tmp.shape[-2:])     # [all_nodes, T, n_states_per_node]
+    tmp = data.reshape(*shp, nnd, -1)  # [..., T, n_nodes, n_states_per_node]
+    tmp = np.swapaxes(tmp, -3, -2)  # [..., n_nodes, T, n_states_per_node]  Needed for time delay
+    tmp = tmp.reshape(-1, *tmp.shape[-2:])  # [all_nodes, T, n_states_per_node]
     return tmp
 
 
@@ -47,16 +50,26 @@ def _infer_graph_nodes(edge_index) -> int:
     if isinstance(edge_index, (np.ndarray, torch.Tensor)):
         tensor = torch.as_tensor(edge_index)
         return int(tensor.max().item()) + 1
-    if isinstance(edge_index, (list, tuple)) and edge_index and isinstance(edge_index[0], (np.ndarray, torch.Tensor, list, tuple)):
+    if (
+        isinstance(edge_index, (list, tuple))
+        and edge_index
+        and isinstance(edge_index[0], (np.ndarray, torch.Tensor, list, tuple))
+    ):
         if isinstance(edge_index[0], (list, tuple)):
             values = [torch.as_tensor(step).max().item() for step in edge_index]
         else:
             values = [torch.as_tensor(step).max().item() for step in edge_index]
         return int(max(values)) + 1
-    if isinstance(edge_index, list) and edge_index and isinstance(edge_index[0], (np.ndarray, torch.Tensor)):
+    if (
+        isinstance(edge_index, list)
+        and edge_index
+        and isinstance(edge_index[0], (np.ndarray, torch.Tensor))
+    ):
         values = [torch.as_tensor(step).max().item() for step in edge_index]
         return int(max(values)) + 1
-    raise ValueError("Typed graph checkpoint prediction currently supports fixed or per-step single-graph edge indices.")
+    raise ValueError(
+        "Typed graph checkpoint prediction currently supports fixed or per-step single-graph edge indices."
+    )
 
 
 def _transform_graph_node_payload(data, nnd, transform_module, dtype, device):
@@ -66,9 +79,13 @@ def _transform_graph_node_payload(data, nnd, transform_module, dtype, device):
 
     batch_size = array.shape[0]
     node_major = graph_data_prep(array, nnd)
-    transformed = transform_module.transform_batch(_to_tensor_batch(node_major, dtype=dtype, device=device))
+    transformed = transform_module.transform_batch(
+        _to_tensor_batch(node_major, dtype=dtype, device=device)
+    )
     stacked = torch.stack(transformed)
-    return stacked.reshape(batch_size, nnd, stacked.shape[-2], stacked.shape[-1]).permute(0, 2, 1, 3)
+    return stacked.reshape(batch_size, nnd, stacked.shape[-2], stacked.shape[-1]).permute(
+        0, 2, 1, 3
+    )
 
 
 def _ensure_regular_batch(data):
@@ -89,7 +106,9 @@ def _ensure_param_batch(data):
     return array
 
 
-def _infer_prediction_delay(*, raw_state, transformed_state, raw_control=None, transformed_control=None) -> int:
+def _infer_prediction_delay(
+    *, raw_state, transformed_state, raw_control=None, transformed_control=None
+) -> int:
     raw_state_batch = _ensure_regular_batch(raw_state)
     delays = [int(raw_state_batch.shape[1] - transformed_state.shape[1])]
     if raw_control is not None and transformed_control is not None:
@@ -118,6 +137,7 @@ def _trim_graph_temporal_payload(payload, *, delay: int, target_steps: int):
     if array.ndim >= 1 and array.shape[0] == target_steps + delay:
         return array[delay:]
     return payload
+
 
 def _to_tensor_batch(
     data,
@@ -149,7 +169,10 @@ def _normalize_graph_batch_payload(payload, batch_size: int):
 def _runtime_with_params(runtime: TypedRuntime, params: torch.Tensor | None) -> TypedRuntime:
     if params is None:
         return runtime
-    if isinstance(runtime, (UniformRegularRuntime, RaggedRegularRuntime, UniformGraphRuntime, RaggedGraphRuntime)):
+    if isinstance(
+        runtime,
+        (UniformRegularRuntime, RaggedRegularRuntime, UniformGraphRuntime, RaggedGraphRuntime),
+    ):
         return replace(runtime, params=params)
     return runtime
 
@@ -229,6 +252,7 @@ def _prediction_defaults_from_config(config: dict | None) -> dict:
             return defaults
     return {}
 
+
 def _load_model_legacy(model_class, checkpoint_path):
     """
     Load a model from a checkpoint file.
@@ -246,40 +270,50 @@ def _load_model_legacy(model_class, checkpoint_path):
     # If checkpoint_path does not exist, try adding directory prefix based on filename
     chkpt_path = str(checkpoint_path)
     if not os.path.exists(chkpt_path):
-        chkpt_path = os.path.join(chkpt_path.split('.')[0], chkpt_path)
+        chkpt_path = os.path.join(chkpt_path.split(".")[0], chkpt_path)
         if not os.path.exists(chkpt_path):
             raise FileNotFoundError(f"Checkpoint file not found at {chkpt_path}.")
     chkpt = torch.load(chkpt_path, weights_only=False)
-    cfg = chkpt['config']
-    md = chkpt['train_md']
+    cfg = chkpt["config"]
+    md = chkpt["train_md"]
     prediction_defaults = _prediction_defaults_from_config(cfg)
-    dtype = torch.double if cfg['data'].get('double_precision', False) else torch.float
-    torch.set_default_dtype(dtype)   # GNNs use the default dtype, so we need to set it here
+    dtype = torch.double if cfg["data"].get("double_precision", False) else torch.float
+    torch.set_default_dtype(dtype)  # GNNs use the default dtype, so we need to set it here
 
     # Model
-    model_config = cfg.get('model', None)
+    model_config = cfg.get("model", None)
     model = model_class(model_config, md, dtype=dtype)
-    model.load_state_dict(chkpt['model_state_dict'])
+    model.load_state_dict(chkpt["model_state_dict"])
 
     # Data transformations
-    _data_transform_x = build_transform_module(cfg.get('transform_x', None), md["transform_x_state"])
+    _data_transform_x = build_transform_module(
+        cfg.get("transform_x", None), md["transform_x_state"]
+    )
 
-    _has_u = md.get('transform_u_state', None) is not None
+    _has_u = md.get("transform_u_state", None) is not None
     if _has_u:
-        _data_transform_u = build_transform_module(cfg.get('transform_u', None), md["transform_u_state"])
+        _data_transform_u = build_transform_module(
+            cfg.get("transform_u", None), md["transform_u_state"]
+        )
 
-    _has_ew = cfg.get('transform_ew', None) is not None
+    _has_ew = cfg.get("transform_ew", None) is not None
     if _has_ew:
-        _data_transform_ew = build_transform_module(cfg.get('transform_ew', None), md["transform_ew_state"])
+        _data_transform_ew = build_transform_module(
+            cfg.get("transform_ew", None), md["transform_ew_state"]
+        )
 
-    _has_ea = cfg.get('transform_ea', None) is not None
+    _has_ea = cfg.get("transform_ea", None) is not None
     if _has_ea:
-        _data_transform_ea = build_transform_module(cfg.get('transform_ea', None), md["transform_ea_state"])
+        _data_transform_ea = build_transform_module(
+            cfg.get("transform_ea", None), md["transform_ea_state"]
+        )
 
-    _regular_pipeline = SeriesTransformPipeline([
-        FieldTransformModule("state", _data_transform_x),
-        *([FieldTransformModule("control", _data_transform_u)] if _has_u else []),
-    ])
+    _regular_pipeline = SeriesTransformPipeline(
+        [
+            FieldTransformModule("state", _data_transform_x),
+            *([FieldTransformModule("control", _data_transform_u)] if _has_u else []),
+        ]
+    )
 
     # Data processing
     def _proc_x0(x0, device):
@@ -290,8 +324,11 @@ def _load_model_legacy(model_class, checkpoint_path):
             return transformed[0]
         return transformed[:, 0, :]
 
-    _proc_u = lambda us, device: None
+    def _proc_u(us, device):
+        return None
+
     if _has_u:
+
         def _proc_u(us, device):
             transformed = _stack_batch(
                 _data_transform_u.transform_batch(_to_tensor_batch(us, dtype=dtype, device=device))
@@ -374,25 +411,35 @@ def _load_model_legacy(model_class, checkpoint_path):
             )
         return build_model_context(GraphSeriesBatch.collate(items))
 
-    _proc_ew = lambda ew, device: ew
+    def _proc_ew(ew, device):
+        return ew
+
     if _has_ew:
+
         def _proc_ew(ew, device):
             if isinstance(ew, list) and not isinstance(ew[0], list):
-                payloads = [torch.as_tensor(_e.reshape(-1, 1), dtype=dtype, device=device) for _e in ew]
+                payloads = [
+                    torch.as_tensor(_e.reshape(-1, 1), dtype=dtype, device=device) for _e in ew
+                ]
                 _tmp = _data_transform_ew.transform_batch(payloads)
                 return [step.reshape(-1) for step in _tmp]
             elif isinstance(ew[0], list):
                 _ew = []
                 for e in ew:
-                    payloads = [torch.as_tensor(_e.reshape(-1, 1), dtype=dtype, device=device) for _e in e]
+                    payloads = [
+                        torch.as_tensor(_e.reshape(-1, 1), dtype=dtype, device=device) for _e in e
+                    ]
                     _tmp = _data_transform_ew.transform_batch(payloads)
                     _ew.append([step.reshape(-1) for step in _tmp])
             else:
                 raise ValueError("Edge weights format not recognized.")
             return _ew
 
-    _proc_ea = lambda ea, device: ea
+    def _proc_ea(ea, device):
+        return ea
+
     if _has_ea:
+
         def _proc_ea(ea, device):
             if isinstance(ea, list) and not isinstance(ea[0], list):
                 payloads = [torch.as_tensor(_e, dtype=dtype, device=device) for _e in ea]
@@ -416,7 +463,18 @@ def _load_model_legacy(model_class, checkpoint_path):
         return result
 
     # Prediction in data space
-    def predict_fn(x0, t, u=None, p=None, ei=None, ew=None, ea=None, device="cpu", ret_dat=False, **predict_kwargs):
+    def predict_fn(
+        x0,
+        t,
+        u=None,
+        p=None,
+        ei=None,
+        ew=None,
+        ea=None,
+        device="cpu",
+        ret_dat=False,
+        **predict_kwargs,
+    ):
         """Predict trajectory in data space."""
         if isinstance(t, np.ndarray):
             t = torch.from_numpy(t).to(device=device)
@@ -438,13 +496,13 @@ def _load_model_legacy(model_class, checkpoint_path):
 
         if ret_dat:
             return {
-                't': _data.t,
-                'x': _x0,
-                'u': _data.u,
-                'p': _data.p,
-                'ei': getattr(_data, "ei", None),
-                'ew': getattr(_data, "ew", None),
-                'ea': getattr(_data, "ea", None),
+                "t": _data.t,
+                "x": _x0,
+                "u": _data.u,
+                "p": _data.p,
+                "ei": getattr(_data, "ei", None),
+                "ew": getattr(_data, "ew", None),
+                "ea": getattr(_data, "ea", None),
             }
 
         with torch.no_grad():
@@ -467,15 +525,17 @@ def _load_model_legacy(model_class, checkpoint_path):
             # Now pred is of shape (T', all_nodes*n_features_per_node)
             shp = pred.shape[:-1]
             tmp = pred.reshape(*shp, _data.n_nodes, -1)  # [T', all_nodes, n_features_per_node]
-            tmp = np.swapaxes(tmp, -3, -2)               # [all_nodes, T', n_features_per_node]
-            shp = tmp.shape[:-2]                         # [all_nodes]
-            nnd = _data.n_nodes // _data.batch_size      # n_nodes
-            shp = (*shp[:-1], _data.batch_size, nnd)     # [batch_size, n_nodes]
-            tmp = tmp.reshape(-1, *tmp.shape[-2:])       # [:, T', n_features_per_node]  Needed for time delay
-            prd = _proc_prd(tmp)                         # [:, T, n_states_per_node]  Might change T
-            prd = prd.reshape(*shp, *prd.shape[-2:])     # [batch_size, n_nodes, T, n_states_per_node]
-            prd = np.swapaxes(prd, -3, -2)               # [batch_size, T, n_nodes, n_states_per_node]
-            prd = prd.reshape(*prd.shape[:-2], -1)       # [batch_size, T, n_nodes*n_states_per_node]
+            tmp = np.swapaxes(tmp, -3, -2)  # [all_nodes, T', n_features_per_node]
+            shp = tmp.shape[:-2]  # [all_nodes]
+            nnd = _data.n_nodes // _data.batch_size  # n_nodes
+            shp = (*shp[:-1], _data.batch_size, nnd)  # [batch_size, n_nodes]
+            tmp = tmp.reshape(
+                -1, *tmp.shape[-2:]
+            )  # [:, T', n_features_per_node]  Needed for time delay
+            prd = _proc_prd(tmp)  # [:, T, n_states_per_node]  Might change T
+            prd = prd.reshape(*shp, *prd.shape[-2:])  # [batch_size, n_nodes, T, n_states_per_node]
+            prd = np.swapaxes(prd, -3, -2)  # [batch_size, T, n_nodes, n_states_per_node]
+            prd = prd.reshape(*prd.shape[:-2], -1)  # [batch_size, T, n_nodes*n_states_per_node]
             if prd.ndim > x0.ndim:
                 prd = prd.squeeze(0)  # Squeeze out the leading dim if exists
             return prd
@@ -485,14 +545,15 @@ def _load_model_legacy(model_class, checkpoint_path):
 
 
 def load_model(
-        model_class,
-        checkpoint_path,
-        *,
-        context=None,
-        horizon: int = 1,
-        has_control: bool = False,
-        has_graph: bool = False,
-        return_trace: bool = False):
+    model_class,
+    checkpoint_path,
+    *,
+    context=None,
+    horizon: int = 1,
+    has_control: bool = False,
+    has_graph: bool = False,
+    return_trace: bool = False,
+):
     """Public checkpoint loader routed through the migration boundary."""
     from dymad.io.load_model_compat import load_model_compat
 
@@ -507,7 +568,9 @@ def load_model(
     )
 
 
-def _prepare_visualize_model_input(input_data: dict[str, torch.Tensor | tuple[torch.Tensor, torch.Tensor] | None]) -> dict:
+def _prepare_visualize_model_input(
+    input_data: dict[str, torch.Tensor | tuple[torch.Tensor, torch.Tensor] | None],
+) -> dict:
     prepared = dict(input_data)
 
     t = prepared.get("t")
@@ -533,8 +596,15 @@ def _prepare_visualize_model_input(input_data: dict[str, torch.Tensor | tuple[to
 
 
 def visualize_model(
-        mdl_class=None, checkpoint_path=None, model=None, prd_func=None,
-        ref_data=None, depth=1, device='cpu', ifsave=False):
+    mdl_class=None,
+    checkpoint_path=None,
+    model=None,
+    prd_func=None,
+    ref_data=None,
+    depth=1,
+    device="cpu",
+    ifsave=False,
+):
     try:
         from torchview import draw_graph
     except ImportError as e:
@@ -544,35 +614,33 @@ def visualize_model(
         ) from e
 
     if mdl_class is None:
-        assert model is not None and prd_func is not None, \
+        assert model is not None and prd_func is not None, (
             "Either mdl_class and checkpoint_path, or model and prd_func must be provided."
+        )
     else:
-        assert checkpoint_path is not None, \
+        assert checkpoint_path is not None, (
             "checkpoint_path must be provided when mdl_class is given."
+        )
         model, prd_func = load_model(mdl_class, checkpoint_path)
 
     if isinstance(ref_data, str):
         dat = np.load(ref_data, allow_pickle=True)
     else:
         dat = ref_data  # Assuming dict
-    t_data = dat.get('t', None)
-    x_data = dat.get('x', None)
-    u_data = dat.get('u', None)
-    p_data = dat.get('p', None)
-    ei_data = dat.get('ei', None)
-    ew_data = dat.get('ew', None)
-    ea_data = dat.get('ea', None)
+    t_data = dat.get("t", None)
+    x_data = dat.get("x", None)
+    u_data = dat.get("u", None)
+    p_data = dat.get("p", None)
+    ei_data = dat.get("ei", None)
+    ew_data = dat.get("ew", None)
+    ea_data = dat.get("ea", None)
 
     input_data = prd_func(
-        x_data, t_data, u=u_data, p=p_data, ei=ei_data, ew=ew_data, ea=ea_data,
-        ret_dat=True)
+        x_data, t_data, u=u_data, p=p_data, ei=ei_data, ew=ew_data, ea=ea_data, ret_dat=True
+    )
     input_data = _prepare_visualize_model_input(input_data)
 
-    model_graph = draw_graph(
-        model,
-        input_data=input_data,
-        depth=depth,
-        device=device)
+    model_graph = draw_graph(model, input_data=input_data, depth=depth, device=device)
 
     if ifsave:
         if checkpoint_path is None:
@@ -599,22 +667,30 @@ class DataInterface:
         - [Secondary] config_path and/or config_mod is given: Instantiate the data transforms from the config.
           No model (i.e., autoencoders) in this case.
     """
-    def __init__(self,
-                 model_class: Union[Type[torch.nn.Module], None] = None,
-                 checkpoint_path: Union[str, None] = None,
-                 config_path: Union[str, None] = None,
-                 config_mod: Optional[dict] = None,
-                 device: Optional[torch.device] = None):
-        self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def __init__(
+        self,
+        model_class: type[torch.nn.Module] | None = None,
+        checkpoint_path: str | None = None,
+        config_path: str | None = None,
+        config_mod: dict | None = None,
+        device: torch.device | None = None,
+    ):
+        self.device = (
+            device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
 
         metadata, self.has_model = self._init_metadata(checkpoint_path, config_path, config_mod)
         self._setup_data(metadata)
 
         if self.has_model:
             self.model, self.prd_func = load_model(model_class, checkpoint_path)
+
             def encoder(x):
                 _x_shape = x.shape[:-1]
-                x_tensor = torch.atleast_2d(torch.as_tensor(x, dtype=self.dtype, device=self.device))
+                x_tensor = torch.atleast_2d(
+                    torch.as_tensor(x, dtype=self.dtype, device=self.device)
+                )
                 payload = SeriesAdapter.from_regular_arrays(
                     time=np.arange(x_tensor.shape[0], dtype=np.int64),
                     state=x_tensor,
@@ -623,39 +699,45 @@ class DataInterface:
                 )
                 _z = self.model.encoder(build_model_context(payload))
                 return _z.reshape(*_x_shape, -1)
+
             def decoder(z):
                 return self.model.decoder(z, None)
+
             enc = Autoencoder(self.model, encoder, decoder)
             self._trans_x.append(enc)
 
         self.NT = self._trans_x.NT
 
-    def _init_metadata(self, checkpoint_path, config_path, config_mod) -> Tuple[Dict, bool]:
+    def _init_metadata(self, checkpoint_path, config_path, config_mod) -> tuple[dict, bool]:
         """Initialize metadata from config or checkpoint."""
         if checkpoint_path is not None:
             path = checkpoint_path
             if not os.path.exists(path):
-                path = os.path.join(path.split('.')[0], path)
+                path = os.path.join(path.split(".")[0], path)
             assert os.path.exists(path), "Checkpoint path does not exist."
             return torch.load(path, weights_only=False), True
         _config = load_config(config_path, config_mod)
-        return {'config': _config}, False
+        return {"config": _config}, False
 
     def _setup_data(self, metadata) -> None:
         """Setup data loaders and datasets.
 
         Striped from TrainerBase.
         """
-        if 'train_md' in metadata:
+        if "train_md" in metadata:
             # Previously processed
-            cfg = copy.deepcopy(metadata['train_md'])
-            cfg['config']['dataloader']['shuffle'] = False   # Turn off shuffling to ensure fixed order of samples
-            train = TrajectoryManager(cfg, data_key='train', device=self.device)
+            cfg = copy.deepcopy(metadata["train_md"])
+            cfg["config"]["dataloader"]["shuffle"] = (
+                False  # Turn off shuffling to ensure fixed order of samples
+            )
+            train = TrajectoryManager(cfg, data_key="train", device=self.device)
             self.train_loader, dataset, _ = train.process_all(typed=True)
 
-            cfg = copy.deepcopy(metadata['valid_md'])
-            cfg['config']['dataloader']['shuffle'] = False   # Turn off shuffling to ensure fixed order of samples
-            valid = TrajectoryManager(cfg, data_key='valid', device=self.device)
+            cfg = copy.deepcopy(metadata["valid_md"])
+            cfg["config"]["dataloader"]["shuffle"] = (
+                False  # Turn off shuffling to ensure fixed order of samples
+            )
+            valid = TrajectoryManager(cfg, data_key="valid", device=self.device)
             self.valid_loader = valid.process_all(typed=True)[0]
 
             self.t = dataset[0].time.clone().detach()
@@ -663,7 +745,7 @@ class DataInterface:
         else:
             # Simple config
             # Here we just let train and valid be the same
-            tm = TrajectoryManager(metadata, data_key='train', device=self.device)
+            tm = TrajectoryManager(metadata, data_key="train", device=self.device)
             self.train_loader, _dataset, _ = tm.process_all(typed=True)
             self.valid_loader = self.train_loader
 
@@ -673,14 +755,14 @@ class DataInterface:
         self._trans_x = tm._data_transform_x
         self._trans_u = tm._data_transform_u
 
-    def encode(self, X: np.ndarray, rng: Optional[List | None] = None) -> np.ndarray:
+    def encode(self, X: np.ndarray, rng: list | None = None) -> np.ndarray:
         """
         Encode new trajectory data to the observer space.
         """
         _Z = self._trans_x.transform([np.atleast_2d(X)], rng)[0]
         return _Z.squeeze()
 
-    def decode(self, X: np.ndarray, rng: Optional[List | None] = None) -> np.ndarray:
+    def decode(self, X: np.ndarray, rng: list | None = None) -> np.ndarray:
         """
         Decode trajectory data from the observer space.
         """
@@ -697,15 +779,17 @@ class DataInterface:
         """
         F = []
         for batch in self.train_loader:
-            B = batch.state_tensor().cpu().numpy()[..., :-1, :]        # This is already transformed
+            B = batch.state_tensor().cpu().numpy()[..., :-1, :]  # This is already transformed
             B = B.reshape(-1, B.shape[-1])
-            end = self.NT-1 if self.has_model else self.NT
-            B = self._trans_x.inverse_transform([B], [0, end])[0]   # A hack to get back to the original space
+            end = self.NT - 1 if self.has_model else self.NT
+            B = self._trans_x.inverse_transform([B], [0, end])[
+                0
+            ]  # A hack to get back to the original space
             F.append(fobs(B))
         return np.hstack(F)
 
-    def get_forward_modes(self, ref=None, rng: Union[List, None] = None, **kwargs) -> np.ndarray:
+    def get_forward_modes(self, ref=None, rng: list | None = None, **kwargs) -> np.ndarray:
         return self._trans_x.get_forward_modes(ref, rng, **kwargs)
 
-    def get_backward_modes(self, ref=None, rng: Union[List, None] = None, **kwargs) -> np.ndarray:
+    def get_backward_modes(self, ref=None, rng: list | None = None, **kwargs) -> np.ndarray:
         return self._trans_x.get_backward_modes(ref, rng, **kwargs)

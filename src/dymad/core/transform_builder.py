@@ -14,7 +14,11 @@ from dymad.core.torch_transforms import (
     LiftTransform,
     ScalerTransform,
 )
-from dymad.core.transform_module import LegacyTransformModuleAdapter, NDRTransformModuleAdapter, TransformModule
+from dymad.core.transform_module import (
+    LegacyTransformModuleAdapter,
+    NDRTransformModuleAdapter,
+    TransformModule,
+)
 from dymad.transform import make_transform
 from dymad.transform.base import Transform
 from dymad.transform.collection import TRN_MAP
@@ -52,7 +56,7 @@ def build_transform_module(config, state_dict: dict[str, Any] | None = None) -> 
 
     children = [
         _build_stage_module(stage_cfg, child_state)
-        for stage_cfg, child_state in zip(stages, child_states)
+        for stage_cfg, child_state in zip(stages, child_states, strict=False)
     ]
     return ComposeTransform(children)
 
@@ -134,7 +138,9 @@ def _is_compose_state(state_dict: dict[str, Any] | None) -> bool:
     return "children" in state_dict or state_type == "compose"
 
 
-def _build_stage_module(stage_cfg: dict[str, Any], state_dict: dict[str, Any] | None) -> TransformModule:
+def _build_stage_module(
+    stage_cfg: dict[str, Any], state_dict: dict[str, Any] | None
+) -> TransformModule:
     stage_type = _canonicalize_type(stage_cfg.get("type", ""))
     kwargs = dict(stage_cfg)
     kwargs.pop("type", None)

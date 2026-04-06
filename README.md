@@ -48,7 +48,7 @@ ruff check .
 ruff check . --fix
 ruff format .
 ruff format . --check
-pyright
+pyright --pythonpath "$(which python)"
 ```
 
 **Documentation:** Generate the document by

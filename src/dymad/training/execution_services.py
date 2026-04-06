@@ -4,7 +4,7 @@ import copy
 import logging
 import os
 from dataclasses import dataclass, replace
-from typing import Any, Dict, Optional
+from typing import Any
 
 import torch
 
@@ -24,7 +24,7 @@ class ExecutionServices:
     @classmethod
     def _select_device(
         cls,
-        default_device: Optional[torch.device] = None,
+        default_device: torch.device | None = None,
     ) -> torch.device:
         if default_device is not None:
             return default_device
@@ -33,9 +33,9 @@ class ExecutionServices:
     @classmethod
     def from_config(
         cls,
-        config: Dict[str, Any] | None,
-        default_device: Optional[torch.device] = None,
-    ) -> "ExecutionServices":
+        config: dict[str, Any] | None,
+        default_device: torch.device | None = None,
+    ) -> ExecutionServices:
         cfg = config or {}
         path_cfg = cfg.get("path", {})
         checkpoint_prefix = path_cfg.get("checkpoint_prefix", ".")
@@ -52,10 +52,10 @@ class ExecutionServices:
     @classmethod
     def from_driver_config(
         cls,
-        base_config: Dict[str, Any],
+        base_config: dict[str, Any],
         config_path: str,
-        default_device: Optional[torch.device] = None,
-    ) -> "ExecutionServices":
+        default_device: torch.device | None = None,
+    ) -> ExecutionServices:
         root = os.path.dirname(config_path) or "."
         base_name = base_config["model"]["name"]
         prefix = os.path.join(root, base_name)
@@ -71,19 +71,21 @@ class ExecutionServices:
     def with_paths(
         self,
         *,
-        checkpoint_prefix: Optional[str] = None,
-        results_prefix: Optional[str] = None,
-    ) -> "ExecutionServices":
+        checkpoint_prefix: str | None = None,
+        results_prefix: str | None = None,
+    ) -> ExecutionServices:
         return replace(
             self,
-            checkpoint_prefix=self.checkpoint_prefix if checkpoint_prefix is None else checkpoint_prefix,
+            checkpoint_prefix=self.checkpoint_prefix
+            if checkpoint_prefix is None
+            else checkpoint_prefix,
             results_prefix=self.results_prefix if results_prefix is None else results_prefix,
         )
 
-    def with_device(self, device: torch.device) -> "ExecutionServices":
+    def with_device(self, device: torch.device) -> ExecutionServices:
         return replace(self, device=device)
 
-    def apply_to_config(self, config: Dict[str, Any] | None) -> Dict[str, Any]:
+    def apply_to_config(self, config: dict[str, Any] | None) -> dict[str, Any]:
         cfg = copy.deepcopy(config or {})
         cfg.setdefault("path", {})
         cfg["path"]["checkpoint_prefix"] = self.checkpoint_prefix
@@ -105,7 +107,7 @@ class ExecutionServices:
             return ""
         return os.path.join(self.results_prefix, default_name)
 
-    def configure_logger(self, name: str, prefix: Optional[str] = None) -> logging.Logger:
+    def configure_logger(self, name: str, prefix: str | None = None) -> logging.Logger:
         logger = logging.getLogger(name)
         config_logger(
             logger,

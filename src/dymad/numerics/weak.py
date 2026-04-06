@@ -5,6 +5,7 @@ from scipy import special as spc
 # Jacobi Polynomial Utilities for alpha=1, beta=1
 # ------------------------------------------------------------------------------------
 
+
 def jacobi_polynomial(order: int, coords: np.ndarray) -> np.ndarray:
     """
     Evaluate the Jacobi polynomials of order `order` (from 0 to order-1) with parameters
@@ -26,6 +27,7 @@ def jacobi_polynomial(order: int, coords: np.ndarray) -> np.ndarray:
         # eval_jacobi(n, alpha, beta, x)
         polynomials[i] = spc.eval_jacobi(i, 1, 1, coords)
     return polynomials
+
 
 def jacobi_polynomial_derivative(order: int, coords: np.ndarray) -> np.ndarray:
     """
@@ -52,16 +54,18 @@ def jacobi_polynomial_derivative(order: int, coords: np.ndarray) -> np.ndarray:
         derivatives[i] = ((i + 3) / 2.0) * spc.eval_jacobi(i - 1, 2, 2, coords)
     return derivatives
 
+
 # ------------------------------------------------------------------------------------
 # Newton-Cotes Weights (for simple numeric integration)
 # ------------------------------------------------------------------------------------
 
 _NEWTON_COTES_COEFS = {
-    '1': [0.5, 0.5],                   # Trapezoid rule
-    '2': [1.0/3.0, 4.0/3.0, 1.0/3.0],   # Simpson's 1/3 rule
-    '3': [3.0/8.0, 9.0/8.0, 9.0/8.0, 3.0/8.0],  # Simpson's 3/8 rule
-    '4': [14.0/45.0, 64.0/45.0, 24.0/45.0, 64.0/45.0, 14.0/45.0],  # Boole's rule
+    "1": [0.5, 0.5],  # Trapezoid rule
+    "2": [1.0 / 3.0, 4.0 / 3.0, 1.0 / 3.0],  # Simpson's 1/3 rule
+    "3": [3.0 / 8.0, 9.0 / 8.0, 9.0 / 8.0, 3.0 / 8.0],  # Simpson's 3/8 rule
+    "4": [14.0 / 45.0, 64.0 / 45.0, 24.0 / 45.0, 64.0 / 45.0, 14.0 / 45.0],  # Boole's rule
 }
+
 
 def compute_newton_cotes_weights(num_points: int, dx: float, order: int) -> np.ndarray:
     """
@@ -89,13 +93,15 @@ def compute_newton_cotes_weights(num_points: int, dx: float, order: int) -> np.n
     # Add the rule coefficients in segments
     for i in range(num_segments):
         # i*order : (i+1)*order+1 -> covers exactly 'order + 1' points
-        weights[i*order : (i+1)*order+1] += coefs
+        weights[i * order : (i + 1) * order + 1] += coefs
 
     return weights * dx
+
 
 # ------------------------------------------------------------------------------------
 # Weak Formulation Weight Generation
 # ------------------------------------------------------------------------------------
+
 
 def generate_weak_weights(
     dt: float,
@@ -140,7 +146,7 @@ def generate_weak_weights(
             - D: shape (poly_order, n_integration_points).
     """
     # L = half the integral interval length in the time domain
-    L = (n_integration_points-1) * dt / 2.0
+    L = (n_integration_points - 1) * dt / 2.0
 
     # Grid in [-1, 1] for the polynomials
     h = np.linspace(-1.0, 1.0, n_integration_points)
@@ -161,6 +167,6 @@ def generate_weak_weights(
     #  (P1 * w0 + P0 * w1) is shape (poly_order, N),
     #  multiplying by w (shape (N,)) must happen along axis=1.
     C = -(P1 * w0 + P0 * w1) * w  # shape: (poly_order, N)
-    D = P0 * w0 * w               # shape: (poly_order, N)
+    D = P0 * w0 * w  # shape: (poly_order, N)
 
     return C, D

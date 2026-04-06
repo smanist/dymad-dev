@@ -1,8 +1,9 @@
+from collections.abc import Callable
+
 import torch
 import torch.nn as nn
-from typing import Callable, Union, Optional
 
-from dymad.modules.helpers import _resolve_activation, _resolve_init, INIT_MAP_W, INIT_MAP_B
+from dymad.modules.helpers import INIT_MAP_B, INIT_MAP_W, _resolve_activation, _resolve_init
 
 
 class SequentialBase(nn.Module):
@@ -14,7 +15,7 @@ class SequentialBase(nn.Module):
     (..., seq_len, input_dim) and passes it to an internal sequential model (e.g., RNN),
     and return the output either at the last step (..., output_dim) or
     the full sequence flattened (..., seq_len * output_dim).
-    
+
     It considers two types of architectures
 
     - Internally construct RNN-like models, that applies to the input in the standard way.
@@ -54,18 +55,19 @@ class SequentialBase(nn.Module):
         self,
         seq_len: int,
         *,
-        last_only: Optional[bool] = True,
-        net: Optional[nn.Module] = None,
-        input_dim: Optional[int] = -1,
-        hidden_dim: Optional[int] = -1,
-        output_dim: Optional[int] = -1,
-        n_layers: Optional[int] = 2,
-        activation: Union[str, nn.Module, Callable[[], nn.Module]] = nn.ReLU,
-        weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
+        last_only: bool | None = True,
+        net: nn.Module | None = None,
+        input_dim: int | None = -1,
+        hidden_dim: int | None = -1,
+        output_dim: int | None = -1,
+        n_layers: int | None = 2,
+        activation: str | nn.Module | Callable[[], nn.Module] = nn.ReLU,
+        weight_init: str | Callable[[torch.Tensor, float], None] = nn.init.xavier_uniform_,
         bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
-        gain: Optional[float] = 1.0,
-        dtype=None, device=None,
-        **kwargs
+        gain: float | None = 1.0,
+        dtype=None,
+        device=None,
+        **kwargs,
     ):
         super().__init__()
         self.seq_len = seq_len
@@ -79,12 +81,16 @@ class SequentialBase(nn.Module):
             return
 
         # Check dimensions
-        assert input_dim % seq_len == 0, f"input_dim {input_dim} must be divisible by seq_len {seq_len}."
+        assert input_dim % seq_len == 0, (
+            f"input_dim {input_dim} must be divisible by seq_len {seq_len}."
+        )
         _inp_dim = input_dim // seq_len
         if last_only:
             _out_dim = output_dim
         else:
-            assert output_dim % seq_len == 0, f"output_dim {output_dim} must be divisible by seq_len {seq_len} when last_only is False."
+            assert output_dim % seq_len == 0, (
+                f"output_dim {output_dim} must be divisible by seq_len {seq_len} when last_only is False."
+            )
             _out_dim = output_dim // seq_len
 
         # Internally construct RNN-like model
@@ -97,8 +103,10 @@ class SequentialBase(nn.Module):
 
         # Compute gain
         act_name = _act().__class__.__name__.lower()
-        _g = nn.init.calculate_gain(act_name if act_name not in ["gelu", "prelu", "identity"] else "relu")
-        self._gain = gain*_g
+        _g = nn.init.calculate_gain(
+            act_name if act_name not in ["gelu", "prelu", "identity"] else "relu"
+        )
+        self._gain = gain * _g
 
         # Initialise weights & biases
         self.apply(self._init_linear)
@@ -108,7 +116,9 @@ class SequentialBase(nn.Module):
             self._weight_init(m.weight, self._gain)
             self._bias_init(m.bias)
 
-    def _build_seq(self, input_dim, hidden_dim, output_dim, n_layers, _act, dtype, device, **kwargs):
+    def _build_seq(
+        self, input_dim, hidden_dim, output_dim, n_layers, _act, dtype, device, **kwargs
+    ):
         """Build the internal sequential module.
 
         Expect input_dim and output_dim as the dimensions of the input/output features per step.
@@ -167,19 +177,23 @@ class SequentialBase(nn.Module):
 class VanillaRNN(SequentialBase):
     """Vanilla RNN from pytorch."""
 
-    def _build_seq(self, input_dim, hidden_dim, output_dim, n_layers, _act, dtype, device, **kwargs):
+    def _build_seq(
+        self, input_dim, hidden_dim, output_dim, n_layers, _act, dtype, device, **kwargs
+    ):
         _act_name = _act().__class__.__name__.lower()
-        assert _act_name in ['tanh', 'relu'], "Only 'tanh' and 'relu' activations are supported for nn.RNN."
+        assert _act_name in ["tanh", "relu"], (
+            "Only 'tanh' and 'relu' activations are supported for nn.RNN."
+        )
         assert output_dim == hidden_dim, "For VanillaRNN, output_dim must equal hidden_dim."
         self.net = nn.RNN(
-            input_size = input_dim,
-            hidden_size = hidden_dim,
-            num_layers = n_layers,
-            nonlinearity = _act_name,
-            batch_first = True,
+            input_size=input_dim,
+            hidden_size=hidden_dim,
+            num_layers=n_layers,
+            nonlinearity=_act_name,
+            batch_first=True,
             device=device,
             dtype=dtype,
-            **kwargs
+            **kwargs,
         )
         self.dtype = dtype
         self.device = device
@@ -191,17 +205,19 @@ class VanillaRNN(SequentialBase):
 
 class SimpleRNN(SequentialBase):
     """A simple recurrent neural network module
-    
+
     One layer, unidirectional, but supports arbitrary activations with a linear readout.
     """
 
-    def _build_seq(self, input_dim, hidden_dim, output_dim, n_layers, _act, dtype, device, **kwargs):
+    def _build_seq(
+        self, input_dim, hidden_dim, output_dim, n_layers, _act, dtype, device, **kwargs
+    ):
         assert n_layers == 1, f"SimpleRNN only supports n_layers=1, got {n_layers}"
 
         self.hidden_dim = hidden_dim
 
         # Linear transformations
-        self.i2h = nn.Linear(input_dim,  hidden_dim, device=device, dtype=dtype)
+        self.i2h = nn.Linear(input_dim, hidden_dim, device=device, dtype=dtype)
         self.h2h = nn.Linear(hidden_dim, hidden_dim, device=device, dtype=dtype)
         self.h2o = nn.Linear(hidden_dim, output_dim, device=device, dtype=dtype)
         self.activation = _act()

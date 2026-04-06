@@ -1,9 +1,9 @@
 import argparse
 import copy
 import os
-from pathlib import Path
 import random
 import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,21 +14,22 @@ from dymad.models import DKM, DKMSK, KM
 from dymad.training import LinearTrainer, StackedTrainer
 from dymad.utils import TrajectorySampler, plot_trajectory
 
-
 BASE_DIR = Path(__file__).resolve().parent
 
 B = 30
 N = 41
 t_grid = np.linspace(0, 2, N)
 
-A = np.array([[0., 1.], [-1., -0.1]])
+A = np.array([[0.0, 1.0], [-1.0, -0.1]])
 
 
 def f(t, x, u):
     return (x @ A.T) + u
 
 
-g = lambda t, x, u: x
+def g(t, x, u):
+    return x
+
 
 config_chr = {
     "control": {
@@ -52,11 +53,39 @@ opt_opk1 = {
     "Ls": np.array([[[1, 0], [0, 1]]]),
 }
 opt_opval = {"type": "opval", "kernel": opt_opk1, "dtype": torch.float64, "ridge_init": RIDGE}
-mdl_kl = {"name": "ker_model", "encoder_layers": 0, "decoder_layers": 0, "kernel_dimension": 2, **opt_opval}
+mdl_kl = {
+    "name": "ker_model",
+    "encoder_layers": 0,
+    "decoder_layers": 0,
+    "kernel_dimension": 2,
+    **opt_opval,
+}
 
-trn_ln = {"n_epochs": 1, "save_interval": 100, "load_checkpoint": False, "learning_rate": 1e-2, "decay_rate": 0.999, "method": "raw"}
-trn_ct = {"n_epochs": 200, "save_interval": 50, "load_checkpoint": False, "learning_rate": 1e-2, "decay_rate": 0.999, "sweep_lengths": [4], "chop_mode": "initial", "chop_step": 0.5}
-trn_dt = {"n_epochs": 400, "save_interval": 50, "load_checkpoint": False, "learning_rate": 1e-2, "decay_rate": 0.999}
+trn_ln = {
+    "n_epochs": 1,
+    "save_interval": 100,
+    "load_checkpoint": False,
+    "learning_rate": 1e-2,
+    "decay_rate": 0.999,
+    "method": "raw",
+}
+trn_ct = {
+    "n_epochs": 200,
+    "save_interval": 50,
+    "load_checkpoint": False,
+    "learning_rate": 1e-2,
+    "decay_rate": 0.999,
+    "sweep_lengths": [4],
+    "chop_mode": "initial",
+    "chop_step": 0.5,
+}
+trn_dt = {
+    "n_epochs": 400,
+    "save_interval": 50,
+    "load_checkpoint": False,
+    "learning_rate": 1e-2,
+    "decay_rate": 0.999,
+}
 
 
 def _optimizer_phase(trainer, cfg):
@@ -75,25 +104,63 @@ def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=Tru
     return phase
 
 
-def _alternating_schedule(trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None, reset_optimizer=True):
+def _alternating_schedule(
+    trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None, reset_optimizer=True
+):
     phases = []
     for n_epochs in chunk_epochs:
-        phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+        phases.append(
+            _linear_solve_phase(
+                method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer
+            )
+        )
         chunk_cfg = dict(base_cfg)
         chunk_cfg["n_epochs"] = n_epochs
         phases.append(_optimizer_phase(trainer, chunk_cfg))
-    phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+    phases.append(
+        _linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer)
+    )
     return phases
 
 
 config_path = "ker_model.yaml"
 cfgs = [
     ("km_ln", KM, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
-    ("km_nd", KM, StackedTrainer, {"model": mdl_kl, "phases": _alternating_schedule("NODE", trn_ct, [50, 50, 50, 50], method="raw", reset_optimizer=False)}),
+    (
+        "km_nd",
+        KM,
+        StackedTrainer,
+        {
+            "model": mdl_kl,
+            "phases": _alternating_schedule(
+                "NODE", trn_ct, [50, 50, 50, 50], method="raw", reset_optimizer=False
+            ),
+        },
+    ),
     ("dkm_ln", DKM, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
-    ("dkm_nd", DKM, StackedTrainer, {"model": mdl_kl, "phases": _alternating_schedule("NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False)}),
+    (
+        "dkm_nd",
+        DKM,
+        StackedTrainer,
+        {
+            "model": mdl_kl,
+            "phases": _alternating_schedule(
+                "NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False
+            ),
+        },
+    ),
     ("dks_ln", DKMSK, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
-    ("dks_nd", DKMSK, StackedTrainer, {"model": mdl_kl, "phases": _alternating_schedule("NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False)}),
+    (
+        "dks_nd",
+        DKMSK,
+        StackedTrainer,
+        {
+            "model": mdl_kl,
+            "phases": _alternating_schedule(
+                "NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False
+            ),
+        },
+    ),
 ]
 DEFAULT_CASES = [0, 1, 2, 3, 4, 5]
 
@@ -109,9 +176,17 @@ def set_seed(seed: int):
 def parse_args():
     parser = argparse.ArgumentParser(description="Run kernel LTI cases.")
     parser.add_argument("--case", nargs="+", type=int, help="Case indices to run.")
-    parser.add_argument("--list-cases", action="store_true", help="Print available case indices and exit.")
-    parser.add_argument("--data", action="store_true", help="Generate ./data/ker.npz before other actions.")
-    parser.add_argument("--workdir", type=Path, help="Run in a separate working directory and stage the needed files there.")
+    parser.add_argument(
+        "--list-cases", action="store_true", help="Print available case indices and exit."
+    )
+    parser.add_argument(
+        "--data", action="store_true", help="Generate ./data/ker.npz before other actions."
+    )
+    parser.add_argument(
+        "--workdir",
+        type=Path,
+        help="Run in a separate working directory and stage the needed files there.",
+    )
     parser.add_argument("--seed", type=int, help="Set random seeds for reproducible runs.")
     parser.add_argument("--no-train", action="store_true")
     parser.add_argument("--no-plot", action="store_true")
@@ -168,7 +243,14 @@ def predict(selected):
         with torch.no_grad():
             pred = prd_func(x_data, t_data, u=u_data)
         res.append(pred)
-    plot_trajectory(np.array(res), t_data, "LTI", us=u_data, labels=["Truth"] + [cfgs[i][0] for i in selected], ifclose=False)
+    plot_trajectory(
+        np.array(res),
+        t_data,
+        "LTI",
+        us=u_data,
+        labels=["Truth"] + [cfgs[i][0] for i in selected],
+        ifclose=False,
+    )
 
 
 def main():

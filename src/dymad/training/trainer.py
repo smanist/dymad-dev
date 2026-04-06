@@ -1,24 +1,27 @@
-from typing import Dict, Any, Type
 import copy
 import logging
+from typing import Any
+
 import torch
 
 from dymad.training.driver import SingleSplitDriver
 
 logger = logging.getLogger(__name__)
 
+
 class NODETrainer(SingleSplitDriver):
     """
     Simple interface for single-split single-stage training by NODE.
     """
+
     def __init__(
         self,
         config_path: str,
-        model_class: Type[torch.nn.Module],
-        config_mod: Dict[str, Any] | None = None,
+        model_class: type[torch.nn.Module],
+        config_mod: dict[str, Any] | None = None,
         device: torch.device | None = None,
         max_workers: int = 1,
-        ):
+    ):
         super().__init__(
             config_path=config_path,
             model_class=model_class,
@@ -39,14 +42,15 @@ class WeakFormTrainer(SingleSplitDriver):
     """
     Simple interface for single-split single-stage training by Weak Form.
     """
+
     def __init__(
         self,
         config_path: str,
-        model_class: Type[torch.nn.Module],
-        config_mod: Dict[str, Any] | None = None,
+        model_class: type[torch.nn.Module],
+        config_mod: dict[str, Any] | None = None,
         device: torch.device | None = None,
         max_workers: int = 1,
-        ):
+    ):
         super().__init__(
             config_path=config_path,
             model_class=model_class,
@@ -67,14 +71,15 @@ class LinearTrainer(SingleSplitDriver):
     """
     Simple interface for single-split single-stage training by Linear regression.
     """
+
     def __init__(
         self,
         config_path: str,
-        model_class: Type[torch.nn.Module],
-        config_mod: Dict[str, Any] | None = None,
+        model_class: type[torch.nn.Module],
+        config_mod: dict[str, Any] | None = None,
         device: torch.device | None = None,
         max_workers: int = 1,
-        ):
+    ):
         super().__init__(
             config_path=config_path,
             model_class=model_class,
@@ -95,14 +100,15 @@ class StackedTrainer(SingleSplitDriver):
     """
     Simple interface for single-split phased training.
     """
+
     def __init__(
         self,
         config_path: str,
-        model_class: Type[torch.nn.Module],
-        config_mod: Dict[str, Any] | None = None,
+        model_class: type[torch.nn.Module],
+        config_mod: dict[str, Any] | None = None,
         device: torch.device | None = None,
         max_workers: int = 1,
-        ):
+    ):
         super().__init__(
             config_path=config_path,
             model_class=model_class,

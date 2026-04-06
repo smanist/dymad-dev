@@ -1,7 +1,7 @@
 import argparse
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,13 +11,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.cli_helpers import add_common_cli_args, print_case_table, resolve_case_indices, set_seed, stage_workdir
+from scripts.cli_helpers import (
+    add_common_cli_args,
+    print_case_table,
+    resolve_case_indices,
+    set_seed,
+    stage_workdir,
+)
 
 from dymad.io import load_model
 from dymad.models import DLTI, DSDM, KBF, LDM
 from dymad.training import NODETrainer, WeakFormTrainer
 from dymad.utils import TrajectorySampler, plot_summary, plot_trajectory
-
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -31,7 +36,9 @@ def f(t, x, u):
     return (x @ A.T) + u
 
 
-g = lambda t, x, u: x
+def g(t, x, u):
+    return x
+
 
 config_chr = {
     "control": {
@@ -99,7 +106,7 @@ def plot(selected: list[int]):
     labels = [cases[idx]["name"] for idx in selected]
     npz_files = [f"ltd_{label}" for label in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
-    for label, npz in zip(labels, npzs):
+    for label, npz in zip(labels, npzs, strict=False):
         print(f"Epoch time: {label} - {npz['avg_epoch_time']}")
 
 

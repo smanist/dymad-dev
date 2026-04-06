@@ -91,7 +91,9 @@ def test_regular_checkpoint_prediction_uses_typed_series(monkeypatch, tmp_path: 
     assert prediction.shape == (3, 2)
 
 
-def test_regular_checkpoint_prediction_routes_through_model_context(monkeypatch, tmp_path: Path) -> None:
+def test_regular_checkpoint_prediction_routes_through_model_context(
+    monkeypatch, tmp_path: Path
+) -> None:
     checkpoint_path = tmp_path / "dummy.pt"
     checkpoint_path.write_text("placeholder", encoding="utf-8")
 
@@ -125,7 +127,9 @@ def test_regular_checkpoint_prediction_routes_through_model_context(monkeypatch,
     assert prediction.shape == (3, 2)
 
 
-def test_graph_checkpoint_prediction_routes_through_model_context(monkeypatch, tmp_path: Path) -> None:
+def test_graph_checkpoint_prediction_routes_through_model_context(
+    monkeypatch, tmp_path: Path
+) -> None:
     checkpoint_path = tmp_path / "dummy.pt"
     checkpoint_path.write_text("placeholder", encoding="utf-8")
 
@@ -161,20 +165,28 @@ def test_graph_checkpoint_prediction_routes_through_model_context(monkeypatch, t
     assert prediction.shape == (2, 4)
 
 
-def test_regular_slice_integration_touches_typed_transform_seam(monkeypatch, tmp_path: Path) -> None:
+def test_regular_slice_integration_touches_typed_transform_seam(
+    monkeypatch, tmp_path: Path
+) -> None:
     data_path = tmp_path / "regular_slice.npz"
-    t = np.stack([
-        np.linspace(0.0, 1.0, 6),
-        np.linspace(0.0, 1.0, 6),
-    ])
-    x = np.stack([
-        np.column_stack((np.linspace(0.0, 1.0, 6), np.linspace(1.0, 2.0, 6))),
-        np.column_stack((np.linspace(2.0, 3.0, 6), np.linspace(3.0, 4.0, 6))),
-    ])
-    u = np.stack([
-        np.linspace(0.0, 0.5, 6).reshape(-1, 1),
-        np.linspace(0.5, 1.0, 6).reshape(-1, 1),
-    ])
+    t = np.stack(
+        [
+            np.linspace(0.0, 1.0, 6),
+            np.linspace(0.0, 1.0, 6),
+        ]
+    )
+    x = np.stack(
+        [
+            np.column_stack((np.linspace(0.0, 1.0, 6), np.linspace(1.0, 2.0, 6))),
+            np.column_stack((np.linspace(2.0, 3.0, 6), np.linspace(3.0, 4.0, 6))),
+        ]
+    )
+    u = np.stack(
+        [
+            np.linspace(0.0, 0.5, 6).reshape(-1, 1),
+            np.linspace(0.5, 1.0, 6).reshape(-1, 1),
+        ]
+    )
     np.savez(data_path, t=t, x=x, u=u)
 
     checkpoint_path = tmp_path / "dummy.pt"
@@ -252,7 +264,9 @@ def test_checkpoint_prediction_uses_saved_ode_defaults(monkeypatch, tmp_path: Pa
     assert model.predict_calls[-1]["step_size"] == 0.05
 
 
-def test_checkpoint_prediction_explicit_kwargs_override_saved_defaults(monkeypatch, tmp_path: Path) -> None:
+def test_checkpoint_prediction_explicit_kwargs_override_saved_defaults(
+    monkeypatch, tmp_path: Path
+) -> None:
     checkpoint_path = tmp_path / "dummy.pt"
     checkpoint_path.write_text("placeholder", encoding="utf-8")
 
@@ -278,7 +292,9 @@ def test_checkpoint_prediction_explicit_kwargs_override_saved_defaults(monkeypat
     assert model.predict_calls[-1]["step_size"] == 0.1
 
 
-def test_checkpoint_prediction_aligns_full_time_for_delayed_runtime(monkeypatch, tmp_path: Path) -> None:
+def test_checkpoint_prediction_aligns_full_time_for_delayed_runtime(
+    monkeypatch, tmp_path: Path
+) -> None:
     checkpoint_path = tmp_path / "dummy.pt"
     checkpoint_path.write_text("placeholder", encoding="utf-8")
 
@@ -286,10 +302,12 @@ def test_checkpoint_prediction_aligns_full_time_for_delayed_runtime(monkeypatch,
 
     payload = _build_checkpoint_payload()
     delayed = make_transform({"type": "delay", "delay": 1})
-    delayed.fit([
-        np.array([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=float),
-        np.array([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=float),
-    ])
+    delayed.fit(
+        [
+            np.array([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=float),
+            np.array([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=float),
+        ]
+    )
     payload["config"]["transform_x"] = {"type": "delay", "delay": 1}
     payload["train_md"]["transform_x_state"] = delayed.state_dict()
 
@@ -310,7 +328,9 @@ def test_checkpoint_prediction_aligns_full_time_for_delayed_runtime(monkeypatch,
     )
 
 
-def test_graph_checkpoint_prediction_aligns_full_time_for_delayed_runtime(monkeypatch, tmp_path: Path) -> None:
+def test_graph_checkpoint_prediction_aligns_full_time_for_delayed_runtime(
+    monkeypatch, tmp_path: Path
+) -> None:
     checkpoint_path = tmp_path / "dummy.pt"
     checkpoint_path.write_text("placeholder", encoding="utf-8")
 
@@ -318,10 +338,12 @@ def test_graph_checkpoint_prediction_aligns_full_time_for_delayed_runtime(monkey
 
     payload = _build_checkpoint_payload()
     delayed = make_transform({"type": "delay", "delay": 1})
-    delayed.fit([
-        np.array([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=float),
-        np.array([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=float),
-    ])
+    delayed.fit(
+        [
+            np.array([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=float),
+            np.array([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=float),
+        ]
+    )
     payload["config"]["transform_x"] = {"type": "delay", "delay": 1}
     payload["train_md"]["transform_x_state"] = delayed.state_dict()
 

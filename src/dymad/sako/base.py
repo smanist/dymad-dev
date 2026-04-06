@@ -1,19 +1,26 @@
 import logging
+
 import numpy as np
 import torch
-from typing import Optional, Tuple, Type
 
 from dymad.exec.context import build_default_context
 from dymad.io import DataInterface
 from dymad.models.collections import DKBF, KBF
-from dymad.numerics import check_orthogonality, disc2cont, eig_low_rank, scaled_eig, truncate_sequence
-from dymad.sako.adapter import SpectralAnalysisAdapter, SpectralEigensystem
-from dymad.sako.plotting import SpectralPlottingAdapter, per_state_err
+from dymad.numerics import (
+    check_orthogonality,
+    disc2cont,
+    eig_low_rank,
+    scaled_eig,
+    truncate_sequence,
+)
+from dymad.sako.adapter import SpectralEigensystem
+from dymad.sako.plotting import SpectralPlottingAdapter
 from dymad.sako.snapshot import SpectralSnapshot, build_spectral_snapshot
 
 logger = logging.getLogger(__name__)
 
-def filter_spectrum(sako, eigs, order='full', remove_one=True):
+
+def filter_spectrum(sako, eigs, order="full", remove_one=True):
     """
     Apply SAKO to the identified eigenpairs to compute the corresponding residuals
     """
@@ -24,8 +31,8 @@ def filter_spectrum(sako, eigs, order='full', remove_one=True):
     _msk = np.argsort(res)
     res_full = res[_msk]
     wd_full = wd[_msk]
-    vl_full = vl[:,_msk]
-    vr_full = vr[:,_msk]
+    vl_full = vl[:, _msk]
+    vr_full = vr[:, _msk]
 
     # Truncated set
     idx = truncate_sequence(res_full, order)
@@ -34,40 +41,52 @@ def filter_spectrum(sako, eigs, order='full', remove_one=True):
         if _i not in jdx:
             jdx.append(_i)
             _w = wd_full[_i]
-            _j = np.argmin(np.abs(wd_full-_w.conj()))
+            _j = np.argmin(np.abs(wd_full - _w.conj()))
             if _j not in idx:
                 logger.info(f"Adding missing conjugate {_j}: {wd_full[_j]:5.4e}")
             if _j not in jdx:
                 jdx.append(_j)
     res = res_full[jdx]
     wd = wd_full[jdx]
-    vl = vl_full[:,jdx]
-    vr = vr_full[:,jdx]
+    vl = vl_full[:, jdx]
+    vr = vr_full[:, jdx]
 
     if remove_one:
-        _d = np.abs(wd-1.0)
+        _d = np.abs(wd - 1.0)
         if np.min(_d) < 1e-10:
             _i = np.argmin(_d)
-            logger.info(f"Removing eigenvalue {wd[_i]:5.4e} close to 1.0 with residual {res[_i]:3.1e}")
+            logger.info(
+                f"Removing eigenvalue {wd[_i]:5.4e} close to 1.0 with residual {res[_i]:3.1e}"
+            )
             _m = np.arange(len(wd)) != _i
             wd = wd[_m]
-            vl = vl[:,_m]
-            vr = vr[:,_m]
+            vl = vl[:, _m]
+            vr = vr[:, _m]
             res = res[_m]
 
     return (wd, vl, vr), (wd_full, vl_full, vr_full), (res, res_full)
+
 
 def encode_runtime_batch(model: torch.nn.Module, batch) -> np.ndarray:
     """Encode one trainer batch via typed-runtime payloads."""
     runtime = batch.runtime if hasattr(batch, "runtime") else batch
     return model.encoder(runtime).cpu().detach().numpy()
 
+
 class SAInterface(DataInterface):
     """
     Interface for spectral analysis of KBF and DKBF models.
     """
-    def __init__(self, model_class: Type[torch.nn.Module], checkpoint_path: str, device: Optional[torch.device] = None):
-        assert model_class in [KBF, DKBF], "Spectral Analysis is currently only implemented for KBF and DKBF."
+
+    def __init__(
+        self,
+        model_class: type[torch.nn.Module],
+        checkpoint_path: str,
+        device: torch.device | None = None,
+    ):
+        assert model_class in [KBF, DKBF], (
+            "Spectral Analysis is currently only implemented for KBF and DKBF."
+        )
         self._checkpoint_path = str(checkpoint_path)
 
         super().__init__(model_class=model_class, checkpoint_path=checkpoint_path, device=device)
@@ -106,12 +125,12 @@ class SAInterface(DataInterface):
             },
         )
 
-    def get_weights(self) -> Tuple[np.ndarray]:
+    def get_weights(self) -> tuple[np.ndarray]:
         """
         Get the linear weights of the dynamics model.
         """
         if self.model.processor_net.mode == "full":
-            return (self.model.processor_net.weight.data.cpu().numpy(), )
+            return (self.model.processor_net.weight.data.cpu().numpy(),)
         else:
             U = self.model.processor_net.U.data.cpu().numpy()
             V = self.model.processor_net.V.data.cpu().numpy()
@@ -121,6 +140,7 @@ class SAInterface(DataInterface):
     def snapshot(self) -> SpectralSnapshot:
         """Typed spectral snapshot extracted from checkpoint-backed model state."""
         return self._snapshot
+
 
 class SpectralAnalysis:
     """
@@ -134,9 +154,17 @@ class SpectralAnalysis:
     Args:
         dt: Time step size.
     """
-    def __init__(self,
-                 model_class: Type[torch.nn.Module], checkpoint_path: str,
-                 forder='full', dt: float = 1.0, reps: float = 1e-10, remove_one=True, etol: float = 1e-13):
+
+    def __init__(
+        self,
+        model_class: type[torch.nn.Module],
+        checkpoint_path: str,
+        forder="full",
+        dt: float = 1.0,
+        reps: float = 1e-10,
+        remove_one=True,
+        etol: float = 1e-13,
+    ):
         self._dt = dt
         self._reps = reps
         self._etol = etol
@@ -164,9 +192,9 @@ class SpectralAnalysis:
             return_obs: If return observables over time as well
         """
         _ts = tseries - tseries[0]
-        _p0 = np.atleast_2d(self._ctx.encode(x0))    # (n_batch, n_dim)
+        _p0 = np.atleast_2d(self._ctx.encode(x0))  # (n_batch, n_dim)
         # Project initial conditions
-        _b = self._proj.dot(_p0.T)                   # (n_modes, n_batch)
+        _b = self._proj.dot(_p0.T)  # (n_modes, n_batch)
         _ls = np.exp(self._wc.reshape(-1, 1) * _ts)  # (n_modes, n_steps)
         # Time evolution for each batch
         # vr (n_dim, n_modes)
@@ -178,7 +206,7 @@ class SpectralAnalysis:
             return _xt, _pt.squeeze()
         return _xt
 
-    def estimate_measure(self, fobs, order, eps, thetas = 101):
+    def estimate_measure(self, fobs, order, eps, thetas=101):
         """
         Estimate the measure of the observable along the unit circle.
         """
@@ -189,14 +217,14 @@ class SpectralAnalysis:
         Evaluate the eigenfunctions at given locations, possibly in embedded space
         """
         _P = self._ctx.encode(X, rng)
-        return _P.dot(self._vl[:,idx])
+        return _P.dot(self._vl[:, idx])
 
     def eval_eigfun_par(self, par, idx, func, rng=None):
         """
         Evaluate the eigenfunctions at given parametrization
         """
         _P = self._ctx.encode(func(par), rng)
-        return _P.dot(self._vl[:,idx])
+        return _P.dot(self._vl[:, idx])
 
     def eval_eigfunc_jac(self, ref=None, rng=None, **kwargs) -> np.ndarray:
         return self._adapter.eval_eigfunc_jac(ref=ref, rng=rng, **kwargs)
@@ -212,23 +240,23 @@ class SpectralAnalysis:
         """
         _wl, _vl, _vr = scaled_eig(J)
         _N = len(J)
-        assert len(_wl) <= len(self._wc)   # Insufficient Koopman dimensions
+        assert len(_wl) <= len(self._wc)  # Insufficient Koopman dimensions
         _idx = []
         _sgn = []
         _eps = 1e-6
         logger.info("Computing conjugacy map:")
         for _j, _w in enumerate(_wl):
             # Identify the principal eigenfunction
-            _d = np.abs(self._wc-_w)
+            _d = np.abs(self._wc - _w)
             _i = np.argmin(_d)
-            logger.info("EV: Jacobian {0:5.4e}, Koopman {1:5.4e}, diff {2:5.4e}".format(
-                _w, self._wc[_i], np.abs(_d[_i]/self._wc[_i])
-            ))
+            logger.info(
+                f"EV: Jacobian {_w:5.4e}, Koopman {self._wc[_i]:5.4e}, diff {np.abs(_d[_i] / self._wc[_i]):5.4e}"
+            )
             _idx.append(_i)
             # Check the sign by evaluating along w_i, and v_i^H w_i = +/- 1
-            _f1 = self.eval_eigfun(_eps*_vl[:,_j].reshape(1,-1), _i)
-            _f0 = self.eval_eigfun(np.zeros((1,_N)), _i)   # Supposed to be 0
-            _vw =  (_f1-_f0) / _eps
+            _f1 = self.eval_eigfun(_eps * _vl[:, _j].reshape(1, -1), _i)
+            _f0 = self.eval_eigfun(np.zeros((1, _N)), _i)  # Supposed to be 0
+            _vw = (_f1 - _f0) / _eps
             _sgn.append(np.sign(_vw.real))
         _sgn = np.array(_sgn).reshape(-1)
         logger.info(f"Flipping: {_sgn}")
@@ -237,13 +265,13 @@ class SpectralAnalysis:
         self.mapto_cnj = lambda X, I=_idx, W=_T: self.eval_eigfun(X, I).dot(W.T)
         self.mapto_nrm = lambda X, I=_idx, S=_sgn: self.eval_eigfun(X, I) * S
 
-    def filter_spectrum(self, order='full', remove_one=True):
+    def filter_spectrum(self, order="full", remove_one=True):
         """
         Apply SAKO to the identified eigenpairs to compute the corresponding residuals
         """
         eigs, eigs_full, res = filter_spectrum(
-            self._sako, (self._wd_full, self._vl_full, self._vr_full), order,
-            remove_one=remove_one)
+            self._sako, (self._wd_full, self._vl_full, self._vr_full), order, remove_one=remove_one
+        )
 
         self._wd, self._vl, self._vr = eigs
         self._wd_full, self._vl_full, self._vr_full = eigs_full
@@ -255,7 +283,7 @@ class SpectralAnalysis:
         self._proc_eigs()
         self._refresh_adapter()
 
-    def estimate_ps(self, grid=None, return_vec=False, mode='cont', method='standard'):
+    def estimate_ps(self, grid=None, return_vec=False, mode="cont", method="standard"):
         """
         Estimate pseudospectrum over a grid.
 
@@ -292,22 +320,28 @@ class SpectralAnalysis:
         # Dimensions
         self._Nrank = None
         # Raw eigensystem quantities
-        self._wd_full = np.array([])    # Eigenvalues (discrete)
-        self._wc_full = np.array([])    # Eigenvalues (continuous)
-        self._vl_full = np.array([])    # Left eigenvectors
-        self._vr_full = np.array([])    # Right eigenvectors
+        self._wd_full = np.array([])  # Eigenvalues (discrete)
+        self._wc_full = np.array([])  # Eigenvalues (continuous)
+        self._vl_full = np.array([])  # Left eigenvectors
+        self._vr_full = np.array([])  # Right eigenvectors
         # Retained eigensystem quantities
-        self._wd = np.array([])    # Eigenvalues (discrete)
-        self._vl = np.array([])    # Left eigenvectors
-        self._vr = np.array([])    # Right eigenvectors
+        self._wd = np.array([])  # Eigenvalues (discrete)
+        self._vl = np.array([])  # Left eigenvectors
+        self._vr = np.array([])  # Right eigenvectors
         # Residuals - not all DMD classes compute this
-        self._res_full = np.array([])   # All residuals
-        self._res      = np.array([])   # Retained residuals
+        self._res_full = np.array([])  # All residuals
+        self._res = np.array([])  # Retained residuals
         # Derived quantities
-        self._wc   = np.array([])  # Eigenvalues (continuous)
-        self._proj = np.array([])  # Projector onto vl; should be vr, but this is for numerical robustness
-        self.mapto_cnj = None      # Conjugate mapping for systems with equilibrium point, to original Jacobian
-        self.mapto_nrm = None      # Conjugate mapping for systems with equilibrium point, to orthogonal space
+        self._wc = np.array([])  # Eigenvalues (continuous)
+        self._proj = np.array(
+            []
+        )  # Projector onto vl; should be vr, but this is for numerical robustness
+        self.mapto_cnj = (
+            None  # Conjugate mapping for systems with equilibrium point, to original Jacobian
+        )
+        self.mapto_nrm = (
+            None  # Conjugate mapping for systems with equilibrium point, to orthogonal space
+        )
 
     def _solve_eigs(self):
         weights = self._ctx.get_weights()
@@ -339,7 +373,7 @@ class SpectralAnalysis:
         self._wc_full = disc2cont(self._wd_full, self._dt)
         self._wc = disc2cont(self._wd, self._dt)
         # self._proj = np.linalg.solve(self._vr.conj().T.dot(self._vr), self._vr.conj().T)
-        self._proj = self._vl.conj().T   # Mathemetically correct, but numerically inaccurate.
+        self._proj = self._vl.conj().T  # Mathemetically correct, but numerically inaccurate.
 
     def _refresh_adapter(self):
         eigensystem = SpectralEigensystem(
@@ -368,11 +402,24 @@ class SpectralAnalysis:
         self._sako = self._adapter.sako
         self._rals = self._adapter.rals
 
-    def plot_eigs(self, fig=None, plot_full='bo', plot_filt='r^', mode='disc'):
+    def plot_eigs(self, fig=None, plot_full="bo", plot_filt="r^", mode="disc"):
         """Plot the eigenvalues in the complex plane."""
-        return self._plotting.plot_eigs(fig=fig, plot_full=plot_full, plot_filt=plot_filt, mode=mode)
+        return self._plotting.plot_eigs(
+            fig=fig, plot_full=plot_full, plot_filt=plot_filt, mode=mode
+        )
 
-    def plot_pred(self, x0s, ts, ref=None, ifobs=False, idx='all', ncols=1, figsize=(6,8), title=None, fig=None):
+    def plot_pred(
+        self,
+        x0s,
+        ts,
+        ref=None,
+        ifobs=False,
+        idx="all",
+        ncols=1,
+        figsize=(6, 8),
+        title=None,
+        fig=None,
+    ):
         """Plot the predicted trajectories in data space or latent space."""
         return self._plotting.plot_pred(
             x0s=x0s,
@@ -386,7 +433,9 @@ class SpectralAnalysis:
             fig=fig,
         )
 
-    def plot_eigfun_2d(self, rngs, Ns, idx, mode='angle', space='full', ncols=2, figsize=(6,10), fig=None):
+    def plot_eigfun_2d(
+        self, rngs, Ns, idx, mode="angle", space="full", ncols=2, figsize=(6, 10), fig=None
+    ):
         """Plot the 2D eigenfunctions as contours."""
         return self._plotting.plot_eigfun_2d(
             rngs=rngs,
@@ -399,11 +448,21 @@ class SpectralAnalysis:
             fig=fig,
         )
 
-    def plot_eigjac_contour(self,
-                            ref=None, rng=None, eig='func',
-                            lam='ct', comp='ri', idx='all', shape=(),
-                            contour_args={}, **kwargs):
+    def plot_eigjac_contour(
+        self,
+        ref=None,
+        rng=None,
+        eig="func",
+        lam="ct",
+        comp="ri",
+        idx="all",
+        shape=(),
+        contour_args=None,
+        **kwargs,
+    ):
         """Plot contour maps for Jacobian eigfunction/eigmode components."""
+        if contour_args is None:
+            contour_args = {}
         return self._plotting.plot_eigjac_contour(
             ref=ref,
             rng=rng,
@@ -416,8 +475,10 @@ class SpectralAnalysis:
             **kwargs,
         )
 
-    def plot_vec_line(self, idx, which='func', modes=['angle'], ncols=1, figsize=(6,10)):
+    def plot_vec_line(self, idx, which="func", modes=None, ncols=1, figsize=(6, 10)):
         """Plot slices of eigenfunctions/eigenmodes as vectors."""
+        if modes is None:
+            modes = ["angle"]
         return self._plotting.plot_vec_line(
             idx=idx,
             which=which,

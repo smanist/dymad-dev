@@ -3,24 +3,36 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from dymad.core import GraphTrainerBatch, RaggedRegularSeriesBatch, RegularTrainerBatch, RegularSeries, RegularSeriesBatch
+from dymad.core import (
+    GraphTrainerBatch,
+    RaggedRegularSeriesBatch,
+    RegularSeries,
+    RegularSeriesBatch,
+    RegularTrainerBatch,
+)
 from dymad.io.trajectory_manager import TrajectoryManager, TrajectoryManagerGraph
 
 
 def test_regular_typed_dataloader_emits_regular_trainer_batch(tmp_path) -> None:
     data_path = tmp_path / "toy_regular_typed_loader.npz"
-    t = np.stack([
-        np.linspace(0.0, 1.0, 6),
-        np.linspace(0.0, 1.0, 6),
-    ])
-    x = np.stack([
-        np.column_stack((np.linspace(0.0, 1.0, 6), np.linspace(1.0, 2.0, 6))),
-        np.column_stack((np.linspace(2.0, 3.0, 6), np.linspace(3.0, 4.0, 6))),
-    ])
-    u = np.stack([
-        np.linspace(0.0, 0.5, 6).reshape(-1, 1),
-        np.linspace(0.5, 1.0, 6).reshape(-1, 1),
-    ])
+    t = np.stack(
+        [
+            np.linspace(0.0, 1.0, 6),
+            np.linspace(0.0, 1.0, 6),
+        ]
+    )
+    x = np.stack(
+        [
+            np.column_stack((np.linspace(0.0, 1.0, 6), np.linspace(1.0, 2.0, 6))),
+            np.column_stack((np.linspace(2.0, 3.0, 6), np.linspace(3.0, 4.0, 6))),
+        ]
+    )
+    u = np.stack(
+        [
+            np.linspace(0.0, 0.5, 6).reshape(-1, 1),
+            np.linspace(0.5, 1.0, 6).reshape(-1, 1),
+        ]
+    )
     np.savez(data_path, t=t, x=x, u=u)
 
     manager = TrajectoryManager(

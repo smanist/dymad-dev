@@ -1,11 +1,12 @@
 import logging
+
 import numpy as np
 import scipy.linalg as spl
-from typing import Tuple, Union
 
 from dymad.numerics import generate_coef, scaled_eig
 
 logger = logging.getLogger(__name__)
+
 
 def clip_eig(M, tol=1e-13):
     """
@@ -17,6 +18,7 @@ def clip_eig(M, tol=1e-13):
         logger.info(f"clip_eig: {np.sum(msk)} small eigenvalues found, max {np.max(-w[msk]):4.3e}")
         w[msk] = tol
     return v @ np.diag(w) @ v.conj().T
+
 
 class SAKO:
     """
@@ -37,12 +39,24 @@ class SAKO:
         reps (float): Threshold for the imaginary part of the residual, default is 1e-10
         etol (float): Tolerance for clipping small eigenvalues in the inner product matrices, default is 1e-13
     """
+
     def __init__(
-            self, P0: np.ndarray, P1: np.ndarray,
-            W: np.ndarray = None, reps: float = 1e-10, etol: float = 1e-13):
+        self,
+        P0: np.ndarray,
+        P1: np.ndarray,
+        W: np.ndarray = None,
+        reps: float = 1e-10,
+        etol: float = 1e-13,
+    ):
         self._P0 = P0
         self._P1 = P1
-        self._W  = np.array(W) if W is not None else np.ones(len(P0),)
+        self._W = (
+            np.array(W)
+            if W is not None
+            else np.ones(
+                len(P0),
+            )
+        )
         self._reps = reps
 
         # The inner product matrices
@@ -89,14 +103,16 @@ class SAKO:
             gs (np.ndarray): Array of right eigenvectors, column wise
         """
         _N = len(ls)
-        _r = np.zeros(_N,)
+        _r = np.zeros(
+            _N,
+        )
         for _i in range(_N):
-            _r[_i] = self._residual_r(gs[:,_i], self._residual_G(ls[_i]))
+            _r[_i] = self._residual_r(gs[:, _i], self._residual_G(ls[_i]))
         return _r
 
     def estimate_measure(
-            self, fobs: np.ndarray, order: int, eps: float,
-            thetas: Union[int, np.ndarray] = 101) -> Tuple[np.ndarray, np.ndarray]:
+        self, fobs: np.ndarray, order: int, eps: float, thetas: int | np.ndarray = 101
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Estimate the spectral measure associated with a given scalar observable using
         a kernel of rational function.
@@ -114,12 +130,12 @@ class SAKO:
         _N = len(_th)
 
         # Generalized Schur decomposition
-        _S, _T, _Q, _Z = spl.qz(self._M01, self._M00, output='complex')
+        _S, _T, _Q, _Z = spl.qz(self._M01, self._M00, output="complex")
 
         # Projection of observable
-        _b = (self._P0.conj().T).dot(self._W*fobs.reshape(-1))
+        _b = (self._P0.conj().T).dot(self._W * fobs.reshape(-1))
         ## Enforcing complex128 for compatibility with early version of Scipy
-        _a = spl.solve(np.array(self._M00, dtype=np.complex128), _b, assume_a='her')
+        _a = spl.solve(np.array(self._M00, dtype=np.complex128), _b, assume_a="her")
 
         # Working arrays
         _v1 = _T.dot(_Z.conj().T.dot(_a))
@@ -131,24 +147,26 @@ class SAKO:
 
         # Loop over theta
         _ex = np.exp(1j * _th)
-        _nu = np.zeros(_N,)
+        _nu = np.zeros(
+            _N,
+        )
         for _i in range(_N):
             for _j in range(order):
-                _l = _ex[_i] * (1+eps*_zs[_j])
-                _I = spl.solve_triangular(_S - _l*_T, _v1, lower=False)
+                _l = _ex[_i] * (1 + eps * _zs[_j])
+                _I = spl.solve_triangular(_S - _l * _T, _v1, lower=False)
                 _nu[_i] += np.real(
-                    _cs[_j] * _l.conj() * _I.conj().dot(_v2) + \
-                    _ds[_j] * _v3.conj().dot(_I))
-        return _th, _nu / (-2*np.pi)
+                    _cs[_j] * _l.conj() * _I.conj().dot(_v2) + _ds[_j] * _v3.conj().dot(_I)
+                )
+        return _th, _nu / (-2 * np.pi)
 
-    def _residual_G(self, l: Union[float, complex]) -> np.ndarray:
+    def _residual_G(self, l: float | complex) -> np.ndarray:
         """
         The core math device in SAKO - Part I
 
         Args:
             l (Union[float, complex]): Eigenvalue, or eigenvalue-like
         """
-        _G = self._M11 - l*self._M10 - np.conj(l)*self._M01 + np.abs(l)**2 * self._M00
+        _G = self._M11 - l * self._M10 - np.conj(l) * self._M01 + np.abs(l) ** 2 * self._M00
         # Enforce the hermitianity of the G matrix
         return 0.5 * (_G + _G.conj().T)
 
@@ -162,11 +180,15 @@ class SAKO:
         """
         _r = g.conj().T.dot(G).dot(g) / g.conj().T.dot(self._M00).dot(g)
         if np.abs(_r.imag) > self._reps:
-            logger.info(f"SAKO Warning: Imaginary part of residual {_r.imag:5.4e} exceeds " \
-                        f"threshold {self._reps:3.2e}; real part {_r.real:5.4e}")
+            logger.info(
+                f"SAKO Warning: Imaginary part of residual {_r.imag:5.4e} exceeds "
+                f"threshold {self._reps:3.2e}; real part {_r.real:5.4e}"
+            )
         return np.sqrt(np.abs(_r))
 
-    def _ps_point(self, z: Union[float, complex], return_vec: bool = False) -> Union[float, Tuple[float, np.ndarray]]:
+    def _ps_point(
+        self, z: float | complex, return_vec: bool = False
+    ) -> float | tuple[float, np.ndarray]:
         """
         Compute the resolvent norm at given complex point for pseudospectrum.
         The matrices involved are hermitian, so a GEP is solved instead of a
@@ -190,13 +212,13 @@ class SAKO:
         """
         _G = self._residual_G(z)
         if return_vec:
-            _e, _v = spl.eigh(_G, self._M00, subset_by_index=[0, 0], driver='gvx')
+            _e, _v = spl.eigh(_G, self._M00, subset_by_index=[0, 0], driver="gvx")
         else:
-            _e = spl.eigh(_G, self._M00, subset_by_index=[0, 0], driver='gvx', eigvals_only=True)
+            _e = spl.eigh(_G, self._M00, subset_by_index=[0, 0], driver="gvx", eigvals_only=True)
             _v = None
         if not _e >= 0:
             logger.info(f"SAKO Warning: Non-positive norm {_e[0]:4.3e} found for {z:4.3e}")
             _e = np.array([1e-16])
         if return_vec:
-            return 1/np.sqrt(_e), _v.reshape(-1)
-        return 1/np.sqrt(_e)
+            return 1 / np.sqrt(_e), _v.reshape(-1)
+        return 1 / np.sqrt(_e)

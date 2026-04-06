@@ -6,7 +6,7 @@ import random
 import time
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Type
+from typing import Any
 
 import numpy as np
 import torch
@@ -45,14 +45,14 @@ class PhaseSpecValidationError(ValueError):
 class BasePhaseSpec:
     name: str
     kind: str
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class OptimizerPhaseSpec(BasePhaseSpec):
     trainer: str = "NODE"
 
-    def __init__(self, name: str, trainer: str, config: Dict[str, Any]):
+    def __init__(self, name: str, trainer: str, config: dict[str, Any]):
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "kind", "optimizer")
         object.__setattr__(self, "trainer", trainer)
@@ -63,7 +63,7 @@ class OptimizerPhaseSpec(BasePhaseSpec):
 class LinearSolvePhaseSpec(BasePhaseSpec):
     method: str = "full"
     params: Any = None
-    kwargs: Dict[str, Any] = field(default_factory=dict)
+    kwargs: dict[str, Any] = field(default_factory=dict)
     reset_optimizer: bool = True
 
     def __init__(
@@ -72,9 +72,9 @@ class LinearSolvePhaseSpec(BasePhaseSpec):
         *,
         method: str,
         params: Any = None,
-        kwargs: Dict[str, Any] | None = None,
+        kwargs: dict[str, Any] | None = None,
         reset_optimizer: bool = True,
-        config: Dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
     ):
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "kind", "linear_solve")
@@ -89,7 +89,9 @@ class LinearSolvePhaseSpec(BasePhaseSpec):
 class DataPhaseSpec(BasePhaseSpec):
     operation: str = "context"
 
-    def __init__(self, name: str, *, operation: str = "context", config: Dict[str, Any] | None = None):
+    def __init__(
+        self, name: str, *, operation: str = "context", config: dict[str, Any] | None = None
+    ):
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "kind", "data")
         object.__setattr__(self, "operation", operation)
@@ -107,7 +109,7 @@ class AnalysisPhaseSpec(BasePhaseSpec):
         *,
         split: str = "valid",
         evaluate_all: bool = False,
-        config: Dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
     ):
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "kind", "analysis")
@@ -120,14 +122,16 @@ class AnalysisPhaseSpec(BasePhaseSpec):
 class ExportPhaseSpec(BasePhaseSpec):
     export_kind: str = "best_model"
 
-    def __init__(self, name: str, *, export_kind: str, config: Dict[str, Any] | None = None):
+    def __init__(self, name: str, *, export_kind: str, config: dict[str, Any] | None = None):
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "kind", "export")
         object.__setattr__(self, "export_kind", export_kind)
         object.__setattr__(self, "config", {} if config is None else config)
 
 
-PhaseSpec = OptimizerPhaseSpec | LinearSolvePhaseSpec | DataPhaseSpec | AnalysisPhaseSpec | ExportPhaseSpec
+PhaseSpec = (
+    OptimizerPhaseSpec | LinearSolvePhaseSpec | DataPhaseSpec | AnalysisPhaseSpec | ExportPhaseSpec
+)
 
 
 def _determine_chop_step(window: int, step: int | float) -> int:
@@ -147,7 +151,9 @@ def _normalize_legacy_optimizer_name(trainer: str) -> str:
     return trainer
 
 
-def _optimizer_spec_from_legacy(entry: Dict[str, Any], index: int, suffix: str = "") -> OptimizerPhaseSpec:
+def _optimizer_spec_from_legacy(
+    entry: dict[str, Any], index: int, suffix: str = ""
+) -> OptimizerPhaseSpec:
     cfg = copy.deepcopy(entry)
     trainer = _normalize_legacy_optimizer_name(cfg.pop("trainer"))
     name = cfg.get("name", f"phase_{index}")
@@ -163,7 +169,7 @@ def _raise_legacy_ls_update_error() -> None:
     )
 
 
-def _with_repeat_name(entry: Dict[str, Any], index: int, suffix: str) -> Dict[str, Any]:
+def _with_repeat_name(entry: dict[str, Any], index: int, suffix: str) -> dict[str, Any]:
     cloned = copy.deepcopy(entry)
     if "repeat" in cloned:
         repeat_cfg = copy.deepcopy(cloned["repeat"])
@@ -192,14 +198,18 @@ def _warn_if_repeat_contains_terminal_phase(spec: PhaseSpec, repeat_name: str) -
         )
 
 
-def _normalize_explicit_phase(entry: Dict[str, Any], index: int) -> PhaseSpec:
+def _normalize_explicit_phase(entry: dict[str, Any], index: int) -> PhaseSpec:
     phase_type = entry.get("type")
     if phase_type == "optimizer":
         trainer = _normalize_legacy_optimizer_name(entry["trainer"])
         return OptimizerPhaseSpec(
             name=entry.get("name", f"phase_{index}"),
             trainer=trainer,
-            config={k: copy.deepcopy(v) for k, v in entry.items() if k not in {"type", "name", "trainer"}},
+            config={
+                k: copy.deepcopy(v)
+                for k, v in entry.items()
+                if k not in {"type", "name", "trainer"}
+            },
         )
     if phase_type == "linear_solve":
         return LinearSolvePhaseSpec(
@@ -208,31 +218,47 @@ def _normalize_explicit_phase(entry: Dict[str, Any], index: int) -> PhaseSpec:
             params=entry.get("params"),
             kwargs=copy.deepcopy(entry.get("kwargs", {})),
             reset_optimizer=entry.get("reset_optimizer", True),
-            config={k: copy.deepcopy(v) for k, v in entry.items() if k not in {"type", "name", "method", "params", "kwargs", "reset_optimizer"}},
+            config={
+                k: copy.deepcopy(v)
+                for k, v in entry.items()
+                if k not in {"type", "name", "method", "params", "kwargs", "reset_optimizer"}
+            },
         )
     if phase_type == "data":
         return DataPhaseSpec(
             name=entry.get("name", f"phase_{index}"),
             operation=entry.get("operation", "context"),
-            config={k: copy.deepcopy(v) for k, v in entry.items() if k not in {"type", "name", "operation"}},
+            config={
+                k: copy.deepcopy(v)
+                for k, v in entry.items()
+                if k not in {"type", "name", "operation"}
+            },
         )
     if phase_type == "analysis":
         return AnalysisPhaseSpec(
             name=entry.get("name", f"phase_{index}"),
             split=entry.get("split", "valid"),
             evaluate_all=entry.get("evaluate_all", False),
-            config={k: copy.deepcopy(v) for k, v in entry.items() if k not in {"type", "name", "split", "evaluate_all"}},
+            config={
+                k: copy.deepcopy(v)
+                for k, v in entry.items()
+                if k not in {"type", "name", "split", "evaluate_all"}
+            },
         )
     if phase_type == "export":
         return ExportPhaseSpec(
             name=entry.get("name", f"phase_{index}"),
             export_kind=entry.get("export_kind", "best_model"),
-            config={k: copy.deepcopy(v) for k, v in entry.items() if k not in {"type", "name", "export_kind"}},
+            config={
+                k: copy.deepcopy(v)
+                for k, v in entry.items()
+                if k not in {"type", "name", "export_kind"}
+            },
         )
     raise PhaseSpecValidationError(f"Unsupported explicit phase type '{phase_type}'.")
 
 
-def _normalize_phase_entry(entry: Dict[str, Any], index: int) -> list[PhaseSpec]:
+def _normalize_phase_entry(entry: dict[str, Any], index: int) -> list[PhaseSpec]:
     if entry.get("ls_update") is not None:
         _raise_legacy_ls_update_error()
     if "repeat" in entry:
@@ -240,11 +266,13 @@ def _normalize_phase_entry(entry: Dict[str, Any], index: int) -> list[PhaseSpec]
     if "type" in entry:
         return [_normalize_explicit_phase(entry, index)]
     if "trainer" not in entry:
-        raise PhaseSpecValidationError(f"Phase entry {index} must define 'trainer', 'type', or 'repeat'.")
+        raise PhaseSpecValidationError(
+            f"Phase entry {index} must define 'trainer', 'type', or 'repeat'."
+        )
     return [_optimizer_spec_from_legacy(entry, index)]
 
 
-def _normalize_repeat_block(entry: Dict[str, Any], index: int) -> list[PhaseSpec]:
+def _normalize_repeat_block(entry: dict[str, Any], index: int) -> list[PhaseSpec]:
     if set(entry.keys()) != {"repeat"}:
         invalid = ", ".join(sorted(key for key in entry.keys() if key != "repeat"))
         raise PhaseSpecValidationError(
@@ -259,11 +287,15 @@ def _normalize_repeat_block(entry: Dict[str, Any], index: int) -> list[PhaseSpec
         raise PhaseSpecValidationError(f"Repeat phase entry {index} must define 'times'.")
     times = int(repeat_cfg["times"])
     if times <= 0:
-        raise PhaseSpecValidationError(f"Repeat phase entry {index} must define a positive 'times' value.")
+        raise PhaseSpecValidationError(
+            f"Repeat phase entry {index} must define a positive 'times' value."
+        )
 
     raw_phases = repeat_cfg.get("phases")
     if not isinstance(raw_phases, list) or not raw_phases:
-        raise PhaseSpecValidationError(f"Repeat phase entry {index} must define a non-empty 'phases' list.")
+        raise PhaseSpecValidationError(
+            f"Repeat phase entry {index} must define a non-empty 'phases' list."
+        )
 
     repeat_name = repeat_cfg.get("name", f"repeat_{index}")
     specs: list[PhaseSpec] = []
@@ -278,12 +310,14 @@ def _normalize_repeat_block(entry: Dict[str, Any], index: int) -> list[PhaseSpec
     return specs
 
 
-def normalize_phase_specs(config: Dict[str, Any]) -> list[PhaseSpec]:
+def normalize_phase_specs(config: dict[str, Any]) -> list[PhaseSpec]:
     raw_phases = copy.deepcopy(config.get("phases"))
     if raw_phases is None:
         legacy_training = copy.deepcopy(config.get("training"))
         if legacy_training is None:
-            raise PhaseSpecValidationError("Training config must contain 'phases' or a legacy 'training' block.")
+            raise PhaseSpecValidationError(
+                "Training config must contain 'phases' or a legacy 'training' block."
+            )
         legacy_training.setdefault("name", "phase_0")
         legacy_training.setdefault("trainer", "NODE")
         raw_phases = [legacy_training]
@@ -294,11 +328,7 @@ def normalize_phase_specs(config: Dict[str, Any]) -> list[PhaseSpec]:
 
     if not any(spec.kind == "analysis" for spec in specs):
         specs.append(AnalysisPhaseSpec(name="analysis"))
-    export_kinds = {
-        spec.export_kind
-        for spec in specs
-        if isinstance(spec, ExportPhaseSpec)
-    }
+    export_kinds = {spec.export_kind for spec in specs if isinstance(spec, ExportPhaseSpec)}
     if "best_model" not in export_kinds:
         specs.append(ExportPhaseSpec(name="export_best_model", export_kind="best_model"))
     if "run_checkpoint" not in export_kinds:
@@ -313,8 +343,8 @@ class BasePhase:
         self,
         *,
         spec: PhaseSpec,
-        config: Dict[str, Any],
-        model_class: Type,
+        config: dict[str, Any],
+        model_class: type,
         dtype: torch.dtype,
         execution_services: ExecutionServices,
     ):
@@ -380,12 +410,12 @@ class BasePhase:
         self,
         model_artifact: ModelArtifact,
         history: TrainingHistoryArtifact | None = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if history is not None and history.best_model_state_dict is not None:
             return copy.deepcopy(history.best_model_state_dict)
         return copy.deepcopy(model_artifact.model.state_dict())
 
-    def _prediction_settings(self) -> tuple[str, Dict[str, Any]]:
+    def _prediction_settings(self) -> tuple[str, dict[str, Any]]:
         phases = self.config.get("phases", [])
         for phase_cfg in phases:
             if not isinstance(phase_cfg, dict):
@@ -409,8 +439,8 @@ class BasePhase:
     def _inverse_transform_tensor(
         self,
         tensor: torch.Tensor,
-        transform_config: Dict[str, Any] | list[Dict[str, Any]] | None,
-        transform_state: Dict[str, Any] | None,
+        transform_config: dict[str, Any] | list[dict[str, Any]] | None,
+        transform_state: dict[str, Any] | None,
     ) -> np.ndarray:
         module = build_transform_module(transform_config, transform_state)
         restored = module.inverse_batch([tensor.detach().cpu()])[0]
@@ -424,7 +454,7 @@ class BasePhase:
         phase_context: PhaseContext,
         run_name: str,
         logger: logging.Logger,
-        state_dict: Dict[str, Any] | None = None,
+        state_dict: dict[str, Any] | None = None,
     ) -> str | None:
         if bool(getattr(model_artifact.model, "GRAPH", False)):
             logger.info("Skipping per-run prediction plot for graph model '%s'.", run_name)
@@ -437,7 +467,10 @@ class BasePhase:
 
         runtime = batch_to_runtime(sample)
         if getattr(runtime, "x", None) is None or getattr(runtime, "t", None) is None:
-            logger.info("Skipping per-run prediction plot for '%s': sample has no regular trajectory payload.", run_name)
+            logger.info(
+                "Skipping per-run prediction plot for '%s': sample has no regular trajectory payload.",
+                run_name,
+            )
             return None
 
         time_tensor = runtime.t[0] if runtime.t.ndim > 1 else runtime.t
@@ -514,9 +547,9 @@ class BasePhase:
         phase_context: PhaseContext,
         run_name: str,
         logger: logging.Logger,
-        hist_entries: list[Dict[str, list]],
+        hist_entries: list[dict[str, list]],
         crit_name: str | None,
-        state_dict: Dict[str, Any] | None = None,
+        state_dict: dict[str, Any] | None = None,
     ) -> None:
         plot_hist(
             copy.deepcopy(hist_entries),
@@ -538,7 +571,7 @@ class BasePhase:
     def _build_phase_record(
         self,
         trainer_state: TrainerState,
-        metrics: Dict[str, float],
+        metrics: dict[str, float],
         artifacts: ArtifactRegistry,
         *,
         started_epoch: int,
@@ -631,18 +664,18 @@ class BaseOptimizerPhase(BasePhase):
         return criteria, weights, names
 
     @staticmethod
-    def _aggregate_losses(loss_list: List[torch.Tensor], weights: List[float]) -> torch.Tensor:
+    def _aggregate_losses(loss_list: list[torch.Tensor], weights: list[float]) -> torch.Tensor:
         total: torch.Tensor | float = 0.0
-        for loss, weight in zip(loss_list, weights):
+        for loss, weight in zip(loss_list, weights, strict=False):
             total = total + loss * weight
         return total
 
     @staticmethod
-    def _average_loss_lists(loss_lists: List[List[torch.Tensor]]) -> List[torch.Tensor]:
+    def _average_loss_lists(loss_lists: list[list[torch.Tensor]]) -> list[torch.Tensor]:
         if not loss_lists:
             raise ValueError("loss_lists must not be empty")
         n_items = len(loss_lists)
-        return [sum(loss_terms) / n_items for loss_terms in zip(*loss_lists)]
+        return [sum(loss_terms) / n_items for loss_terms in zip(*loss_lists, strict=False)]
 
     def _additional_criteria_evaluation(
         self,
@@ -652,8 +685,8 @@ class BaseOptimizerPhase(BasePhase):
         predictions,
         batch: TrainerBatch | RuntimeBatch,
         ode_method: str,
-        ode_args: Dict[str, Any],
-    ) -> List[torch.Tensor]:
+        ode_args: dict[str, Any],
+    ) -> list[torch.Tensor]:
         loss_list: list[torch.Tensor] = []
         if len(optimizer_state.criteria_weights) < 2:
             return loss_list
@@ -665,7 +698,9 @@ class BaseOptimizerPhase(BasePhase):
 
         if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
             if x_hat is not None or predictions is not None:
-                raise ValueError("Ragged runtime collections require per-sample criteria evaluation.")
+                raise ValueError(
+                    "Ragged runtime collections require per-sample criteria evaluation."
+                )
             nested_losses = [
                 self._additional_criteria_evaluation(
                     model,
@@ -707,8 +742,8 @@ class BaseOptimizerPhase(BasePhase):
         optimizer_state: OptimizerStateArtifact,
         dataloader: DataLoader,
         ode_method: str,
-        ode_args: Dict[str, Any],
-    ) -> tuple[float, List[float]]:
+        ode_args: dict[str, Any],
+    ) -> tuple[float, list[float]]:
         model.eval()
         total = 0.0
         items = [0.0 for _ in optimizer_state.criteria_weights]
@@ -717,7 +752,7 @@ class BaseOptimizerPhase(BasePhase):
                 losses = self._compute_losses(model, optimizer_state, batch, ode_method, ode_args)
                 agg = self._aggregate_losses(losses, optimizer_state.criteria_weights)
                 total += agg.item()
-                items = [acc + value.item() for acc, value in zip(items, losses)]
+                items = [acc + value.item() for acc, value in zip(items, losses, strict=False)]
         return total / len(dataloader), [value / len(dataloader) for value in items]
 
     def _evaluate_prediction_criterion_single(
@@ -784,7 +819,7 @@ class BaseOptimizerPhase(BasePhase):
         model: torch.nn.Module,
         trainer_state: TrainerState,
         history: TrainingHistoryArtifact,
-        local_hist: Dict[str, list],
+        local_hist: dict[str, list],
     ) -> bool:
         if local_hist["valid_total"][-1] < trainer_state.best_loss["valid_total"]:
             trainer_state.best_loss = {key: value[-1] for key, value in local_hist.items() if value}
@@ -801,8 +836,8 @@ class BaseOptimizerPhase(BasePhase):
         optimizer_state: OptimizerStateArtifact,
         batch: TrainerBatch,
         ode_method: str,
-        ode_args: Dict[str, Any],
-    ) -> List[torch.Tensor]:
+        ode_args: dict[str, Any],
+    ) -> list[torch.Tensor]:
         raise NotImplementedError
 
     def _train_epoch(
@@ -811,9 +846,9 @@ class BaseOptimizerPhase(BasePhase):
         optimizer_state: OptimizerStateArtifact,
         phase_context: PhaseContext,
         ode_method: str,
-        ode_args: Dict[str, Any],
+        ode_args: dict[str, Any],
         phase_logger: logging.Logger,
-    ) -> tuple[float, List[float], bool]:
+    ) -> tuple[float, list[float], bool]:
         model.train()
         total = 0.0
         items = [0.0 for _ in optimizer_state.criteria_weights]
@@ -824,7 +859,7 @@ class BaseOptimizerPhase(BasePhase):
             agg.backward()
             optimizer_state.optimizer.step()
             total += agg.item()
-            items = [acc + value.item() for acc, value in zip(items, losses)]
+            items = [acc + value.item() for acc, value in zip(items, losses, strict=False)]
 
         avg_total = total / len(phase_context.train_loader)
         avg_items = [value / len(phase_context.train_loader) for value in items]
@@ -855,7 +890,9 @@ class BaseOptimizerPhase(BasePhase):
         model_artifact = self._ensure_model_artifact(phase_context, artifacts)
         history = self._ensure_history_artifact(artifacts)
         optimizer_state = self._build_optimizer_artifact(model_artifact.model, artifacts)
-        self._customize_optimizer_artifact(optimizer_state, model_artifact.model, phase_context, logger)
+        self._customize_optimizer_artifact(
+            optimizer_state, model_artifact.model, phase_context, logger
+        )
 
         n_epochs = int(self.spec.config.get("n_epochs", 1))
         save_interval = int(self.spec.config.get("save_interval", 10))
@@ -891,7 +928,9 @@ class BaseOptimizerPhase(BasePhase):
             trainer_state.converged = trainer_state.converged or converged
 
             local_hist["epoch"].append(trainer_state.epoch - 1)
-            for name, train_value, valid_value in zip(optimizer_state.criteria_names[:-1], train_items, valid_items):
+            for name, train_value, valid_value in zip(
+                optimizer_state.criteria_names[:-1], train_items, valid_items, strict=False
+            ):
                 local_hist[f"train_{name}"].append(train_value)
                 local_hist[f"valid_{name}"].append(valid_value)
             local_hist["train_total"].append(train_total)
@@ -916,7 +955,11 @@ class BaseOptimizerPhase(BasePhase):
                     current_lr,
                 )
 
-            if trainer_state.epoch % save_interval == 0 or trainer_state.converged or local_epoch == n_epochs - 1:
+            if (
+                trainer_state.epoch % save_interval == 0
+                or trainer_state.converged
+                or local_epoch == n_epochs - 1
+            ):
                 self._update_prediction_history(
                     model_artifact.model,
                     optimizer_state,
@@ -942,7 +985,9 @@ class BaseOptimizerPhase(BasePhase):
         artifacts.put("model", model_artifact)
         artifacts.put("optimizer_state", optimizer_state)
         metrics = copy.deepcopy(trainer_state.best_loss)
-        record = self._build_phase_record(trainer_state, metrics, artifacts, started_epoch=started_epoch)
+        record = self._build_phase_record(
+            trainer_state, metrics, artifacts, started_epoch=started_epoch
+        )
         trainer_state.phase_records.append(record)
         return PhaseResult(
             name=self.spec.name,
@@ -992,11 +1037,14 @@ class NodeOptimizerPhase(BaseOptimizerPhase):
         optimizer_state: OptimizerStateArtifact,
         batch: TrainerBatch,
         ode_method: str,
-        ode_args: Dict[str, Any],
-    ) -> List[torch.Tensor]:
+        ode_args: dict[str, Any],
+    ) -> list[torch.Tensor]:
         if hasattr(batch, "is_ragged") and batch.is_ragged:
             return self._average_loss_lists(
-                [self._compute_losses(model, optimizer_state, sample, ode_method, ode_args) for sample in batch.iter_single_batches()]
+                [
+                    self._compute_losses(model, optimizer_state, sample, ode_method, ode_args)
+                    for sample in batch.iter_single_batches()
+                ]
             )
 
         num_steps = optimizer_state.schedulers[1].get_length()
@@ -1065,11 +1113,14 @@ class WeakFormOptimizerPhase(BaseOptimizerPhase):
         optimizer_state: OptimizerStateArtifact,
         batch: TrainerBatch,
         ode_method: str,
-        ode_args: Dict[str, Any],
-    ) -> List[torch.Tensor]:
+        ode_args: dict[str, Any],
+    ) -> list[torch.Tensor]:
         if hasattr(batch, "is_ragged") and batch.is_ragged:
             return self._average_loss_lists(
-                [self._compute_losses(model, optimizer_state, sample, ode_method, ode_args) for sample in batch.iter_single_batches()]
+                [
+                    self._compute_losses(model, optimizer_state, sample, ode_method, ode_args)
+                    for sample in batch.iter_single_batches()
+                ]
             )
 
         runtime_batch = batch.to(self.device)
@@ -1116,11 +1167,14 @@ class LinearRegressionPhase(BaseOptimizerPhase):
         optimizer_state: OptimizerStateArtifact,
         batch: TrainerBatch,
         ode_method: str,
-        ode_args: Dict[str, Any],
-    ) -> List[torch.Tensor]:
+        ode_args: dict[str, Any],
+    ) -> list[torch.Tensor]:
         if hasattr(batch, "is_ragged") and batch.is_ragged:
             return self._average_loss_lists(
-                [self._compute_losses(model, optimizer_state, sample, ode_method, ode_args) for sample in batch.iter_single_batches()]
+                [
+                    self._compute_losses(model, optimizer_state, sample, ode_method, ode_args)
+                    for sample in batch.iter_single_batches()
+                ]
             )
         runtime_batch = batch.to(self.device)
         updater = optimizer_state._linear_updater
@@ -1153,9 +1207,9 @@ class LinearRegressionPhase(BaseOptimizerPhase):
         optimizer_state: OptimizerStateArtifact,
         phase_context: PhaseContext,
         ode_method: str,
-        ode_args: Dict[str, Any],
+        ode_args: dict[str, Any],
         phase_logger: logging.Logger,
-    ) -> tuple[float, List[float], bool]:
+    ) -> tuple[float, list[float], bool]:
         avg_loss, _ = optimizer_state._linear_updater.update(model, phase_context.train_loader)
         items = [float(avg_loss)] + [0.0] * (len(optimizer_state.criteria_weights) - 1)
         return float(avg_loss), items, False
@@ -1173,7 +1227,7 @@ class LinearSolvePhase(BasePhase):
     ) -> PhaseResult:
         started_epoch = trainer_state.epoch
         model_artifact = self._ensure_model_artifact(phase_context, artifacts)
-        history = self._ensure_history_artifact(artifacts)
+        self._ensure_history_artifact(artifacts)
         optimizer_state = artifacts.get("optimizer_state")
         updater = LSUpdater(
             method=self.spec.method,
@@ -1206,10 +1260,14 @@ class LinearSolvePhase(BasePhase):
             valid_total = 0.0
             with torch.no_grad():
                 for batch in phase_context.valid_loader:
-                    valid_total += updater.eval_batch(model_artifact.model, batch.to(self.device), optimizer_state.criteria[0]).item()
+                    valid_total += updater.eval_batch(
+                        model_artifact.model, batch.to(self.device), optimizer_state.criteria[0]
+                    ).item()
             valid_total /= len(phase_context.valid_loader)
             metrics["valid_total"] = valid_total
-        record = self._build_phase_record(trainer_state, metrics, artifacts, started_epoch=started_epoch)
+        record = self._build_phase_record(
+            trainer_state, metrics, artifacts, started_epoch=started_epoch
+        )
         trainer_state.phase_records.append(record)
         return PhaseResult(
             name=self.spec.name,
@@ -1232,8 +1290,13 @@ class ContextDataPhase(BasePhase):
         run_name: str,
         logger: logging.Logger,
     ) -> PhaseResult:
-        metrics = {"train_size": float(len(phase_context.train_set or [])), "valid_size": float(len(phase_context.valid_set or []))}
-        record = self._build_phase_record(trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch)
+        metrics = {
+            "train_size": float(len(phase_context.train_set or [])),
+            "valid_size": float(len(phase_context.valid_set or [])),
+        }
+        record = self._build_phase_record(
+            trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch
+        )
         trainer_state.phase_records.append(record)
         return PhaseResult(
             name=self.spec.name,
@@ -1292,7 +1355,9 @@ class ValidationAnalysisPhase(BasePhase):
         metrics = {metric_name: value}
         if not history.crit:
             history.crit.append([trainer_state.epoch, value, value])
-        record = self._build_phase_record(trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch)
+        record = self._build_phase_record(
+            trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch
+        )
         trainer_state.phase_records.append(record)
         return PhaseResult(
             name=self.spec.name,
@@ -1340,7 +1405,9 @@ class BestModelExportPhase(BasePhase):
         exports = self._ensure_export_artifact(artifacts)
         exports.outputs["best_model"] = output_path
         metrics = {"exports_written": float(len(exports.outputs))}
-        record = self._build_phase_record(trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch)
+        record = self._build_phase_record(
+            trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch
+        )
         trainer_state.phase_records.append(record)
         return PhaseResult(
             name=self.spec.name,
@@ -1373,7 +1440,9 @@ class RunCheckpointExportPhase(BasePhase):
         exports = self._ensure_export_artifact(artifacts)
         exports.outputs["run_checkpoint"] = output_path
         metrics = {"exports_written": float(len(exports.outputs))}
-        record = self._build_phase_record(trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch)
+        record = self._build_phase_record(
+            trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch
+        )
         trainer_state.phase_records.append(record)
         return PhaseResult(
             name=self.spec.name,
@@ -1403,7 +1472,9 @@ class SummaryExportPhase(BasePhase):
         if history.crit:
             tmp = np.array(history.crit).T
             crit_epoch, crits = tmp[0], tmp[1:]
-        local_hist = history.hist[-1] if history.hist else {"train_total": [np.nan], "valid_total": [np.nan]}
+        local_hist = (
+            history.hist[-1] if history.hist else {"train_total": [np.nan], "valid_total": [np.nan]}
+        )
         results = {
             "model_name": run_name,
             "total_training_time": float(sum(history.epoch_times)),
@@ -1429,7 +1500,9 @@ class SummaryExportPhase(BasePhase):
             ifclose=True,
             prefix=self.execution_services.checkpoint_prefix,
         )
-        exports.outputs["history_plot"] = self.execution_services.checkpoint_file(f"{run_name}_history.png")
+        exports.outputs["history_plot"] = self.execution_services.checkpoint_file(
+            f"{run_name}_history.png"
+        )
         prediction_path = self._export_prediction_plot(
             model_artifact=artifacts.require("model", ModelArtifact),
             history=history,
@@ -1440,7 +1513,9 @@ class SummaryExportPhase(BasePhase):
         if prediction_path is not None:
             exports.outputs["prediction_plot"] = prediction_path
         metrics = {"exports_written": float(len(exports.outputs))}
-        record = self._build_phase_record(trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch)
+        record = self._build_phase_record(
+            trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch
+        )
         trainer_state.phase_records.append(record)
         return PhaseResult(
             name=self.spec.name,
@@ -1456,8 +1531,8 @@ class SummaryExportPhase(BasePhase):
 def build_phase(
     spec: PhaseSpec,
     *,
-    config: Dict[str, Any],
-    model_class: Type,
+    config: dict[str, Any],
+    model_class: type,
     dtype: torch.dtype,
     execution_services: ExecutionServices,
 ) -> BasePhase:

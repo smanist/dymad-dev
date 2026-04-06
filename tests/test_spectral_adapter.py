@@ -125,8 +125,12 @@ def test_spectral_adapter_delegates_measure_and_jacobian_calls(monkeypatch):
     assert np.array_equal(captured["measure"]["gobs"], np.array([6.0, 7.0]))
     assert np.array_equal(captured["forward_ref"], np.zeros((1, snapshot.input_dim)))
     assert np.array_equal(captured["backward_ref"], np.zeros((1, snapshot.obs_dim)))
-    assert np.array_equal(eigfunc_jac, eigensystem.left_eigvecs.T.dot(np.array([[2.0, 0.0], [0.0, 1.0]])))
-    assert np.array_equal(eigmode_jac, eigensystem.right_eigvecs.T.dot(np.array([[1.0, 1.0], [0.0, 2.0]])))
+    assert np.array_equal(
+        eigfunc_jac, eigensystem.left_eigvecs.T.dot(np.array([[2.0, 0.0], [0.0, 1.0]]))
+    )
+    assert np.array_equal(
+        eigmode_jac, eigensystem.right_eigvecs.T.dot(np.array([[1.0, 1.0], [0.0, 2.0]]))
+    )
 
 
 def test_spectral_adapter_delegates_pseudospectrum_estimation(monkeypatch):

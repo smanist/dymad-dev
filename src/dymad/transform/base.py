@@ -1,21 +1,25 @@
-from abc import ABC, abstractmethod
 import logging
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 import torch
-from typing import Any, Callable, Dict, List, Optional, Union
 
 from dymad.numerics import complex_step, torch_jacobian, truncated_svd
-from dymad.transform.lift import poly_cross, poly_inverse, mixed_cross, mixed_inverse
+from dymad.transform.lift import mixed_cross, mixed_inverse, poly_cross, poly_inverse
 
-Array = List[np.ndarray]
+Array = list[np.ndarray]
 
 logger = logging.getLogger(__name__)
+
 
 class Transform(ABC):
     """
     Transform always assumes the input is list-like, where each element is a numpy array
     of shape (n_samples, n_features).
     """
+
     def __init__(self, **kwargs):  # Optional
         self.delay = 0  # Default delay is 0 for non-delay transforms.
         self._inp_dim = None
@@ -62,7 +66,7 @@ class Transform(ABC):
         """
         raise NotImplementedError("Transform must implement the inverse_transform method.")
 
-    def get_forward_modes(self, ref: Union[np.ndarray, None] = None, **kwargs) -> Array:
+    def get_forward_modes(self, ref: np.ndarray | None = None, **kwargs) -> Array:
         """
         Get the forward modes of the transform.
 
@@ -80,7 +84,7 @@ class Transform(ABC):
         """
         raise NotImplementedError("Transform must implement the get_forward_modes method.")
 
-    def get_backward_modes(self, ref: Union[np.ndarray, None] = None, **kwargs) -> Array:
+    def get_backward_modes(self, ref: np.ndarray | None = None, **kwargs) -> Array:
         """
         Get the backward modes of the transform.
 
@@ -108,8 +112,10 @@ class Transform(ABC):
         """Load the state of the transform from a dictionary."""
         pass
 
+
 class AddOne(Transform):
     """A class that adds one to the data."""
+
     def __str__(self):
         return "add_one"
 
@@ -143,13 +149,14 @@ class AddOne(Transform):
         return {
             "inp": self._inp_dim,
             "out": self._out_dim,
-            }
+        }
 
     def load_state_dict(self, d) -> None:
         """"""
         logger.info(f"AddOne: Loading parameters from checkpoint :{d}")
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
+
 
 class Autoencoder(Transform):
     """
@@ -164,19 +171,21 @@ class Autoencoder(Transform):
     """
 
     def __init__(self, model, encoder, decoder):
-        self.encoder  = encoder
-        self.decoder  = decoder
+        self.encoder = encoder
+        self.decoder = decoder
         self._inp_dim = model.n_total_state_features
         self._out_dim = model.latent_dimension
-        self.dtype    = model.dtype
-        self.device   = model.device
+        self.dtype = model.dtype
+        self.device = model.device
 
     def __str__(self):
         return "autoencoder"
 
     def fit(self, X: Array) -> None:
         """"""
-        raise NotImplementedError("Autoencoder does not implement fit. Load a pre-trained model instead.")
+        raise NotImplementedError(
+            "Autoencoder does not implement fit. Load a pre-trained model instead."
+        )
 
     def transform(self, X: Array) -> Array:
         """"""
@@ -210,8 +219,10 @@ class Autoencoder(Transform):
         """"""
         raise NotImplementedError("Autoencoder does not implement load_state_dict.")
 
+
 class Identity(Transform):
     """A class that performs no transformation on the data."""
+
     def __str__(self):
         return "identity"
 
@@ -241,13 +252,14 @@ class Identity(Transform):
         return {
             "inp": self._inp_dim,
             "out": self._out_dim,
-            }
+        }
 
     def load_state_dict(self, d) -> None:
         """"""
         logger.info(f"Identity: Loading parameters from checkpoint :{d}")
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
+
 
 class Scaler(Transform):
     """
@@ -262,7 +274,7 @@ class Scaler(Transform):
         off (Optional[float]): Offset value for inference datasets (if provided).
     """
 
-    def __init__(self, mode: str = "01", scl: Optional[float] = None, off: Optional[float] = None):
+    def __init__(self, mode: str = "01", scl: float | None = None, off: float | None = None):
         self._mode = mode.lower()
         self._off = off
         self._scl = scl
@@ -325,30 +337,32 @@ class Scaler(Transform):
         """"""
         return {
             "mode": self._mode,
-            "off":  self._off,
-            "scl":  self._scl,
+            "off": self._off,
+            "scl": self._scl,
             "inp": self._inp_dim,
             "out": self._out_dim,
-            }
+        }
 
     def load_state_dict(self, d) -> None:
         """"""
         logger.info(f"Scaler: Loading parameters from checkpoint :{d}")
         self._mode = d["mode"].lower()
-        self._off  = d["off"]
-        self._scl  = d["scl"]
+        self._off = d["off"]
+        self._scl = d["scl"]
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
+
 
 class Lift(Transform):
     """
     Lifting into higher-dimensional space by hand-crafted features
     """
-    def __init__(self, fobs: Union[str, Callable] = None, finv: Union[str, Callable, None] = None, **kwargs):
-        if fobs == 'poly':
+
+    def __init__(self, fobs: str | Callable = None, finv: str | Callable | None = None, **kwargs):
+        if fobs == "poly":
             self._fobs = poly_cross
             self._finv = poly_inverse
-        elif fobs == 'mixed':
+        elif fobs == "mixed":
             self._fobs = mixed_cross
             self._finv = mixed_inverse
         elif callable(fobs):
@@ -382,7 +396,7 @@ class Lift(Transform):
         tmp = []
         for _X in X:
             _x_shape = _X.shape[:-1]
-            _Z = self._fobs(_X.reshape(-1,self._inp_dim), **self._fargs)
+            _Z = self._fobs(_X.reshape(-1, self._inp_dim), **self._fargs)
             tmp.append(_Z.reshape(*_x_shape, -1))
         return tmp
 
@@ -390,7 +404,7 @@ class Lift(Transform):
         tmp = []
         for _X in X:
             _x_shape = _X.shape[:-1]
-            _Z = self._finv(_X.reshape(-1,self._out_dim), **self._fargs)
+            _Z = self._finv(_X.reshape(-1, self._out_dim), **self._fargs)
             tmp.append(_Z.reshape(*_x_shape, -1))
         return tmp
 
@@ -400,19 +414,25 @@ class Lift(Transform):
     def get_forward_modes(self, ref=None, **kwargs) -> np.ndarray:
         """"""
         assert ref is not None, "Lift requires a reference point to compute modes."
-        func = lambda x: self._fobs(x.reshape(1,-1), **self._fargs).reshape(-1)
+
+        def func(x):
+            return self._fobs(x.reshape(1, -1), **self._fargs).reshape(-1)
+
         return complex_step(func, ref)
 
     def get_backward_modes(self, ref=None, **kwargs) -> np.ndarray:
         """"""
         if self._C is None:
             assert ref is not None, "Lift with finv requires a reference point to compute modes."
-            func = lambda x: self._finv(x.reshape(1,-1), **self._fargs).reshape(-1)
+
+            def func(x):
+                return self._finv(x.reshape(1, -1), **self._fargs).reshape(-1)
+
             return complex_step(func, ref).T
         else:
             return self._C
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """"""
         return {
             "inp": self._inp_dim,
@@ -423,12 +443,13 @@ class Lift(Transform):
             "fargs": self._fargs,
         }
 
-    def load_state_dict(self, d: Dict[str, Any]) -> None:
+    def load_state_dict(self, d: dict[str, Any]) -> None:
         """"""
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
         self._C = d["C"]
         self.__init__(d["fobs"], d["finv"], **d["fargs"])
+
 
 class DelayEmbedder(Transform):
     """
@@ -444,7 +465,7 @@ class DelayEmbedder(Transform):
             [ X[t], X[t+1], X[t+2] ]
 
       - The output will have shape:
-      
+
             (seq_length - delay, features * (delay + 1)).
 
     When applied to a batch of sequences with shape (num_sequences, seq_length, features),
@@ -488,10 +509,12 @@ class DelayEmbedder(Transform):
         M = seq_length - self.delay
 
         # Create concatenated sub-sequences for each shift in [0 .. delay].
-        embedded = np.hstack([
-            sequence[j: M + j]  # Each slice has shape (M, features)
-            for j in range(self.delay + 1)
-        ])
+        embedded = np.hstack(
+            [
+                sequence[j : M + j]  # Each slice has shape (M, features)
+                for j in range(self.delay + 1)
+            ]
+        )
         # The resulting shape is (M, features * (delay + 1)).
 
         return embedded
@@ -515,8 +538,9 @@ class DelayEmbedder(Transform):
             np.ndarray: The original sequence of shape (seq_length, features).
         """
         arr = [
-            sequence[:, :self._inp_dim],
-            sequence[-1, self._inp_dim:].reshape(self.delay, self._inp_dim)]
+            sequence[:, : self._inp_dim],
+            sequence[-1, self._inp_dim :].reshape(self.delay, self._inp_dim),
+        ]
         return np.vstack(arr)
 
     def transform(self, X: Array) -> Array:
@@ -538,7 +562,7 @@ class DelayEmbedder(Transform):
 
     def inverse_transform(self, X: Array) -> Array:
         """"""
-        logger.info(f"DelayEmbedder: Unrolling the data.")
+        logger.info("DelayEmbedder: Unrolling the data.")
         unrolled_sequences = []
         for sequence in X:
             unrolled_sequences.append(self._unroll(sequence))
@@ -556,16 +580,17 @@ class DelayEmbedder(Transform):
         """"""
         return {
             "delay": self.delay,
-            "inp":   self._inp_dim,
-            "out":   self._out_dim,
-            }
+            "inp": self._inp_dim,
+            "out": self._out_dim,
+        }
 
     def load_state_dict(self, d) -> None:
         """"""
         logger.info(f"DelayEmbedder: Loading parameters from checkpoint :{d}")
-        self.delay    = d["delay"]
+        self.delay = d["delay"]
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
+
 
 class SVD(Transform):
     """
@@ -576,7 +601,7 @@ class SVD(Transform):
         ifcen (bool): If center the data.
     """
 
-    def __init__(self, order: Union[int, float] = 1.0, ifcen: bool = False):
+    def __init__(self, order: int | float = 1.0, ifcen: bool = False):
         self._order = order
         self._ifcen = ifcen
 
@@ -585,14 +610,16 @@ class SVD(Transform):
 
     def fit(self, X: Array) -> None:
         """"""
-        X_combined    = np.vstack(X)
+        X_combined = np.vstack(X)
         self._inp_dim = X_combined.shape[-1]
 
         if self._ifcen:
             self._off = np.mean(X_combined, axis=0)
             X_combined -= self._off
         else:
-            self._off = np.zeros(self._inp_dim,)
+            self._off = np.zeros(
+                self._inp_dim,
+            )
         _, _, _V = truncated_svd(X_combined, self._order)
         self._P = _V.conj()
 
@@ -605,7 +632,7 @@ class SVD(Transform):
         if self._P is None:
             raise ValueError("SVD parameters are not initialized. Call `fit` first.")
 
-        return [(trajectory-self._off).dot(self._P) for trajectory in X]
+        return [(trajectory - self._off).dot(self._P) for trajectory in X]
 
     def inverse_transform(self, X: Array) -> Array:
         """"""
@@ -630,13 +657,13 @@ class SVD(Transform):
     def state_dict(self) -> dict[str, Any]:
         """"""
         return {
-            "order":  self._order,
-            "ifcen":  self._ifcen,
-            "inp":    self._inp_dim,
-            "out":    self._out_dim,
-            "P":      self._P,
-            "off":    self._off
-            }
+            "order": self._order,
+            "ifcen": self._ifcen,
+            "inp": self._inp_dim,
+            "out": self._out_dim,
+            "P": self._P,
+            "off": self._off,
+        }
 
     def load_state_dict(self, d) -> None:
         """"""
@@ -645,5 +672,5 @@ class SVD(Transform):
         self._ifcen = d["ifcen"]
         self._inp_dim = d["inp"]
         self._out_dim = d["out"]
-        self._P     = d["P"]
-        self._off   = d["off"]
+        self._P = d["P"]
+        self._off = d["off"]

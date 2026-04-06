@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypeAlias
 
 import torch
 
@@ -18,7 +17,7 @@ class ComponentInputView:
     runtime: TypedRuntime | TypedRuntimeStep
 
     @classmethod
-    def build(cls, payload: ComponentInputPayload) -> "ComponentInputView":
+    def build(cls, payload: ComponentInputPayload) -> ComponentInputView:
         if isinstance(payload, ComponentInputView):
             return payload
         if isinstance(payload, RegularModelContext):
@@ -72,4 +71,6 @@ def build_component_input_view(payload: ComponentInputPayload) -> ComponentInput
     return ComponentInputView.build(payload)
 
 
-ComponentInputPayload: TypeAlias = TypedRuntime | TypedRuntimeStep | RegularModelContext | GraphModelContext | ComponentInputView
+type ComponentInputPayload = (
+    TypedRuntime | TypedRuntimeStep | RegularModelContext | GraphModelContext | ComponentInputView
+)

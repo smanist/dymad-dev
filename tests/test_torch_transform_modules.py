@@ -50,7 +50,7 @@ def test_torch_compose_transform_matches_legacy_regular_payloads() -> None:
     torch_out = transform.transform_batch(_as_torch_batch(payloads))
 
     assert transform.delay == 1
-    for source, expected, actual in zip(payloads, legacy_out, torch_out):
+    for source, expected, actual in zip(payloads, legacy_out, torch_out, strict=False):
         torch.testing.assert_close(actual, torch.as_tensor(expected, dtype=actual.dtype))
         recovered = transform.inverse(actual)
         torch.testing.assert_close(

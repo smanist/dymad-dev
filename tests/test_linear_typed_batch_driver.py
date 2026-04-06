@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import torch
 
 from dymad.core import GraphSeries, GraphTrainerBatch, RegularSeries, RegularTrainerBatch
 from dymad.io.trajectory_manager import TrajectoryManager, TrajectoryManagerGraph
@@ -12,18 +11,24 @@ def test_build_data_state_uses_regular_typed_batches_for_linear_only(tmp_path) -
     import numpy as np
 
     data_path = tmp_path / "toy_regular_linear_driver.npz"
-    t = np.stack([
-        np.linspace(0.0, 1.0, 6),
-        np.linspace(0.0, 1.0, 6),
-    ])
-    x = np.stack([
-        np.column_stack((np.linspace(0.0, 1.0, 6), np.linspace(1.0, 2.0, 6))),
-        np.column_stack((np.linspace(2.0, 3.0, 6), np.linspace(3.0, 4.0, 6))),
-    ])
-    u = np.stack([
-        np.linspace(0.0, 0.5, 6).reshape(-1, 1),
-        np.linspace(0.5, 1.0, 6).reshape(-1, 1),
-    ])
+    t = np.stack(
+        [
+            np.linspace(0.0, 1.0, 6),
+            np.linspace(0.0, 1.0, 6),
+        ]
+    )
+    x = np.stack(
+        [
+            np.column_stack((np.linspace(0.0, 1.0, 6), np.linspace(1.0, 2.0, 6))),
+            np.column_stack((np.linspace(2.0, 3.0, 6), np.linspace(3.0, 4.0, 6))),
+        ]
+    )
+    u = np.stack(
+        [
+            np.linspace(0.0, 0.5, 6).reshape(-1, 1),
+            np.linspace(0.5, 1.0, 6).reshape(-1, 1),
+        ]
+    )
     np.savez(data_path, t=t, x=x, u=u)
 
     cfg = {

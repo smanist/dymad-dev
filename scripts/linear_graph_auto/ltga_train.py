@@ -3,36 +3,37 @@ import numpy as np
 import torch
 
 from dymad.io import load_model
-from dymad.models import GLDM, GKBF
-from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
-from dymad.utils import adj_to_edge, plot_summary, plot_trajectory, TrajectorySampler
+from dymad.models import GKBF, GLDM
+from dymad.training import LinearTrainer, NODETrainer, WeakFormTrainer
+from dymad.utils import TrajectorySampler, adj_to_edge, plot_summary, plot_trajectory
 
 B = 128
 N = 501
 t_grid = np.linspace(0, 5, N)
 
-A = np.array([
-            [0., 1.],
-            [-1., -0.1]])
-def f(t, x):
-    return (x @ A.T)
-g = lambda t, x: x
+A = np.array([[0.0, 1.0], [-1.0, -0.1]])
 
-adj = np.array([
-    [0, 1, 1],
-    [1, 0, 1],
-    [1, 1, 0]
-])
+
+def f(t, x):
+    return x @ A.T
+
+
+def g(t, x):
+    return x
+
+
+adj = np.array([[0, 1, 1], [1, 0, 1], [1, 1, 0]])
 
 mdl_kb = {
-    "name" : 'ltga_model',
-    "encoder_layers" : 1,
-    "decoder_layers" : 1,
-    "hidden_dimension" : 32,
-    "koopman_dimension" : 4,
-    "activation" : "none",
-    "gcl" : "sage",
-    "weight_init" : "xavier_uniform"}
+    "name": "ltga_model",
+    "encoder_layers": 1,
+    "decoder_layers": 1,
+    "hidden_dimension": 32,
+    "koopman_dimension": 4,
+    "activation": "none",
+    "gcl": "sage",
+    "weight_init": "xavier_uniform",
+}
 mdl_ld = {
     "name": "ltga_model",
     "encoder_layers": 1,
@@ -40,18 +41,20 @@ mdl_ld = {
     "decoder_layers": 1,
     "hidden_dimension": 32,
     "activation": "none",
-    "gcl" : "sage",
-    "weight_init": "xavier_uniform"}
+    "gcl": "sage",
+    "weight_init": "xavier_uniform",
+}
 mdl_kl = {
-    "name" : 'ltga_model',
-    "encoder_layers" : 1,
-    "decoder_layers" : 1,
-    "hidden_dimension" : 32,
-    "koopman_dimension" : 4,
-    "activation" : "none",
-    "autoencoder_type" : "cat",
-    "gcl" : "sage",
-    "weight_init" : "xavier_uniform"}
+    "name": "ltga_model",
+    "encoder_layers": 1,
+    "decoder_layers": 1,
+    "hidden_dimension": 32,
+    "koopman_dimension": 4,
+    "activation": "none",
+    "autoencoder_type": "cat",
+    "gcl": "sage",
+    "weight_init": "xavier_uniform",
+}
 
 trn_wf = {
     "n_epochs": 500,
@@ -59,11 +62,8 @@ trn_wf = {
     "load_checkpoint": False,
     "learning_rate": 1e-2,
     "decay_rate": 0.999,
-    "weak_form_params": {
-        "N": 13,
-        "dN": 2,
-        "ordpol": 2,
-        "ordint": 2}}
+    "weak_form_params": {"N": 13, "dN": 2, "ordpol": 2, "ordint": 2},
+}
 trn_nd = {
     "n_epochs": 500,
     "save_interval": 10,
@@ -73,9 +73,8 @@ trn_nd = {
     "sweep_lengths": [2, 5, 10, 50, 100],
     "sweep_epoch_step": 100,
     "ode_method": "dopri5",
-    "ode_args": {
-        "rtol": 1e-7,
-        "atol": 1e-9}}
+    "ode_args": {"rtol": 1e-7, "atol": 1e-9},
+}
 trn_ln = {
     "n_epochs": 1,
     "save_interval": 1,
@@ -85,15 +84,15 @@ trn_ln = {
     "method": "truncated",
     "params": 2,
 }
-config_path = 'ltga_model.yaml'
+config_path = "ltga_model.yaml"
 
 cfgs = [
-    ('ldm_wf',   GLDM, WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
-    ('ldm_node', GLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
-    ('kbf_wf',   GKBF, WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
-    ('kbf_node', GKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
-    ('kbf_ln',   GKBF, LinearTrainer,   {"model": mdl_kl, "training" : trn_ln}),
-    ]
+    ("ldm_wf", GLDM, WeakFormTrainer, {"model": mdl_ld, "training": trn_wf}),
+    ("ldm_node", GLDM, NODETrainer, {"model": mdl_ld, "training": trn_nd}),
+    ("kbf_wf", GKBF, WeakFormTrainer, {"model": mdl_kb, "training": trn_wf}),
+    ("kbf_node", GKBF, NODETrainer, {"model": mdl_kb, "training": trn_nd}),
+    ("kbf_ln", GKBF, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
+]
 
 # IDX = [0, 1]
 IDX = [0, 1, 2, 3, 4]
@@ -105,13 +104,10 @@ ifplt = 1
 ifprd = 1
 
 if ifdat:
-    sampler = TrajectorySampler(f, g, config='ltga_data.yaml')
+    sampler = TrajectorySampler(f, g, config="ltga_data.yaml")
     ts, xs, ys = sampler.sample(t_grid, batch=B)
     # Pretending a 3-node graph
-    np.savez_compressed(
-        './data/ltga.npz',
-        t=ts, x=np.concatenate([ys, ys, ys], axis=-1),
-        adj=adj)
+    np.savez_compressed("./data/ltga.npz", t=ts, x=np.concatenate([ys, ys, ys], axis=-1), adj=adj)
 
 if iftrn:
     for i in IDX:
@@ -121,14 +117,14 @@ if iftrn:
         trainer.train()
 
 if ifplt:
-    npz_files = [f'ltga_{l}' for l in labels]
+    npz_files = [f"ltga_{l}" for l in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
 
-    for lbl, npz in zip(labels, npzs):
+    for lbl, npz in zip(labels, npzs, strict=False):
         print(f"Epoch time {lbl}: {npz['avg_epoch_time']}")
 
 if ifprd:
-    sampler = TrajectorySampler(f, config='ltga_data.yaml')
+    sampler = TrajectorySampler(f, config="ltga_data.yaml")
     ts, xs, ys = sampler.sample(t_grid, batch=1)
     x_data = np.concatenate([xs[0], xs[0], xs[0]], axis=-1)
     t_data = ts[0]
@@ -138,13 +134,11 @@ if ifprd:
     for i in IDX:
         mdl, MDL, Trainer, opt = cfgs[i]
         opt["model"]["name"] = f"ltga_{mdl}"
-        _, prd_func = load_model(MDL, f'ltga_{mdl}.pt')
+        _, prd_func = load_model(MDL, f"ltga_{mdl}.pt")
         with torch.no_grad():
             pred = prd_func(x_data, t_data, ei=edge_index)
         res.append(pred)
 
-    plot_trajectory(
-        np.array(res), t_data, "LTGA",
-        labels=['Truth'] + labels, ifclose=False)
+    plot_trajectory(np.array(res), t_data, "LTGA", labels=["Truth"] + labels, ifclose=False)
 
 plt.show()

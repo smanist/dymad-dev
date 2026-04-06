@@ -1,14 +1,20 @@
 import logging
+from collections.abc import Callable
+
 import numpy as np
 import scipy.linalg as spl
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 
+
 def resolvent_analysis(
-        z: np.ndarray, return_vec: bool = False,
-        A: np.ndarray = None, B: np.ndarray = None, U: np.ndarray = None,
-        ord: int = 1):
+    z: np.ndarray,
+    return_vec: bool = False,
+    A: np.ndarray = None,
+    B: np.ndarray = None,
+    U: np.ndarray = None,
+    ord: int = 1,
+):
     """
     Standalone, naive implementation of resolvent analysis, mainly for
     sanity check and suitable for small-scale problems.
@@ -25,21 +31,30 @@ def resolvent_analysis(
     """
     if U is None:
         # No constraints on input/output space
-        _N  = len(A)
+        _N = len(A)
         if B is None:
             _B = np.eye(_N)
         else:
             _B = np.array(B)
-        _zI = np.diag(z*np.ones(_N,))
-        _H = np.linalg.solve(_zI-A, _B)
+        _zI = np.diag(
+            z
+            * np.ones(
+                _N,
+            )
+        )
+        _H = np.linalg.solve(_zI - A, _B)
         _U, _s, _Vh = np.linalg.svd(_H)
         _V = _Vh.conj().T
     else:
         # Constraints on both input & output spaces
         _Q, _R = np.linalg.qr(U)
         _Ar = spl.pinv(U).dot(A).dot(U)
-        _Ir = np.diag(np.ones(U.shape[1],))
-        _tmp = spl.solve(_R.dot(z*_Ir-_Ar).T, _R.T).T
+        _Ir = np.diag(
+            np.ones(
+                U.shape[1],
+            )
+        )
+        _tmp = spl.solve(_R.dot(z * _Ir - _Ar).T, _R.T).T
         _U, _s, _Vh = np.linalg.svd(_tmp, full_matrices=False)
         _U = _Q.dot(_U)
         _V = _Q.dot(_Vh.conj().T)
@@ -52,10 +67,13 @@ def resolvent_analysis(
         # _V = _Q.dot(_Vh.conj().T)
 
     if return_vec:
-        return _s[:ord], np.squeeze(_U[:,:ord]), np.squeeze(_V[:,:ord])
+        return _s[:ord], np.squeeze(_U[:, :ord]), np.squeeze(_V[:, :ord])
     return _s[:ord]
 
-def estimate_pseudospectrum(grid: np.ndarray, estimator: Callable, return_vec: bool = False, **kwargs):
+
+def estimate_pseudospectrum(
+    grid: np.ndarray, estimator: Callable, return_vec: bool = False, **kwargs
+):
     """
     Estimate pseudospectrum over a grid.
 
@@ -72,7 +90,7 @@ def estimate_pseudospectrum(grid: np.ndarray, estimator: Callable, return_vec: b
 
     _es, _us, _vs = [], [], []
     for _i, _z in enumerate(grid):
-        logger.info(f"Estimating pseudospectrum at point {_i+1}/{_Ng}: {_z}")
+        logger.info(f"Estimating pseudospectrum at point {_i + 1}/{_Ng}: {_z}")
         _res = estimator(_z, **kwargs)
         if return_vec:
             _es.append(_res[0])
@@ -93,8 +111,9 @@ def estimate_pseudospectrum(grid: np.ndarray, estimator: Callable, return_vec: b
         return _es, _us, _vs
     return _es
 
+
 class RALowRank:
-    """
+    r"""
     Resolvent analysis for low-rank linear systems
 
     For continuous-time system,
@@ -140,6 +159,7 @@ class RALowRank:
         V (np.ndarray): Right orthogonal factor of A
         dt (float): Time step for discrete-time systems, default is 1.0
     """
+
     def __init__(self, U: np.ndarray, T: np.ndarray, V: np.ndarray, dt: float = 1.0):
         self._U = U
         self._T = T
@@ -147,11 +167,11 @@ class RALowRank:
         self._dt = dt
         self._Ndim, self._Nrnk = U.shape
 
-        self._Td = spl.expm(self._T*self._dt)
+        self._Td = spl.expm(self._T * self._dt)
         self._Q, self._R = np.linalg.qr(self._U)
         self._Ir = np.eye(self._Nrnk)
 
-    def __call__(self, z: np.ndarray, return_vec: bool, mode: str = 'cont'):
+    def __call__(self, z: np.ndarray, return_vec: bool, mode: str = "cont"):
         """
         Compute the resolvent norm at given complex point for pseudospectrum.
         Only the dominant one is returned.
@@ -161,8 +181,8 @@ class RALowRank:
             return_vec (bool): If return resolvent modes
             mode (str): 'cont' for c-t, 'disc' for d-t
         """
-        _L = self._T if mode == 'cont' else self._Td
-        _tmp = self._R.dot(z*self._Ir-_L).T
+        _L = self._T if mode == "cont" else self._Td
+        _tmp = self._R.dot(z * self._Ir - _L).T
         try:
             _M = spl.solve(_tmp, self._R.T).T
         except np.linalg.LinAlgError:
@@ -171,7 +191,7 @@ class RALowRank:
         # Since Nrnk is expected to be low, we just compute the entire set of SVD
         if return_vec:
             _U, _s, _Vh = np.linalg.svd(_M, full_matrices=False, compute_uv=True)
-            _U = self._Q.dot(_U[:,0])
+            _U = self._Q.dot(_U[:, 0])
             _V = self._Q.dot(_Vh.conj()[0])
             return _s[0], _U, _V
         _s = np.linalg.svd(_M, full_matrices=False, compute_uv=False)

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
 import math
 import os
-from pathlib import Path
 import subprocess
 import sys
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -15,7 +15,6 @@ import torch
 from dymad.io import load_model
 from dymad.models import KBF, LDM, LTI
 from dymad.utils import TrajectorySampler
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "linear_time_invariant"
@@ -30,17 +29,21 @@ ABS_TOLERANCES = {
     "rmse": 1.0e-9,
 }
 
-A = np.array([
-    [0.0, 1.0],
-    [-1.0, -0.1],
-])
+A = np.array(
+    [
+        [0.0, 1.0],
+        [-1.0, -0.1],
+    ]
+)
 
 
 def f(t, x, u):
     return (x @ A.T) + u
 
 
-g = lambda t, x, u: x
+def g(t, x, u):
+    return x
+
 
 CONFIG_GAU = {
     "control": {
@@ -205,7 +208,7 @@ def _run_case(case: SlowLTICase, workdir: Path) -> None:
 
 
 def _load_baselines() -> dict:
-    with open(BASELINE_PATH, "r") as fh:
+    with open(BASELINE_PATH) as fh:
         return json.load(fh)
 
 
@@ -220,11 +223,19 @@ def _load_summary(summary_path: Path) -> dict:
 
 
 def _summary_signature(summary: dict) -> dict:
-    model_name = summary["model_name"].item() if hasattr(summary["model_name"], "item") else summary["model_name"]
+    model_name = (
+        summary["model_name"].item()
+        if hasattr(summary["model_name"], "item")
+        else summary["model_name"]
+    )
     best_valid = summary["best_valid_loss"].item()
     hist = summary["hist"]
     hist0 = hist[0] if len(hist) > 0 else {}
-    crit_name = summary["crit_name"].item() if hasattr(summary["crit_name"], "item") else summary["crit_name"]
+    crit_name = (
+        summary["crit_name"].item()
+        if hasattr(summary["crit_name"], "item")
+        else summary["crit_name"]
+    )
     crit_epoch = summary["crit_epoch"]
     crits = summary["crits"]
     return {
@@ -291,7 +302,7 @@ def baseline_store(request):
 
     store = {}
     if BASELINE_PATH.exists():
-        with open(BASELINE_PATH, "r") as fh:
+        with open(BASELINE_PATH) as fh:
             store = json.load(fh)
 
     yield store
@@ -332,5 +343,7 @@ def test_lti_cli_training_regression(case: SlowLTICase, tmp_path: Path, request,
 
 @pytest.mark.extra_slow
 @pytest.mark.parametrize("case", EXTRA_SLOW_CASES, ids=lambda case: case.model_name)
-def test_lti_cli_training_regression_extra_slow(case: SlowLTICase, tmp_path: Path, request, baseline_store):
+def test_lti_cli_training_regression_extra_slow(
+    case: SlowLTICase, tmp_path: Path, request, baseline_store
+):
     _run_and_check(case, tmp_path, request, baseline_store)

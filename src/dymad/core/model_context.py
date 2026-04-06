@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import Any
 
 import torch
 
@@ -12,13 +12,10 @@ from dymad.core.graph_series import (
     GraphSeries,
     GraphSeriesBatch,
     VariableEdgeGraphSeries,
-    UniformLengthGraphSeriesBatch,
 )
 from dymad.core.runtime import (
     EmptyRegularRuntime,
     GraphRuntime,
-    RaggedGraphRuntime,
-    RaggedRegularRuntime,
     TypedRuntime,
     UniformGraphRuntime,
     UniformRegularRuntime,
@@ -26,10 +23,8 @@ from dymad.core.runtime import (
     to_padded_regular_runtime,
 )
 from dymad.core.series import (
-    RaggedRegularSeriesBatch,
     RegularSeries,
     RegularSeriesBatch,
-    UniformLengthRegularSeriesBatch,
 )
 
 
@@ -40,11 +35,11 @@ class RegularModelContext:
     batch: RegularSeriesBatch
 
     @classmethod
-    def from_series(cls, series: RegularSeries) -> "RegularModelContext":
+    def from_series(cls, series: RegularSeries) -> RegularModelContext:
         return cls(RegularSeriesBatch.collate([series]))
 
     @classmethod
-    def from_batch(cls, batch: RegularSeriesBatch) -> "RegularModelContext":
+    def from_batch(cls, batch: RegularSeriesBatch) -> RegularModelContext:
         return cls(batch)
 
     @property
@@ -72,11 +67,11 @@ class GraphModelContext:
     batch: GraphSeriesBatch
 
     @classmethod
-    def from_series(cls, series: GraphSeries) -> "GraphModelContext":
+    def from_series(cls, series: GraphSeries) -> GraphModelContext:
         return cls(GraphSeriesBatch.collate([series]))
 
     @classmethod
-    def from_batch(cls, batch: GraphSeriesBatch) -> "GraphModelContext":
+    def from_batch(cls, batch: GraphSeriesBatch) -> GraphModelContext:
         return cls(batch)
 
     @property
@@ -117,7 +112,7 @@ def build_model_context(
     raise TypeError(f"Unsupported model-context payload type: {type(batch)!r}")
 
 
-ModelRuntimePayload: TypeAlias = "TypedRuntime | RegularModelContext | GraphModelContext"
+type ModelRuntimePayload = "TypedRuntime | RegularModelContext | GraphModelContext"
 
 
 def _expand_regular_context_for_prediction(
@@ -128,9 +123,7 @@ def _expand_regular_context_for_prediction(
 ) -> RegularModelContext:
     if not is_batch:
         if context.batch_size != 1:
-            raise ValueError(
-                f"Single mode: ws batch size must be 1. Got ws: {context.batch_size}"
-            )
+            raise ValueError(f"Single mode: ws batch size must be 1. Got ws: {context.batch_size}")
         return context
 
     if context.batch_size == 1 and batch_size > 1:
@@ -152,9 +145,7 @@ def _expand_graph_context_for_prediction(
 ) -> GraphModelContext:
     if not is_batch:
         if context.batch_size != 1:
-            raise ValueError(
-                f"Single mode: ws batch size must be 1. Got ws: {context.batch_size}"
-            )
+            raise ValueError(f"Single mode: ws batch size must be 1. Got ws: {context.batch_size}")
         return context
 
     if context.batch_size == 1 and batch_size > 1:
@@ -240,7 +231,9 @@ def _ensure_time_tensor(
     device: torch.device,
 ) -> torch.Tensor:
     if t is None:
-        return torch.arange(n_steps, device=device, dtype=torch.get_default_dtype()).expand(batch_size, -1)
+        return torch.arange(n_steps, device=device, dtype=torch.get_default_dtype()).expand(
+            batch_size, -1
+        )
     if t.ndim == 0:
         return t.reshape(1, 1).expand(batch_size, n_steps)
     if t.ndim == 1:
@@ -248,7 +241,9 @@ def _ensure_time_tensor(
             return t.reshape(1, -1).expand(batch_size, -1)
         if t.shape[0] == batch_size and n_steps == 1:
             return t.reshape(batch_size, 1)
-        raise ValueError(f"Unsupported time shape {tuple(t.shape)} for batch_size={batch_size}, n_steps={n_steps}")
+        raise ValueError(
+            f"Unsupported time shape {tuple(t.shape)} for batch_size={batch_size}, n_steps={n_steps}"
+        )
     if t.ndim == 2:
         if t.shape == (batch_size, n_steps):
             return t
@@ -256,7 +251,9 @@ def _ensure_time_tensor(
             return t.expand(batch_size, -1)
         if t.shape == (batch_size, 1):
             return t.expand(-1, n_steps)
-        raise ValueError(f"Unsupported time shape {tuple(t.shape)} for batch_size={batch_size}, n_steps={n_steps}")
+        raise ValueError(
+            f"Unsupported time shape {tuple(t.shape)} for batch_size={batch_size}, n_steps={n_steps}"
+        )
     raise ValueError(f"Unsupported time shape {tuple(t.shape)}")
 
 
@@ -268,7 +265,7 @@ def _split_nested_payload(payload: Any) -> list[torch.Tensor] | None:
     if isinstance(payload, tuple):
         values, offsets = payload
         offsets = torch.as_tensor(offsets, dtype=torch.int64, device=values.device)
-        return [values[offsets[idx]:offsets[idx + 1]] for idx in range(offsets.numel() - 1)]
+        return [values[offsets[idx] : offsets[idx + 1]] for idx in range(offsets.numel() - 1)]
     if getattr(payload, "is_nested", False):
         return [item for item in payload.unbind()]
 
@@ -320,7 +317,11 @@ def materialize_model_base_forward_payload(
         elif u.ndim == 1:
             control = u.reshape(1, 1, -1).expand(batch_size, n_steps, -1)
         elif u.ndim == 2:
-            control = u.unsqueeze(1) if u.shape[0] == batch_size else u.reshape(1, n_steps, -1).expand(batch_size, -1, -1)
+            control = (
+                u.unsqueeze(1)
+                if u.shape[0] == batch_size
+                else u.reshape(1, n_steps, -1).expand(batch_size, -1, -1)
+            )
         elif u.ndim == 3:
             control = u
         else:

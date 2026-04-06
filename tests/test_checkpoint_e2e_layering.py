@@ -41,7 +41,9 @@ def test_checkpoint_e2e_path_routes_facade_store_exec(monkeypatch, tmp_path: Pat
             device=device,
         )
 
-    def traced_prepare_prediction_request(*, checkpoint_handle: str, horizon: int, has_control: bool = False, has_graph: bool = False):
+    def traced_prepare_prediction_request(
+        *, checkpoint_handle: str, horizon: int, has_control: bool = False, has_graph: bool = False
+    ):
         events.append("facade.prepare_prediction_request")
         return original_prepare_prediction(
             checkpoint_handle=checkpoint_handle,
@@ -61,7 +63,9 @@ def test_checkpoint_e2e_path_routes_facade_store_exec(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(context.executor, "plan_checkpoint_prediction", traced_plan)
     monkeypatch.setattr(context.executor, "materialize_checkpoint_prediction", traced_materialize)
     monkeypatch.setattr(context.facade, "register_checkpoint", traced_register_checkpoint)
-    monkeypatch.setattr(context.facade, "prepare_prediction_request", traced_prepare_prediction_request)
+    monkeypatch.setattr(
+        context.facade, "prepare_prediction_request", traced_prepare_prediction_request
+    )
     monkeypatch.setattr(context.facade, "get_prediction_request", traced_get_prediction_request)
     monkeypatch.setattr(context.facade, "get_checkpoint", traced_get_checkpoint)
 

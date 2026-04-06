@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -17,9 +18,9 @@ class TrainingCheckpointError(ValueError):
 @dataclass
 class ModelArtifact:
     model: torch.nn.Module
-    config: Dict[str, Any]
-    train_md: Dict[str, Any]
-    valid_md: Dict[str, Any]
+    config: dict[str, Any]
+    train_md: dict[str, Any]
+    valid_md: dict[str, Any]
     dtype: torch.dtype
 
 
@@ -38,8 +39,8 @@ class TrainingHistoryArtifact:
     hist: list[Any] = field(default_factory=list)
     crit: list[Any] = field(default_factory=list)
     epoch_times: list[float] = field(default_factory=list)
-    best_loss: Dict[str, float] = field(default_factory=lambda: {"valid_total": float("inf")})
-    best_model_state_dict: Dict[str, Any] | None = None
+    best_loss: dict[str, float] = field(default_factory=lambda: {"valid_total": float("inf")})
+    best_model_state_dict: dict[str, Any] | None = None
     convergence_epoch: int | None = None
 
 
@@ -58,21 +59,21 @@ class LinearSolveReportArtifact:
 
 @dataclass
 class EvaluationArtifact:
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, float] = field(default_factory=dict)
     split: str = "valid"
     criterion_name: str = "total"
 
 
 @dataclass
 class ExportArtifact:
-    outputs: Dict[str, str] = field(default_factory=dict)
+    outputs: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class ArtifactRegistry:
     """Typed intermediate artifacts shared across phases."""
 
-    _artifacts: Dict[str, Any] = field(default_factory=dict)
+    _artifacts: dict[str, Any] = field(default_factory=dict)
 
     def put(self, key: str, artifact: Any) -> Any:
         self._artifacts[key] = artifact
@@ -92,11 +93,11 @@ class ArtifactRegistry:
     def keys(self) -> Iterable[str]:
         return self._artifacts.keys()
 
-    def checkpoint_payload(self) -> Dict[str, Any]:
+    def checkpoint_payload(self) -> dict[str, Any]:
         return dict(self._artifacts)
 
     @classmethod
-    def from_checkpoint_payload(cls, payload: Dict[str, Any] | None) -> "ArtifactRegistry":
+    def from_checkpoint_payload(cls, payload: dict[str, Any] | None) -> ArtifactRegistry:
         return cls(_artifacts={} if payload is None else dict(payload))
 
 
@@ -106,7 +107,7 @@ class PhaseRecord:
     kind: str
     started_epoch: int
     completed_epoch: int
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, float] = field(default_factory=dict)
     artifact_keys: list[str] = field(default_factory=list)
 
 
@@ -114,17 +115,17 @@ class PhaseRecord:
 class TrainerState:
     """Checkpointable training state."""
 
-    config: Optional[Dict[str, Any]]
-    execution_services: Optional[ExecutionServices] = None
-    device: Optional[torch.device] = None
+    config: dict[str, Any] | None
+    execution_services: ExecutionServices | None = None
+    device: torch.device | None = None
     epoch: int = 0
-    best_loss: Dict[str, float] = field(default_factory=lambda: {"valid_total": float("inf")})
+    best_loss: dict[str, float] = field(default_factory=lambda: {"valid_total": float("inf")})
     converged: bool = False
     convergence_epoch: int | None = None
     phase_cursor: int = 0
     phase_records: list[PhaseRecord] = field(default_factory=list)
 
-    def checkpoint_payload(self) -> Dict[str, Any]:
+    def checkpoint_payload(self) -> dict[str, Any]:
         return {
             "config": copy.deepcopy(self.config),
             "device": self.device,
@@ -139,10 +140,10 @@ class TrainerState:
     @classmethod
     def from_checkpoint_payload(
         cls,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
         execution_services: ExecutionServices | None = None,
-    ) -> "TrainerState":
+    ) -> TrainerState:
         return cls(
             config=payload.get("config"),
             execution_services=execution_services,
@@ -160,12 +161,12 @@ class TrainerState:
 class PhaseContext:
     """Live phase context for one run."""
 
-    train_set: Optional[Dataset] = None
-    valid_set: Optional[Dataset] = None
-    train_loader: Optional[DataLoader] = None
-    valid_loader: Optional[DataLoader] = None
-    train_md: Optional[Dict[str, Any]] = None
-    valid_md: Optional[Dict[str, Any]] = None
+    train_set: Dataset | None = None
+    valid_set: Dataset | None = None
+    train_loader: DataLoader | None = None
+    valid_loader: DataLoader | None = None
+    train_md: dict[str, Any] | None = None
+    valid_md: dict[str, Any] | None = None
 
 
 @dataclass
@@ -177,7 +178,7 @@ class PhaseResult:
     trainer_state: TrainerState
     phase_context: PhaseContext
     artifacts: ArtifactRegistry
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, float] = field(default_factory=dict)
     record: PhaseRecord | None = None
 
     def get_metric(self, metric_name: str) -> float:
@@ -190,7 +191,7 @@ class PhaseResult:
 
 
 def build_initial_trainer_state(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     *,
     execution_services: ExecutionServices,
 ) -> TrainerState:

@@ -14,10 +14,14 @@ def test_gnn_accepts_graph_sequences_with_multiple_leading_batch_dims() -> None:
     )
 
     x = torch.randn(2, 3, 2, 2)
-    edge_index = torch.tensor(
-        [[0, 1], [1, 0]],
-        dtype=torch.long,
-    ).reshape(1, 1, 2, 2).expand(2, 3, 2, 2)
+    edge_index = (
+        torch.tensor(
+            [[0, 1], [1, 0]],
+            dtype=torch.long,
+        )
+        .reshape(1, 1, 2, 2)
+        .expand(2, 3, 2, 2)
+    )
     edge_weight = torch.ones(2, 3, 2)
 
     out = net(x, edge_index, edge_weight, None)

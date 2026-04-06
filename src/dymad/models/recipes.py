@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-import numpy as np
+
 import torch
-from typing import Tuple
 
 from dymad.models.helpers import build_processor, fzu_selector, get_dims
 from dymad.models.model_base import ComposedDynamics
@@ -43,7 +42,7 @@ class CD_LDM(ComposedDynamics):
         dims = get_dims(model_config, data_meta)
 
         # Autoencoder
-        suffix = "_ctrl" if dims['u'] > 0 else "_auto"
+        suffix = "_ctrl" if dims["u"] > 0 else "_auto"
         enc_type += suffix
 
         # Features in the dynamics
@@ -53,7 +52,7 @@ class CD_LDM(ComposedDynamics):
         processor_net = build_processor(model_config, dims, dtype, device, ifgnn=ifgnn)
 
         # Prediction options
-        input_order = model_config.get('input_order', 'cubic')
+        input_order = model_config.get("input_order", "cubic")
         return RecipeResolution(
             dims=dims,
             encoder_key=enc_type,
@@ -84,27 +83,27 @@ class CD_SDM(ComposedDynamics):
 
         # Dimensions
         dims = get_dims(model_config, data_meta)
-        dims['s'] = dims['z']
-        dims['r'] = dims['z'] // dims['seq']
+        dims["s"] = dims["z"]
+        dims["r"] = dims["z"] // dims["seq"]
 
         # Autoencoder
-        assert 'raw' in enc_type, "SDM model needs raw-type encoder."
-        suffix = "_ctrl" if dims['u'] > 0 else "_auto"
+        assert "raw" in enc_type, "SDM model needs raw-type encoder."
+        suffix = "_ctrl" if dims["u"] > 0 else "_auto"
         enc_type += suffix
 
         # Features in the dynamics
         # As is
 
         # Processor in the dynamics
-        prc_type = model_config.get('processor_type', 'seq_std')
-        model_config['processor_type'] = prc_type
+        prc_type = model_config.get("processor_type", "seq_std")
+        model_config["processor_type"] = prc_type
         processor_net = build_processor(model_config, dims, dtype, device, ifgnn=ifgnn)
 
         # Prediction
         input_order = None
-        prd_type = model_config.get('predictor_type', 'ode')
-        if prd_type == 'exp':
-            assert dims['u'] == 0, "SDM with control cannot use predict_discrete_exp."
+        prd_type = model_config.get("predictor_type", "ode")
+        if prd_type == "exp":
+            assert dims["u"] == 0, "SDM with control cannot use predict_discrete_exp."
 
         return RecipeResolution(
             dims=dims,
@@ -134,7 +133,7 @@ class CD_LFM(ComposedDynamics):
 
     def __init__(self, encoder, dynamics, decoder, predict=None, model_config=None, dims=None):
         super().__init__(encoder, dynamics, decoder, predict, model_config, dims)
-        self.koopman_dimension = dims['z']
+        self.koopman_dimension = dims["z"]
 
     @classmethod
     def resolve_spec(
@@ -150,37 +149,37 @@ class CD_LFM(ComposedDynamics):
         dec_type = model_spec.decoder.kind
 
         # Options
-        const_term = model_config.get('const_term', True)
+        const_term = model_config.get("const_term", True)
 
         # Dimensions
         dims = get_dims(model_config, data_meta)
-        dims['e'] = dims['x']
-        dims['z'] = model_config.get('koopman_dimension')
+        dims["e"] = dims["x"]
+        dims["z"] = model_config.get("koopman_dimension")
 
-        blin_term = 'blin' in fzu_type
-        if dims['u'] > 0:
+        blin_term = "blin" in fzu_type
+        if dims["u"] > 0:
             if blin_term:
                 if const_term:
-                    dyn_dim = dims['z'] * (dims['u'] + 1) + dims['u']
+                    dyn_dim = dims["z"] * (dims["u"] + 1) + dims["u"]
                 else:
-                    dyn_dim = dims['z'] * (dims['u'] + 1)
+                    dyn_dim = dims["z"] * (dims["u"] + 1)
             else:
-                dyn_dim = dims['z'] + dims['u']
+                dyn_dim = dims["z"] + dims["u"]
         else:
-            dyn_dim = dims['z']
-        dims['s'] = dyn_dim
+            dyn_dim = dims["z"]
+        dims["s"] = dyn_dim
 
         # Autoencoder
-        assert 'auto' in enc_type, "LFM model needs state-only encoder."
+        assert "auto" in enc_type, "LFM model needs state-only encoder."
 
         # Features in the dynamics
-        fzu_type = fzu_selector(fzu_type, dims['u'], const_term)
+        fzu_type = fzu_selector(fzu_type, dims["u"], const_term)
 
         # Processor in the dynamics
-        processor_net = FlexLinear(dims['s'], dims['z'], bias=False, dtype=dtype, device=device)
+        processor_net = FlexLinear(dims["s"], dims["z"], bias=False, dtype=dtype, device=device)
 
         # Prediction options
-        input_order = model_config.get('input_order', 'cubic')
+        input_order = model_config.get("input_order", "cubic")
         return RecipeResolution(
             dims=dims,
             encoder_key=enc_type,
@@ -209,31 +208,31 @@ class CD_KM(ComposedDynamics):
         dec_type = model_spec.decoder.kind
 
         # Options
-        const_term = model_config.get('const_term', True)
+        const_term = model_config.get("const_term", True)
 
         # Dimensions
         dims = get_dims(model_config, data_meta)
-        dims['z'] = model_config.get('kernel_dimension')
+        dims["z"] = model_config.get("kernel_dimension")
 
         # Autoencoder
-        assert 'auto' in enc_type, "KM model needs state-only encoder."
+        assert "auto" in enc_type, "KM model needs state-only encoder."
 
         # Features in the dynamics
-        fzu_type = fzu_selector(fzu_type, dims['u'], const_term)
+        fzu_type = fzu_selector(fzu_type, dims["u"], const_term)
 
         # Processor in the dynamics
         opts = {
-            'type'       : model_config.get('type', 'share'),
-            'kernel'     : model_config.get('kernel', None),
-            'ridge_init' : model_config.get('ridge_init', 1e-10),
-            'jitter'     : model_config.get('jitter', 1e-12),
-            'dtype'      : dtype,
-            'device'     : device
+            "type": model_config.get("type", "share"),
+            "kernel": model_config.get("kernel", None),
+            "ridge_init": model_config.get("ridge_init", 1e-10),
+            "jitter": model_config.get("jitter", 1e-12),
+            "dtype": dtype,
+            "device": device,
         }
         processor_net = make_krr(**opts)
 
         # Prediction options
-        input_order = model_config.get('input_order', 'cubic')
+        input_order = model_config.get("input_order", "cubic")
         return RecipeResolution(
             dims=dims,
             encoder_key=enc_type,
@@ -244,7 +243,9 @@ class CD_KM(ComposedDynamics):
             input_order=input_order,
         )
 
-    def linear_solve(self, inp: torch.Tensor, out: torch.Tensor, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
+    def linear_solve(
+        self, inp: torch.Tensor, out: torch.Tensor, **kwargs
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Fit the kernel dynamics using input-output pairs.
         """
@@ -276,15 +277,19 @@ class CD_KMSK(CD_KM):
 
     def __init__(self, encoder, dynamics, decoder, predict=None, model_config=None, dims=None):
         super().__init__(encoder, dynamics, decoder, predict, model_config, dims)
-        self.kernel_dimension = dims['z']
+        self.kernel_dimension = dims["z"]
 
-    def linear_solve(self, inp: torch.Tensor, out: torch.Tensor, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
-        self.processor_net.set_train_data(inp, out-inp[..., :self.kernel_dimension])
+    def linear_solve(
+        self, inp: torch.Tensor, out: torch.Tensor, **kwargs
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        self.processor_net.set_train_data(inp, out - inp[..., : self.kernel_dimension])
         residual = self.processor_net.fit()
         return self.processor_net._alphas, residual
 
 
-M_KEYS = ['data', 'd', 'K', 'g', 'T', 'iforit', 'extT']
+M_KEYS = ["data", "d", "K", "g", "T", "iforit", "extT"]
+
+
 class CD_KMM(CD_KM):
     """
     KM with Manifold constraints.
@@ -294,30 +299,33 @@ class CD_KMM(CD_KM):
 
     See more in Huang, He, Harlim & Li ICLR2025.
     """
+
     GRAPH = False
-    CONT  = True
+    CONT = True
 
     def __init__(self, encoder, dynamics, decoder, predict=None, model_config=None, dims=None):
         super().__init__(encoder, dynamics, decoder, predict, model_config, dims)
 
-        self._man_opts = model_config.get('manifold', {})
+        self._man_opts = model_config.get("manifold", {})
 
         # Register buffers for Manifold parameters
-        self.register_buffer(f"_m_data", torch.empty(0, dtype=torch.float64))
-        self.register_buffer(f"_m_d", torch.empty(0, dtype=torch.int64))
-        self.register_buffer(f"_m_K", torch.empty(0, dtype=torch.int64))
-        self.register_buffer(f"_m_g", torch.empty(0, dtype=torch.int64))
-        self.register_buffer(f"_m_T", torch.empty(0, dtype=torch.int64))
-        self.register_buffer(f"_m_iforit", torch.tensor(False, dtype=torch.bool))
-        self.register_buffer(f"_m_extT", torch.empty(0, dtype=torch.float64))
+        self.register_buffer("_m_data", torch.empty(0, dtype=torch.float64))
+        self.register_buffer("_m_d", torch.empty(0, dtype=torch.int64))
+        self.register_buffer("_m_K", torch.empty(0, dtype=torch.int64))
+        self.register_buffer("_m_g", torch.empty(0, dtype=torch.int64))
+        self.register_buffer("_m_T", torch.empty(0, dtype=torch.int64))
+        self.register_buffer("_m_iforit", torch.tensor(False, dtype=torch.bool))
+        self.register_buffer("_m_extT", torch.empty(0, dtype=torch.float64))
 
-    def linear_solve(self, inp: torch.Tensor, out: torch.Tensor, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
+    def linear_solve(
+        self, inp: torch.Tensor, out: torch.Tensor, **kwargs
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Fit the kernel dynamics using input-output pairs.
         """
         # Build manifold from input data
         # This is a Numpy object, and we register buffers to reload it later
-        self._manifold = Manifold(inp[:,:self.n_total_state_features], **self._man_opts)
+        self._manifold = Manifold(inp[:, : self.n_total_state_features], **self._man_opts)
         self._manifold.precompute()
         ts = self._manifold.to_tensors()
         for _k, _v in ts.items():
@@ -356,7 +364,7 @@ class CD_KMM(CD_KM):
 
         res = super().load_state_dict(state_dict, strict=strict)
 
-        t = {_k : getattr(self, f"_m_{_k}") for _k in M_KEYS}
+        t = {_k: getattr(self, f"_m_{_k}") for _k in M_KEYS}
         self._manifold = Manifold.from_tensors(t)
         self.processor_net._manifold = self._manifold
         self.processor_net.kernel._manifold = self._manifold

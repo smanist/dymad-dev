@@ -1,18 +1,17 @@
 import argparse
 import os
-from pathlib import Path
 import random
 import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
 from dymad.io import load_model
-from dymad.models import DGLDM, DGKBF, DGKM, DGKMSK
+from dymad.models import DGKBF, DGKM, DGKMSK, DGLDM
 from dymad.training import LinearTrainer, NODETrainer
 from dymad.utils import TrajectorySampler, adj_to_edge, plot_summary, plot_trajectory
-
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -20,48 +19,44 @@ B = 128
 N = 501
 t_grid = np.linspace(0, 5, N)
 
-A = np.array([
-            [0., 1.],
-            [-1., -0.1]])
+A = np.array([[0.0, 1.0], [-1.0, -0.1]])
 
 
 def f(t, x, u):
     return (x @ A.T) + u
 
 
-g = lambda t, x, u: x
+def g(t, x, u):
+    return x
 
-adj = np.array([
-    [0, 1, 1],
-    [1, 0, 1],
-    [1, 1, 0]
-])
+
+adj = np.array([[0, 1, 1], [1, 0, 1], [1, 1, 0]])
 
 config_chr = {
-    "control" : {
+    "control": {
         "kind": "chirp",
         "params": {
             "t1": 4.0,
             "freq_range": (0.5, 2.0),
             "amp_range": (0.5, 1.0),
-            "phase_range": (0.0, 360.0)}}}
+            "phase_range": (0.0, 360.0),
+        },
+    }
+}
 
 config_gau = {
-    "control" : {
+    "control": {
         "kind": "gaussian",
-        "params": {
-            "mean": 0.5,
-            "std":  1.0,
-            "t1":   4.0,
-            "dt":   0.2,
-            "mode": "zoh"}}}
+        "params": {"mean": 0.5, "std": 1.0, "t1": 4.0, "dt": 0.2, "mode": "zoh"},
+    }
+}
 
 cases = [
-    {"name": "dldm",  "model": DGLDM,  "trainer": NODETrainer,   "config": "ltg_dldm.yaml"},
-    {"name": "dkbf",  "model": DGKBF,  "trainer": NODETrainer,   "config": "ltg_dkbf.yaml"},
-    {"name": "dkbl",  "model": DGKBF,  "trainer": LinearTrainer, "config": "ltg_dkbl.yaml"},
-    {"name": "ltil",  "model": DGKBF,  "trainer": LinearTrainer, "config": "ltg_ltil.yaml"},
-    {"name": "dkm",   "model": DGKM,   "trainer": LinearTrainer, "config": "ltg_dkm.yaml"},
+    {"name": "dldm", "model": DGLDM, "trainer": NODETrainer, "config": "ltg_dldm.yaml"},
+    {"name": "dkbf", "model": DGKBF, "trainer": NODETrainer, "config": "ltg_dkbf.yaml"},
+    {"name": "dkbl", "model": DGKBF, "trainer": LinearTrainer, "config": "ltg_dkbl.yaml"},
+    {"name": "ltil", "model": DGKBF, "trainer": LinearTrainer, "config": "ltg_ltil.yaml"},
+    {"name": "dkm", "model": DGKM, "trainer": LinearTrainer, "config": "ltg_dkm.yaml"},
     {"name": "dkmsk", "model": DGKMSK, "trainer": LinearTrainer, "config": "ltg_dkmsk.yaml"},
 ]
 DEFAULT_CASES = [0, 1, 2, 3, 4, 5]
@@ -163,7 +158,7 @@ def plot(selected):
     labels = [cases[idx]["name"] for idx in selected]
     npz_files = [f"ltg_{label}" for label in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
-    for label, npz in zip(labels, npzs):
+    for label, npz in zip(labels, npzs, strict=False):
         print(f"Epoch time: {label} - {npz['avg_epoch_time']}")
 
 
@@ -187,8 +182,13 @@ def predict(selected):
         res.append(pred)
 
     plot_trajectory(
-        np.array(res), t_data, "LTG",
-        us=u_data, labels=["Truth"] + [cases[idx]["name"] for idx in selected], ifclose=False)
+        np.array(res),
+        t_data,
+        "LTG",
+        us=u_data,
+        labels=["Truth"] + [cases[idx]["name"] for idx in selected],
+        ifclose=False,
+    )
 
 
 def main():

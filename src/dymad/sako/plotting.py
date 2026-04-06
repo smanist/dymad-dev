@@ -43,16 +43,26 @@ class SpectralPlottingAdapter:
             ax.plot(np.sin(_t), np.cos(_t), "k--")
             _l1, _l2 = None, None
             if plot_full:
-                _l1, = ax.plot(analysis._wd_full.real, analysis._wd_full.imag, plot_full, markerfacecolor="none")
+                (_l1,) = ax.plot(
+                    analysis._wd_full.real,
+                    analysis._wd_full.imag,
+                    plot_full,
+                    markerfacecolor="none",
+                )
             if plot_filt:
-                _l2, = ax.plot(analysis._wd.real, analysis._wd.imag, plot_filt)
+                (_l2,) = ax.plot(analysis._wd.real, analysis._wd.imag, plot_filt)
             ax.set_aspect("equal")
         elif mode.lower() == "cont":
             _l1, _l2 = None, None
             if plot_full:
-                _l1, = ax.plot(analysis._wc_full.real, analysis._wc_full.imag, plot_full, markerfacecolor="none")
+                (_l1,) = ax.plot(
+                    analysis._wc_full.real,
+                    analysis._wc_full.imag,
+                    plot_full,
+                    markerfacecolor="none",
+                )
             if plot_filt:
-                _l2, = ax.plot(analysis._wc.real, analysis._wc.imag, plot_filt)
+                (_l2,) = ax.plot(analysis._wc.real, analysis._wc.imag, plot_filt)
             ax.set_aspect("equal")
         else:
             raise ValueError(f"Unknwon mode {mode} for plotting spectrum")
@@ -65,7 +75,18 @@ class SpectralPlottingAdapter:
             _ls.append(_l2)
         return f, ax, _ls
 
-    def plot_pred(self, x0s, ts, ref=None, ifobs=False, idx="all", ncols=1, figsize=(6, 8), title=None, fig=None):
+    def plot_pred(
+        self,
+        x0s,
+        ts,
+        ref=None,
+        ifobs=False,
+        idx="all",
+        ncols=1,
+        figsize=(6, 8),
+        title=None,
+        fig=None,
+    ):
         """Plot predicted trajectories in data space or latent space."""
         analysis = self._analysis
         if idx == "all":
@@ -108,9 +129,9 @@ class SpectralPlottingAdapter:
         ax = _ax.flatten()
         for _k, _j in enumerate(_idx):
             for _i in range(_Nx0):
-                l1, = ax[_k].plot(ts, _prds[_i][:, _j], "b-")
+                (l1,) = ax[_k].plot(ts, _prds[_i][:, _j], "b-")
                 if _refs is not None:
-                    l2, = ax[_k].plot(ts, _refs[_i][:, _j], "r--")
+                    (l2,) = ax[_k].plot(ts, _refs[_i][:, _j], "r--")
             ax[_k].set_ylabel(f"{_ylbl} {_j}")
         if _refs is not None:
             for _k, _j in enumerate(_idx):
@@ -120,7 +141,9 @@ class SpectralPlottingAdapter:
 
         return f, ax
 
-    def plot_eigfun_2d(self, rngs, Ns, idx, mode="angle", space="full", ncols=2, figsize=(6, 10), fig=None):
+    def plot_eigfun_2d(
+        self, rngs, Ns, idx, mode="angle", space="full", ncols=2, figsize=(6, 10), fig=None
+    ):
         """Plot 2D eigenfunctions as contours."""
         analysis = self._analysis
         x1s = np.linspace(rngs[0][0], rngs[0][1], Ns[0])
@@ -151,7 +174,9 @@ class SpectralPlottingAdapter:
         for _i, _j in enumerate(_idx):
             _F = _fun[:, _i].reshape(Ns[1], Ns[0])
             _ax[_i].contourf(X1, X2, _func(_F), levels=20)
-            _ax[_i].set_title(f"{_j}: {np.angle(analysis._wc[_j]):3.2e} / {analysis._res[_j].real:3.2e}")
+            _ax[_i].set_title(
+                f"{_j}: {np.angle(analysis._wc[_j]):3.2e} / {analysis._res[_j].real:3.2e}"
+            )
 
         return f, ax
 
@@ -241,6 +266,8 @@ class SpectralPlottingAdapter:
         for _i in _idx:
             for _f in _fs:
                 _ax[_i].plot(_f(_vec[_i]))
-            _ax[_i].set_title(f"{_i}: {np.angle(analysis._wc[_i]):3.2e} / {analysis._res[_i].real:3.2e}")
+            _ax[_i].set_title(
+                f"{_i}: {np.angle(analysis._wc[_i]):3.2e} / {analysis._res[_i].real:3.2e}"
+            )
 
         return f, ax

@@ -1,27 +1,32 @@
 import logging
+
 import numpy as np
+import scipy.linalg as spl
 from scipy.optimize import minimize_scalar
 from scipy.sparse import coo_matrix, spdiags
 from scipy.sparse.linalg import eigsh
 from scipy.spatial.distance import cdist
-import scipy.linalg as spl
 from sklearn.neighbors import KDTree
-from typing import Dict
 
 from dymad.numerics.manifold import DimensionEstimator
 
 logger = logging.getLogger(__name__)
 
+
 def dS(eps, D, F):
-    tmp = np.exp(-D / (F*eps))
+    tmp = np.exp(-D / (F * eps))
     fun = np.mean(tmp)
     grd = np.mean(D * tmp) / F
-    return grd/fun/eps
+    return grd / fun / eps
+
 
 def epsOpt(D, F, ret_val=False):
     # Normalize by max distance for epsilon at unit scale
     _max = np.max(D)
-    _fun = lambda e: -2*dS(2.**e, D/_max, F)
+
+    def _fun(e):
+        return -2 * dS(2.0**e, D / _max, F)
+
     _res = minimize_scalar(_fun, bracket=[-30, 10])
     _eps = 2**_res.x * _max
     if ret_val:
@@ -29,8 +34,9 @@ def epsOpt(D, F, ret_val=False):
         return _eps, _dim
     return _eps
 
+
 def compDist(a, b, K):
-    d2 = cdist(np.atleast_2d(a), np.atleast_2d(b), metric='sqeuclidean')
+    d2 = cdist(np.atleast_2d(a), np.atleast_2d(b), metric="sqeuclidean")
     if K is None:
         return d2
     idx = np.argsort(d2, axis=1)[:, :K]
@@ -39,6 +45,7 @@ def compDist(a, b, K):
     d2[mask] = np.inf
     return d2
 
+
 def genMat(data, inds, N=None, ifsym=False):
     # Generate a MxN sparse matrix
     # data and inds are Mxk
@@ -46,15 +53,13 @@ def genMat(data, inds, N=None, ifsym=False):
     M, k = inds.shape
     if N is None:
         N = M
-    row = np.tile(np.arange(M), (k,1)).T.reshape(-1)
-    A = coo_matrix((
-            data.reshape(-1),
-            (row, inds.reshape(-1))),
-        shape=(M, N))
+    row = np.tile(np.arange(M), (k, 1)).T.reshape(-1)
+    A = coo_matrix((data.reshape(-1), (row, inds.reshape(-1))), shape=(M, N))
     if ifsym:
         if M == N:
-            A = (A + A.T)/2
+            A = (A + A.T) / 2
     return A
+
 
 class DMF:
     """
@@ -70,25 +75,26 @@ class DMF:
         - For KRR, full DM, i.e., without Knn, performs the best.
         - Whenever memory allows, use full DM.
     """
+
     def __init__(self, n_components, n_neighbors=None, alpha=1, epsilon=None):
-        self._Npsi  = n_components
-        self._Knn   = n_neighbors
+        self._Npsi = n_components
+        self._Knn = n_neighbors
         self._alpha = alpha
         self._epsilon = epsilon
 
-    def _kernel(self, x, y = None):
+    def _kernel(self, x, y=None):
         if y is None:
             d2 = compDist(x, x, self._Knn)
             W = np.exp(-d2 / (4 * self._epsilon))
             if self._Knn is not None:
-                W = (W + W.T)/2
+                W = (W + W.T) / 2
 
             _qest = np.sum(W, axis=1).flatten()
-            _D = _qest**(-self._alpha)
-            W = _D.reshape(-1,1) * W * _D
+            _D = _qest ** (-self._alpha)
+            W = _D.reshape(-1, 1) * W * _D
             D = np.sum(W, axis=1).flatten()
-            _Dinv1 = D**(-0.5)
-            W = _Dinv1.reshape(-1,1) * W * _Dinv1
+            _Dinv1 = D ** (-0.5)
+            W = _Dinv1.reshape(-1, 1) * W * _Dinv1
 
             return W, _qest, _D, _Dinv1
 
@@ -96,11 +102,11 @@ class DMF:
         W = np.exp(-d2 / (4 * self._epsilon))
 
         qest = np.sum(W, axis=1).flatten()
-        D = qest**(-self._alpha)
-        W = D.reshape(-1,1) * W * self._D
+        D = qest ** (-self._alpha)
+        W = D.reshape(-1, 1) * W * self._D
         D = np.sum(W, axis=1).flatten()
-        Dinv1 = D**(-0.5)
-        W = Dinv1.reshape(-1,1) * W * self._Dinv1
+        Dinv1 = D ** (-0.5)
+        W = Dinv1.reshape(-1, 1) * W * self._Dinv1
 
         return W, qest, D, Dinv1
 
@@ -120,16 +126,18 @@ class DMF:
         W, self._qest, self._D, self._Dinv1 = self._kernel(self._x)
 
         # Compute eigenvalues and eigenvectors
-        eigvals, eigvecs = spl.eigh(W, subset_by_index=[self._N-self._Npsi, self._N-1])
+        eigvals, eigvecs = spl.eigh(W, subset_by_index=[self._N - self._Npsi, self._N - 1])
         self._lmbd_raw = eigvals[::-1]
         self._psi_raw = eigvecs[:, ::-1]
-        psi = self._Dinv1.reshape(-1,1) * self._psi_raw
+        psi = self._Dinv1.reshape(-1, 1) * self._psi_raw
         self._lambda = -np.log(self._lmbd_raw) / self._epsilon
 
         # Normalize eigenvectors
         peq = self._qest / self._Dinv1**2
         self._peq = peq / np.mean(peq / self._qest)
-        self._norm_factors = np.sqrt(np.mean(psi**2 * (self._peq / self._qest).reshape(-1, 1), axis=0))
+        self._norm_factors = np.sqrt(
+            np.mean(psi**2 * (self._peq / self._qest).reshape(-1, 1), axis=0)
+        )
         self._psi = psi / self._norm_factors
 
     def transform(self, x):
@@ -137,7 +145,7 @@ class DMF:
         Nystrom extension for diffusion maps.
         """
         W, _, _, Dinv1 = self._kernel(self._x, x)
-        eigvecs = Dinv1.reshape(-1,1) * (W @ self._psi_raw) / self._lmbd_raw
+        eigvecs = Dinv1.reshape(-1, 1) * (W @ self._psi_raw) / self._lmbd_raw
         eigvecs_normalized = eigvecs / self._norm_factors
         return eigvecs_normalized
 
@@ -149,13 +157,13 @@ class DMF:
         self._set_data(X)
         W, self._qest, self._D, self._Dinv1 = self._kernel(self._x)
         I = ridge * np.eye(W.shape[0])
-        self._beta = spl.solve(W + I, y, assume_a='sym')
+        self._beta = spl.solve(W + I, y, assume_a="sym")
 
     def predict_krr(self, X):
         K = self._kernel(self._x, X)[0]
         return K @ self._beta
 
-    def state_dict(self) -> Dict[str, any]:
+    def state_dict(self) -> dict[str, any]:
         return {
             "x": self._x,
             "Npsi": self._Npsi,
@@ -170,10 +178,10 @@ class DMF:
             "peq": self._peq,
             "psi_raw": self._psi_raw,
             "psi": self._psi,
-            "norm_factors": self._norm_factors
+            "norm_factors": self._norm_factors,
         }
 
-    def load_state_dict(self, d: Dict[str, any]) -> None:
+    def load_state_dict(self, d: dict[str, any]) -> None:
         self._x = d["x"]
         self._Npsi = d["Npsi"]
         self._alpha = d["alpha"]
@@ -188,6 +196,7 @@ class DMF:
         self._psi_raw = d["psi_raw"]
         self._psi = d["psi"]
         self._norm_factors = d["norm_factors"]
+
 
 class DM:
     """
@@ -207,9 +216,10 @@ class DM:
         alpha: Normalization parameter
         epsilon: Kernel bandwidth; if None, it will be estimated
     """
+
     def __init__(self, n_components, n_neighbors, alpha=1, epsilon=None):
-        self._Npsi  = n_components
-        self._Knn   = n_neighbors
+        self._Npsi = n_components
+        self._Knn = n_neighbors
         self._alpha = alpha
         self._epsilon = epsilon
 
@@ -227,21 +237,21 @@ class DM:
             logger.info(f"Estimated epsilon: {self._epsilon}")
 
         # Step 2: Construct kernel matrix
-        W = np.exp(-distances ** 2 / (4 * self._epsilon))
+        W = np.exp(-(distances**2) / (4 * self._epsilon))
         W = genMat(W, indices, self._N, ifsym=True)
 
         # Normalize
         self._qest = np.array(W.sum(axis=1)).flatten()
-        self._D = spdiags(self._qest ** -self._alpha, 0, self._N, self._N)
+        self._D = spdiags(self._qest**-self._alpha, 0, self._N, self._N)
         W = self._D @ W @ self._D
 
         # Normalize further to create Markov matrix
         D = np.array(W.sum(axis=1)).flatten()
-        self._Dinv1 = spdiags(D ** -0.5, 0, self._N, self._N)
+        self._Dinv1 = spdiags(D**-0.5, 0, self._N, self._N)
         W = self._Dinv1 @ W @ self._Dinv1
 
         # Step 4: Compute eigenvalues and eigenvectors
-        eigvals, eigvecs = eigsh(W, k=self._Npsi, which='LM')
+        eigvals, eigvecs = eigsh(W, k=self._Npsi, which="LM")
         self._lmbd_raw = eigvals[::-1]
         self._psi_raw = eigvecs[:, ::-1]
         psi = self._Dinv1 @ self._psi_raw
@@ -250,7 +260,9 @@ class DM:
         # Normalize eigenvectors
         peq = self._qest * D
         self._peq = peq / np.mean(peq / self._qest)
-        self._norm_factors = np.sqrt(np.mean(psi**2 * (self._peq / self._qest).reshape(-1, 1), axis=0))
+        self._norm_factors = np.sqrt(
+            np.mean(psi**2 * (self._peq / self._qest).reshape(-1, 1), axis=0)
+        )
         self._psi = psi / self._norm_factors
 
     def transform(self, x, ifsym=False):
@@ -260,7 +272,7 @@ class DM:
         M = len(x)
         distances, indices = self._tree.query(x, k=self._Knn)
 
-        W = np.exp(-distances ** 2 / (4 * self._epsilon))
+        W = np.exp(-(distances**2) / (4 * self._epsilon))
         W = genMat(W, indices, self._N, ifsym=ifsym)
 
         qest = np.array(W.sum(axis=1)).flatten()
@@ -268,7 +280,7 @@ class DM:
         W = D @ W @ self._D
         D = np.array(W.sum(axis=1)).flatten()
 
-        eigvecs = (spdiags(1/D, 0, M, M) @ W @ self._Dinv1) * self._psi_raw/self._lmbd_raw
+        eigvecs = (spdiags(1 / D, 0, M, M) @ W @ self._Dinv1) * self._psi_raw / self._lmbd_raw
         eigvecs_normalized = eigvecs / self._norm_factors
 
         return eigvecs_normalized
@@ -277,7 +289,7 @@ class DM:
         self.fit(x)
         return self.transform(x)
 
-    def state_dict(self) -> Dict[str, any]:
+    def state_dict(self) -> dict[str, any]:
         return {
             "Npsi": self._Npsi,
             "Knn": self._Knn,
@@ -293,10 +305,10 @@ class DM:
             "psi_raw": self._psi_raw,
             "psi": self._psi,
             "tree": self._tree,
-            "norm_factors": self._norm_factors
+            "norm_factors": self._norm_factors,
         }
 
-    def load_state_dict(self, d: Dict[str, any]) -> None:
+    def load_state_dict(self, d: dict[str, any]) -> None:
         self._Npsi = d["Npsi"]
         self._Knn = d["Knn"]
         self._alpha = d["alpha"]
@@ -312,6 +324,7 @@ class DM:
         self._psi = d["psi"]
         self._tree = d["tree"]
         self._norm_factors = d["norm_factors"]
+
 
 class VBDM:
     """
@@ -335,12 +348,13 @@ class VBDM:
         Kb: Number of nearest neighbors for density estimation
         operator: 'lb' for Laplace-Beltrami, 'kb' for Kolmogorov backward
     """
+
     def __init__(self, n_components, n_neighbors, Kb=None, operator=None):
-        self._op   = operator
+        self._op = operator
         self._Npsi = n_components
-        self._Knn  = n_neighbors
+        self._Knn = n_neighbors
         if Kb is None:
-            self._Kb = n_neighbors//2
+            self._Kb = n_neighbors // 2
         else:
             assert Kb <= n_neighbors
             self._Kb = Kb
@@ -350,7 +364,7 @@ class VBDM:
         # Pre-processing
         # ---------------
         self._N = x.shape[0]
-        self._tree = KDTree(x, leaf_size=2*self._Knn)
+        self._tree = KDTree(x, leaf_size=2 * self._Knn)
         d, inds = self._tree.query(x, k=self._Knn)
         self._estimate_rho(d, inds)
 
@@ -358,7 +372,7 @@ class VBDM:
         # Determine the final kernel
         # ---------------
         # construct the exponent of K^S_epsilon
-        d = d**2 / (self._rho.reshape(-1,1)*self._rho[inds])
+        d = d**2 / (self._rho.reshape(-1, 1) * self._rho[inds])
 
         # Tune epsilon for the final kernel
         self._epsilon = epsOpt(d, 4, ret_val=False)
@@ -367,7 +381,7 @@ class VBDM:
         # Construct DM matrix and Solve Eigenvalue problem
         # ---------------
         # K^S_epsilon with final choice of epsilon
-        tmp = np.exp(-d/(4*self._epsilon))
+        tmp = np.exp(-d / (4 * self._epsilon))
         d = genMat(tmp, inds)
 
         # q^S_epsilon
@@ -375,18 +389,18 @@ class VBDM:
         self._qest_raw = np.sum(d, axis=1).A1 / self._rho**self._dim
 
         # K = K^S_{epsilon,alpha}
-        Dinv = spdiags(self._qest_raw**(-self._alpha), 0, self._N, self._N)
+        Dinv = spdiags(self._qest_raw ** (-self._alpha), 0, self._N, self._N)
         d = Dinv @ d @ Dinv
 
         # S^2 =P^2*D, where P = diag(rho), D = q^S_{epsilon,alpha}
-        rho2 = self._rho*self._rho
+        rho2 = self._rho * self._rho
         Ssquare = np.sum(d, axis=1).A1 * rho2
 
         # S^{-1}
-        Sinv = spdiags(Ssquare**(-0.5), 0, self._N, self._N)
+        Sinv = spdiags(Ssquare ** (-0.5), 0, self._N, self._N)
 
         # epsilon*Lhat +eye(I) = Sinv*K*Sinv - P^{-2} + eye(I)
-        d = Sinv @ d @ Sinv - spdiags(1/rho2 - 1, 0, self._N, self._N)
+        d = Sinv @ d @ Sinv - spdiags(1 / rho2 - 1, 0, self._N, self._N)
 
         # this is eigenvalue of lambda = eig(eye(I) + epsilon*Lhat)
         # Since lambda^{1/epsilon} ---> e^(eig(Lhat))
@@ -397,13 +411,13 @@ class VBDM:
         lmbd = np.log(lmbd) / self._epsilon
         self._lambda = lmbd[::-1]
         psi = Sinv @ psi
-        self._proj = np.array(psi)[:,::-1]
+        self._proj = np.array(psi)[:, ::-1]
 
         # ---------------
         # Post-processing
         # ---------------
         # Normalize qest into a density by dividing by m0
-        self._qest_fact = self._N * (4 * np.pi * self._epsilon)**(self._dim / 2)
+        self._qest_fact = self._N * (4 * np.pi * self._epsilon) ** (self._dim / 2)
         self._qest = self._qest_raw / self._qest_fact
 
         # U^TU = S^{-2} implies that U^TUS^2 = I
@@ -411,16 +425,16 @@ class VBDM:
         # but since phi_j is evaluated at x_i with sampling measure q(x),
         # then S^2(i,i) = peq(x_i)/q(x_i) which means, peq = S^2*q
         self._peqoversample = Ssquare
-        peq = self._qest * Ssquare    # Invariant measure of the system
+        peq = self._qest * Ssquare  # Invariant measure of the system
 
         # normalization factor Z = \frac{1}{N}sum_{j=1}^N peq(x_j)/qest(x_j)
         self._peq_fact = np.mean(peq / self._qest)
         self._peq = peq / self._peq_fact
 
         # normalize eigenfunctions such that \sum_i psi(x_i)^2 p(x_i)/q(x_i) = 1
-        self._psi_fact = np.sqrt(np.mean(psi**2 * (self._peq / self._qest).reshape(-1,1), axis=0))
+        self._psi_fact = np.sqrt(np.mean(psi**2 * (self._peq / self._qest).reshape(-1, 1), axis=0))
         psi /= self._psi_fact
-        self._psi = psi[:,::-1]
+        self._psi = psi[:, ::-1]
 
     def transform_naive(self, x):
         d, inds = self._tree.query(x, k=1)
@@ -438,30 +452,32 @@ class VBDM:
         rho = self._compute_rho(d=d, inds=inds)
 
         # k^S_epsilon
-        d = d**2 / (rho.reshape(-1,1)*self._rho[inds])
-        d = np.exp(-d/(4*self._epsilon))
-        a = np.ones(M,)
+        d = d**2 / (rho.reshape(-1, 1) * self._rho[inds])
+        d = np.exp(-d / (4 * self._epsilon))
+        a = np.ones(
+            M,
+        )
 
         # q^S_epsilon, unnormalized
         qest = np.sum(d, axis=1) / rho**self._dim
 
         # k = k^S_{epsilon,alpha}
-        dinvL = qest**(-self._alpha)
-        dinvR = self._qest_raw**(-self._alpha)
-        d = dinvL.reshape(-1,1) * d * dinvR[inds]
+        dinvL = qest ** (-self._alpha)
+        dinvR = self._qest_raw ** (-self._alpha)
+        d = dinvL.reshape(-1, 1) * d * dinvR[inds]
         a *= dinvL**2
 
         # S^2 = P^2*D
-        rho2 = rho*rho
+        rho2 = rho * rho
         Ssquare = np.sum(d, axis=1) * rho2
 
         # Projection to obtain eigenfunction
-        d = d / Ssquare.reshape(-1,1)
-        a = a / Ssquare - 1/rho2 + 1
+        d = d / Ssquare.reshape(-1, 1)
+        a = a / Ssquare - 1 / rho2 + 1
         psi = np.zeros((M, self._Npsi))
         for _i in range(self._Npsi):
-            psi[:,_i] = np.sum(d * self._proj[inds,_i], axis=1)
-        psi = psi / (self._lmbd_raw - a.reshape(-1,1))
+            psi[:, _i] = np.sum(d * self._proj[inds, _i], axis=1)
+        psi = psi / (self._lmbd_raw - a.reshape(-1, 1))
         psi /= self._psi_fact
 
         if ret_den:
@@ -483,16 +499,16 @@ class VBDM:
         Compute bandwidth function
         """
         # Build ad hoc bandwidth function by autotuning epsilon for each point
-        self._rho0 = np.sqrt(np.mean(d[:, 1:self._Kb]**2, axis=1)).reshape(-1)
+        self._rho0 = np.sqrt(np.mean(d[:, 1 : self._Kb] ** 2, axis=1)).reshape(-1)
 
         # Pre-kernel used with ad hoc bandwidth only for estimating dimension and sampling density
-        dt = d**2 / (self._rho0.reshape(-1,1) * self._rho0[inds])
+        dt = d**2 / (self._rho0.reshape(-1, 1) * self._rho0[inds])
 
         # Tune epsilon on the pre-kernel
         self._rhoeps, self._dim = epsOpt(dt, 2, ret_val=True)
 
         # Use ad hoc bandwidth function, rho0, to estimate the density
-        tmp = np.exp(-dt/(2*self._rhoeps)) / (2*np.pi*self._rhoeps)**(self._dim/2)
+        tmp = np.exp(-dt / (2 * self._rhoeps)) / (2 * np.pi * self._rhoeps) ** (self._dim / 2)
         dt = genMat(tmp, inds)
 
         # A temporary estimate of sampling density q(x)
@@ -503,18 +519,23 @@ class VBDM:
         if self._op == "lb":
             # Laplace-Beltrami, c1 = 0
             self._beta = -0.5
-            self._alpha = -self._dim/4 + 0.5
+            self._alpha = -self._dim / 4 + 0.5
         elif self._op == "kb":
             # Kolmogorov backward operator, c1 = 1
             self._beta = -0.5
-            self._alpha = -self._dim/4
+            self._alpha = -self._dim / 4
         else:
             raise ValueError(f"Unknown operator {self._op}")
 
         # Theoretical coefficients
-        self._c1 = 2 - 2*self._alpha + self._dim*self._beta + 2*self._beta
-        self._c2 = 0.5 - 2*self._alpha + 2*self._dim*self._alpha + \
-            self._dim*self._beta/2 + self._beta
+        self._c1 = 2 - 2 * self._alpha + self._dim * self._beta + 2 * self._beta
+        self._c2 = (
+            0.5
+            - 2 * self._alpha
+            + 2 * self._dim * self._alpha
+            + self._dim * self._beta / 2
+            + self._beta
+        )
 
         # bandwidth function rho(x) from the sampling density estimate
         rho = qest**self._beta
@@ -524,11 +545,11 @@ class VBDM:
     def _compute_rho(self, x=None, d=None, inds=None):
         if d is None:
             d, inds = self._tree.query(x, k=self._Knn)
-        rho0 = np.sqrt(np.mean(d[:, 1:self._Kb]**2, axis=1)).reshape(-1)
+        rho0 = np.sqrt(np.mean(d[:, 1 : self._Kb] ** 2, axis=1)).reshape(-1)
 
         # Ad hoc bandwidth function for density estimate
-        dt = d**2 / (rho0.reshape(-1,1) * self._rho0[inds])
-        dt = np.exp(-dt/(2*self._rhoeps)) / (2*np.pi*self._rhoeps)**(self._dim/2)
+        dt = d**2 / (rho0.reshape(-1, 1) * self._rho0[inds])
+        dt = np.exp(-dt / (2 * self._rhoeps)) / (2 * np.pi * self._rhoeps) ** (self._dim / 2)
 
         # An estimate of sampling density q(x)
         qest = np.sum(dt, axis=1) / (self._N * rho0**self._dim)
@@ -536,7 +557,7 @@ class VBDM:
         rho = rho.reshape(-1) / self._rho_fact
         return rho
 
-    def state_dict(self) -> Dict[str, any]:
+    def state_dict(self) -> dict[str, any]:
         return {
             "Knn": self._Knn,  # Transform
             "tree": self._tree,
@@ -551,8 +572,7 @@ class VBDM:
             "psi_fact": self._psi_fact,
             "qest_fact": self._qest_fact,
             "peq_fact": self._peq_fact,
-
-            "Kb": self._Kb,    # compute rho
+            "Kb": self._Kb,  # compute rho
             "rho0": self._rho0,
             "rhoeps": self._rhoeps,
             "N": self._N,
@@ -560,7 +580,7 @@ class VBDM:
             "rho_fact": self._rho_fact,
         }
 
-    def load_state_dict(self, d: Dict[str, any]) -> None:
+    def load_state_dict(self, d: dict[str, any]) -> None:
         self._Knn = d["Knn"]
         self._tree = d["tree"]
         self._rho = d["rho"]

@@ -20,25 +20,35 @@ def test_regular_series_adapter_builds_typed_series_from_arrays() -> None:
 
     assert isinstance(series, RegularSeries)
     assert series.time.dtype == torch.float64
-    torch.testing.assert_close(series.state, torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=torch.float64))
-    torch.testing.assert_close(series.control, torch.tensor([[0.1], [0.2], [0.3]], dtype=torch.float64))
+    torch.testing.assert_close(
+        series.state, torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=torch.float64)
+    )
+    torch.testing.assert_close(
+        series.control, torch.tensor([[0.1], [0.2], [0.3]], dtype=torch.float64)
+    )
     torch.testing.assert_close(series.params, torch.tensor([7.0], dtype=torch.float64))
 
 
 def test_regular_series_pipeline_matches_transform_path(tmp_path) -> None:
     data_path = tmp_path / "toy_regular_transform.npz"
-    t = np.stack([
-        np.linspace(0.0, 1.0, 6),
-        np.linspace(0.0, 1.0, 6),
-    ])
-    x = np.stack([
-        np.column_stack((np.linspace(0.0, 1.0, 6), np.linspace(1.0, 2.0, 6))),
-        np.column_stack((np.linspace(2.0, 3.0, 6), np.linspace(3.0, 4.0, 6))),
-    ])
-    u = np.stack([
-        np.linspace(0.0, 0.5, 6).reshape(-1, 1),
-        np.linspace(0.5, 1.0, 6).reshape(-1, 1),
-    ])
+    t = np.stack(
+        [
+            np.linspace(0.0, 1.0, 6),
+            np.linspace(0.0, 1.0, 6),
+        ]
+    )
+    x = np.stack(
+        [
+            np.column_stack((np.linspace(0.0, 1.0, 6), np.linspace(1.0, 2.0, 6))),
+            np.column_stack((np.linspace(2.0, 3.0, 6), np.linspace(3.0, 4.0, 6))),
+        ]
+    )
+    u = np.stack(
+        [
+            np.linspace(0.0, 0.5, 6).reshape(-1, 1),
+            np.linspace(0.5, 1.0, 6).reshape(-1, 1),
+        ]
+    )
     np.savez(data_path, t=t, x=x, u=u)
 
     config = {
@@ -69,7 +79,13 @@ def test_regular_series_pipeline_matches_transform_path(tmp_path) -> None:
         expected_t = t[index][common_delay:]
         expected_x = ref_x[index][common_delay - legacy_x.delay :]
         expected_u = ref_u[index][common_delay - legacy_u.delay :]
-        torch.testing.assert_close(series.time, torch.as_tensor(expected_t, dtype=series.time.dtype))
-        torch.testing.assert_close(series.state, torch.as_tensor(expected_x, dtype=series.state.dtype))
-        torch.testing.assert_close(series.control, torch.as_tensor(expected_u, dtype=series.control.dtype))
+        torch.testing.assert_close(
+            series.time, torch.as_tensor(expected_t, dtype=series.time.dtype)
+        )
+        torch.testing.assert_close(
+            series.state, torch.as_tensor(expected_x, dtype=series.state.dtype)
+        )
+        torch.testing.assert_close(
+            series.control, torch.as_tensor(expected_u, dtype=series.control.dtype)
+        )
         assert series.meta["delay"] == common_delay

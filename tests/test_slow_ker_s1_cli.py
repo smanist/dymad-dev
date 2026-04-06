@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -14,9 +14,13 @@ import torch
 from dymad.io import load_model
 from dymad.models import DKMSK, KM, KMM
 from dymad.utils import TrajectorySampler
-
-from tests.slow_regression_utils import assert_summary_against_baseline, extract_record, load_baselines, load_summary, scaled_limit
-
+from tests.slow_regression_utils import (
+    assert_summary_against_baseline,
+    extract_record,
+    load_baselines,
+    load_summary,
+    scaled_limit,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "ker_s1"
@@ -67,7 +71,12 @@ class Case:
 
 
 CASES = [
-    Case(0, "km_exp", KM, metric_factors={"crit_train_last": 500.0, "crit_valid_last": 500.0, "rmse": 2.0}),
+    Case(
+        0,
+        "km_exp",
+        KM,
+        metric_factors={"crit_train_last": 500.0, "crit_valid_last": 500.0, "rmse": 2.0},
+    ),
     Case(1, "kmm_tn", KMM),
     Case(2, "dks_rbf", DKMSK),
     Case(3, "dks_exp", DKMSK),
@@ -95,7 +104,19 @@ def _run_case(case: Case, workdir: Path) -> None:
     env["MPLBACKEND"] = "Agg"
     env["MPLCONFIGDIR"] = str(mpl_dir)
     subprocess.run(
-        [sys.executable, str(SCRIPT_ROOT / "ker_s1_cli.py"), "--case", str(case.idx), "--workdir", str(workdir), "--seed", str(TEST_SEED), "--no-plot", "--no-predict", "--no-show"],
+        [
+            sys.executable,
+            str(SCRIPT_ROOT / "ker_s1_cli.py"),
+            "--case",
+            str(case.idx),
+            "--workdir",
+            str(workdir),
+            "--seed",
+            str(TEST_SEED),
+            "--no-plot",
+            "--no-predict",
+            "--no-show",
+        ],
         check=True,
         cwd=REPO_ROOT,
         env=env,
@@ -109,7 +130,7 @@ def baseline_store(request):
         return
     store = {}
     if BASELINE_PATH.exists():
-        with open(BASELINE_PATH, "r") as fh:
+        with open(BASELINE_PATH) as fh:
             store = json.load(fh)
     yield store
     with open(BASELINE_PATH, "w") as fh:

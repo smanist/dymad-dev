@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.func as func
 
+
 def complex_step(f, x, h=1e-20, v=None):
     """Complex step differentiation.
 
@@ -30,8 +31,9 @@ def complex_step(f, x, h=1e-20, v=None):
     # Complex step
     J = []
     for _v in v:
-        J.append(np.imag(f(x + 1j*h*_v)) / h)
+        J.append(np.imag(f(x + 1j * h * _v)) / h)
     return np.array(J).T
+
 
 def central_diff(f, x, h=1e-6, v=None):
     """Central difference.
@@ -61,8 +63,9 @@ def central_diff(f, x, h=1e-6, v=None):
     # Central difference
     J = []
     for _v in v:
-        J.append((f(x + h*_v) - f(x - h*_v)) / (2*h))
+        J.append((f(x + h * _v) - f(x - h * _v)) / (2 * h))
     return np.array(J).T
+
 
 def torch_jacobian(f, x, v=None, dtype=torch.float64):
     """Jacobian using torch.func.jacobian.

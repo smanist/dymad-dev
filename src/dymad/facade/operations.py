@@ -25,7 +25,9 @@ class FacadeOperations:
     def __init__(self, store: ObjectStore) -> None:
         self._store = store
 
-    def register_checkpoint(self, *, model_ref: str, checkpoint_path: str, device: str = "cpu") -> ObjectSummary:
+    def register_checkpoint(
+        self, *, model_ref: str, checkpoint_path: str, device: str = "cpu"
+    ) -> ObjectSummary:
         if not model_ref.strip():
             raise ValueError("model_ref cannot be empty")
         if not checkpoint_path.strip():

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from itertools import product
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 
@@ -11,7 +10,7 @@ from dymad.core.transform_module import TransformModule
 
 
 class IdentityTransform(TransformModule):
-    def fit(self, data: Sequence[torch.Tensor]) -> "IdentityTransform":
+    def fit(self, data: Sequence[torch.Tensor]) -> IdentityTransform:
         if data:
             self.input_dim = int(data[0].shape[-1])
             self.output_dim = self.input_dim
@@ -25,7 +24,7 @@ class IdentityTransform(TransformModule):
 
 
 class AddOneTransform(TransformModule):
-    def fit(self, data: Sequence[torch.Tensor]) -> "AddOneTransform":
+    def fit(self, data: Sequence[torch.Tensor]) -> AddOneTransform:
         if data:
             self.input_dim = int(data[0].shape[-1])
             self.output_dim = self.input_dim + 1
@@ -49,7 +48,7 @@ def _cross_features(blocks: Sequence[torch.Tensor]) -> torch.Tensor:
 def _linear_index(sizes: Sequence[int], picks: Sequence[int]) -> int:
     idx = 0
     stride = 1
-    for size, pick in zip(reversed(sizes), reversed(picks)):
+    for size, pick in zip(reversed(sizes), reversed(picks), strict=False):
         idx += pick * stride
         stride *= size
     return idx
@@ -63,7 +62,7 @@ class LiftTransform(TransformModule):
         self.kwargs = kwargs
         self._feature_sizes: list[int] | None = None
 
-    def fit(self, data: Sequence[torch.Tensor]) -> "LiftTransform":
+    def fit(self, data: Sequence[torch.Tensor]) -> LiftTransform:
         if not data:
             return self
         self.input_dim = int(data[0].shape[-1])
@@ -77,7 +76,9 @@ class LiftTransform(TransformModule):
             return self._forward_poly(data)
         if self.fobs == "mixed":
             return self._forward_mixed(data)
-        raise ValueError("LiftTransform currently supports native fobs='poly' or fobs='mixed' only.")
+        raise ValueError(
+            "LiftTransform currently supports native fobs='poly' or fobs='mixed' only."
+        )
 
     def inverse(self, data: torch.Tensor) -> torch.Tensor:
         if self._feature_sizes is None:
@@ -86,7 +87,9 @@ class LiftTransform(TransformModule):
             return self._inverse_poly(data)
         if self.fobs == "mixed":
             return self._inverse_mixed(data)
-        raise ValueError("LiftTransform currently supports native inverse only for fobs='poly' or fobs='mixed'.")
+        raise ValueError(
+            "LiftTransform currently supports native inverse only for fobs='poly' or fobs='mixed'."
+        )
 
     def _infer_feature_sizes(self) -> list[int]:
         if self.fobs == "poly":
@@ -142,7 +145,7 @@ class LiftTransform(TransformModule):
                 radius = torch.sqrt(data[..., first] ** 2 + data[..., second] ** 2)
                 theta = torch.atan2(data[..., second], data[..., first])
                 feature_blocks[first] = torch.stack(
-                    [radius ** degree for degree in range(int(order[0]))],
+                    [radius**degree for degree in range(int(order[0]))],
                     dim=-1,
                 )
                 parts = [torch.ones_like(theta)]
@@ -154,7 +157,9 @@ class LiftTransform(TransformModule):
             else:
                 raise ValueError(f"Unknown mixed lift kind: {kind}")
         if used != set(range(data.shape[-1])):
-            raise ValueError("LiftTransform mixed options must cover every input dimension exactly once.")
+            raise ValueError(
+                "LiftTransform mixed options must cover every input dimension exactly once."
+            )
         return _cross_features(feature_blocks)  # type: ignore[arg-type]
 
     def _inverse_poly(self, data: torch.Tensor) -> torch.Tensor:
@@ -168,8 +173,10 @@ class LiftTransform(TransformModule):
 
     def _inverse_mixed(self, data: torch.Tensor) -> torch.Tensor:
         assert self._feature_sizes is not None
-        result = torch.zeros(*data.shape[:-1], len(self._feature_sizes), dtype=data.dtype, device=data.device)
-        for index, kind, order in self.kwargs["opts"]:
+        result = torch.zeros(
+            *data.shape[:-1], len(self._feature_sizes), dtype=data.dtype, device=data.device
+        )
+        for index, kind, _order in self.kwargs["opts"]:
             if kind == "m":
                 picks = [0 for _ in self._feature_sizes]
                 picks[index] = 1
@@ -208,7 +215,7 @@ class ScalerTransform(TransformModule):
         self.register_buffer("offset", torch.empty(0))
         self.register_buffer("scale", torch.empty(0))
 
-    def fit(self, data: Sequence[torch.Tensor]) -> "ScalerTransform":
+    def fit(self, data: Sequence[torch.Tensor]) -> ScalerTransform:
         if not data:
             return self
         merged = torch.cat([item.reshape(-1, item.shape[-1]) for item in data], dim=0)
@@ -249,7 +256,7 @@ class DelayEmbeddingTransform(TransformModule):
     def __init__(self, delay: int = 1) -> None:
         super().__init__(delay=delay)
 
-    def fit(self, data: Sequence[torch.Tensor]) -> "DelayEmbeddingTransform":
+    def fit(self, data: Sequence[torch.Tensor]) -> DelayEmbeddingTransform:
         if data:
             self.input_dim = int(data[0].shape[-1])
             self.output_dim = self.input_dim * (self.delay + 1)
@@ -267,7 +274,9 @@ class DelayEmbeddingTransform(TransformModule):
 
     def inverse(self, data: torch.Tensor) -> torch.Tensor:
         if self.input_dim is None:
-            raise ValueError("DelayEmbeddingTransform parameters are not initialized. Call fit(...) first.")
+            raise ValueError(
+                "DelayEmbeddingTransform parameters are not initialized. Call fit(...) first."
+            )
         head = data[..., : self.input_dim]
         if self.delay <= 0:
             return head
@@ -290,7 +299,7 @@ class ComposeTransform(TransformModule):
         self.invertibility = self._aggregate_invertibility()
         self.supports_gradients = self._aggregate_gradient_support()
 
-    def fit(self, data: Sequence[torch.Tensor]) -> "ComposeTransform":
+    def fit(self, data: Sequence[torch.Tensor]) -> ComposeTransform:
         current = list(data)
         for stage in self.transforms:
             stage.fit(current)

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import logging
+
 import numpy as np
 import torch
 from torchdiffeq import odeint
-from typing import Union
 
 from dymad.core.model_context import ModelRuntimePayload, materialize_prediction_runtime
 from dymad.core.runtime import TypedRuntime
-from dymad.numerics import expm_low_rank, expm_full_rank
+from dymad.numerics import expm_full_rank, expm_low_rank
 from dymad.utils import ControlInterpolator
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ def _odeint_with_rk4_fallback(ode_func, z0, ts, *, method: str, log_prefix: str,
         retry_kwargs.pop("rtol", None)
         retry_kwargs.pop("atol", None)
         return odeint(ode_func, z0, ts, method="rk4", **retry_kwargs)
+
 
 def _runtime_is_graph(runtime) -> bool:
     return bool(getattr(runtime, "is_graph", getattr(runtime, "_has_graph", False)))
@@ -66,7 +67,9 @@ def _prepare_data(x0, ts, ws: ModelRuntimePayload | None, device):
             elif _ts.ndim != 2:
                 raise ValueError(f"Batch mode: ts must be 1D or 2D. Got ts: {_ts.shape}")
             if _ts.shape[0] != _Nb:
-                raise ValueError(f"Batch mode: ts first dimension must match batch size. Got ts: {_ts.shape}, x0: {_x0.shape}")
+                raise ValueError(
+                    f"Batch mode: ts first dimension must match batch size. Got ts: {_ts.shape}, x0: {_x0.shape}"
+                )
         else:
             if _ts.ndim != 1:
                 raise ValueError(f"Single mode: ts must be 1D. Got ts: {_ts.shape}")
@@ -88,10 +91,13 @@ def _prepare_data(x0, ts, ws: ModelRuntimePayload | None, device):
     else:
         if _Nw is not None:
             if _Nt != _Nw:
-                raise ValueError(f"ts and ws must have the same number of time steps. Got ts: {_Nt}, ws: {_Nw}")
+                raise ValueError(
+                    f"ts and ws must have the same number of time steps. Got ts: {_Nt}, ws: {_Nw}"
+                )
         n_steps = _Nt
 
     return _x0, _ts, _ws, n_steps, is_batch
+
 
 def _proc_ztraj(z_traj, model, ws, n_steps, is_batch):
     if _runtime_is_graph(ws):
@@ -146,7 +152,7 @@ def _pad_ragged_predictions(
         dtype=outputs[0].dtype,
         device=outputs[0].device,
     )
-    for idx, (pred, length) in enumerate(zip(outputs, runtime.step_lengths)):
+    for idx, (pred, length) in enumerate(zip(outputs, runtime.step_lengths, strict=False)):
         out[idx, :length] = pred[:length]
     return out
 
@@ -171,18 +177,20 @@ def _predict_ragged_series(
         outputs.append(pred)
     return _pad_ragged_predictions(outputs, ws, is_graph=_runtime_is_graph(ws))
 
+
 # ------------------
 # Continuous-time case
 # ------------------
 
+
 def predict_continuous(
     model,
     x0: torch.Tensor,
-    ts: Union[np.ndarray, torch.Tensor],
+    ts: np.ndarray | torch.Tensor,
     ws: ModelRuntimePayload | None = None,
-    method: str = 'dopri5',
-    order: str = 'cubic',
-    **kwargs
+    method: str = "dopri5",
+    order: str = "cubic",
+    **kwargs,
 ) -> torch.Tensor:
     """
     Predict trajectory(ies) for continuous-time models with batch support.
@@ -220,7 +228,7 @@ def predict_continuous(
     _ts = _ts[0]
 
     def bucket(t):
-        return torch.searchsorted(_ts, t).clamp(1, _ts.numel()-1)
+        return torch.searchsorted(_ts, t).clamp(1, _ts.numel() - 1)
 
     _has_u = _ws.u is not None
     if _has_u:
@@ -228,19 +236,24 @@ def predict_continuous(
         u_intp = ControlInterpolator(_ts, _ws.u, order=order)
     else:
         logger.debug(f"predict_continuous: {'Batch' if is_batch else 'Single'} mode (autonomous)")
-        u_intp = lambda t: None
+
+        def u_intp(t):
+            return None
 
     z0 = model.encoder(_ws.get_step(0).set_x(_x0))
+
     def ode_func(t, z):
-        _tk  = bucket(t)
+        _tk = bucket(t)
         wtmp = _ws.get_step(_tk).set_u(u_intp(t))
-        x    = model.decoder(z, wtmp)
+        x = model.decoder(z, wtmp)
         wtmp = wtmp.set_x(x)
-        z    = model.encoder(wtmp)
+        z = model.encoder(wtmp)
         z_dot = model.dynamics(z, wtmp)
         return z_dot
 
-    logger.debug(f"predict_continuous: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order if _has_u else 'N/A'}")
+    logger.debug(
+        f"predict_continuous: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order if _has_u else 'N/A'}"
+    )
     z_traj = _odeint_with_rk4_fallback(
         ode_func,
         z0,
@@ -256,14 +269,15 @@ def predict_continuous(
     logger.debug(f"predict_continuous: Final trajectory shape {x_traj.shape}")
     return x_traj
 
+
 def predict_continuous_np(
     model,
     x0: torch.Tensor,
-    ts: Union[np.ndarray, torch.Tensor],
+    ts: np.ndarray | torch.Tensor,
     ws: ModelRuntimePayload | None = None,
-    method: str = 'dopri5',
-    order: str = 'cubic',
-    **kwargs
+    method: str = "dopri5",
+    order: str = "cubic",
+    **kwargs,
 ) -> torch.Tensor:
     """
     Predict trajectory(ies) for continuous-time models with batch support.
@@ -286,25 +300,34 @@ def predict_continuous_np(
     _ts = _ts[0]
 
     def bucket(t):
-        return torch.searchsorted(_ts, t).clamp(1, _ts.numel()-1)
+        return torch.searchsorted(_ts, t).clamp(1, _ts.numel() - 1)
 
     _has_u = _ws.u is not None
     if _has_u:
-        logger.debug(f"predict_continuous_np: {'Batch' if is_batch else 'Single'} mode (controlled)")
+        logger.debug(
+            f"predict_continuous_np: {'Batch' if is_batch else 'Single'} mode (controlled)"
+        )
         u_intp = ControlInterpolator(_ts, _ws.u, order=order)
     else:
-        logger.debug(f"predict_continuous_np: {'Batch' if is_batch else 'Single'} mode (autonomous)")
-        u_intp = lambda t: None
+        logger.debug(
+            f"predict_continuous_np: {'Batch' if is_batch else 'Single'} mode (autonomous)"
+        )
+
+        def u_intp(t):
+            return None
 
     z0 = model.encoder(_ws.get_step(0).set_x(_x0))
+
     def ode_func(t, z):
-        _tk  = bucket(t)
+        _tk = bucket(t)
         wtmp = _ws.get_step(_tk)
-        u    = u_intp(t)
+        u = u_intp(t)
         z_dot = model.dynamics(z, wtmp.set_u(u))
         return z_dot
 
-    logger.debug(f"predict_continuous_np: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order if _has_u else 'N/A'}")
+    logger.debug(
+        f"predict_continuous_np: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order if _has_u else 'N/A'}"
+    )
     z_traj = _odeint_with_rk4_fallback(
         ode_func,
         z0,
@@ -320,12 +343,13 @@ def predict_continuous_np(
     logger.debug(f"predict_continuous_np: Final trajectory shape {x_traj.shape}")
     return x_traj
 
+
 def predict_continuous_exp(
     model,
     x0: torch.Tensor,
-    ts: Union[np.ndarray, torch.Tensor],
+    ts: np.ndarray | torch.Tensor,
     ws: ModelRuntimePayload | None = None,
-    **kwargs
+    **kwargs,
 ) -> torch.Tensor:
     """
     Predict trajectory(ies) for continuous-time models with batch support.
@@ -343,7 +367,9 @@ def predict_continuous_exp(
             predict_continuous_exp,
             model,
             _x0,
-            ts if isinstance(ts, torch.Tensor) else torch.as_tensor(ts, dtype=_x0.dtype, device=_x0.device),
+            ts
+            if isinstance(ts, torch.Tensor)
+            else torch.as_tensor(ts, dtype=_x0.dtype, device=_x0.device),
             _ws,
             **kwargs,
         )
@@ -352,7 +378,7 @@ def predict_continuous_exp(
 
     # Get the system matrix
     if model.processor_net.mode == "full":
-        W = (model.processor_net.weight, )
+        W = (model.processor_net.weight,)
     else:
         U = model.processor_net.U
         V = model.processor_net.V
@@ -363,7 +389,7 @@ def predict_continuous_exp(
 
     logger.debug(f"predict_continuous_exp: Starting ODE integration with shape {z0.shape}")
     if ts.dim() == 2:
-        dt = ts[0] - ts[0,0]
+        dt = ts[0] - ts[0, 0]
     else:
         dt = ts - ts[0]  # (n_steps,)
     if len(W) == 1:
@@ -378,12 +404,13 @@ def predict_continuous_exp(
     logger.debug(f"predict_continuous_exp: Final trajectory shape {x_traj.shape}")
     return x_traj
 
+
 def predict_continuous_fenc(
     model,
     x0: torch.Tensor,
-    ts: Union[np.ndarray, torch.Tensor],
+    ts: np.ndarray | torch.Tensor,
     ws: ModelRuntimePayload | None = None,
-    **kwargs
+    **kwargs,
 ) -> torch.Tensor:
     """
     Predict trajectory(ies) using First-order Euler with Normal Correction (FENC).
@@ -410,27 +437,31 @@ def predict_continuous_fenc(
     z_traj = [z0]
     for k in range(n_steps - 1):
         wtmp = _ws.get_step(k)
-        z_next = model.fenc_step(z_traj[-1], wtmp, _ts[...,k+1]-_ts[...,k])
+        z_next = model.fenc_step(z_traj[-1], wtmp, _ts[..., k + 1] - _ts[..., k])
         z_traj.append(z_next)
 
     z_traj = torch.stack(z_traj, dim=0)  # (n_steps, batch_size, z_dim)
-    logger.debug(f"predict_continuous_fenc: Completed integration, trajectory shape: {z_traj.shape}")
+    logger.debug(
+        f"predict_continuous_fenc: Completed integration, trajectory shape: {z_traj.shape}"
+    )
 
     x_traj = _proc_ztraj(z_traj, model, _ws, n_steps, is_batch)
 
     logger.debug(f"predict_continuous_fenc: Final trajectory shape {x_traj.shape}")
     return x_traj
 
+
 # ------------------
 # Discrete-time case
 # ------------------
 
+
 def predict_discrete(
     model,
     x0: torch.Tensor,
-    ts: Union[np.ndarray, torch.Tensor],
+    ts: np.ndarray | torch.Tensor,
     ws: ModelRuntimePayload | None = None,
-    **kwargs
+    **kwargs,
 ) -> torch.Tensor:
     """
     Predict trajectory(ies) for discrete-time models with batch support.
@@ -457,17 +488,17 @@ def predict_discrete(
         return _predict_ragged_series(predict_discrete, model, _x0, None, _ws, **kwargs)
 
     wtmp = _ws.get_step(0).set_x(_x0)
-    ztmp = model.encoder(wtmp)            # The initial condition for dynamics
-    x0   = model.decoder(ztmp, wtmp)      # The first decoded observation
+    ztmp = model.encoder(wtmp)  # The initial condition for dynamics
+    x0 = model.decoder(ztmp, wtmp)  # The first decoded observation
 
     x_traj = [x0]
     for k in range(n_steps - 1):
         wtmp = _ws.get_step(k).set_x(x_traj[-1])
-        _z   = model.encoder(wtmp)
+        _z = model.encoder(wtmp)
         ztmp = model.dynamics(_z, wtmp)
-        x_k  = model.decoder(ztmp, wtmp)
+        x_k = model.decoder(ztmp, wtmp)
         x_traj.append(x_k)
-    x_traj = torch.stack(x_traj, dim=1)   # (batch_size, n_steps, z_dim)
+    x_traj = torch.stack(x_traj, dim=1)  # (batch_size, n_steps, z_dim)
 
     if not is_batch:
         x_traj = x_traj.squeeze(0)
@@ -475,12 +506,13 @@ def predict_discrete(
     logger.debug(f"predict_discrete: Final trajectory shape {x_traj.shape}")
     return x_traj
 
+
 def predict_discrete_exp(
     model,
     x0: torch.Tensor,
-    ts: Union[np.ndarray, torch.Tensor],
+    ts: np.ndarray | torch.Tensor,
     ws: ModelRuntimePayload | None = None,
-    **kwargs
+    **kwargs,
 ) -> torch.Tensor:
     """
     Predict trajectory(ies) for discrete-time models with batch support.

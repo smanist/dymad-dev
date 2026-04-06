@@ -28,9 +28,15 @@ class SeriesAdapter:
         return RegularSeries(
             time=torch.as_tensor(time, dtype=dtype, device=device),
             state=torch.as_tensor(state, dtype=dtype, device=device),
-            control=torch.as_tensor(control, dtype=dtype, device=device) if control is not None else None,
-            target=torch.as_tensor(target, dtype=dtype, device=device) if target is not None else None,
-            params=torch.as_tensor(params, dtype=dtype, device=device) if params is not None else None,
+            control=torch.as_tensor(control, dtype=dtype, device=device)
+            if control is not None
+            else None,
+            target=torch.as_tensor(target, dtype=dtype, device=device)
+            if target is not None
+            else None,
+            params=torch.as_tensor(params, dtype=dtype, device=device)
+            if params is not None
+            else None,
             meta=dict(meta or {}),
         )
 
@@ -51,15 +57,29 @@ class SeriesAdapter:
     ) -> GraphSeries:
         time_tensor = torch.as_tensor(time, dtype=dtype, device=device)
         node_state_tensor = torch.as_tensor(node_state, dtype=dtype, device=device)
-        control_tensor = torch.as_tensor(control, dtype=dtype, device=device) if control is not None else None
-        target_tensor = torch.as_tensor(target, dtype=dtype, device=device) if target is not None else None
-        params_tensor = torch.as_tensor(params, dtype=dtype, device=device) if params is not None else None
+        control_tensor = (
+            torch.as_tensor(control, dtype=dtype, device=device) if control is not None else None
+        )
+        target_tensor = (
+            torch.as_tensor(target, dtype=dtype, device=device) if target is not None else None
+        )
+        params_tensor = (
+            torch.as_tensor(params, dtype=dtype, device=device) if params is not None else None
+        )
 
         edge_index_payload = SeriesAdapter._graph_edge_index_payload(edge_index, device=device)
-        edge_weight_payload = SeriesAdapter._graph_optional_payload(edge_weight, dtype=dtype, device=device)
-        edge_attr_payload = SeriesAdapter._graph_optional_payload(edge_attr, dtype=dtype, device=device)
+        edge_weight_payload = SeriesAdapter._graph_optional_payload(
+            edge_weight, dtype=dtype, device=device
+        )
+        edge_attr_payload = SeriesAdapter._graph_optional_payload(
+            edge_attr, dtype=dtype, device=device
+        )
 
-        cls = FixedGraphSeries if isinstance(edge_index_payload, torch.Tensor) else VariableEdgeGraphSeries
+        cls = (
+            FixedGraphSeries
+            if isinstance(edge_index_payload, torch.Tensor)
+            else VariableEdgeGraphSeries
+        )
         return cls(
             time=time_tensor,
             node_state=node_state_tensor,
@@ -75,7 +95,9 @@ class SeriesAdapter:
     @staticmethod
     def _graph_edge_index_payload(edge_index: Any, *, device: torch.device | str | None):
         if isinstance(edge_index, (list, tuple)):
-            steps = tuple(SeriesAdapter._to_edge_index_tensor(item, device=device) for item in edge_index)
+            steps = tuple(
+                SeriesAdapter._to_edge_index_tensor(item, device=device) for item in edge_index
+            )
             if steps and all(torch.equal(steps[0], step) for step in steps[1:]):
                 return steps[0]
             return steps
@@ -85,7 +107,9 @@ class SeriesAdapter:
         return SeriesAdapter._to_edge_index_tensor(tensor, device=device)
 
     @staticmethod
-    def _to_edge_index_tensor(edge_index: Any, *, device: torch.device | str | None) -> torch.Tensor:
+    def _to_edge_index_tensor(
+        edge_index: Any, *, device: torch.device | str | None
+    ) -> torch.Tensor:
         tensor = torch.as_tensor(edge_index, dtype=torch.long, device=device)
         if tensor.ndim != 2:
             raise ValueError("edge_index tensors must have exactly two dimensions")

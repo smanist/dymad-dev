@@ -1,15 +1,24 @@
 import copy
 import logging
+from typing import Optional
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from typing import Optional, Union, Tuple, Dict, List
 
 from dymad.core.graph_series import GraphSeries, GraphSeriesBatch
 from dymad.core.series import RegularSeries, RegularSeriesBatch
 from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
-from dymad.core.transform_builder import build_legacy_transform, build_transform_module, export_transform_state
-from dymad.core.transform_module import FieldTransformModule, LegacyTransformModuleAdapter, SeriesTransformPipeline
+from dymad.core.transform_builder import (
+    build_legacy_transform,
+    build_transform_module,
+    export_transform_state,
+)
+from dymad.core.transform_module import (
+    FieldTransformModule,
+    LegacyTransformModuleAdapter,
+    SeriesTransformPipeline,
+)
 from dymad.io.series_adapter import SeriesAdapter
 from dymad.utils.graph import adj_to_edge
 
@@ -23,6 +32,7 @@ def _stack_if_uniform(data):
         return np.stack(data, axis=0)
     except ValueError:
         return list(data)
+
 
 def _process_data(data, x, label, base_dim=1, offset=0):
     """
@@ -57,23 +67,39 @@ def _process_data(data, x, label, base_dim=1, offset=0):
         # - np.ndarray of shape (...,)            - Broadcast to all steps and trajs
         if data.ndim == _dim + 2:  # (n_traj, n_steps, ...)
             if data.shape[0] == 1 and len(x) > 1:
-                logger.info(f"Detected {label} as np.ndarray (1, n_steps, ...): {data.shape} for multiple x. Broadcasting to all trajectories.")
+                logger.info(
+                    f"Detected {label} as np.ndarray (1, n_steps, ...): {data.shape} for multiple x. Broadcasting to all trajectories."
+                )
                 _data = [np.array(data[0]) for _ in x]
-            elif data.shape[1] == 1 and offset == 0:   # Need offset == 0, otherwise n_steps dimension is irrelevant (for p, offset=1)
-                logger.info(f"Detected {label} as np.ndarray (n_traj, 1, ...): {data.shape}. Expanding to trajectory for each x and broadcasting to all time steps.")
-                _data = [np.tile(data[_i], (_x.shape[0],) + (1,) * base_dim) for _i, _x in enumerate(x)]
+            elif (
+                data.shape[1] == 1 and offset == 0
+            ):  # Need offset == 0, otherwise n_steps dimension is irrelevant (for p, offset=1)
+                logger.info(
+                    f"Detected {label} as np.ndarray (n_traj, 1, ...): {data.shape}. Expanding to trajectory for each x and broadcasting to all time steps."
+                )
+                _data = [
+                    np.tile(data[_i], (_x.shape[0],) + (1,) * base_dim) for _i, _x in enumerate(x)
+                ]
             else:
-                logger.info(f"Detected {label} as np.ndarray (n_traj, n_steps, ...): {data.shape}. Splitting into list of arrays.")
+                logger.info(
+                    f"Detected {label} as np.ndarray (n_traj, n_steps, ...): {data.shape}. Splitting into list of arrays."
+                )
                 _data = [np.array(_u) for _u in data]
         elif data.ndim == _dim + 1:  # (n_steps, ...)
             if len(x) > 1:
-                logger.info(f"Detected {label} as np.ndarray (n_steps, ...): {data.shape} but x is multi-traj ({len(x)}). Broadcasting {label} to all trajectories.")
+                logger.info(
+                    f"Detected {label} as np.ndarray (n_steps, ...): {data.shape} but x is multi-traj ({len(x)}). Broadcasting {label} to all trajectories."
+                )
                 _data = [np.array(data) for _ in x]
             else:
-                logger.info(f"Detected {label} as np.ndarray (n_steps, ...): {data.shape}. Wrapping as single-element list.")
+                logger.info(
+                    f"Detected {label} as np.ndarray (n_steps, ...): {data.shape}. Wrapping as single-element list."
+                )
                 _data = [np.array(data)]
         elif data.ndim == _dim and _dim > 0:  # (...,)
-            logger.info(f"Detected {label} as np.ndarray (...,): {data.shape}. Expanding to trajectory for each x and broadcasting to all trajectories.")
+            logger.info(
+                f"Detected {label} as np.ndarray (...,): {data.shape}. Expanding to trajectory for each x and broadcasting to all trajectories."
+            )
             _data = [np.tile(data, (x.shape[0],) + (1,) * base_dim) for x in x]
         else:
             msg = f"Unsupported {label} shape: {data.shape}"
@@ -91,31 +117,43 @@ def _process_data(data, x, label, base_dim=1, offset=0):
         # - list of lists of one array - (n_traj, 1, ...)  - broadcast to all steps
         # - list of arrays             - (n_steps, ...)    - single traj data, broadcast to all trajs
         if isinstance(data[0], np.ndarray):
-            if data[0].ndim == _dim:   # (n_steps, ...)
+            if data[0].ndim == _dim:  # (n_steps, ...)
                 if len(x) > 1:
-                    logger.info(f"Detected {label} as lists (n_steps, ...): {data[0].shape} but x is multi-traj ({len(x)})." \
-                                 f"Broadcasting {label} to all trajectories.")
+                    logger.info(
+                        f"Detected {label} as lists (n_steps, ...): {data[0].shape} but x is multi-traj ({len(x)})."
+                        f"Broadcasting {label} to all trajectories."
+                    )
                     _data = [data for _ in x]
                 else:
-                    logger.info(f"Detected {label} as lists (n_steps, ...): {data[0].shape}. Wrapping as single-element list.")
+                    logger.info(
+                        f"Detected {label} as lists (n_steps, ...): {data[0].shape}. Wrapping as single-element list."
+                    )
                     _data = [np.array(data[0])]
             else:
                 msg = f"Unsupported {label} array shape in list: {data[0].shape}"
                 logger.error(msg)
                 raise ValueError(msg)
         elif isinstance(data[0], list):
-            if len(data) == 1:         # (1, n_steps, ...)
+            if len(data) == 1:  # (1, n_steps, ...)
                 if len(x) > 1:
-                    logger.info(f"Detected {label} as lists (1, n_steps, ...): {data[0][0].shape} for multiple x. Broadcasting to all trajectories.")
+                    logger.info(
+                        f"Detected {label} as lists (1, n_steps, ...): {data[0][0].shape} for multiple x. Broadcasting to all trajectories."
+                    )
                     _data = [data[0] for _ in x]
                 else:
-                    logger.info(f"Detected {label} as lists (n_traj, n_steps, ...): {data[0][0].shape}. Return as is.")
+                    logger.info(
+                        f"Detected {label} as lists (n_traj, n_steps, ...): {data[0][0].shape}. Return as is."
+                    )
                     _data = data
-            elif len(data[0]) == 1:    # (n_traj, 1, ...)
-                logger.info(f"Detected {label} as lists (n_traj, 1, ...): {data[0][0].shape}. Expanding to trajectory for each x and broadcasting to all time steps.")
+            elif len(data[0]) == 1:  # (n_traj, 1, ...)
+                logger.info(
+                    f"Detected {label} as lists (n_traj, 1, ...): {data[0][0].shape}. Expanding to trajectory for each x and broadcasting to all time steps."
+                )
                 _data = [[data[_i][0] for _ in range(x[_i].shape[0])] for _i in range(len(x))]
-            else:                      # (n_traj, n_steps, ...)
-                logger.info(f"Detected {label} as lists (n_traj, n_steps, ...): {data[0][0].shape}. Return as is.")
+            else:  # (n_traj, n_steps, ...)
+                logger.info(
+                    f"Detected {label} as lists (n_traj, n_steps, ...): {data[0][0].shape}. Return as is."
+                )
                 _data = data
 
     else:
@@ -123,14 +161,17 @@ def _process_data(data, x, label, base_dim=1, offset=0):
         raise TypeError(f"{label} must be a np.ndarray or list of np.ndarrays")
 
     # Data validation
-    assert len(_data) == len(x), f"{label} list length ({len(_data)}) must match x list length ({len(x)})"
+    assert len(_data) == len(x), (
+        f"{label} list length ({len(_data)}) must match x list length ({len(x)})"
+    )
     if len(_data[0]) > 0 and offset == 0:
-        for xi, ui in zip(x, _data):
+        for xi, ui in zip(x, _data, strict=False):
             if len(xi) != len(ui):
                 msg = f"Each trajectory in x ({len(xi)}) and {label} ({len(ui)}) must have the same number of time steps"
                 logger.error(msg)
                 raise ValueError(msg)
     return _data
+
 
 class TrajectoryManager:
     """
@@ -157,10 +198,11 @@ class TrajectoryManager:
     # Initialization
     # --------------
     def __init__(
-            self,
-            metadata: Dict,
-            data_key: str | None = None,
-            device: torch.device = torch.device("cpu")):
+        self,
+        metadata: dict,
+        data_key: str | None = None,
+        device: torch.device = torch.device("cpu"),
+    ):
         self.metadata = copy.deepcopy(metadata)
         self.device = device
         self.typed_dataset: list[RegularSeries] | list[GraphSeries] | None = None
@@ -171,38 +213,48 @@ class TrajectoryManager:
 
     def _init_transforms(self) -> None:
         self._transform_fitted = False
-        self._data_transform_x = build_legacy_transform(self.metadata['config'].get('transform_x', None))
-        self._data_transform_y = build_legacy_transform(self.metadata['config'].get('transform_y', None))
-        self._data_transform_p = build_legacy_transform(self.metadata['config'].get('transform_p', None))
-        cfg_transform_u = self.metadata['config'].get('transform_u', None)
+        self._data_transform_x = build_legacy_transform(
+            self.metadata["config"].get("transform_x", None)
+        )
+        self._data_transform_y = build_legacy_transform(
+            self.metadata["config"].get("transform_y", None)
+        )
+        self._data_transform_p = build_legacy_transform(
+            self.metadata["config"].get("transform_p", None)
+        )
+        cfg_transform_u = self.metadata["config"].get("transform_u", None)
         self._data_transform_u = build_legacy_transform(cfg_transform_u)
         if cfg_transform_u is None:
             self.metadata["delay"] = self._data_transform_x.delay
         else:
             self.metadata["delay"] = max(self._data_transform_x.delay, self._data_transform_u.delay)
 
-    def _load_metadata(self, metadata: Dict, data_key: str) -> None:
+    def _load_metadata(self, metadata: dict, data_key: str) -> None:
         if "data_key" in metadata:
             self.data_key = metadata["data_key"]
         else:
-            if data_key == 'train':
-                self.data_key = 'data'
+            if data_key == "train":
+                self.data_key = "data"
             else:
-                self.data_key = 'data_' + data_key
+                self.data_key = "data_" + data_key
             self.metadata["data_key"] = self.data_key
-        self.data_path = self.metadata['config'][self.data_key]['path']
-        self.dtype = torch.double if self.metadata['config'][self.data_key].get('double_precision', False) else torch.float
+        self.data_path = self.metadata["config"][self.data_key]["path"]
+        self.dtype = (
+            torch.double
+            if self.metadata["config"][self.data_key].get("double_precision", False)
+            else torch.float
+        )
 
         if "data_index" in metadata:
             # If data_index is already in metadata, we assume the dataset has been processed before.
             assert metadata["n_data"] == len(metadata["data_index"])
-            logger.info(f"Reusing data index from provided metadata.")
+            logger.info("Reusing data index from provided metadata.")
 
             self.data_index = torch.tensor(metadata["data_index"], dtype=torch.long)
             self.metadata["n_data"] = metadata["n_data"]
             self.metadata["data_index"] = self.data_index.tolist()
 
-            self.set_transforms(metadata=metadata)    # This sets self._transform_fitted = True
+            self.set_transforms(metadata=metadata)  # This sets self._transform_fitted = True
         else:
             self.data_index = None
             self._transform_fitted = False
@@ -210,20 +262,18 @@ class TrajectoryManager:
     # --------------
     # Public interface - for modification
     # --------------
-    def update_config(self, config: Dict) -> None:
+    def update_config(self, config: dict) -> None:
         """
         Update the configuration metadata.
         After this step, data transformations need to be refitted.
         """
-        self.metadata['config'].update(config)
+        self.metadata["config"].update(config)
         self._init_transforms()
         logger.info("New config loaded.")
 
     def set_transforms(
-            self,
-            metadata: Dict | None = None,
-            trajmgr: Optional['TrajectoryManager'] = None
-            ) -> None:
+        self, metadata: dict | None = None, trajmgr: Optional["TrajectoryManager"] = None
+    ) -> None:
         if (metadata is None and trajmgr is None) or (metadata is not None and trajmgr is not None):
             raise ValueError("Either metadata or trajmgr must be provided, but not both.")
 
@@ -244,12 +294,18 @@ class TrajectoryManager:
             if hasattr(trajmgr, "_data_transform_p") and trajmgr._data_transform_p is not None:
                 self._data_transform_p.load_state_dict(trajmgr._data_transform_p.state_dict())
         self.metadata["transform_x_state"] = self._data_transform_x.state_dict()
-        self.metadata["transform_y_state"] = self._data_transform_y.state_dict() if self._data_transform_y is not None else None
-        self.metadata["transform_u_state"] = self._data_transform_u.state_dict() if self._data_transform_u is not None else None
-        self.metadata["transform_p_state"] = self._data_transform_p.state_dict() if self._data_transform_p is not None else None
+        self.metadata["transform_y_state"] = (
+            self._data_transform_y.state_dict() if self._data_transform_y is not None else None
+        )
+        self.metadata["transform_u_state"] = (
+            self._data_transform_u.state_dict() if self._data_transform_u is not None else None
+        )
+        self.metadata["transform_p_state"] = (
+            self._data_transform_p.state_dict() if self._data_transform_p is not None else None
+        )
         self._transform_fitted = True
 
-    def set_data_index(self, index: Union[torch.Tensor, List[int]] | None = None) -> None:
+    def set_data_index(self, index: torch.Tensor | list[int] | None = None) -> None:
         """
         Set the data index for this TrajectoryManager.
         """
@@ -280,7 +336,11 @@ class TrajectoryManager:
         self,
         *,
         typed: bool = False,
-    ) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
+    ) -> tuple[
+        tuple[DataLoader, DataLoader, DataLoader],
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        dict,
+    ]:
         """
         Latter half of process_all
         """
@@ -295,7 +355,11 @@ class TrajectoryManager:
         self,
         *,
         typed: bool = False,
-    ) -> Tuple[Tuple[DataLoader, DataLoader, DataLoader], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], dict]:
+    ) -> tuple[
+        tuple[DataLoader, DataLoader, DataLoader],
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        dict,
+    ]:
         """
         Returns:
             A tuple containing: dataloader, dataset, metadata
@@ -309,7 +373,7 @@ class TrajectoryManager:
     # --------------
     # Workflow implementation - not meant for public use
     # --------------
-    def load_data(self) -> Dict:
+    def load_data(self) -> dict:
         """
         Load raw data from a binary file.
 
@@ -340,16 +404,18 @@ class TrajectoryManager:
 
         # Extract entries from the loaded data.
         logger.info("Loading raw data...")
-        keys = ['t', 'x', 'y', 'u', 'p']
+        keys = ["t", "x", "y", "u", "p"]
         vals = []
         for k in keys:
             _tmp = data.get(k, None)
-            if k == 'x' and _tmp is None:
+            if k == "x" and _tmp is None:
                 msg = "x must be provided in the data file."
                 logger.error(msg)
                 raise ValueError(msg)
             if _tmp is not None:
-                logger.info(f"{k} shape: {_tmp.shape if isinstance(_tmp, np.ndarray) else f'{len(_tmp)} list of arrays'}")
+                logger.info(
+                    f"{k} shape: {_tmp.shape if isinstance(_tmp, np.ndarray) else f'{len(_tmp)} list of arrays'}"
+                )
             vals.append(_tmp)
         logger.info("Raw data loaded.")
 
@@ -357,17 +423,21 @@ class TrajectoryManager:
         x = vals[1]
         if isinstance(x, np.ndarray):
             if x.ndim == 3:  # multiple trajectories as (n_traj, n_steps, n_features)
-                logger.info(f"Detected x as 3D np.ndarray (n_traj, n_steps, n_features): {x.shape}. Splitting into list of arrays.")
+                logger.info(
+                    f"Detected x as 3D np.ndarray (n_traj, n_steps, n_features): {x.shape}. Splitting into list of arrays."
+                )
                 self.x = [np.array(_x) for _x in x]
             elif x.ndim == 2:  # single trajectory (n_steps, n_features)
-                logger.info(f"Detected x as 2D np.ndarray, treating it as a single trajectory (n_steps, n_features): {x.shape}. Wrapping as single-element list.")
+                logger.info(
+                    f"Detected x as 2D np.ndarray, treating it as a single trajectory (n_steps, n_features): {x.shape}. Wrapping as single-element list."
+                )
                 self.x = [np.array(x)]
             else:
                 msg = f"Unsupported x shape: {x.shape}"
                 logger.error(msg)
                 raise ValueError(msg)
         elif isinstance(x, list):
-            logger.info(f"Detected x as list of arrays.")
+            logger.info("Detected x as list of arrays.")
             self.x = [np.array(_x) for _x in x]
         else:
             logger.error("x must be a np.ndarray or list of np.ndarrays")
@@ -376,28 +446,28 @@ class TrajectoryManager:
         # In the processing below, the raw data is converted to arrays, as they are supposed to be regular.
         # Process t
         self.t = _process_data(
-            None if vals[0] is None else np.array(vals[0]),
-            self.x, "t", base_dim=0, offset=0)
+            None if vals[0] is None else np.array(vals[0]), self.x, "t", base_dim=0, offset=0
+        )
         if self.t[0].size == 0:
             self.t = [np.arange(_x.shape[0]) for _x in self.x]
         self.dt = [ti[1] - ti[0] for ti in self.t]
 
         # Process y
         self.y = _process_data(
-            None if vals[2] is None else np.array(vals[2]),
-            self.x, "y", base_dim=1, offset=0)
+            None if vals[2] is None else np.array(vals[2]), self.x, "y", base_dim=1, offset=0
+        )
 
         # Process u
         self.u = _process_data(
-            None if vals[3] is None else np.array(vals[3]),
-            self.x, "u", base_dim=1, offset=0)
+            None if vals[3] is None else np.array(vals[3]), self.x, "u", base_dim=1, offset=0
+        )
         self._is_autonomous = self.u[0].size == 0
 
         # Process p
         self.p = _process_data(
-            None if vals[4] is None else np.array(vals[4]),
-            self.x, "p", base_dim=1, offset=1)
-        
+            None if vals[4] is None else np.array(vals[4]), self.x, "p", base_dim=1, offset=1
+        )
+
         return data
 
     def data_truncation(self) -> None:
@@ -408,9 +478,9 @@ class TrajectoryManager:
           - Subsetting the number of trajectories and horizon (n_steps).
           - Populating basic metadata (dt, tf, shapes, etc.).
         """
-        cfg = self.metadata['config'].get(self.data_key, {})
-        n_samples: Optional[int] = cfg.get("n_samples", None)
-        n_steps: Optional[int] = cfg.get("n_steps", None)
+        cfg = self.metadata["config"].get(self.data_key, {})
+        n_samples: int | None = cfg.get("n_samples", None)
+        n_steps: int | None = cfg.get("n_steps", None)
 
         if self.x is None or self.u is None or self.t is None:
             raise ValueError("Data not loaded. Call load_data() first.")
@@ -487,14 +557,16 @@ class TrajectoryManager:
         if self.metadata["delay"] > 0:
             logger.info("Conforming the time data due to delay.")
             # For time, we remove the last "delay" time steps.
-            self.t = [ti[:-self.metadata["delay"]] for ti in self.t]
+            self.t = [ti[: -self.metadata["delay"]] for ti in self.t]
 
         self._update_dataset_metadata()
 
-    def _transform_by_index(self, indices: torch.Tensor) -> List[RegularSeries]:
+    def _transform_by_index(self, indices: torch.Tensor) -> list[RegularSeries]:
         return self._transform_regular_series_by_index(indices)
 
-    def create_regular_series_dataset(self, indices: torch.Tensor | List[int] | None = None) -> List[RegularSeries]:
+    def create_regular_series_dataset(
+        self, indices: torch.Tensor | list[int] | None = None
+    ) -> list[RegularSeries]:
         """Expose the first typed data seam for regular trajectory preprocessing."""
         if indices is None:
             if self.data_index is None:
@@ -511,7 +583,7 @@ class TrajectoryManager:
                 return [self.typed_dataset[position_by_index[int(index)]] for index in indices]
         return self._transform_regular_series_by_index(indices)
 
-    def _create_raw_regular_series_by_index(self, indices: torch.Tensor) -> List[RegularSeries]:
+    def _create_raw_regular_series_by_index(self, indices: torch.Tensor) -> list[RegularSeries]:
         dataset = []
         for index in indices:
             target = self.y[index] if self.metadata["n_aux_features"] > 0 else None
@@ -532,36 +604,55 @@ class TrajectoryManager:
 
     def _build_regular_transform_pipeline(self) -> SeriesTransformPipeline:
         cfg = self.metadata["config"]
-        return SeriesTransformPipeline([
-            FieldTransformModule(
-                "state",
-                build_transform_module(cfg.get("transform_x", None), self.metadata.get("transform_x_state")),
-            ),
-            *(
-                [FieldTransformModule(
-                    "control",
-                    build_transform_module(cfg.get("transform_u", None), self.metadata.get("transform_u_state")),
-                )]
-                if self.metadata["n_control_features"] > 0 else []
-            ),
-            *(
-                [FieldTransformModule(
-                    "target",
-                    build_transform_module(cfg.get("transform_y", None), self.metadata.get("transform_y_state")),
-                )]
-                if self.metadata["n_aux_features"] > 0 else []
-            ),
-            *(
-                [FieldTransformModule(
-                    "params",
-                    build_transform_module(cfg.get("transform_p", None), self.metadata.get("transform_p_state")),
-                    time_varying=False,
-                )]
-                if self.metadata["n_parameters"] > 0 else []
-            ),
-        ])
+        return SeriesTransformPipeline(
+            [
+                FieldTransformModule(
+                    "state",
+                    build_transform_module(
+                        cfg.get("transform_x", None), self.metadata.get("transform_x_state")
+                    ),
+                ),
+                *(
+                    [
+                        FieldTransformModule(
+                            "control",
+                            build_transform_module(
+                                cfg.get("transform_u", None), self.metadata.get("transform_u_state")
+                            ),
+                        )
+                    ]
+                    if self.metadata["n_control_features"] > 0
+                    else []
+                ),
+                *(
+                    [
+                        FieldTransformModule(
+                            "target",
+                            build_transform_module(
+                                cfg.get("transform_y", None), self.metadata.get("transform_y_state")
+                            ),
+                        )
+                    ]
+                    if self.metadata["n_aux_features"] > 0
+                    else []
+                ),
+                *(
+                    [
+                        FieldTransformModule(
+                            "params",
+                            build_transform_module(
+                                cfg.get("transform_p", None), self.metadata.get("transform_p_state")
+                            ),
+                            time_varying=False,
+                        )
+                    ]
+                    if self.metadata["n_parameters"] > 0
+                    else []
+                ),
+            ]
+        )
 
-    def _transform_regular_series_by_index(self, indices: torch.Tensor) -> List[RegularSeries]:
+    def _transform_regular_series_by_index(self, indices: torch.Tensor) -> list[RegularSeries]:
         raw_dataset = self._create_raw_regular_series_by_index(indices)
         pipeline = self._build_regular_transform_pipeline()
         transformed = pipeline(RegularSeriesBatch.collate(raw_dataset))
@@ -569,28 +660,32 @@ class TrajectoryManager:
 
     def _update_dataset_metadata(self):
         # Bookkeeping metadata for the dataset.
-        self.metadata['n_total_state_features'] = self._data_transform_x._out_dim
+        self.metadata["n_total_state_features"] = self._data_transform_x._out_dim
         if self.metadata["n_aux_features"] == 0:
-            self.metadata['n_total_aux_features'] = 0
+            self.metadata["n_total_aux_features"] = 0
         else:
-            self.metadata['n_total_aux_features'] = self._data_transform_y._out_dim
+            self.metadata["n_total_aux_features"] = self._data_transform_y._out_dim
         if self.metadata["n_control_features"] == 0:
-            self.metadata['n_total_control_features'] = 0
+            self.metadata["n_total_control_features"] = 0
         else:
-            self.metadata['n_total_control_features'] = self._data_transform_u._out_dim
+            self.metadata["n_total_control_features"] = self._data_transform_u._out_dim
         if self.metadata["n_parameters"] == 0:
-            self.metadata['n_total_parameters'] = 0
+            self.metadata["n_total_parameters"] = 0
         else:
-            self.metadata['n_total_parameters'] = self._data_transform_p._out_dim
-        self.metadata['n_total_features'] = self.metadata['n_total_state_features'] + self.metadata['n_total_control_features']
+            self.metadata["n_total_parameters"] = self._data_transform_p._out_dim
+        self.metadata["n_total_features"] = (
+            self.metadata["n_total_state_features"] + self.metadata["n_total_control_features"]
+        )
         self.metadata["dt_and_n_steps"] = self._create_dt_n_steps_metadata()
 
         logger.info(f"Number of total state features: {self.metadata['n_total_state_features']}")
         logger.info(f"Number of total auxiliary features: {self.metadata['n_total_aux_features']}")
-        logger.info(f"Number of total control features: {self.metadata['n_total_control_features']}")
+        logger.info(
+            f"Number of total control features: {self.metadata['n_total_control_features']}"
+        )
         logger.info(f"Number of total parameters: {self.metadata['n_total_parameters']}")
 
-    def _create_dt_n_steps_metadata(self) -> List[List[float]]:
+    def _create_dt_n_steps_metadata(self) -> list[list[float]]:
         """
         Create metadata for dt and n_steps, optimizing storage if values are uniform.
 
@@ -600,7 +695,7 @@ class TrajectoryManager:
         """
         # Store dt and n_steps for metadata, but don't modify self.t and self.dt
         metadata_dt_and_n_steps = []
-        for dt, t in zip(self.dt, self.t):
+        for dt, t in zip(self.dt, self.t, strict=False):
             # Use the actual length after any truncation for metadata
             actual_n_steps = len(t)
             metadata_dt_and_n_steps.append([dt, actual_n_steps])
@@ -611,7 +706,9 @@ class TrajectoryManager:
             nsteps = [item[1] for item in metadata_dt_and_n_steps]
             if len(set(dts)) == 1 and len(set(nsteps)) == 1:
                 # Only store one entry if both dt and n_steps are uniform
-                logger.info("Uniform dt and n_steps detected across all trajectories. Only saving one entry in metadata.")
+                logger.info(
+                    "Uniform dt and n_steps detected across all trajectories. Only saving one entry in metadata."
+                )
                 return [metadata_dt_and_n_steps[0]]
             else:
                 return metadata_dt_and_n_steps
@@ -622,7 +719,7 @@ class TrajectoryManager:
         """
         Create dataloaders for the data set.
         """
-        dl_cfg = self.metadata['config'].get("dataloader", {})
+        dl_cfg = self.metadata["config"].get("dataloader", {})
         batch_size: int = dl_cfg.get("batch_size", 1)
         if_shuffle: bool = dl_cfg.get("shuffle", True)
 
@@ -636,6 +733,7 @@ class TrajectoryManager:
             collate_fn=RegularTrainerBatch.collate_series,
         )
 
+
 class TrajectoryManagerGraph(TrajectoryManager):
     r"""
     A class to manage trajectory data loading, preprocessing, and
@@ -648,7 +746,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
 
     In the raw data, the nodal state features are expected to be concatenated sequentially.
     For example, for N nodes with M features each, the raw data for states at a time step is
-    
+
     .. math::
         x = [x_1, x_2, ..., x_N], \text{where } x_i \in R^M,
 
@@ -665,23 +763,27 @@ class TrajectoryManagerGraph(TrajectoryManager):
     # Initialization
     # --------------
     def __init__(
-            self,
-            metadata: Dict,
-            data_key: str = 'train',
-            device: torch.device = torch.device("cpu"),
-            adj: Optional[Union[torch.Tensor, np.ndarray]] = None
-            ):
+        self,
+        metadata: dict,
+        data_key: str = "train",
+        device: torch.device = torch.device("cpu"),
+        adj: torch.Tensor | np.ndarray | None = None,
+    ):
         super().__init__(metadata, data_key, device)
         self.adj = adj  # Store the adjacency matrix if provided externally
 
     def _init_transforms(self) -> None:
         super()._init_transforms()
-        self._data_transform_ew = build_legacy_transform(self.metadata['config'].get('transform_ew', None))
+        self._data_transform_ew = build_legacy_transform(
+            self.metadata["config"].get("transform_ew", None)
+        )
         if self._data_transform_ew.delay > 0:
             msg = "Edge weight transformations with delay embedding are not supported."
             logger.error(msg)
             raise ValueError(msg)
-        self._data_transform_ea = build_legacy_transform(self.metadata['config'].get('transform_ea', None))
+        self._data_transform_ea = build_legacy_transform(
+            self.metadata["config"].get("transform_ea", None)
+        )
         if self._data_transform_ea.delay > 0:
             msg = "Edge attribute transformations with delay embedding are not supported."
             logger.error(msg)
@@ -691,10 +793,8 @@ class TrajectoryManagerGraph(TrajectoryManager):
     # Public interface - for modification
     # --------------
     def set_transforms(
-            self,
-            metadata: Dict | None = None,
-            trajmgr: Optional['TrajectoryManagerGraph'] = None
-            ) -> None:
+        self, metadata: dict | None = None, trajmgr: Optional["TrajectoryManagerGraph"] = None
+    ) -> None:
         super().set_transforms(metadata, trajmgr)
 
         if metadata is not None:
@@ -709,7 +809,9 @@ class TrajectoryManagerGraph(TrajectoryManager):
             if hasattr(trajmgr, "_data_transform_p") and trajmgr._data_transform_p is not None:
                 self._data_transform_p.load_state_dict(trajmgr._data_transform_p.state_dict())
         self.metadata["transform_ew_state"] = self._data_transform_ew.state_dict()
-        self.metadata["transform_ea_state"] = self._data_transform_ea.state_dict() if self._data_transform_ea is not None else None
+        self.metadata["transform_ea_state"] = (
+            self._data_transform_ea.state_dict() if self._data_transform_ea is not None else None
+        )
         self._transform_fitted = True
 
     # --------------
@@ -721,25 +823,29 @@ class TrajectoryManagerGraph(TrajectoryManager):
     # --------------
     # Workflow implementation - not meant for public use
     # --------------
-    def load_data(self) -> Dict:
+    def load_data(self) -> dict:
         data = super().load_data()
 
         # By now t/x/y/u/p should have been loaded.
-        ei = data.get('ei', None)
-        ew = data.get('ew', None)
-        ea = data.get('ea', None)
+        ei = data.get("ei", None)
+        ew = data.get("ew", None)
+        ea = data.get("ea", None)
 
-        adj = data.get('adj', None)
+        adj = data.get("adj", None)
         if adj is not None:
             if self.adj is not None:
-                logger.warning("Adjacency matrix provided both externally and in data file. Using the one from data.")
+                logger.warning(
+                    "Adjacency matrix provided both externally and in data file. Using the one from data."
+                )
             self.adj = adj
             logger.info("Loaded adjacency matrix from data file")
 
         # Process ei and ew
         if ei is not None:
             if self.adj is not None:
-                logger.warning("Edge index provided both externally and in data file. Using the one from data.")
+                logger.warning(
+                    "Edge index provided both externally and in data file. Using the one from data."
+                )
         else:
             logger.info("Edge index is not in data, generating from adjacency matrix")
             ei, ew = adj_to_edge(self.adj)
@@ -764,23 +870,32 @@ class TrajectoryManagerGraph(TrajectoryManager):
         super().data_truncation()
 
         # Update n_state_features, n_aux_features, n_control_features to per-node basis
-        assert self.metadata["n_state_features"] % self.n_nodes == 0, \
+        assert self.metadata["n_state_features"] % self.n_nodes == 0, (
             "Total number of state features must be divisible by number of nodes."
-        assert self.metadata["n_aux_features"] % self.n_nodes == 0, \
+        )
+        assert self.metadata["n_aux_features"] % self.n_nodes == 0, (
             "Total number of auxiliary features must be divisible by number of nodes."
-        assert self.metadata["n_control_features"] % self.n_nodes == 0, \
+        )
+        assert self.metadata["n_control_features"] % self.n_nodes == 0, (
             "Total number of control features must be divisible by number of nodes."
+        )
         self.metadata["n_state_features"] = self.metadata["n_state_features"] // self.n_nodes
         self.metadata["n_aux_features"] = self.metadata["n_aux_features"] // self.n_nodes
         self.metadata["n_control_features"] = self.metadata["n_control_features"] // self.n_nodes
-        logger.info(f"Number of state features, updated for graph: {self.metadata['n_state_features']}")
-        logger.info(f"Number of auxiliary features, updated for graph: {self.metadata['n_aux_features']}")
-        logger.info(f"Number of control features, updated for graph: {self.metadata['n_control_features']}")
+        logger.info(
+            f"Number of state features, updated for graph: {self.metadata['n_state_features']}"
+        )
+        logger.info(
+            f"Number of auxiliary features, updated for graph: {self.metadata['n_aux_features']}"
+        )
+        logger.info(
+            f"Number of control features, updated for graph: {self.metadata['n_control_features']}"
+        )
 
         # Graph specific truncation for ei, ew, ea
-        cfg = self.metadata['config'].get(self.data_key, {})
-        n_samples: Optional[int] = cfg.get("n_samples", None)
-        n_steps: Optional[int] = cfg.get("n_steps", None)
+        cfg = self.metadata["config"].get(self.data_key, {})
+        n_samples: int | None = cfg.get("n_samples", None)
+        n_steps: int | None = cfg.get("n_steps", None)
         # Subset trajectories if n_samples is provided.
         if n_samples is not None:
             if n_samples > 1:
@@ -810,7 +925,9 @@ class TrajectoryManagerGraph(TrajectoryManager):
         """
         assert self.data_index is not None, "Dataset must be split before applying transformations."
 
-        raw_batch = GraphSeriesBatch.collate(self._create_raw_graph_series_by_index(self.data_index))
+        raw_batch = GraphSeriesBatch.collate(
+            self._create_raw_graph_series_by_index(self.data_index)
+        )
         pipeline = self._build_graph_transform_pipeline()
 
         if not self._transform_fitted:
@@ -828,14 +945,16 @@ class TrajectoryManagerGraph(TrajectoryManager):
         if self.metadata["delay"] > 0:
             logger.info("Conforming the time data due to delay.")
             # For time, we remove the last "delay" time steps.
-            self.t = [ti[:-self.metadata["delay"]] for ti in self.t]
+            self.t = [ti[: -self.metadata["delay"]] for ti in self.t]
 
         self._update_dataset_metadata()
 
-    def _transform_by_index(self, indices: torch.Tensor) -> List[GraphSeries]:
+    def _transform_by_index(self, indices: torch.Tensor) -> list[GraphSeries]:
         return self._transform_graph_series_by_index(indices)
 
-    def create_graph_series_dataset(self, indices: torch.Tensor | List[int] | None = None) -> List[GraphSeries]:
+    def create_graph_series_dataset(
+        self, indices: torch.Tensor | list[int] | None = None
+    ) -> list[GraphSeries]:
         """Expose the typed graph-series seam for graph trajectory preprocessing."""
         if indices is None:
             if self.data_index is None:
@@ -852,23 +971,37 @@ class TrajectoryManagerGraph(TrajectoryManager):
                 return [self.typed_dataset[position_by_index[int(index)]] for index in indices]
         return self._transform_graph_series_by_index(indices)
 
-    def _transform_graph_series_by_index(self, indices: torch.Tensor) -> List[GraphSeries]:
+    def _transform_graph_series_by_index(self, indices: torch.Tensor) -> list[GraphSeries]:
         raw_batch = GraphSeriesBatch.collate(self._create_raw_graph_series_by_index(indices))
         transformed = self._build_graph_transform_pipeline()(raw_batch)
         return list(transformed)
 
-    def _create_raw_graph_series_by_index(self, indices: torch.Tensor) -> List[GraphSeries]:
+    def _create_raw_graph_series_by_index(self, indices: torch.Tensor) -> list[GraphSeries]:
         dataset = []
         for index in indices:
-            target = np.swapaxes(self._graph_data_reshape(self.y[index], forward=True), 0, 1) if self.metadata["n_aux_features"] > 0 else None
-            control = np.swapaxes(self._graph_data_reshape(self.u[index], forward=True), 0, 1) if self.metadata["n_control_features"] > 0 else None
+            target = (
+                np.swapaxes(self._graph_data_reshape(self.y[index], forward=True), 0, 1)
+                if self.metadata["n_aux_features"] > 0
+                else None
+            )
+            control = (
+                np.swapaxes(self._graph_data_reshape(self.u[index], forward=True), 0, 1)
+                if self.metadata["n_control_features"] > 0
+                else None
+            )
             params = self.p[index] if self.metadata["n_parameters"] > 0 else None
-            edge_weight = _stack_if_uniform(self.ew[index]) if self.metadata["n_edge_weights"] > 0 else None
-            edge_attr = _stack_if_uniform(self.ea[index]) if self.metadata["n_edge_features"] > 0 else None
+            edge_weight = (
+                _stack_if_uniform(self.ew[index]) if self.metadata["n_edge_weights"] > 0 else None
+            )
+            edge_attr = (
+                _stack_if_uniform(self.ea[index]) if self.metadata["n_edge_features"] > 0 else None
+            )
             dataset.append(
                 SeriesAdapter.from_graph_arrays(
                     time=self.t[index],
-                    node_state=np.swapaxes(self._graph_data_reshape(self.x[index], forward=True), 0, 1),
+                    node_state=np.swapaxes(
+                        self._graph_data_reshape(self.x[index], forward=True), 0, 1
+                    ),
                     control=control,
                     target=target,
                     params=params,
@@ -883,56 +1016,81 @@ class TrajectoryManagerGraph(TrajectoryManager):
 
     def _build_graph_transform_pipeline(self) -> SeriesTransformPipeline:
         cfg = self.metadata["config"]
-        return SeriesTransformPipeline([
-            FieldTransformModule(
-                "node_state",
-                build_transform_module(cfg.get("transform_x", None), self.metadata.get("transform_x_state")),
-            ),
-            *(
-                [FieldTransformModule(
-                    "control",
-                    build_transform_module(cfg.get("transform_u", None), self.metadata.get("transform_u_state")),
-                )]
-                if self.metadata["n_control_features"] > 0 else []
-            ),
-            *(
-                [FieldTransformModule(
-                    "target",
-                    build_transform_module(cfg.get("transform_y", None), self.metadata.get("transform_y_state")),
-                )]
-                if self.metadata["n_aux_features"] > 0 else []
-            ),
-            *(
-                [FieldTransformModule(
-                    "params",
-                    build_transform_module(cfg.get("transform_p", None), self.metadata.get("transform_p_state")),
-                    time_varying=False,
-                )]
-                if self.metadata["n_parameters"] > 0 else []
-            ),
-            *(
-                [FieldTransformModule(
-                    "edge_weight",
-                    self._build_graph_edge_transform_module(
-                        cfg.get("transform_ew", None),
-                        self.metadata.get("transform_ew_state"),
-                        field="edge_weight",
+        return SeriesTransformPipeline(
+            [
+                FieldTransformModule(
+                    "node_state",
+                    build_transform_module(
+                        cfg.get("transform_x", None), self.metadata.get("transform_x_state")
                     ),
-                )]
-                if self.metadata["n_edge_weights"] > 0 else []
-            ),
-            *(
-                [FieldTransformModule(
-                    "edge_attr",
-                    self._build_graph_edge_transform_module(
-                        cfg.get("transform_ea", None),
-                        self.metadata.get("transform_ea_state"),
-                        field="edge_attr",
-                    ),
-                )]
-                if self.metadata["n_edge_features"] > 0 else []
-            ),
-        ])
+                ),
+                *(
+                    [
+                        FieldTransformModule(
+                            "control",
+                            build_transform_module(
+                                cfg.get("transform_u", None), self.metadata.get("transform_u_state")
+                            ),
+                        )
+                    ]
+                    if self.metadata["n_control_features"] > 0
+                    else []
+                ),
+                *(
+                    [
+                        FieldTransformModule(
+                            "target",
+                            build_transform_module(
+                                cfg.get("transform_y", None), self.metadata.get("transform_y_state")
+                            ),
+                        )
+                    ]
+                    if self.metadata["n_aux_features"] > 0
+                    else []
+                ),
+                *(
+                    [
+                        FieldTransformModule(
+                            "params",
+                            build_transform_module(
+                                cfg.get("transform_p", None), self.metadata.get("transform_p_state")
+                            ),
+                            time_varying=False,
+                        )
+                    ]
+                    if self.metadata["n_parameters"] > 0
+                    else []
+                ),
+                *(
+                    [
+                        FieldTransformModule(
+                            "edge_weight",
+                            self._build_graph_edge_transform_module(
+                                cfg.get("transform_ew", None),
+                                self.metadata.get("transform_ew_state"),
+                                field="edge_weight",
+                            ),
+                        )
+                    ]
+                    if self.metadata["n_edge_weights"] > 0
+                    else []
+                ),
+                *(
+                    [
+                        FieldTransformModule(
+                            "edge_attr",
+                            self._build_graph_edge_transform_module(
+                                cfg.get("transform_ea", None),
+                                self.metadata.get("transform_ea_state"),
+                                field="edge_attr",
+                            ),
+                        )
+                    ]
+                    if self.metadata["n_edge_features"] > 0
+                    else []
+                ),
+            ]
+        )
 
     def _build_graph_edge_transform_module(self, config, state_dict, *, field: str):
         legacy_transform = build_legacy_transform(config)
@@ -976,7 +1134,9 @@ class TrajectoryManagerGraph(TrajectoryManager):
         stacked = np.stack(data, axis=0)
         return torch.as_tensor(stacked, dtype=reference.dtype, device=reference.device)
 
-    def _sync_legacy_graph_transforms_from_pipeline(self, pipeline: SeriesTransformPipeline) -> None:
+    def _sync_legacy_graph_transforms_from_pipeline(
+        self, pipeline: SeriesTransformPipeline
+    ) -> None:
         stage_by_field = {stage.field: stage.transform for stage in pipeline.stages}
 
         def _sync(field, legacy_attr, metadata_key):
@@ -1029,7 +1189,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
         """
         For graph data, we aggregate the trajectories into batches of graphs.
         """
-        dl_cfg = self.metadata['config'].get("dataloader", {})
+        dl_cfg = self.metadata["config"].get("dataloader", {})
         batch_size: int = dl_cfg.get("batch_size", 1)
         if_shuffle: bool = dl_cfg.get("shuffle", True)
 

@@ -5,7 +5,7 @@ import torch
 from dymad.io import load_model
 from dymad.models import DKBF
 from dymad.training import NODETrainer
-from dymad.utils import plot_summary, plot_trajectory, TrajectorySampler
+from dymad.utils import TrajectorySampler, plot_summary, plot_trajectory
 
 B = 256
 N = 301
@@ -13,19 +13,23 @@ t_grid = np.linspace(0, 6, N)
 
 mu = -0.5
 lm = -3
+
+
 def f(t, x):
-    _d = np.array([mu*x[0], lm*(x[1]-x[0]**2)])
+    _d = np.array([mu * x[0], lm * (x[1] - x[0] ** 2)])
     return _d
 
+
 mdl_kb = {
-    "name" : 'kp_model',
-    "encoder_layers" : 2,
-    "decoder_layers" : 2,
-    "hidden_dimension" : 32,
-    "koopman_dimension" : 4,
+    "name": "kp_model",
+    "encoder_layers": 2,
+    "decoder_layers": 2,
+    "hidden_dimension": 32,
+    "koopman_dimension": 4,
     "autoencoder_type": "cat",
-    "activation" : "tanh",
-    "weight_init" : "xavier_uniform"}
+    "activation": "tanh",
+    "weight_init": "xavier_uniform",
+}
 
 trn_ref = {
     "n_epochs": 2000,
@@ -54,7 +58,7 @@ trn_nd3 = {
 trn_nd3.update(trn_ref)
 
 trn_opts = [trn_nd1, trn_nd2, trn_nd3]
-config_path = 'kp_model.yaml'
+config_path = "kp_model.yaml"
 
 IDX = [0, 1, 2]
 # IDX = [0]
@@ -66,20 +70,20 @@ ifprd = 1
 if iftrn:
     for i in IDX:
         opt = {"model": mdl_kb, "training": trn_opts[i]}
-        opt["model"]["name"] = f"kp_dt{i+1}"
+        opt["model"]["name"] = f"kp_dt{i + 1}"
         trainer = NODETrainer(config_path, DKBF, config_mod=opt)
         trainer.train()
 
 if ifplt:
-    labels = [f"dt{i+1}" for i in IDX]
-    npz_files = [f'kp_{l}' for l in labels]
+    labels = [f"dt{i + 1}" for i in IDX]
+    npz_files = [f"kp_{l}" for l in labels]
     npzs = plot_summary(npz_files, labels=labels, ifscl=False, ifclose=False)
 
     for i in IDX:
-        print(f"dt{i+1} Epoch time:", npzs[i]['avg_epoch_time'])
+        print(f"dt{i + 1} Epoch time:", npzs[i]["avg_epoch_time"])
 
 if ifprd:
-    sampler = TrajectorySampler(f, config='kp_data.yaml')
+    sampler = TrajectorySampler(f, config="kp_data.yaml")
     ts, xs, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -87,15 +91,13 @@ if ifprd:
     res = [x_data]
     for i in IDX:
         opt = {"model": mdl_kb, "training": trn_opts[i]}
-        opt["model"]["name"] = f"kp_dt{i+1}"
-        _, prd_func = load_model(DKBF, f'kp_dt{i+1}.pt')
+        opt["model"]["name"] = f"kp_dt{i + 1}"
+        _, prd_func = load_model(DKBF, f"kp_dt{i + 1}.pt")
         with torch.no_grad():
             pred = prd_func(x_data, t_data)
         res.append(pred)
 
-    labels = ['Truth'] + [f"dt{i+1}" for i in IDX]
-    plot_trajectory(
-        np.array(res), t_data, "KP",
-        labels=labels, ifclose=False)
+    labels = ["Truth"] + [f"dt{i + 1}" for i in IDX]
+    plot_trajectory(np.array(res), t_data, "KP", labels=labels, ifclose=False)
 
 plt.show()

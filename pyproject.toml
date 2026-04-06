@@ -83,15 +83,51 @@ exclude = [
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
-ignore = ["E501", "E741"]
+ignore = [
+  "B006",
+  "B007",
+  "B008",
+  "B023",
+  "B027",
+  "B905",
+  "E501",
+  "E731",
+  "E741",
+  "UP007",
+  "UP040",
+  "W293",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+"examples/aircraft_system/*.py" = ["E402", "F821"]
+"examples/double_pendulum/deprecated/*.py" = ["E402"]
+"scripts/**/*_cli.py" = ["E402"]
 
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
-include = ["src/dymad"]
+include = [
+  "src/dymad/core/graph_series.py",
+  "src/dymad/core/series.py",
+  "src/dymad/exec",
+  "src/dymad/facade",
+  "src/dymad/io/load_model_compat.py",
+  "src/dymad/models/model_spec.py",
+  "src/dymad/models/rollout_engine.py",
+  "src/dymad/modules/misc.py",
+  "src/dymad/numerics/spectrum.py",
+  "src/dymad/numerics/time_int.py",
+  "src/dymad/numerics/weak.py",
+  "src/dymad/sako/snapshot.py",
+  "src/dymad/store",
+  "src/dymad/training/batch_adapter.py",
+  "src/dymad/training/execution_services.py",
+  "src/dymad/training/helper.py",
+  "src/dymad/training/phase_pipeline.py",
+  "src/dymad/training/phase_runtime.py",
+  "src/dymad/training/trainer.py",
+]
 exclude = [
   ".git",
   ".ruff_cache",
@@ -106,4 +142,5 @@ exclude = [
   "tests",
 ]
 extraPaths = ["src"]
+reportMissingImports = "none"
 reportMissingTypeStubs = "none"

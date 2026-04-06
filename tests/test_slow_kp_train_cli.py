@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -14,7 +14,6 @@ import torch
 from dymad.io import load_model
 from dymad.models import KBF, LDM
 from dymad.utils import TrajectorySampler
-
 from tests.slow_regression_utils import (
     assert_summary_against_baseline,
     extract_record,
@@ -22,7 +21,6 @@ from tests.slow_regression_utils import (
     load_summary,
     scaled_limit,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "2d_koopman"
@@ -117,7 +115,7 @@ def baseline_store(request):
         return
     store = {}
     if BASELINE_PATH.exists():
-        with open(BASELINE_PATH, "r") as fh:
+        with open(BASELINE_PATH) as fh:
             store = json.load(fh)
     yield store
     with open(BASELINE_PATH, "w") as fh:

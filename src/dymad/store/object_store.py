@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 if TYPE_CHECKING:
@@ -44,7 +44,7 @@ class SpectralSnapshotRecord:
 class ObjectSummary:
     handle: str
     kind: str
-    derived_from: Optional[str]
+    derived_from: str | None
     preview: str
 
 

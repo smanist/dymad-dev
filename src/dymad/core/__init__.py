@@ -16,7 +16,6 @@ from dymad.core.series import (
     RegularSeriesBatch,
     UniformLengthRegularSeriesBatch,
 )
-from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 from dymad.core.torch_transforms import (
     AddOneTransform,
     ComposeTransform,
@@ -25,6 +24,7 @@ from dymad.core.torch_transforms import (
     LiftTransform,
     ScalerTransform,
 )
+from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 from dymad.core.transform_builder import build_transform_module
 from dymad.core.transform_module import (
     FieldTransformModule,

@@ -43,7 +43,7 @@ class _GraphExpModel:
 def _make_regular_batch(batch_size: int, n_steps: int, n_state: int, n_control: int):
     items = []
     base_time = torch.linspace(0.0, 1.0, n_steps)
-    for idx in range(batch_size):
+    for _idx in range(batch_size):
         state = torch.randn(n_steps, n_state)
         control = torch.randn(n_steps, n_control) if n_control > 0 else None
         items.append(

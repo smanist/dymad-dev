@@ -3,60 +3,70 @@ import numpy as np
 import torch
 
 from dymad.io import load_model, visualize_model
-from dymad.models import GLDM, GKBF, GKM, GLTI
-from dymad.training import WeakFormTrainer, NODETrainer, LinearTrainer
-from dymad.utils import adj_to_edge, plot_summary, plot_trajectory, TrajectorySampler
+from dymad.models import GKBF, GKM, GLDM, GLTI
+from dymad.training import LinearTrainer, NODETrainer, WeakFormTrainer
+from dymad.utils import TrajectorySampler, adj_to_edge, plot_summary, plot_trajectory
 
 B = 128
 N = 501
 t_grid = np.linspace(0, 5, N)
 
-A = np.array([
-            [0., 1.],
-            [-1., -0.1]])
+A = np.array([[0.0, 1.0], [-1.0, -0.1]])
+
+
 def f(t, x, u):
     return (x @ A.T) + u
-g = lambda t, x, u: x
 
-adj = np.array([
-    [0, 1, 1],
-    [1, 0, 1],
-    [1, 1, 0]
-])
+
+def g(t, x, u):
+    return x
+
+
+adj = np.array([[0, 1, 1], [1, 0, 1], [1, 1, 0]])
 
 config_chr = {
-    "control" : {
+    "control": {
         "kind": "chirp",
         "params": {
             "t1": 4.0,
             "freq_range": (0.5, 2.0),
             "amp_range": (0.5, 1.0),
-            "phase_range": (0.0, 360.0)}}}
+            "phase_range": (0.0, 360.0),
+        },
+    }
+}
 
 config_gau = {
-    "control" : {
+    "control": {
         "kind": "gaussian",
-        "params": {
-            "mean": 0.5,
-            "std":  1.0,
-            "t1":   4.0,
-            "dt":   0.2,
-            "mode": "zoh"}}}
+        "params": {"mean": 0.5, "std": 1.0, "t1": 4.0, "dt": 0.2, "mode": "zoh"},
+    }
+}
 
 cases = [
-    {"name": "ldm_wf",   "model" : GLDM, "trainer": WeakFormTrainer, "config": 'ltg_ldm_wf.yaml'},
-    {"name": "ldm_node", "model" : GLDM, "trainer": NODETrainer,     "config": 'ltg_ldm_node.yaml'},
-    {"name": "kbf_wf",   "model" : GKBF, "trainer": WeakFormTrainer, "config": 'ltg_kbf_wf.yaml'},
-    {"name": "kbf_node", "model" : GKBF, "trainer": NODETrainer,     "config": 'ltg_kbf_node.yaml'},
-    {"name": "kbf_ln",   "model" : GKBF, "trainer": LinearTrainer,   "config": 'ltg_kbf_ln.yaml'},  # Explodes
-    {"name": "lti_wf",   "model" : GLTI, "trainer": WeakFormTrainer, "config": 'ltg_lti_wf.yaml'},
-    {"name": "lti_ln",   "model" : GLTI, "trainer": LinearTrainer,   "config": 'ltg_lti_ln.yaml'},
-    {"name": "km_ln",    "model" : GKM,  "trainer": LinearTrainer,   "config": 'ltg_km_ln.yaml'}    # Explodes
+    {"name": "ldm_wf", "model": GLDM, "trainer": WeakFormTrainer, "config": "ltg_ldm_wf.yaml"},
+    {"name": "ldm_node", "model": GLDM, "trainer": NODETrainer, "config": "ltg_ldm_node.yaml"},
+    {"name": "kbf_wf", "model": GKBF, "trainer": WeakFormTrainer, "config": "ltg_kbf_wf.yaml"},
+    {"name": "kbf_node", "model": GKBF, "trainer": NODETrainer, "config": "ltg_kbf_node.yaml"},
+    {
+        "name": "kbf_ln",
+        "model": GKBF,
+        "trainer": LinearTrainer,
+        "config": "ltg_kbf_ln.yaml",
+    },  # Explodes
+    {"name": "lti_wf", "model": GLTI, "trainer": WeakFormTrainer, "config": "ltg_lti_wf.yaml"},
+    {"name": "lti_ln", "model": GLTI, "trainer": LinearTrainer, "config": "ltg_lti_ln.yaml"},
+    {
+        "name": "km_ln",
+        "model": GKM,
+        "trainer": LinearTrainer,
+        "config": "ltg_km_ln.yaml",
+    },  # Explodes
 ]
 # IDX = [0, 1]
 IDX = [2, 3]
 # IDX = [4]
-labels = [cases[i]['name'] for i in IDX]
+labels = [cases[i]["name"] for i in IDX]
 
 ifdat = 0
 iftrn = 1
@@ -64,31 +74,34 @@ ifplt = 1
 ifprd = 1
 
 if ifdat:
-    sampler = TrajectorySampler(f, g, config='ltg_data.yaml', config_mod=config_chr)
+    sampler = TrajectorySampler(f, g, config="ltg_data.yaml", config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
     # Pretending a 3-node graph
     np.savez_compressed(
-        './data/ltg.npz',
-        t=ts, x=np.concatenate([ys, ys, ys], axis=-1), u=np.concatenate([us, us, us], axis=-1),
-        adj=adj)
+        "./data/ltg.npz",
+        t=ts,
+        x=np.concatenate([ys, ys, ys], axis=-1),
+        u=np.concatenate([us, us, us], axis=-1),
+        adj=adj,
+    )
 
 if iftrn:
     for _i in IDX:
-        Model = cases[_i]['model']
-        Trainer = cases[_i]['trainer']
-        config_path = cases[_i]['config']
+        Model = cases[_i]["model"]
+        Trainer = cases[_i]["trainer"]
+        config_path = cases[_i]["config"]
 
         trainer = Trainer(config_path, Model)
         trainer.train()
 
 if ifplt:
-    npz_files = [f'ltg_{mdl}' for mdl in labels]
-    npzs = plot_summary(npz_files, labels = labels, ifclose=False)
-    for lbl, npz in zip(labels, npzs):
+    npz_files = [f"ltg_{mdl}" for mdl in labels]
+    npzs = plot_summary(npz_files, labels=labels, ifclose=False)
+    for lbl, npz in zip(labels, npzs, strict=False):
         print(f"Epoch time: {lbl} - {npz['avg_epoch_time']}")
 
 if ifprd:
-    sampler = TrajectorySampler(f, g, config='ltg_data.yaml', config_mod=config_gau)
+    sampler = TrajectorySampler(f, g, config="ltg_data.yaml", config_mod=config_gau)
     edge_index = adj_to_edge(adj)[0]
 
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
@@ -98,20 +111,23 @@ if ifprd:
 
     res = [x_data]
     for _i in IDX:
-        mdl, MDL = cases[_i]['name'], cases[_i]['model']
-        model, prd_func = load_model(MDL, f'ltg_{mdl}.pt')
+        mdl, MDL = cases[_i]["name"], cases[_i]["model"]
+        model, prd_func = load_model(MDL, f"ltg_{mdl}.pt")
 
         with torch.no_grad():
             _pred = prd_func(x_data, t_data, u=u_data, ei=edge_index)
         res.append(_pred)
 
         model_graph = visualize_model(
-            model=model, prd_func=prd_func,
-            ref_data={'t': t_data, 'x': x_data, 'u': u_data, 'ei': edge_index},
-            depth=1, ifsave=f'ltg_{mdl}/ltg_{mdl}')
+            model=model,
+            prd_func=prd_func,
+            ref_data={"t": t_data, "x": x_data, "u": u_data, "ei": edge_index},
+            depth=1,
+            ifsave=f"ltg_{mdl}/ltg_{mdl}",
+        )
 
     plot_trajectory(
-        np.array(res), t_data, "LTG",
-        us=u_data, labels=['Truth']+labels, ifclose=False)
+        np.array(res), t_data, "LTG", us=u_data, labels=["Truth"] + labels, ifclose=False
+    )
 
 plt.show()

@@ -3,42 +3,34 @@ Test cases for kernel dynamics with inputs.
 """
 
 import copy
-import numpy as np
 import os
-import pytest
 import shutil
+
+import numpy as np
+import pytest
 import torch
 
 from dymad.io import load_model
 from dymad.models import DKM, DKMSK, KM, KMM
-from dymad.training import LinearTrainer, NODETrainer, StackedTrainer
+from dymad.training import LinearTrainer, StackedTrainer
 
 # Options
 ## Regular kernels
 RIDGE = 1e-10
-opt_rbf1 = {
-    "type": "sc_rbf",
-    "input_dim": 3,
-    "lengthscale_init": 1.0
-}
+opt_rbf1 = {"type": "sc_rbf", "input_dim": 3, "lengthscale_init": 1.0}
 opt_opk1 = {
     "type": "op_sep",
     "input_dim": 3,
     "output_dim": 2,
     "kopts": [opt_rbf1],
-    "Ls": np.array([np.eye(2)])
+    "Ls": np.array([np.eye(2)]),
 }
-opt_share = {
-    "type": "share",
-    "kernel": opt_rbf1,
-    "dtype": torch.float64,
-    "ridge_init": RIDGE
-}
+opt_share = {"type": "share", "kernel": opt_rbf1, "dtype": torch.float64, "ridge_init": RIDGE}
 opt_indep = {
     "type": "indep",
     "kernel": [opt_rbf1, opt_rbf1],
     "dtype": torch.float64,
-    "ridge_init": RIDGE
+    "ridge_init": RIDGE,
 }
 opt_opval = {
     "type": "opval",
@@ -48,11 +40,11 @@ opt_opval = {
 }
 
 mdl_ref = {
-    "name" : 'ker_model',
-    "encoder_layers" : 0,
-    "decoder_layers" : 0,
-    "kernel_dimension" : 2,
-    }
+    "name": "ker_model",
+    "encoder_layers": 0,
+    "decoder_layers": 0,
+    "kernel_dimension": 2,
+}
 mdl_share = copy.deepcopy(mdl_ref)
 mdl_share.update(**opt_share)
 
@@ -63,28 +55,15 @@ mdl_opval = copy.deepcopy(mdl_ref)
 mdl_opval.update(**opt_opval)
 
 ## Manifold case
-opt_opk = {
-    "type": "op_tan",
-    "input_dim": 3,
-    "output_dim": 2,
-    "kopts": opt_rbf1
-}
-opt_tange = {
-    "type": "tangent",
-    "kernel": opt_opk,
-    "dtype": torch.float64,
-    "ridge_init": RIDGE
-}
+opt_opk = {"type": "op_tan", "input_dim": 3, "output_dim": 2, "kopts": opt_rbf1}
+opt_tange = {"type": "tangent", "kernel": opt_opk, "dtype": torch.float64, "ridge_init": RIDGE}
 mdl_mn = {
-    "name" : 'ker_model',
-    "encoder_layers" : 0,
-    "decoder_layers" : 0,
-    "kernel_dimension" : 2,
-    "manifold" : {
-        "d" : 2,
-        "T" : 3,
-        "g" : 3
-    }}
+    "name": "ker_model",
+    "encoder_layers": 0,
+    "decoder_layers": 0,
+    "kernel_dimension": 2,
+    "manifold": {"d": 2, "T": 3, "g": 3},
+}
 mdl_mn.update(**opt_tange)
 
 # Training options
@@ -134,30 +113,33 @@ trn_dt_phases = [
 ]
 
 cfgs = [
-    ('km_ln',  KM,     LinearTrainer,     {"model": mdl_indep, "training" : trn_ln}),
-    ('dkm_ln', DKM,    LinearTrainer,     {"model": mdl_opval, "training" : trn_ln}),
-    ('dks_ln', DKMSK,  LinearTrainer,     {"model": mdl_share, "training" : trn_ln}),
-    ('dks_nd', DKMSK,  StackedTrainer,    {"model": mdl_share, "phases" : trn_dt_phases}),
-    ('kmm_ln', KMM,    LinearTrainer,     {"model": mdl_mn,    "training" : trn_ln}),
-    ]
+    ("km_ln", KM, LinearTrainer, {"model": mdl_indep, "training": trn_ln}),
+    ("dkm_ln", DKM, LinearTrainer, {"model": mdl_opval, "training": trn_ln}),
+    ("dks_ln", DKMSK, LinearTrainer, {"model": mdl_share, "training": trn_ln}),
+    ("dks_nd", DKMSK, StackedTrainer, {"model": mdl_share, "phases": trn_dt_phases}),
+    ("kmm_ln", KMM, LinearTrainer, {"model": mdl_mn, "training": trn_ln}),
+]
+
 
 def train_case(idx, data, path):
     _, MDL, Trainer, opt = cfgs[idx]
     opt.update({"data": {"path": data}})
-    config_path = path/'ker_model_ctrl.yaml'
+    config_path = path / "ker_model_ctrl.yaml"
     trainer = Trainer(config_path, MDL, config_mod=opt)
     trainer.train()
+
 
 def predict_case(idx, sample, path):
     x_data, t_data, u_data = sample
     _, MDL, _, opt = cfgs[idx]
-    _, prd_func = load_model(MDL, path/'ker_model/ker_model.pt')
+    _, prd_func = load_model(MDL, path / "ker_model/ker_model.pt")
     with torch.no_grad():
         prd_func(x_data, t_data, u=u_data)
+
 
 @pytest.mark.parametrize("idx", range(len(cfgs)))
 def test_ker(lti_data, lti_gau, env_setup, idx):
     train_case(idx, lti_data, env_setup)
     predict_case(idx, lti_gau, env_setup)
-    if os.path.exists(env_setup/'ker_model'):
-        shutil.rmtree(env_setup/'ker_model')
+    if os.path.exists(env_setup / "ker_model"):
+        shutil.rmtree(env_setup / "ker_model")

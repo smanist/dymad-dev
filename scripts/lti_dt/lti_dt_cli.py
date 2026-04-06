@@ -1,8 +1,8 @@
 import argparse
 import os
-from pathlib import Path
 import random
 import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,21 +13,22 @@ from dymad.models import DKBF, DLDM, DLTI
 from dymad.training import LinearTrainer, NODETrainer
 from dymad.utils import TrajectorySampler, plot_summary, plot_trajectory
 
-
 BASE_DIR = Path(__file__).resolve().parent
 
 B = 128
 N = 501
 t_grid = np.linspace(0, 5, N)
 
-A = np.array([[0., 1.], [-1., -0.1]])
+A = np.array([[0.0, 1.0], [-1.0, -0.1]])
 
 
 def f(t, x, u):
     return (x @ A.T) + u
 
 
-g = lambda t, x, u: x
+def g(t, x, u):
+    return x
+
 
 config_chr = {
     "control": {
@@ -143,7 +144,14 @@ def predict(selected):
         with torch.no_grad():
             pred = prd_func(x_data, t_data, u=u_data)
         res.append(pred)
-    plot_trajectory(np.array(res), t_data, "LTI", us=u_data, labels=["Truth"] + [cases[idx]["name"] for idx in selected], ifclose=False)
+    plot_trajectory(
+        np.array(res),
+        t_data,
+        "LTI",
+        us=u_data,
+        labels=["Truth"] + [cases[idx]["name"] for idx in selected],
+        ifclose=False,
+    )
 
 
 def main():

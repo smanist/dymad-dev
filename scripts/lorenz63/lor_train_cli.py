@@ -1,8 +1,8 @@
 import argparse
 import copy
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,14 +12,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.cli_helpers import add_common_cli_args, print_case_table, resolve_case_indices, set_seed, stage_workdir
+from scripts.cli_helpers import (
+    add_common_cli_args,
+    print_case_table,
+    resolve_case_indices,
+    set_seed,
+    stage_workdir,
+)
 
 from dymad.io import load_model
 from dymad.losses import vpt_loss
 from dymad.models import DKMSK
 from dymad.training import LinearTrainer
-from dymad.utils import TrajectorySampler, plot_cv_results, plot_multi_trajs, plot_trajectory
-
+from dymad.utils import TrajectorySampler, plot_cv_results, plot_multi_trajs
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -96,8 +101,16 @@ cases = [
         "trainer": LinearTrainer,
         "config": "lor_model.yaml",
         "setups": [
-            {"name": "base_25", "resume": False, "options": {"model": mdl_rbf, "cv": cv_rbf, "training": trn_ln}},
-            {"name": "resume_10", "resume": True, "options": {"model": mdl_rbf, "cv": cv_rbf_resume, "training": trn_ln}},
+            {
+                "name": "base_25",
+                "resume": False,
+                "options": {"model": mdl_rbf, "cv": cv_rbf, "training": trn_ln},
+            },
+            {
+                "name": "resume_10",
+                "resume": True,
+                "options": {"model": mdl_rbf, "cv": cv_rbf_resume, "training": trn_ln},
+            },
         ],
     },
     {
@@ -106,8 +119,16 @@ cases = [
         "trainer": LinearTrainer,
         "config": "lor_model.yaml",
         "setups": [
-            {"name": "base_10", "resume": False, "options": {"model": mdl_dm, "cv": cv_dm, "training": trn_ln}},
-            {"name": "resume_10", "resume": True, "options": {"model": mdl_dm, "cv": cv_dm_resume, "training": trn_ln}},
+            {
+                "name": "base_10",
+                "resume": False,
+                "options": {"model": mdl_dm, "cv": cv_dm, "training": trn_ln},
+            },
+            {
+                "name": "resume_10",
+                "resume": True,
+                "options": {"model": mdl_dm, "cv": cv_dm_resume, "training": trn_ln},
+            },
         ],
     },
 ]
@@ -118,9 +139,18 @@ DEFAULT_SETUP = 0
 def parse_args():
     parser = argparse.ArgumentParser(description="Run Lorenz63 kernel cases.")
     add_common_cli_args(parser, include_data=True, plot_help="Skip CV plotting.")
-    parser.add_argument("--resume", action="store_true", help="Resume training from an existing checkpoint.")
-    parser.add_argument("--setup", type=int, default=DEFAULT_SETUP, help="Setup index to run for the selected cases.")
-    parser.add_argument("--list-setups", action="store_true", help="List setup indices for each case.")
+    parser.add_argument(
+        "--resume", action="store_true", help="Resume training from an existing checkpoint."
+    )
+    parser.add_argument(
+        "--setup",
+        type=int,
+        default=DEFAULT_SETUP,
+        help="Setup index to run for the selected cases.",
+    )
+    parser.add_argument(
+        "--list-setups", action="store_true", help="List setup indices for each case."
+    )
     return parser.parse_args()
 
 

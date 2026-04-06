@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 
 class HandleValidationError(ValueError):
@@ -24,7 +24,7 @@ class CheckpointHandle:
             raise HandleValidationError(f"invalid checkpoint handle: {self.value}")
 
     @classmethod
-    def parse(cls, raw: str) -> "CheckpointHandle":
+    def parse(cls, raw: str) -> CheckpointHandle:
         return cls(raw)
 
     def __str__(self) -> str:
@@ -40,7 +40,7 @@ class PredictionHandle:
             raise HandleValidationError(f"invalid prediction handle: {self.value}")
 
     @classmethod
-    def parse(cls, raw: str) -> "PredictionHandle":
+    def parse(cls, raw: str) -> PredictionHandle:
         return cls(raw)
 
     def __str__(self) -> str:
@@ -56,7 +56,7 @@ class SpectralSnapshotHandle:
             raise HandleValidationError(f"invalid spectral snapshot handle: {self.value}")
 
     @classmethod
-    def parse(cls, raw: str) -> "SpectralSnapshotHandle":
+    def parse(cls, raw: str) -> SpectralSnapshotHandle:
         return cls(raw)
 
     def __str__(self) -> str:

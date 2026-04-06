@@ -1,10 +1,11 @@
-import numpy as np
 import os
-from pathlib import Path
-import pytest
 import shutil
+from pathlib import Path
 
-from dymad.utils import adj_to_edge, TrajectorySampler
+import numpy as np
+import pytest
+
+from dymad.utils import TrajectorySampler, adj_to_edge
 
 HERE = Path(__file__).parent
 
@@ -17,50 +18,59 @@ def pytest_addoption(parser):
         help="Record baseline metrics for slow regression tests instead of comparing against them.",
     )
 
-A = np.array([
-            [0., 1.],
-            [-1., -0.1]])
+
+A = np.array([[0.0, 1.0], [-1.0, -0.1]])
+
+
 def f(t, x, u):
     return (x @ A.T) + u
-g = lambda t, x, u: x
+
+
+def g(t, x, u):
+    return x
+
 
 def f_auto(t, x):
-    return (x @ A.T)
-g_auto = lambda t, x: x
+    return x @ A.T
+
+
+def g_auto(t, x):
+    return x
+
 
 mu = -0.5
 lm = -3
+
+
 def f_kp(t, x):
-    _d = np.array([mu*x[0], lm*(x[1]-x[0]**2)])
+    _d = np.array([mu * x[0], lm * (x[1] - x[0] ** 2)])
     return _d
 
-adj = np.array([
-    [0, 1, 2],
-    [1, 0, 1],
-    [1, 2, 0]
-])
+
+adj = np.array([[0, 1, 2], [1, 0, 1], [1, 2, 0]])
 edge_index = adj_to_edge(adj)[0]
 
 config_chr = {
-    "control" : {
+    "control": {
         "kind": "chirp",
         "params": {
             "t1": 4.0,
             "freq_range": (0.5, 2.0),
             "amp_range": (0.5, 1.0),
-            "phase_range": (0.0, 360.0)}}}
+            "phase_range": (0.0, 360.0),
+        },
+    }
+}
 
 config_gau = {
-    "control" : {
+    "control": {
         "kind": "gaussian",
-        "params": {
-            "mean": 0.5,
-            "std":  1.0,
-            "t1":   4.0,
-            "dt":   0.2,
-            "mode": "zoh"}}}
+        "params": {"mean": 0.5, "std": 1.0, "t1": 4.0, "dt": 0.2, "mode": "zoh"},
+    }
+}
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def env_setup():
     # ---- runs ONCE before any tests execute ----
 
@@ -71,10 +81,11 @@ def env_setup():
 
     # --------------------
     # Clean up
-    shutil.rmtree(HERE/'results', ignore_errors=True)
-    shutil.rmtree(HERE/'checkpoints', ignore_errors=True)
+    shutil.rmtree(HERE / "results", ignore_errors=True)
+    shutil.rmtree(HERE / "checkpoints", ignore_errors=True)
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def trj_data():
     # ---- runs ONCE before any tests execute ----
 
@@ -84,24 +95,25 @@ def trj_data():
     N = 21
     t_grid = np.linspace(0, 0.1, N)
 
-    sampler = TrajectorySampler(f, g, config=HERE/'lti_data.yaml', config_mod=config_chr)
+    sampler = TrajectorySampler(f, g, config=HERE / "lti_data.yaml", config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
-    ys = np.hstack([xs[0], xs[1]])      # This will be repeated along batch
+    ys = np.hstack([xs[0], xs[1]])  # This will be repeated along batch
     us = us[:, 0, :].reshape(B, 1, -1)  # This will be repeated along time
-    ps = [np.arange(4)+_i for _i in range(len(xs))]
-    np.savez_compressed(HERE/'trj.npz', t=ts, x=xs, y=ys, u=us, p=ps)
+    ps = [np.arange(4) + _i for _i in range(len(xs))]
+    np.savez_compressed(HERE / "trj.npz", t=ts, x=xs, y=ys, u=us, p=ps)
 
     # ---- Interface to the tests ----
-    yield HERE/'trj.npz'
+    yield HERE / "trj.npz"
 
     # ---- runs ONCE after all tests finish (even on failure) ----
 
     # --------------------
     # Clean up
-    if os.path.exists(HERE/'trj.npz'):
-        os.remove(HERE/'trj.npz')
+    if os.path.exists(HERE / "trj.npz"):
+        os.remove(HERE / "trj.npz")
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def lti_data():
     # ---- runs ONCE before any tests execute ----
 
@@ -111,26 +123,27 @@ def lti_data():
     N = 51
     t_grid = np.linspace(0, 0.5, N)
 
-    sampler = TrajectorySampler(f, g, config=HERE/'lti_data.yaml', config_mod=config_chr)
+    sampler = TrajectorySampler(f, g, config=HERE / "lti_data.yaml", config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
-    np.savez_compressed(HERE/'lti.npz', t=ts, x=ys, u=us)
+    np.savez_compressed(HERE / "lti.npz", t=ts, x=ys, u=us)
 
     # ---- Interface to the tests ----
-    yield HERE/'lti.npz'
+    yield HERE / "lti.npz"
 
     # ---- runs ONCE after all tests finish (even on failure) ----
 
     # --------------------
     # Clean up
-    if os.path.exists(HERE/'lti.npz'):
-        os.remove(HERE/'lti.npz')
+    if os.path.exists(HERE / "lti.npz"):
+        os.remove(HERE / "lti.npz")
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def lti_gau():
     # ---- runs ONCE before any tests execute ----
     N = 51
     t_grid = np.linspace(0, 0.5, N)
-    sampler = TrajectorySampler(f, g, config=HERE/'lti_data.yaml', config_mod=config_gau)
+    sampler = TrajectorySampler(f, g, config=HERE / "lti_data.yaml", config_mod=config_gau)
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -139,7 +152,8 @@ def lti_gau():
     # ---- Interface to the tests ----
     yield (x_data, t_data, u_data)
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def kp_data():
     # ---- runs ONCE before any tests execute ----
 
@@ -149,26 +163,27 @@ def kp_data():
     N = 31
     t_grid = np.linspace(0, 0.5, N)
 
-    sampler = TrajectorySampler(f_kp, config=HERE/'kp_data.yaml')
+    sampler = TrajectorySampler(f_kp, config=HERE / "kp_data.yaml")
     ts, xs, ys = sampler.sample(t_grid, batch=B)
-    np.savez_compressed(HERE/'kp.npz', t=ts, x=ys)
+    np.savez_compressed(HERE / "kp.npz", t=ts, x=ys)
 
     # ---- Interface to the tests ----
-    yield HERE/'kp.npz'
+    yield HERE / "kp.npz"
 
     # ---- runs ONCE after all tests finish (even on failure) ----
 
     # --------------------
     # Clean up
-    if os.path.exists(HERE/'kp.npz'):
-        os.remove(HERE/'kp.npz')
+    if os.path.exists(HERE / "kp.npz"):
+        os.remove(HERE / "kp.npz")
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def kp_test():
     # ---- runs ONCE before any tests execute ----
     N = 31
     t_grid = np.linspace(0, 0.5, N)
-    sampler = TrajectorySampler(f_kp, config=HERE/'kp_data.yaml', config_mod=config_gau)
+    sampler = TrajectorySampler(f_kp, config=HERE / "kp_data.yaml", config_mod=config_gau)
     ts, xs, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -176,7 +191,8 @@ def kp_test():
     # ---- Interface to the tests ----
     yield (x_data, t_data)
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def ltg_data():
     # ---- runs ONCE before any tests execute ----
 
@@ -186,34 +202,36 @@ def ltg_data():
     N = 51
     t_grid = np.linspace(0, 0.5, N)
 
-    sampler = TrajectorySampler(f, g, config=HERE/'lti_data.yaml', config_mod=config_chr)
+    sampler = TrajectorySampler(f, g, config=HERE / "lti_data.yaml", config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
 
     # Pretending a 3-node graph
     np.savez_compressed(
-        HERE/'ltg.npz',
+        HERE / "ltg.npz",
         t=ts,
         x=np.concatenate([ys, ys, ys], axis=-1),
         u=np.concatenate([us, us, us], axis=-1),
-        p=np.concatenate([us[:,0,:], us[:,0,:], us[:,0,:]], axis=-1).squeeze(),
-        adj=adj)
+        p=np.concatenate([us[:, 0, :], us[:, 0, :], us[:, 0, :]], axis=-1).squeeze(),
+        adj=adj,
+    )
 
     # ---- Interface to the tests ----
-    yield HERE/'ltg.npz'
+    yield HERE / "ltg.npz"
 
     # ---- runs ONCE after all tests finish (even on failure) ----
 
     # --------------------
     # Clean up
-    if os.path.exists(HERE/'ltg.npz'):
-        os.remove(HERE/'ltg.npz')
+    if os.path.exists(HERE / "ltg.npz"):
+        os.remove(HERE / "ltg.npz")
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def ltg_gau():
     # ---- runs ONCE before any tests execute ----
     N = 51
     t_grid = np.linspace(0, 0.5, N)
-    sampler = TrajectorySampler(f, g, config=HERE/'lti_data.yaml', config_mod=config_gau)
+    sampler = TrajectorySampler(f, g, config=HERE / "lti_data.yaml", config_mod=config_gau)
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = np.concatenate([ys[0], ys[0], ys[0]], axis=-1)
     t_data = ts[0]
@@ -222,7 +240,8 @@ def ltg_gau():
     # ---- Interface to the tests ----
     yield (x_data, t_data, u_data, edge_index)
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def ltga_data():
     # ---- runs ONCE before any tests execute ----
 
@@ -232,30 +251,28 @@ def ltga_data():
     N = 51
     t_grid = np.linspace(0, 0.5, N)
 
-    sampler = TrajectorySampler(f_auto, g_auto, config=HERE/'ltga_data.yaml')
+    sampler = TrajectorySampler(f_auto, g_auto, config=HERE / "ltga_data.yaml")
     ts, xs, ys = sampler.sample(t_grid, batch=B)
 
     # Pretending a 3-node graph
-    np.savez_compressed(
-        HERE/'ltga.npz',
-        t=ts, x=np.concatenate([ys, ys, ys], axis=-1),
-        adj=adj)
+    np.savez_compressed(HERE / "ltga.npz", t=ts, x=np.concatenate([ys, ys, ys], axis=-1), adj=adj)
 
     # ---- Interface to the tests ----
-    yield HERE/'ltga.npz'
+    yield HERE / "ltga.npz"
 
     # ---- runs ONCE after all tests finish (even on failure) ----
 
     # --------------------
     # Clean up
-    if os.path.exists(HERE/'ltga.npz'):
-        os.remove(HERE/'ltga.npz')
+    if os.path.exists(HERE / "ltga.npz"):
+        os.remove(HERE / "ltga.npz")
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def ltga_test():
     N = 51
     t_grid = np.linspace(0, 0.5, N)
-    sampler = TrajectorySampler(f_auto, config=HERE/'ltga_data.yaml')
+    sampler = TrajectorySampler(f_auto, config=HERE / "ltga_data.yaml")
     ts, xs, ys = sampler.sample(t_grid, batch=1)
     x_data = np.concatenate([xs[0], xs[0], xs[0]], axis=-1)
     t_data = ts[0]
@@ -264,7 +281,8 @@ def ltga_test():
     # ---- Interface to the tests ----
     yield (x_data, t_data, edge_index)
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def sa_lti_data():
     # ---- runs ONCE before any tests execute ----
 
@@ -274,43 +292,44 @@ def sa_lti_data():
     N = 21
     t_grid = np.linspace(0, 10, N)
 
-    A = np.array([
-        [0.0, 1.0],
-        [-4.0, -1.0]])
+    A = np.array([[0.0, 1.0], [-4.0, -1.0]])
 
     def f(t, x):
-        return (x @ A.T)
-    g = lambda t, x: x
+        return x @ A.T
 
-    sampler = TrajectorySampler(f, g, config=HERE/'sa_data.yaml')
+    def g(t, x):
+        return x
+
+    sampler = TrajectorySampler(f, g, config=HERE / "sa_data.yaml")
     ts, xs, ys = sampler.sample(t_grid, batch=B)
-    np.savez_compressed(HERE/'sa.npz', t=ts, x=ys)
+    np.savez_compressed(HERE / "sa.npz", t=ts, x=ys)
 
     # ---- Interface to the tests ----
-    yield HERE/'sa.npz'
+    yield HERE / "sa.npz"
 
     # ---- runs ONCE after all tests finish (even on failure) ----
 
     # --------------------
     # Clean up
-    if os.path.exists(HERE/'sa.npz'):
-        os.remove(HERE/'sa.npz')
+    if os.path.exists(HERE / "sa.npz"):
+        os.remove(HERE / "sa.npz")
 
-@pytest.fixture(scope='session')
+
+@pytest.fixture(scope="session")
 def sa_lti_test():
     # ---- runs ONCE before any tests execute ----
     N = 21
     t_grid = np.linspace(0, 10, N)
 
-    A = np.array([
-        [0.0, 1.0],
-        [-4.0, -1.0]])
+    A = np.array([[0.0, 1.0], [-4.0, -1.0]])
 
     def f(t, x):
-        return (x @ A.T)
-    g = lambda t, x: x
+        return x @ A.T
 
-    sampler = TrajectorySampler(f, g, config=HERE/'sa_data.yaml')
+    def g(t, x):
+        return x
+
+    sampler = TrajectorySampler(f, g, config=HERE / "sa_data.yaml")
     ts, xs, ys = sampler.sample(t_grid, batch=1)
 
     # ---- Interface to the tests ----

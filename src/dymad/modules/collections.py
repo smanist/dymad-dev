@@ -1,32 +1,49 @@
 import copy
-import torch.nn as nn
-from typing import Dict, List, Tuple, Union
 
-from dymad.modules.gnn import GNN, ResBlockGNN, IdenCatGNN
-from dymad.modules.kernel import KernelScDM, KernelScExp, KernelScRBF, KernelOpSeparable, KernelOpTangent
-from dymad.modules.krr import KRRMultiOutputShared, KRRMultiOutputIndep, KRROperatorValued, KRRTangent
+import torch.nn as nn
+
+from dymad.modules.gnn import GNN, IdenCatGNN, ResBlockGNN
+from dymad.modules.kernel import (
+    KernelOpSeparable,
+    KernelOpTangent,
+    KernelScDM,
+    KernelScExp,
+    KernelScRBF,
+)
+from dymad.modules.krr import (
+    KRRMultiOutputIndep,
+    KRRMultiOutputShared,
+    KRROperatorValued,
+    KRRTangent,
+)
 from dymad.modules.misc import TakeFirst, TakeFirstGraph
-from dymad.modules.mlp import MLP, ResBlockMLP, IdenCatMLP
-from dymad.modules.sequential import SimpleRNN, VanillaRNN, StepwiseModel
+from dymad.modules.mlp import MLP, IdenCatMLP, ResBlockMLP
+from dymad.modules.sequential import SimpleRNN, StepwiseModel, VanillaRNN
 
 #: Options for preset neural network models.
 NN_MAP = {
-    "mlp_smp"  : MLP,
-    "mlp_res"  : ResBlockMLP,
-    "mlp_cat"  : IdenCatMLP,
-    "mlp_1st"  : TakeFirst,
-    "gnn_smp"  : GNN,
-    "gnn_res"  : ResBlockGNN,
-    "gnn_cat"  : IdenCatGNN,
-    "gnn_1st"  : TakeFirstGraph,
-    "seq_std"  : SimpleRNN,
-    "seq_rnn"  : VanillaRNN,
+    "mlp_smp": MLP,
+    "mlp_res": ResBlockMLP,
+    "mlp_cat": IdenCatMLP,
+    "mlp_1st": TakeFirst,
+    "gnn_smp": GNN,
+    "gnn_res": ResBlockGNN,
+    "gnn_cat": IdenCatGNN,
+    "gnn_1st": TakeFirstGraph,
+    "seq_std": SimpleRNN,
+    "seq_rnn": VanillaRNN,
 }
+
 
 def make_network(
     nn_type: str,
-    input_dim: int, hidden_dim: int, output_dim: int, n_layers: int,
-    seq_len: int = None, **kwargs) -> nn.Module:
+    input_dim: int,
+    hidden_dim: int,
+    output_dim: int,
+    n_layers: int,
+    seq_len: int = None,
+    **kwargs,
+) -> nn.Module:
     """Factory function to create preset neural network models based on :attr:`~dymad.modules.collections.NN_MAP`.
 
     Args:
@@ -48,7 +65,9 @@ def make_network(
     _type = nn_type.lower()
     if _type not in NN_MAP:
         if _type[4:] not in NN_MAP:
-            raise ValueError(f"Unknown network type '{nn_type}'. Must be one of {list(NN_MAP.keys())}.")
+            raise ValueError(
+                f"Unknown network type '{nn_type}'. Must be one of {list(NN_MAP.keys())}."
+            )
     net_class = NN_MAP.get(_type, None)
 
     # Special handling for TakeFirst and TakeFirstGraph
@@ -57,10 +76,10 @@ def make_network(
 
     # Prepare common network options
     net_opts = {
-        "input_dim" : input_dim,
+        "input_dim": input_dim,
         "hidden_dim": hidden_dim,
         "output_dim": output_dim,
-        "n_layers"  : n_layers,
+        "n_layers": n_layers,
     }
     net_opts.update(kwargs)
 
@@ -80,10 +99,9 @@ def make_network(
             hidden_dim=hidden_dim,
             output_dim=output_dim // seq_len,
             n_layers=n_layers,
-            **kwargs
-            )
-        return StepwiseModel(
-            seq_len, net=base_net, last_only=False, **kwargs)
+            **kwargs,
+        )
+        return StepwiseModel(seq_len, net=base_net, last_only=False, **kwargs)
 
     # Standard handling for MLP and GNN variants
     return net_class(**net_opts)
@@ -91,24 +109,32 @@ def make_network(
 
 #: Options for preset autoencoder types.
 AE_MAP = {
-    "mlp_smp"     : ("mlp_smp", "mlp_smp"),
-    "mlp_res"     : ("mlp_res", "mlp_res"),
-    "mlp_cat"     : ("mlp_cat", "mlp_1st"),
-    "mlp_seq_rnn" : ("seq_rnn", "seq_mlp_smp"),
-    "mlp_seq_std" : ("seq_std", "seq_mlp_smp"),
-    "mlp_seq_smp" : ("seq_mlp_smp", "seq_mlp_smp"),
-    "gnn_smp"     : ("gnn_smp", "gnn_smp"),
-    "gnn_res"     : ("gnn_res", "gnn_res"),
-    "gnn_cat"     : ("gnn_cat", "gnn_1st"),
-    "gnn_seq_rnn" : ("seq_rnn", "seq_gnn_smp"),
-    "gnn_seq_std" : ("seq_std", "seq_gnn_smp"),
-    "gnn_seq_smp" : ("seq_gnn_smp", "seq_gnn_smp"),
+    "mlp_smp": ("mlp_smp", "mlp_smp"),
+    "mlp_res": ("mlp_res", "mlp_res"),
+    "mlp_cat": ("mlp_cat", "mlp_1st"),
+    "mlp_seq_rnn": ("seq_rnn", "seq_mlp_smp"),
+    "mlp_seq_std": ("seq_std", "seq_mlp_smp"),
+    "mlp_seq_smp": ("seq_mlp_smp", "seq_mlp_smp"),
+    "gnn_smp": ("gnn_smp", "gnn_smp"),
+    "gnn_res": ("gnn_res", "gnn_res"),
+    "gnn_cat": ("gnn_cat", "gnn_1st"),
+    "gnn_seq_rnn": ("seq_rnn", "seq_gnn_smp"),
+    "gnn_seq_std": ("seq_std", "seq_gnn_smp"),
+    "gnn_seq_smp": ("seq_gnn_smp", "seq_gnn_smp"),
 }
 
+
 def make_autoencoder(
-        ae_type: str | Tuple[str, str],
-        input_dim: int, hidden_dim: int, latent_dim: int, enc_depth: int, dec_depth: int,
-        output_dim: int = None, seq_len: int = None, **kwargs) -> Tuple[nn.Module, nn.Module]:
+    ae_type: str | tuple[str, str],
+    input_dim: int,
+    hidden_dim: int,
+    latent_dim: int,
+    enc_depth: int,
+    dec_depth: int,
+    output_dim: int = None,
+    seq_len: int = None,
+    **kwargs,
+) -> tuple[nn.Module, nn.Module]:
     """
     Factory function to create preset autoencoder models. Including:
 
@@ -134,12 +160,16 @@ def make_autoencoder(
     # Determine encoder and decoder types
     if isinstance(ae_type, str):
         if ae_type.lower() not in AE_MAP:
-            raise ValueError(f"Unknown autoencoder type '{ae_type}'. Must be one of {list(AE_MAP.keys())}.")
+            raise ValueError(
+                f"Unknown autoencoder type '{ae_type}'. Must be one of {list(AE_MAP.keys())}."
+            )
         enc_type, dec_type = AE_MAP[ae_type.lower()]
     elif isinstance(ae_type, tuple) and len(ae_type) == 2:
         enc_type, dec_type = ae_type
     else:
-        raise ValueError(f"Autoencoder type must be a string or a tuple of two strings, got {ae_type}.")
+        raise ValueError(
+            f"Autoencoder type must be a string or a tuple of two strings, got {ae_type}."
+        )
 
     # Prepare the arguments
     if output_dim is None:
@@ -150,7 +180,7 @@ def make_autoencoder(
         hidden_dim=hidden_dim,
         output_dim=latent_dim,
         n_layers=enc_depth,
-        seq_len=seq_len
+        seq_len=seq_len,
     )
     encoder_args.update(kwargs)
     decoder_args = dict(
@@ -158,7 +188,7 @@ def make_autoencoder(
         hidden_dim=hidden_dim,
         output_dim=output_dim,
         n_layers=dec_depth,
-        seq_len=seq_len
+        seq_len=seq_len,
     )
     decoder_args.update(kwargs)
 
@@ -179,7 +209,10 @@ def _make_scalar_kernel(sk_type: str, input_dim: int, dtype=None, **kwargs) -> n
     else:
         raise ValueError(f"Unknown kernel type '{sk_type}'.")
 
-def make_kernel(k_type: str, input_dim: int, output_dim: int = None, kopts: List=None, dtype=None, **kwargs) -> nn.Module:
+
+def make_kernel(
+    k_type: str, input_dim: int, output_dim: int = None, kopts: list = None, dtype=None, **kwargs
+) -> nn.Module:
     """
     Factory function to create preset kernels. Including:
 
@@ -196,7 +229,7 @@ def make_kernel(k_type: str, input_dim: int, output_dim: int = None, kopts: List
         dtype: Data type of the kernel parameters.
         **kwargs: Additional keyword arguments passed to the kernel constructors.
     """
-    _type = k_type.lower().split('_')
+    _type = k_type.lower().split("_")
     if len(_type) < 2:
         raise ValueError(f"Unknown kernel type '{k_type}'.")
 
@@ -213,22 +246,26 @@ def make_kernel(k_type: str, input_dim: int, output_dim: int = None, kopts: List
 
         if _type[1] == "sep":
             if kopts is None or len(kopts) == 0:
-                raise ValueError(f"Operator-valued kernel of type 'sep' must have at least one scalar kernel option, got {kopts}.")
+                raise ValueError(
+                    f"Operator-valued kernel of type 'sep' must have at least one scalar kernel option, got {kopts}."
+                )
 
             kernels = []
             for _k in kopts:
                 _opt = copy.deepcopy(_k)
-                _k_type = _opt.pop("type").split('_')[-1]
+                _k_type = _opt.pop("type").split("_")[-1]
                 _k_input_dim = _opt.pop("input_dim")
                 kernels.append(_make_scalar_kernel(_k_type, _k_input_dim, dtype=dtype, **_opt))
             return KernelOpSeparable(kernels, out_dim=output_dim, dtype=dtype, **kwargs)
 
         if _type[1] == "tan":
             if not isinstance(kopts, dict):
-                raise ValueError(f"Operator-valued kernel of type 'tan' must have one and only one scalar kernel, got {kopts}.")
+                raise ValueError(
+                    f"Operator-valued kernel of type 'tan' must have one and only one scalar kernel, got {kopts}."
+                )
 
             _opt = copy.deepcopy(kopts)
-            _k_type = _opt.pop("type").split('_')[-1]
+            _k_type = _opt.pop("type").split("_")[-1]
             _k_input_dim = _opt.pop("input_dim")
             kernel = _make_scalar_kernel(_k_type, _k_input_dim, dtype=dtype, **_opt)
             return KernelOpTangent(kernel, out_dim=output_dim, dtype=dtype, **kwargs)
@@ -238,9 +275,10 @@ def make_kernel(k_type: str, input_dim: int, output_dim: int = None, kopts: List
     else:
         raise ValueError(f"Unknown kernel type '{type}'.")
 
+
 def make_krr(
-        type: str, kernel: Union[Dict, List[Dict]],
-        ridge_init=0, jitter=1e-10, dtype=None, device=None) -> nn.Module:
+    type: str, kernel: dict | list[dict], ridge_init=0, jitter=1e-10, dtype=None, device=None
+) -> nn.Module:
     """
     Factory function to create preset Kernel Ridge Regression (KRR) models. Including:
 
@@ -261,27 +299,46 @@ def make_krr(
     elif isinstance(kernel, list):
         _ker = kernel
     else:
-        raise ValueError(f"Kernel must be a dictionary or a list of dictionaries, got {type(kernel)}.")
+        raise ValueError(
+            f"Kernel must be a dictionary or a list of dictionaries, got {type(kernel)}."
+        )
 
     k_module = []
     for _k in _ker:
-        k_type   = _k["type"]
-        k_input_dim  = _k["input_dim"]
+        k_type = _k["type"]
+        k_input_dim = _k["input_dim"]
         k_output_dim = _k.get("output_dim", None)
-        k_kopts  = _k.get("kopts", None)
-        k_kwargs = {k: v for k, v in _k.items() if k not in {"type", "input_dim", "output_dim", "kopts"}}
-        k_module.append(make_kernel(k_type, input_dim=k_input_dim, output_dim=k_output_dim, kopts=k_kopts, dtype=dtype, **k_kwargs))
+        k_kopts = _k.get("kopts", None)
+        k_kwargs = {
+            k: v for k, v in _k.items() if k not in {"type", "input_dim", "output_dim", "kopts"}
+        }
+        k_module.append(
+            make_kernel(
+                k_type,
+                input_dim=k_input_dim,
+                output_dim=k_output_dim,
+                kopts=k_kopts,
+                dtype=dtype,
+                **k_kwargs,
+            )
+        )
     if isinstance(kernel, dict):
         # Consistency with input type
         k_module = k_module[0]
 
     _type = type.lower()
     if _type == "share":
-        return KRRMultiOutputShared(kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device)
+        return KRRMultiOutputShared(
+            kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device
+        )
     elif _type == "indep":
-        return KRRMultiOutputIndep(kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device)
+        return KRRMultiOutputIndep(
+            kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device
+        )
     elif _type == "opval":
-        return KRROperatorValued(kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device)
+        return KRROperatorValued(
+            kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device
+        )
     elif _type == "tangent":
         return KRRTangent(kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device)
     else:

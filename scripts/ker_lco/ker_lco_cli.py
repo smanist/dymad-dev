@@ -1,9 +1,9 @@
 import argparse
 import copy
 import os
-from pathlib import Path
 import random
 import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +14,6 @@ from dymad.io import load_model
 from dymad.models import DKM, DKMSK, KM
 from dymad.training import LinearTrainer, StackedTrainer
 from dymad.utils import TrajectorySampler, plot_multi_trajs
-
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -30,7 +29,9 @@ def f(t, x):
     return np.array([_y, mu * (1 - _x**2) * _y - _x])
 
 
-g = lambda t, x: x
+def g(t, x):
+    return x
+
 
 _Nt = 161
 _ts = np.linspace(0, 40.0, 8 * _Nt)
@@ -104,14 +105,22 @@ def _linear_solve_phase(method, params=None, *, kwargs=None, reset_optimizer=Tru
     return phase
 
 
-def _alternating_schedule(trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None, reset_optimizer=True):
+def _alternating_schedule(
+    trainer, base_cfg, chunk_epochs, *, method, params=None, kwargs=None, reset_optimizer=True
+):
     phases = []
     for n_epochs in chunk_epochs:
-        phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+        phases.append(
+            _linear_solve_phase(
+                method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer
+            )
+        )
         chunk_cfg = dict(base_cfg)
         chunk_cfg["n_epochs"] = n_epochs
         phases.append(_optimizer_phase(trainer, chunk_cfg))
-    phases.append(_linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer))
+    phases.append(
+        _linear_solve_phase(method, params=params, kwargs=kwargs, reset_optimizer=reset_optimizer)
+    )
     return phases
 
 
@@ -120,11 +129,41 @@ config_path = "ker_model.yaml"
 
 cfgs = [
     ("km_ln", KM, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
-    ("km_nd", KM, StackedTrainer, {"model": mdl_kl, "phases": _alternating_schedule("NODE", trn_ct, [50, 50, 50, 50], method="raw", reset_optimizer=False)}),
+    (
+        "km_nd",
+        KM,
+        StackedTrainer,
+        {
+            "model": mdl_kl,
+            "phases": _alternating_schedule(
+                "NODE", trn_ct, [50, 50, 50, 50], method="raw", reset_optimizer=False
+            ),
+        },
+    ),
     ("dkm_ln", DKM, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
-    ("dkm_nd", DKM, StackedTrainer, {"model": mdl_kl, "phases": _alternating_schedule("NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False)}),
+    (
+        "dkm_nd",
+        DKM,
+        StackedTrainer,
+        {
+            "model": mdl_kl,
+            "phases": _alternating_schedule(
+                "NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False
+            ),
+        },
+    ),
     ("dks_ln", DKMSK, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
-    ("dks_nd", DKMSK, StackedTrainer, {"model": mdl_kl, "phases": _alternating_schedule("NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False)}),
+    (
+        "dks_nd",
+        DKMSK,
+        StackedTrainer,
+        {
+            "model": mdl_kl,
+            "phases": _alternating_schedule(
+                "NODE", trn_dt, [100, 100, 100, 100], method="raw", reset_optimizer=False
+            ),
+        },
+    ),
 ]
 DEFAULT_CASES = [0, 1, 2, 3, 4, 5]
 
@@ -140,9 +179,17 @@ def set_seed(seed: int):
 def parse_args():
     parser = argparse.ArgumentParser(description="Run kernel LCO cases.")
     parser.add_argument("--case", nargs="+", type=int, help="Case indices to run.")
-    parser.add_argument("--list-cases", action="store_true", help="Print available case indices and exit.")
-    parser.add_argument("--data", action="store_true", help="Generate ./data/ker.npz before other actions.")
-    parser.add_argument("--workdir", type=Path, help="Run in a separate working directory and stage the needed files there.")
+    parser.add_argument(
+        "--list-cases", action="store_true", help="Print available case indices and exit."
+    )
+    parser.add_argument(
+        "--data", action="store_true", help="Generate ./data/ker.npz before other actions."
+    )
+    parser.add_argument(
+        "--workdir",
+        type=Path,
+        help="Run in a separate working directory and stage the needed files there.",
+    )
     parser.add_argument("--seed", type=int, help="Set random seeds for reproducible runs.")
     parser.add_argument("--no-train", action="store_true", help="Skip training.")
     parser.add_argument("--no-plot", action="store_true", help="Skip plot step.")
@@ -201,7 +248,13 @@ def predict(selected):
             pred = prd_func(x_data, t_data)
         res.append(pred)
 
-    plot_multi_trajs(np.array(res), t_data, "KER", labels=["Truth"] + [cfgs[i][0] for i in selected], ifclose=False)
+    plot_multi_trajs(
+        np.array(res),
+        t_data,
+        "KER",
+        labels=["Truth"] + [cfgs[i][0] for i in selected],
+        ifclose=False,
+    )
 
 
 def main():

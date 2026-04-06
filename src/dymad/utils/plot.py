@@ -1,24 +1,38 @@
-import imageio
 import logging
-import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import matplotlib.colors as colors
-from mpl_toolkits.mplot3d import Axes3D
-import numpy as np
 import os
+
+import imageio
+import matplotlib.colors as colors
+import matplotlib.pyplot as plt
+import numpy as np
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 PALETTE = ["#000000", "#9b59b6", "#3498db", "#95a5a6", "#e74c3c", "#34495e"]
 LINESTY = ["-", "--", "-.", ":", ".-"]
 
 # Disable logging for matplotlib to avoid clutter in DEBUG mode
-plt_logger = logging.getLogger('matplotlib')
+plt_logger = logging.getLogger("matplotlib")
 plt_logger.setLevel(logging.INFO)
 
 logger = logging.getLogger(__name__)
 
+
 def plot_trajectory(
-        traj, ts, model_name=None, us=None, axes=None, labels=None, ifclose=True, prefix='.',
-        xidx=None, uidx=None, grid=None, xscl=None, uscl=None, cmp_err=True):
+    traj,
+    ts,
+    model_name=None,
+    us=None,
+    axes=None,
+    labels=None,
+    ifclose=True,
+    prefix=".",
+    xidx=None,
+    uidx=None,
+    grid=None,
+    xscl=None,
+    uscl=None,
+    cmp_err=True,
+):
     """
     Plot trajectories with optional control inputs and save the figure.
 
@@ -46,14 +60,24 @@ def plot_trajectory(
 
     Ntrj = len(traj)
     if labels is None:
-        labels = [None]*Ntrj
+        labels = [None] * Ntrj
     else:
-        assert Ntrj == len(labels), \
-            "Number of trajectories must match number of labels"
+        assert Ntrj == len(labels), "Number of trajectories must match number of labels"
 
     # Plot the first trajectory and create the axes
-    _, ax = plot_one_trajectory(traj[0], ts, idx=0, us=us, axes=axes, label=labels[0],
-                                xidx=xidx, uidx=uidx, grid=grid, xscl=xscl, uscl=uscl)
+    _, ax = plot_one_trajectory(
+        traj[0],
+        ts,
+        idx=0,
+        us=us,
+        axes=axes,
+        label=labels[0],
+        xidx=xidx,
+        uidx=uidx,
+        grid=grid,
+        xscl=xscl,
+        uscl=uscl,
+    )
 
     if Ntrj > 1:
         # Add additional trajectories to the same axes
@@ -61,27 +85,54 @@ def plot_trajectory(
             lbl = labels[i]
             if labels[i] is not None:
                 if cmp_err:
-                    rmse = np.linalg.norm(traj[0] - traj[i]) / (traj[0].shape[0] - 1)**0.5
-                    lbl = labels[i]+f" rmse: {rmse:4.3e}"
+                    rmse = np.linalg.norm(traj[0] - traj[i]) / (traj[0].shape[0] - 1) ** 0.5
+                    lbl = labels[i] + f" rmse: {rmse:4.3e}"
             plot_one_trajectory(
-                traj[i], ts, idx=i, us=None, axes=ax, label=lbl,
-                xidx=xidx, uidx=uidx, grid=grid, xscl=xscl, uscl=uscl)
+                traj[i],
+                ts,
+                idx=i,
+                us=None,
+                axes=ax,
+                label=lbl,
+                xidx=xidx,
+                uidx=uidx,
+                grid=grid,
+                xscl=xscl,
+                uscl=uscl,
+            )
 
     # Adjust layout and save
     plt.tight_layout()
     if model_name is not None:
-        if prefix != '.':
+        if prefix != ".":
             os.makedirs(prefix, exist_ok=True)
-        plt.savefig(f'{prefix}/{model_name}_prediction.png', dpi=150, bbox_inches='tight',
-                    facecolor='white', edgecolor='none')
+        plt.savefig(
+            f"{prefix}/{model_name}_prediction.png",
+            dpi=150,
+            bbox_inches="tight",
+            facecolor="white",
+            edgecolor="none",
+        )
     if ifclose:
         plt.close()
 
     return ax
 
+
 def plot_multi_trajs(
-        traj, ts, model_name, us=None, labels=None, ifclose=True, prefix='.',
-        xidx=None, uidx=None, grid=None, xscl=None, uscl=None):
+    traj,
+    ts,
+    model_name,
+    us=None,
+    labels=None,
+    ifclose=True,
+    prefix=".",
+    xidx=None,
+    uidx=None,
+    grid=None,
+    xscl=None,
+    uscl=None,
+):
     """
     Multi-trajectory version of plot_trajectory - comparison of batches of trajectories.
     """
@@ -89,37 +140,63 @@ def plot_multi_trajs(
         traj = np.array([traj])
 
     Ntrj = len(traj[0])
-    assert len(traj) == len(labels), \
-        "Number of trajectories must match number of labels"
-    _us = [None]*Ntrj if us is None else us
+    assert len(traj) == len(labels), "Number of trajectories must match number of labels"
+    _us = [None] * Ntrj if us is None else us
 
     # Update labels to include RMSE
     for i in range(1, len(traj)):
-        rmse = np.sqrt(np.mean((traj[0] - traj[i])**2))
+        rmse = np.sqrt(np.mean((traj[0] - traj[i]) ** 2))
         labels[i] = f"{labels[i]} rmse: {rmse:4.3e}"
 
     # Plot the first trajectory and create the axes
     ax = plot_trajectory(
         np.array([_t[0] for _t in traj]),
-        ts, model_name=None, us=_us[0], axes=None, labels=labels,
-        ifclose=False, xidx=xidx, uidx=uidx, grid=grid, xscl=xscl, uscl=uscl, cmp_err=False)
+        ts,
+        model_name=None,
+        us=_us[0],
+        axes=None,
+        labels=labels,
+        ifclose=False,
+        xidx=xidx,
+        uidx=uidx,
+        grid=grid,
+        xscl=xscl,
+        uscl=uscl,
+        cmp_err=False,
+    )
 
     if Ntrj > 1:
         # Add additional trajectories to the same axes
         for i in range(1, Ntrj):
             ax = plot_trajectory(
                 np.array([_t[i] for _t in traj]),
-                ts, model_name=None, us=_us[i], axes=ax, labels=None,
-                ifclose=False, xidx=xidx, uidx=uidx, grid=grid, xscl=xscl, uscl=uscl)
+                ts,
+                model_name=None,
+                us=_us[i],
+                axes=ax,
+                labels=None,
+                ifclose=False,
+                xidx=xidx,
+                uidx=uidx,
+                grid=grid,
+                xscl=xscl,
+                uscl=uscl,
+            )
 
     # Adjust layout and save
     plt.tight_layout()
-    if prefix != '.':
+    if prefix != ".":
         os.makedirs(prefix, exist_ok=True)
-    plt.savefig(f'{prefix}/{model_name}_prediction.png', dpi=150, bbox_inches='tight',
-                facecolor='white', edgecolor='none')
+    plt.savefig(
+        f"{prefix}/{model_name}_prediction.png",
+        dpi=150,
+        bbox_inches="tight",
+        facecolor="white",
+        edgecolor="none",
+    )
     if ifclose:
         plt.close()
+
 
 def _scale_axes(ax, data, scl):
     if scl is None:
@@ -129,15 +206,26 @@ def _scale_axes(ax, data, scl):
     elif scl == "-11":
         ax.set_ylim([-1.2, 1.2])  # [-1,1] range with buffer
     elif scl == "std":
-        ax.set_ylim([-3, 3])      # ±3 std devs for standardized data
+        ax.set_ylim([-3, 3])  # ±3 std devs for standardized data
     else:  # mode=none
         ymx = np.max(data)
         ymn = np.min(data)
-        ax.set_ylim([ymn-0.1*abs(ymn), ymx+0.1*abs(ymx)])  # Use data range with buffer
+        ax.set_ylim([ymn - 0.1 * abs(ymn), ymx + 0.1 * abs(ymx)])  # Use data range with buffer
+
 
 def plot_one_trajectory(
-        traj, ts, idx=0, us=None, axes=None, label=None,
-        xidx=None, uidx=None, grid=None, xscl=None, uscl=None):
+    traj,
+    ts,
+    idx=0,
+    us=None,
+    axes=None,
+    label=None,
+    xidx=None,
+    uidx=None,
+    grid=None,
+    xscl=None,
+    uscl=None,
+):
     """
     Used by plot_trajectory to plot a single trajectory.
     """
@@ -151,8 +239,9 @@ def plot_one_trajectory(
     if us is None:
         dim_u = 0
     else:
-        assert traj.shape[0] == us.shape[0], \
+        assert traj.shape[0] == us.shape[0], (
             "Trajectory and control input arrays must have the same time dimension"
+        )
         if uidx is None:
             dim_u = us.shape[1]
             idx_u = np.arange(dim_u)
@@ -162,7 +251,7 @@ def plot_one_trajectory(
 
     # Trim time array if needed
     if len(ts) > traj.shape[0]:
-        ts = ts[:traj.shape[0]]
+        ts = ts[: traj.shape[0]]
 
     # Set up subplot layout from metadata or use default
     if grid is None:
@@ -187,13 +276,20 @@ def plot_one_trajectory(
 
     # Plot each state
     for i in range(dim_x):
-        ax[i].plot(ts, traj[:, idx_x[i]], LINESTY[idx%4], color=PALETTE[idx%6], linewidth=2, label=label)
+        ax[i].plot(
+            ts,
+            traj[:, idx_x[i]],
+            LINESTY[idx % 4],
+            color=PALETTE[idx % 6],
+            linewidth=2,
+            label=label,
+        )
         ax[i].set_xlim([0, ts[-1]])
         ax[i].grid(True, alpha=0.3)
 
-        ax[i].set_ylabel(f'State {idx_x[i]+1}', fontsize=10)
+        ax[i].set_ylabel(f"State {idx_x[i] + 1}", fontsize=10)
         if i == 0:  # Only show legend on first subplot
-            ax[i].legend(loc='best', fontsize=9)
+            ax[i].legend(loc="best", fontsize=9)
 
         if axes is None:
             _scale_axes(ax[i], traj[:, idx_x[i]], xscl)
@@ -202,20 +298,21 @@ def plot_one_trajectory(
         # Plot only once as this is from data
         offset = dim_x
         for i in range(dim_u):
-            ax[offset + i].plot(ts, us[:, idx_u[i]], '-', color='#3498db', linewidth=2)
+            ax[offset + i].plot(ts, us[:, idx_u[i]], "-", color="#3498db", linewidth=2)
             ax[offset + i].set_xlim([0, ts[-1]])
             ax[offset + i].grid(True, alpha=0.3)
-            ax[offset + i].set_ylabel(f'Control {i+1}', fontsize=10)
+            ax[offset + i].set_ylabel(f"Control {i + 1}", fontsize=10)
 
             _scale_axes(ax[offset + i], us[:, idx_u[i]], uscl)
 
     for i in range(n_cols):
-        ax[-i-1].set_xlabel('Time', fontsize=10)
-        ax[-i-1].set_xlim([2*ts[0]-ts[1], 2*ts[-1]-ts[-2]])
+        ax[-i - 1].set_xlabel("Time", fontsize=10)
+        ax[-i - 1].set_xlim([2 * ts[0] - ts[1], 2 * ts[-1] - ts[-2]])
 
     return fig, ax
 
-def plot_summary(npz_files, labels=None, ifscl=True, ifclose=True, prefix='.', output_path=None):
+
+def plot_summary(npz_files, labels=None, ifscl=True, ifclose=True, prefix=".", output_path=None):
     """
     Plot training losses and prediction criterion for multiple summary files on the same figure.
 
@@ -234,7 +331,7 @@ def plot_summary(npz_files, labels=None, ifscl=True, ifclose=True, prefix='.', o
     for idx, npz in enumerate(npzs):
         _, ax = plot_one_summary(npz, label=str(idx), index=idx, ifscl=ifscl, axes=ax)
 
-    lbls = labels if labels is not None else [f'Run {i+1}' for i in range(len(npzs))]
+    lbls = labels if labels is not None else [f"Run {i + 1}" for i in range(len(npzs))]
     titl = ", ".join([f"{i}: {l}" for i, l in enumerate(lbls)])
     ax[0].set_title(ax[0].get_title() + "\n" + titl)
 
@@ -246,14 +343,14 @@ def plot_summary(npz_files, labels=None, ifscl=True, ifclose=True, prefix='.', o
         save_dir = os.path.dirname(save_path)
         if save_dir:
             os.makedirs(save_dir, exist_ok=True)
-        plt.savefig(save_path, dpi=150, bbox_inches='tight',
-                    facecolor='white', edgecolor='none')
+        plt.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="white", edgecolor="none")
     if ifclose:
         plt.close()
 
     return npzs
 
-def plot_one_summary(npz, label='', index=0, ifscl=True, axes=None):
+
+def plot_one_summary(npz, label="", index=0, ifscl=True, axes=None):
     """
     Plot training losses and prediction criterion from a summary file.
 
@@ -271,63 +368,84 @@ def plot_one_summary(npz, label='', index=0, ifscl=True, axes=None):
     else:
         fig = axes[0].figure
         ax = axes
-    scl = npz['hist'][0]['train_total'][0] if ifscl else 1.0
-    for hist in npz['hist']:
-        key = ['total', 'dynamics']
+    scl = npz["hist"][0]["train_total"][0] if ifscl else 1.0
+    for hist in npz["hist"]:
+        key = ["total", "dynamics"]
         for _k in hist.keys():
-            if 'train' in _k:
+            if "train" in _k:
                 if _k[6:] not in key:
                     key.append(_k[6:])
-        epo = hist['epoch']
+        epo = hist["epoch"]
         for _i, _k in enumerate(key):
             _sty = LINESTY[_i % len(LINESTY)]
-            ax[0].semilogy(epo, np.abs(hist[f'train_{_k}'])/scl, _sty, color=clr, label=f'{label} T {_k[:3]}', linewidth=1.5)
-            ax[0].semilogy(epo, np.abs(hist[f'valid_{_k}'])/scl, _sty, color=clr, label=f'{label} V {_k[:3]}', linewidth=.75)
+            ax[0].semilogy(
+                epo,
+                np.abs(hist[f"train_{_k}"]) / scl,
+                _sty,
+                color=clr,
+                label=f"{label} T {_k[:3]}",
+                linewidth=1.5,
+            )
+            ax[0].semilogy(
+                epo,
+                np.abs(hist[f"valid_{_k}"]) / scl,
+                _sty,
+                color=clr,
+                label=f"{label} V {_k[:3]}",
+                linewidth=0.75,
+            )
     if ifscl:
-        ax[0].set_title('Training Loss (scaled)')
-        ax[0].set_ylabel('Relative Loss')
+        ax[0].set_title("Training Loss (scaled)")
+        ax[0].set_ylabel("Relative Loss")
     else:
-        ax[0].set_title('Training Loss (raw)')
-        ax[0].set_ylabel('Loss')
-    ax[0].legend(loc='center left', ncol=2, bbox_to_anchor=(1, 0.5))
+        ax[0].set_title("Training Loss (raw)")
+        ax[0].set_ylabel("Loss")
+    ax[0].legend(loc="center left", ncol=2, bbox_to_anchor=(1, 0.5))
 
-    e_crit, h_crit, n_crit = npz['crit_epoch'], npz['crits'], npz['crit_name']
+    e_crit, h_crit, n_crit = npz["crit_epoch"], npz["crits"], npz["crit_name"]
     if len(e_crit) > 0:
-        ax[1].semilogy(e_crit, np.abs(h_crit[0]), '-',  color=clr, label=f'{label} Train')
-        ax[1].semilogy(e_crit, np.abs(h_crit[1]), '--', color=clr, label=f'{label} Valid')
+        ax[1].semilogy(e_crit, np.abs(h_crit[0]), "-", color=clr, label=f"{label} Train")
+        ax[1].semilogy(e_crit, np.abs(h_crit[1]), "--", color=clr, label=f"{label} Valid")
         ax[1].legend()
-    ax[1].set_title('Prediction Criterion')
-    ax[1].set_xlabel('Epoch')
-    ax[1].set_ylabel(f'Criterion {n_crit}')
+    ax[1].set_title("Prediction Criterion")
+    ax[1].set_xlabel("Epoch")
+    ax[1].set_ylabel(f"Criterion {n_crit}")
 
     return fig, ax
 
-def plot_hist(hist, crit, crit_name, model_name, ifclose=True, prefix='.'):
+
+def plot_hist(hist, crit, crit_name, model_name, ifclose=True, prefix="."):
     tmp = np.array(crit).T
     npz = {
-        'hist': hist,
-        'crit_epoch': tmp[0] if len(tmp) > 0 else [],
-        'crits': tmp[1:] if len(tmp) > 1 else [],
-        'crit_name': crit_name
-        }
-    _ = plot_one_summary(npz, label='', index=0, ifscl=False, axes=None)
+        "hist": hist,
+        "crit_epoch": tmp[0] if len(tmp) > 0 else [],
+        "crits": tmp[1:] if len(tmp) > 1 else [],
+        "crit_name": crit_name,
+    }
+    _ = plot_one_summary(npz, label="", index=0, ifscl=False, axes=None)
 
     plt.tight_layout()
-    plt.savefig(f'{prefix}/{model_name}_history.png', dpi=150, bbox_inches='tight',
-                facecolor='white', edgecolor='none')
+    plt.savefig(
+        f"{prefix}/{model_name}_history.png",
+        dpi=150,
+        bbox_inches="tight",
+        facecolor="white",
+        edgecolor="none",
+    )
 
     if ifclose:
         plt.close()
 
+
 def _resolve_cv_results_path(cv_file):
-    if cv_file.endswith('.npz'):
+    if cv_file.endswith(".npz"):
         return cv_file
 
     cv_dir = os.path.dirname(cv_file)
     cv_name = os.path.basename(cv_file)
     candidates = [
-        os.path.join(cv_dir, f'{cv_name}_cv.npz'),
-        os.path.join(cv_file, f'{cv_name}_cv.npz'),
+        os.path.join(cv_dir, f"{cv_name}_cv.npz"),
+        os.path.join(cv_file, f"{cv_name}_cv.npz"),
     ]
     for candidate in candidates:
         if os.path.exists(candidate):
@@ -335,7 +453,7 @@ def _resolve_cv_results_path(cv_file):
     return candidates[0]
 
 
-def plot_cv_results(cv_file, keys=None, ifclose=True, prefix='.', value_scale='log'):
+def plot_cv_results(cv_file, keys=None, ifclose=True, prefix=".", value_scale="log"):
     """
     Plot cross-validation results.
 
@@ -348,62 +466,75 @@ def plot_cv_results(cv_file, keys=None, ifclose=True, prefix='.', value_scale='l
     if keys is None:
         params, metrics, metric_name, best_idx = _collect_cv_results(cv_file, [])
         params = np.arange(len(metrics))
-        mode = '1d'
-        key_labels = ['Hyperparameter Index']
+        mode = "1d"
+        key_labels = ["Hyperparameter Index"]
     elif len(keys) < 4:
         params, metrics, metric_name, best_idx = _collect_cv_results(cv_file, keys)
         if len(keys) == 1:
             params = params.flatten()
-            mode = '1d'
+            mode = "1d"
         elif len(keys) == 2:
-            mode = '2d'
+            mode = "2d"
         elif len(keys) == 3:
-            mode = '3d'
-        key_labels = [_k.split('.')[-1] for _k in keys]
+            mode = "3d"
+        key_labels = [_k.split(".")[-1] for _k in keys]
     else:
         raise ValueError("Can only plot up to 3 hyperparameters at once.  Try keys=None.")
-    best_label = f"Best: {metric_name} = {metrics[best_idx,0]:.3e} ± {metrics[best_idx,1]:.3e}"
+    best_label = f"Best: {metric_name} = {metrics[best_idx, 0]:.3e} ± {metrics[best_idx, 1]:.3e}"
 
     means = metrics[:, 0]
-    stds  = metrics[:, 1]
-    if mode == '1d':
+    stds = metrics[:, 1]
+    if mode == "1d":
         fig, ax = plt.subplots(figsize=(8, 6))
-        ax.plot(params, means, 'ko', markerfacecolor='none', label='Mean', markersize=8)
-        ax.errorbar(params, means, yerr=stds, fmt='o', color='black', capsize=5, label='Std Dev')
-        ax.plot(params[best_idx], means[best_idx], 'rs', label=best_label, markersize=8)
+        ax.plot(params, means, "ko", markerfacecolor="none", label="Mean", markersize=8)
+        ax.errorbar(params, means, yerr=stds, fmt="o", color="black", capsize=5, label="Std Dev")
+        ax.plot(params[best_idx], means[best_idx], "rs", label=best_label, markersize=8)
         ax.set_yscale(value_scale)
         ax.set_xticks(params)
         ax.set_xlabel(key_labels[0])
         ax.set_ylabel(metric_name)
         ax.legend()
 
-    elif mode == '2d':
+    elif mode == "2d":
         fig, ax = plt.subplots(figsize=(8, 6))
-        sc = ax.scatter(params[:, 0], params[:, 1], c=means, s=100, cmap='viridis')
+        sc = ax.scatter(params[:, 0], params[:, 1], c=means, s=100, cmap="viridis")
         ax.scatter(
-            params[best_idx, 0], params[best_idx, 1],
-            facecolors='none', edgecolors='red', s=150, marker='s', linewidths=2, label=best_label)
+            params[best_idx, 0],
+            params[best_idx, 1],
+            facecolors="none",
+            edgecolors="red",
+            s=150,
+            marker="s",
+            linewidths=2,
+            label=best_label,
+        )
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.1)
         cbar = fig.colorbar(sc, cax=cax)
-        if value_scale == 'log':
+        if value_scale == "log":
             sc.set_norm(colors.LogNorm(vmin=means.min(), vmax=means.max()))
-        cbar.set_label(f'Mean {metric_name}')
+        cbar.set_label(f"Mean {metric_name}")
         ax.set_xticks(np.unique(params[:, 0]))
         ax.set_yticks(np.unique(params[:, 1]))
         ax.set_xlabel(key_labels[0])
         ax.set_ylabel(key_labels[1])
         ax.legend()
 
-    elif mode == '3d':
+    elif mode == "3d":
         fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        p = ax.scatter(params[:, 0], params[:, 1], params[:, 2], c=means, s=100, cmap='viridis')
+        ax = fig.add_subplot(111, projection="3d")
+        p = ax.scatter(params[:, 0], params[:, 1], params[:, 2], c=means, s=100, cmap="viridis")
         ax.scatter(
-            params[best_idx, 0], params[best_idx, 1], params[best_idx, 2],
-            c='red', s=150, marker='s', label=best_label)
+            params[best_idx, 0],
+            params[best_idx, 1],
+            params[best_idx, 2],
+            c="red",
+            s=150,
+            marker="s",
+            label=best_label,
+        )
         cbar = fig.colorbar(p)
-        cbar.set_label(f'Mean {metric_name}')
+        cbar.set_label(f"Mean {metric_name}")
         ax.set_xticks(np.unique(params[:, 0]))
         ax.set_yticks(np.unique(params[:, 1]))
         ax.set_zticks(np.unique(params[:, 2]))
@@ -411,24 +542,30 @@ def plot_cv_results(cv_file, keys=None, ifclose=True, prefix='.', value_scale='l
         ax.set_ylabel(key_labels[1])
         ax.set_zlabel(key_labels[2])
         ax.legend()
-    ax.set_title(f'Cross-Validation Results - Metric: {metric_name}')
+    ax.set_title(f"Cross-Validation Results - Metric: {metric_name}")
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    if prefix != '.':
+    if prefix != ".":
         os.makedirs(prefix, exist_ok=True)
-    plt.savefig(f'{prefix}/cv_results.png', dpi=150, bbox_inches='tight',
-                facecolor='white', edgecolor='none')
+    plt.savefig(
+        f"{prefix}/cv_results.png",
+        dpi=150,
+        bbox_inches="tight",
+        facecolor="white",
+        edgecolor="none",
+    )
     if ifclose:
         plt.close()
 
     return fig, ax
 
+
 def _collect_cv_results(cv_file, keys):
     tmp = np.load(_resolve_cv_results_path(cv_file), allow_pickle=True)
-    cv_res = tmp['all_results']
-    metric_name = tmp['metric_name']
-    best_idx = tmp['best_idx']
+    cv_res = tmp["all_results"]
+    metric_name = tmp["metric_name"]
+    best_idx = tmp["best_idx"]
 
     params, metrics = [], []
     for res in cv_res:
@@ -437,19 +574,32 @@ def _collect_cv_results(cv_file, keys):
 
     return np.array(params), np.array(metrics), metric_name, best_idx
 
+
 def _get_contour_func(ax, mode):
-    if mode == 'contour':
+    if mode == "contour":
         contour_func = ax.contour
-    elif mode == 'contourf':
+    elif mode == "contourf":
         contour_func = ax.contourf
-    elif mode == 'tricontourf':
+    elif mode == "tricontourf":
         contour_func = ax.tricontourf
     return contour_func
 
+
 def plot_contour(
-        arrays, x=None, y=None, vmin=None, vmax=None, levels=20,
-        figsize=(12, 4), colorbar=True, axes=None, label=None, grid=None,
-        mode='contourf', **kwargs):
+    arrays,
+    x=None,
+    y=None,
+    vmin=None,
+    vmax=None,
+    levels=20,
+    figsize=(12, 4),
+    colorbar=True,
+    axes=None,
+    label=None,
+    grid=None,
+    mode="contourf",
+    **kwargs,
+):
     """
     Plot a grid of contour plots for a list of 2D arrays.
 
@@ -474,7 +624,7 @@ def plot_contour(
     n = len(arrays)
     if grid is None:
         grid = (1, n)
-    assert grid[0]*grid[1] >= n, "Grid size too small for number of arrays"
+    assert grid[0] * grid[1] >= n, "Grid size too small for number of arrays"
 
     if label is not None:
         assert len(label) == n, "Number of labels must match number of arrays, if provided"
@@ -484,8 +634,10 @@ def plot_contour(
     else:
         fig, ax = axes
 
-    assert mode in ['contour', 'contourf', 'tricontourf'], "Mode must be 'contour', 'contourf', or 'tricontourf'"
-    if mode == 'tricontourf':
+    assert mode in ["contour", "contourf", "tricontourf"], (
+        "Mode must be 'contour', 'contourf', or 'tricontourf'"
+    )
+    if mode == "tricontourf":
         assert x is not None and y is not None, "x and y must be provided for tricontourf"
 
     # Prepare contour arguments
@@ -499,11 +651,11 @@ def plot_contour(
         _lvls = levels
     else:
         raise ValueError("Levels must be an integer or a list/array of levels")
-    contour_args = {'levels': _lvls}
+    contour_args = {"levels": _lvls}
 
     # Plotting
     ims = []
-    _ax = ax.flatten() if grid[0]*grid[1] > 1 else [ax]
+    _ax = ax.flatten() if grid[0] * grid[1] > 1 else [ax]
     for i, arr in enumerate(arrays):
         _func = _get_contour_func(_ax[i], mode)
         if x is not None and y is not None:
@@ -514,29 +666,53 @@ def plot_contour(
         if label:
             _ax[i].set_title(label[i])
     if colorbar:
-        fig.colorbar(ims[0], ax=ax, orientation='vertical', fraction=0.02, pad=0.04)
+        fig.colorbar(ims[0], ax=ax, orientation="vertical", fraction=0.02, pad=0.04)
 
     return fig, ax
 
+
 def compare_contour(
-        x_true, x_pred, x=None, y=None, vmin=None, vmax=None, levels=20,
-        figsize=(12, 4), colorbar=True, axes=None, label=None,
-        mode='contourf', **kwargs):
+    x_true,
+    x_pred,
+    x=None,
+    y=None,
+    vmin=None,
+    vmax=None,
+    levels=20,
+    figsize=(12, 4),
+    colorbar=True,
+    axes=None,
+    label=None,
+    mode="contourf",
+    **kwargs,
+):
     """
     Compare two contours with error contours.
     """
     vmin = x_true.min() if vmin is None else vmin
     vmax = x_true.max() if vmax is None else vmax
     x_diff = x_true - x_pred
-    err    = np.linalg.norm(x_diff) / np.linalg.norm(x_true)
-    label  = ['Truth', 'Reconstructed', f'Error: {err*100:4.2f}%']
+    err = np.linalg.norm(x_diff) / np.linalg.norm(x_true)
+    label = ["Truth", "Reconstructed", f"Error: {err * 100:4.2f}%"]
     arrays = [x_true, x_pred, x_diff]
     return plot_contour(
-        arrays, x=x, y=y, vmin=vmin, vmax=vmax, levels=levels,
-        figsize=figsize, colorbar=colorbar, axes=axes, label=label, grid=(1,3),
-        mode=mode, **kwargs)
+        arrays,
+        x=x,
+        y=y,
+        vmin=vmin,
+        vmax=vmax,
+        levels=levels,
+        figsize=figsize,
+        colorbar=colorbar,
+        axes=axes,
+        label=label,
+        grid=(1, 3),
+        mode=mode,
+        **kwargs,
+    )
 
-def animate(fig_func, filename, fps=10, n_frames=None, writer_args={}, fig_args={}):
+
+def animate(fig_func, filename, fps=10, n_frames=None, writer_args=None, fig_args=None):
     """
     Create an animation by calling a figure-generating function for each frame.
 
@@ -550,9 +726,13 @@ def animate(fig_func, filename, fps=10, n_frames=None, writer_args={}, fig_args=
         writer_args (dict): Additional keyword arguments to pass to imageio.get_writer.
         fig_args (dict): Additional keyword arguments to pass to fig_func.
     """
+    if fig_args is None:
+        fig_args = {}
+    if writer_args is None:
+        writer_args = {}
     writer = imageio.get_writer(filename, fps=fps, **writer_args)
     for j in range(n_frames):
-        logger.info(f'Generating frame {j+1}/{n_frames} for {filename}')
+        logger.info(f"Generating frame {j + 1}/{n_frames} for {filename}")
 
         fig, ax = fig_func(j, **fig_args)
 
@@ -560,8 +740,8 @@ def animate(fig_func, filename, fps=10, n_frames=None, writer_args={}, fig_args=
         fig.canvas.draw()
         w, h = fig.canvas.get_width_height()
         buf = fig.canvas.buffer_rgba()
-        frame = np.frombuffer(buf, dtype=np.uint8).reshape(2*h, 2*w, 4)
-        writer.append_data(frame[:,:,:3])
+        frame = np.frombuffer(buf, dtype=np.uint8).reshape(2 * h, 2 * w, 4)
+        writer.append_data(frame[:, :, :3])
 
         # Removing existing objects otherwise they accumulate in canvas.draw
         for _a in ax.flatten():
@@ -569,4 +749,4 @@ def animate(fig_func, filename, fps=10, n_frames=None, writer_args={}, fig_args=
                 _c.remove()
         plt.close(fig)
     writer.close()
-    logger.info(f'Animation saved to {filename}')
+    logger.info(f"Animation saved to {filename}")

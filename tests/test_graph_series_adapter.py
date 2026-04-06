@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import numpy as np
 import torch
 
 from dymad.core import FixedGraphSeries
 from dymad.core.graph_series import VariableEdgeGraphSeries
-from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline, TransformModule
+from dymad.core.transform_module import (
+    FieldTransformModule,
+    SeriesTransformPipeline,
+    TransformModule,
+)
 from dymad.io.series_adapter import SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManagerGraph
-import numpy as np
 
 
 def _graph_metadata(path: str) -> dict:
@@ -46,7 +50,9 @@ def test_graph_series_adapter_builds_typed_series_from_arrays() -> None:
     assert isinstance(series, FixedGraphSeries)
     assert series.time.dtype == torch.float64
     assert series.node_state.shape == (2, 2, 2)
-    torch.testing.assert_close(series.control, torch.tensor([[[0.1], [0.2]], [[0.3], [0.4]]], dtype=torch.float64))
+    torch.testing.assert_close(
+        series.control, torch.tensor([[[0.1], [0.2]], [[0.3], [0.4]]], dtype=torch.float64)
+    )
     torch.testing.assert_close(series.params, torch.tensor([9.0, 10.0], dtype=torch.float64))
 
 
@@ -97,14 +103,18 @@ def test_graph_trajectory_manager_accepts_variable_edge_counts() -> None:
     manager.y = [np.empty((2, 0), dtype=np.float32)]
     manager.u = [np.array([[0.0, 0.0], [0.2, 0.2]], dtype=np.float32)]
     manager.p = [np.empty((0,), dtype=np.float32)]
-    manager.ei = [[
-        np.array([[0, 1], [1, 0]], dtype=np.int64),
-        np.array([[0], [1]], dtype=np.int64),
-    ]]
-    manager.ew = [[
-        np.array([1.0, 1.0], dtype=np.float32),
-        np.array([0.5], dtype=np.float32),
-    ]]
+    manager.ei = [
+        [
+            np.array([[0, 1], [1, 0]], dtype=np.int64),
+            np.array([[0], [1]], dtype=np.int64),
+        ]
+    ]
+    manager.ew = [
+        [
+            np.array([1.0, 1.0], dtype=np.float32),
+            np.array([0.5], dtype=np.float32),
+        ]
+    ]
     manager.ea = [[np.empty((2, 0), dtype=np.float32), np.empty((1, 0), dtype=np.float32)]]
 
     series = manager._create_raw_graph_series_by_index(torch.tensor([0]))[0]

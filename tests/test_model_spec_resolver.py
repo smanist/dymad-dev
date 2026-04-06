@@ -18,35 +18,62 @@ from dymad.models.rollout_engine import select_rollout_engine
             collections_module.LDM,
             {},
             {"n_total_state_features": 2, "n_total_control_features": 1, "delay": 0},
-            {"encoder_key": "smpl_ctrl", "feature_key": "none", "decoder_key": "auto", "graph_mode": "none"},
+            {
+                "encoder_key": "smpl_ctrl",
+                "feature_key": "none",
+                "decoder_key": "auto",
+                "graph_mode": "none",
+            },
         ),
         (
             collections_module.GLDM,
             {},
             {"n_total_state_features": 2, "n_total_control_features": 1, "delay": 1},
-            {"encoder_key": "graph_ctrl", "feature_key": "none", "decoder_key": "graph", "graph_mode": "graph"},
+            {
+                "encoder_key": "graph_ctrl",
+                "feature_key": "none",
+                "decoder_key": "graph",
+                "graph_mode": "graph",
+            },
         ),
         (
             collections_module.DSDMG,
             {"processor_layers": 1},
             {"n_total_state_features": 2, "n_total_control_features": 1, "delay": 1},
-            {"encoder_key": "node_raw_ctrl", "feature_key": "none", "decoder_key": "node", "graph_mode": "node"},
+            {
+                "encoder_key": "node_raw_ctrl",
+                "feature_key": "none",
+                "decoder_key": "node",
+                "graph_mode": "node",
+            },
         ),
         (
             collections_module.KBF,
             {"const_term": True, "koopman_dimension": 4},
             {"n_total_state_features": 2, "n_total_control_features": 1, "delay": 0},
-            {"encoder_key": "smpl_auto", "feature_key": "blin_with_const", "decoder_key": "auto", "graph_mode": "none"},
+            {
+                "encoder_key": "smpl_auto",
+                "feature_key": "blin_with_const",
+                "decoder_key": "auto",
+                "graph_mode": "none",
+            },
         ),
         (
             collections_module.GLTI,
             {"const_term": True, "koopman_dimension": 4},
             {"n_total_state_features": 2, "n_total_control_features": 1, "delay": 0},
-            {"encoder_key": "graph_auto", "feature_key": "graph_cat", "decoder_key": "graph", "graph_mode": "graph"},
+            {
+                "encoder_key": "graph_auto",
+                "feature_key": "graph_cat",
+                "decoder_key": "graph",
+                "graph_mode": "graph",
+            },
         ),
     ],
 )
-def test_typed_recipe_resolution_covers_model_families(typed_model, model_config, data_meta, expected) -> None:
+def test_typed_recipe_resolution_covers_model_families(
+    typed_model, model_config, data_meta, expected
+) -> None:
     resolved = resolve_recipe(
         typed_model.typed_spec(),
         model_config,

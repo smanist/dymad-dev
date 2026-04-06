@@ -1,7 +1,7 @@
 import torch
 
-from dymad.core import RegularModelContext, RegularSeries
 import dymad.models.recipes_corr as recipes_corr
+from dymad.core import RegularModelContext, RegularSeries
 
 
 class _EchoTail:

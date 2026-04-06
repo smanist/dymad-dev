@@ -101,7 +101,11 @@ def test_normalize_phase_specs_warns_for_analysis_and_export_inside_repeat():
                                 "times": 1,
                                 "phases": [
                                     {"type": "analysis", "name": "inspect"},
-                                    {"type": "export", "name": "save_model", "export_kind": "best_model"},
+                                    {
+                                        "type": "export",
+                                        "name": "save_model",
+                                        "export_kind": "best_model",
+                                    },
                                 ],
                             }
                         }
@@ -114,7 +118,9 @@ def test_normalize_phase_specs_warns_for_analysis_and_export_inside_repeat():
 
 
 def test_normalize_phase_specs_rejects_legacy_ls_update():
-    with pytest.raises(PhaseSpecValidationError, match="'ls_update' is deprecated and no longer supported"):
+    with pytest.raises(
+        PhaseSpecValidationError, match="'ls_update' is deprecated and no longer supported"
+    ):
         normalize_phase_specs(
             {
                 "model": {"name": "demo"},
@@ -145,10 +151,17 @@ def test_run_cv_single_uses_trainer_run_with_typed_context(monkeypatch):
     monkeypatch.setattr(
         driver,
         "_apply_combo_to_config",
-        lambda combo_idx, fold_id, fold_cfg, combo, base_name, checkpoint_prefix, results_prefix: (cfg, "/tmp/model_prefix"),
+        lambda combo_idx, fold_id, fold_cfg, combo, base_name, checkpoint_prefix, results_prefix: (
+            cfg,
+            "/tmp/model_prefix",
+        ),
     )
-    monkeypatch.setattr(driver, "_build_phase_context", lambda fold_id, cfg, train_sets, valid_sets: phase_context)
-    monkeypatch.setattr(driver, "build_initial_trainer_state", lambda cfg, execution_services: trainer_state)
+    monkeypatch.setattr(
+        driver, "_build_phase_context", lambda fold_id, cfg, train_sets, valid_sets: phase_context
+    )
+    monkeypatch.setattr(
+        driver, "build_initial_trainer_state", lambda cfg, execution_services: trainer_state
+    )
 
     class _FakePhaseResult:
         def get_metric(self, metric_name):
@@ -250,7 +263,9 @@ def test_trainer_run_round_trips_typed_run_checkpoint(tmp_path):
         epoch=3,
         best_loss={"valid_total": 1.23},
         phase_cursor=2,
-        phase_records=[PhaseRecord(name="p0", kind="optimizer", started_epoch=0, completed_epoch=3)],
+        phase_records=[
+            PhaseRecord(name="p0", kind="optimizer", started_epoch=0, completed_epoch=3)
+        ],
     )
     artifacts = ArtifactRegistry()
     trainer_run.save_run_checkpoint(state, artifacts)

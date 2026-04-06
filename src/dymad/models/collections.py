@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Dict
 
 from dymad.models.helpers import build_model
 from dymad.models.model_spec import (
@@ -53,7 +52,7 @@ class PredefinedModel:
         self.GRAPH = self.model_spec.graph_mode != "none"
         self.CONT = self.model_spec.continuous_time
 
-    def __call__(self, model_config: Dict, data_meta: Dict, dtype=None, device=None):
+    def __call__(self, model_config: dict, data_meta: dict, dtype=None, device=None):
         return build_model(
             self.model_spec,
             model_config,

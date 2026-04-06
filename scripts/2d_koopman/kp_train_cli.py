@@ -1,9 +1,9 @@
 import argparse
 import copy
 import os
-from pathlib import Path
 import random
 import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,7 +13,6 @@ from dymad.io import load_model
 from dymad.models import KBF, LDM
 from dymad.training import LinearTrainer, NODETrainer, WeakFormTrainer
 from dymad.utils import TrajectorySampler, plot_multi_trajs, plot_summary
-
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -29,13 +28,65 @@ def f(t, x):
     return np.array([mu * x[0], lm * (x[1] - x[0] ** 2)])
 
 
-mdl_kb = {"name": "kp_model", "encoder_layers": 2, "decoder_layers": 2, "hidden_dimension": 32, "koopman_dimension": 4, "autoencoder_type": "cat", "activation": "prelu", "weight_init": "xavier_uniform"}
-mdl_ld = {"name": "kp_model", "encoder_layers": 0, "processor_layers": 2, "decoder_layers": 0, "hidden_dimension": 32, "autoencoder_type": "smp", "activation": "prelu", "weight_init": "xavier_uniform"}
-mdl_kl = {"name": "kp_model", "encoder_layers": 1, "decoder_layers": 1, "hidden_dimension": 32, "koopman_dimension": 8, "autoencoder_type": "cat", "activation": "tanh", "weight_init": "xavier_uniform"}
+mdl_kb = {
+    "name": "kp_model",
+    "encoder_layers": 2,
+    "decoder_layers": 2,
+    "hidden_dimension": 32,
+    "koopman_dimension": 4,
+    "autoencoder_type": "cat",
+    "activation": "prelu",
+    "weight_init": "xavier_uniform",
+}
+mdl_ld = {
+    "name": "kp_model",
+    "encoder_layers": 0,
+    "processor_layers": 2,
+    "decoder_layers": 0,
+    "hidden_dimension": 32,
+    "autoencoder_type": "smp",
+    "activation": "prelu",
+    "weight_init": "xavier_uniform",
+}
+mdl_kl = {
+    "name": "kp_model",
+    "encoder_layers": 1,
+    "decoder_layers": 1,
+    "hidden_dimension": 32,
+    "koopman_dimension": 8,
+    "autoencoder_type": "cat",
+    "activation": "tanh",
+    "weight_init": "xavier_uniform",
+}
 
-trn_wf = {"n_epochs": 2000, "save_interval": 50, "load_checkpoint": False, "learning_rate": 5e-3, "decay_rate": 0.999, "weak_form_params": {"N": 13, "dN": 2, "ordpol": 2, "ordint": 2}}
-trn_nd = {"n_epochs": 2000, "save_interval": 20, "load_checkpoint": False, "learning_rate": 5e-3, "decay_rate": 0.999, "sweep_lengths": [30, 50, 100, 200, 301], "sweep_epoch_step": 400, "ode_method": "dopri5", "ode_args": {"rtol": 1.e-7, "atol": 1.e-9}}
-trn_ln = {"n_epochs": 1, "save_interval": 1, "load_checkpoint": False, "learning_rate": 5e-3, "decay_rate": 0.999, "method": "truncated", "params": 8}
+trn_wf = {
+    "n_epochs": 2000,
+    "save_interval": 50,
+    "load_checkpoint": False,
+    "learning_rate": 5e-3,
+    "decay_rate": 0.999,
+    "weak_form_params": {"N": 13, "dN": 2, "ordpol": 2, "ordint": 2},
+}
+trn_nd = {
+    "n_epochs": 2000,
+    "save_interval": 20,
+    "load_checkpoint": False,
+    "learning_rate": 5e-3,
+    "decay_rate": 0.999,
+    "sweep_lengths": [30, 50, 100, 200, 301],
+    "sweep_epoch_step": 400,
+    "ode_method": "dopri5",
+    "ode_args": {"rtol": 1.0e-7, "atol": 1.0e-9},
+}
+trn_ln = {
+    "n_epochs": 1,
+    "save_interval": 1,
+    "load_checkpoint": False,
+    "learning_rate": 5e-3,
+    "decay_rate": 0.999,
+    "method": "truncated",
+    "params": 8,
+}
 config_path = "kp_model.yaml"
 
 cfgs = [
@@ -121,7 +172,9 @@ def predict(selected):
         with torch.no_grad():
             pred = prd_func(xs, ts)
         res.append(pred)
-    plot_multi_trajs(np.array(res), ts[0], "KP", labels=["Truth"] + [cfgs[i][0] for i in selected], ifclose=False)
+    plot_multi_trajs(
+        np.array(res), ts[0], "KP", labels=["Truth"] + [cfgs[i][0] for i in selected], ifclose=False
+    )
 
 
 def main():

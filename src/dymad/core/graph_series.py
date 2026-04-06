@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from typing import Any, Iterable
+from typing import Any
 
 import torch
 
@@ -18,7 +19,10 @@ def _move_tensor(
     if tensor is None:
         return None
     if isinstance(tensor, tuple):
-        return tuple(_move_tensor(item, device=device, dtype=dtype, index_dtype=index_dtype) for item in tensor)
+        return tuple(
+            _move_tensor(item, device=device, dtype=dtype, index_dtype=index_dtype)
+            for item in tensor
+        )
     if tensor.dtype in (torch.int32, torch.int64):
         return tensor.to(device=device, dtype=index_dtype)
     return tensor.to(device=device, dtype=dtype)
@@ -71,7 +75,7 @@ class GraphSeries:
     def fixed_topology(self) -> bool:
         return isinstance(self.edge_index, torch.Tensor)
 
-    def slice_steps(self, start: int, end: int) -> "GraphSeries":
+    def slice_steps(self, start: int, end: int) -> GraphSeries:
         n_steps = int(self.time.shape[0])
         return replace(
             self,
@@ -101,7 +105,7 @@ class GraphSeries:
         self,
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
-    ) -> "GraphSeries":
+    ) -> GraphSeries:
         return replace(
             self,
             time=self.time.to(device=device, dtype=dtype),
@@ -152,7 +156,7 @@ class GraphSeriesBatch:
     items: tuple[GraphSeries, ...]
 
     @classmethod
-    def collate(cls, items: Iterable[GraphSeries]) -> "GraphSeriesBatch":
+    def collate(cls, items: Iterable[GraphSeries]) -> GraphSeriesBatch:
         items = tuple(items)
         if cls is not GraphSeriesBatch:
             return cls(items)
@@ -181,14 +185,14 @@ class GraphSeriesBatch:
     def is_uniform_length(self) -> bool:
         return len(set(self.step_lengths)) <= 1
 
-    def slice_batch(self, indices: Iterable[int]) -> "GraphSeriesBatch":
+    def slice_batch(self, indices: Iterable[int]) -> GraphSeriesBatch:
         return GraphSeriesBatch.collate(self.items[index] for index in indices)
 
     def to(
         self,
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
-    ) -> "GraphSeriesBatch":
+    ) -> GraphSeriesBatch:
         return GraphSeriesBatch.collate(item.to(device=device, dtype=dtype) for item in self.items)
 
 

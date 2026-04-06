@@ -1,7 +1,8 @@
 """Typed spectral snapshot records for checkpoint-backed analysis seams."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -11,9 +12,9 @@ class KoopmanWeightSnapshot:
     """Typed Koopman weight payload from checkpoint-backed models."""
 
     mode: str
-    full_matrix: Optional[np.ndarray] = None
-    left_factor: Optional[np.ndarray] = None
-    right_factor: Optional[np.ndarray] = None
+    full_matrix: np.ndarray | None = None
+    left_factor: np.ndarray | None = None
+    right_factor: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -37,10 +38,10 @@ def build_spectral_snapshot(
     checkpoint_path: str,
     encoded_p0: np.ndarray,
     encoded_p1: np.ndarray,
-    weights: Tuple[np.ndarray, ...],
+    weights: tuple[np.ndarray, ...],
     input_dim: int,
     obs_dim: int,
-    metadata: Optional[Mapping[str, Any]] = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> SpectralSnapshot:
     """Build a typed spectral snapshot from checkpoint-derived arrays."""
     if encoded_p0.shape != encoded_p1.shape:

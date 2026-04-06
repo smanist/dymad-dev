@@ -13,6 +13,6 @@ format-check:
 	ruff format . --check
 
 typecheck:
-	pyright
+	pyright --pythonpath "$(shell which python)"
 
 check: lint format-check typecheck

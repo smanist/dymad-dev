@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TypeAlias
-
 from dymad.core.graph_series import GraphSeries
 from dymad.core.runtime import TypedRuntime, runtime_from_series
 from dymad.core.series import RegularSeries
 from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 
-TrainerBatch: TypeAlias = RegularTrainerBatch | GraphTrainerBatch | RegularSeries | GraphSeries
-RuntimeBatch: TypeAlias = TypedRuntime
+type TrainerBatch = RegularTrainerBatch | GraphTrainerBatch | RegularSeries | GraphSeries
+type RuntimeBatch = TypedRuntime
 
 
 def batch_to_runtime(batch: TrainerBatch) -> RuntimeBatch:

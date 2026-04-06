@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 
-
 SAFETY_FACTOR = 1.5
 ABS_TOLERANCES = {
     "best_valid_total": 1.0e-12,
@@ -19,7 +18,7 @@ ABS_TOLERANCES = {
 
 
 def load_baselines(path: Path) -> dict:
-    with open(path, "r") as fh:
+    with open(path) as fh:
         return json.load(fh)
 
 
@@ -41,7 +40,7 @@ def build_mpl_env(workdir: Path) -> dict[str, str]:
 def load_baseline_store(path: Path) -> dict:
     if not path.exists():
         return {}
-    with open(path, "r") as fh:
+    with open(path) as fh:
         return json.load(fh)
 
 
@@ -57,11 +56,19 @@ def load_summary(summary_path: Path) -> dict:
 
 
 def summary_signature(summary: dict) -> dict:
-    model_name = summary["model_name"].item() if hasattr(summary["model_name"], "item") else summary["model_name"]
+    model_name = (
+        summary["model_name"].item()
+        if hasattr(summary["model_name"], "item")
+        else summary["model_name"]
+    )
     best_valid = summary["best_valid_loss"].item()
     hist = summary["hist"]
     hist0 = hist[0] if len(hist) > 0 else {}
-    crit_name = summary["crit_name"].item() if hasattr(summary["crit_name"], "item") else summary["crit_name"]
+    crit_name = (
+        summary["crit_name"].item()
+        if hasattr(summary["crit_name"], "item")
+        else summary["crit_name"]
+    )
     crit_epoch = summary["crit_epoch"]
     crits = summary["crits"]
     return {
@@ -119,7 +126,9 @@ def extract_record(summary: dict, rmse: float) -> dict:
     }
 
 
-def compare_record_metrics(record: dict, baseline: dict, metric_factors: dict[str, float] | None = None) -> None:
+def compare_record_metrics(
+    record: dict, baseline: dict, metric_factors: dict[str, float] | None = None
+) -> None:
     metric_factors = metric_factors or {}
     for metric_name, baseline_value in baseline["metrics"].items():
         factor = metric_factors.get(metric_name)

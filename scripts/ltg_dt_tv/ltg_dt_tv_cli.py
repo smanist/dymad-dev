@@ -1,8 +1,8 @@
 import argparse
 import copy
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,13 +12,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.cli_helpers import add_common_cli_args, print_case_table, resolve_case_indices, set_seed, stage_workdir
+from scripts.cli_helpers import (
+    add_common_cli_args,
+    print_case_table,
+    resolve_case_indices,
+    set_seed,
+    stage_workdir,
+)
 
 from dymad.io import load_model
 from dymad.models import DLDMG
 from dymad.training import NODETrainer
 from dymad.utils import plot_summary, plot_trajectory
-
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -128,7 +133,13 @@ def predict(selected: list[int], root: Path):
             pred = prd_func(x_data, t_data, ei=ei_data, ew=ew_data)
         res.append(pred)
 
-    plot_trajectory(np.array(res), t_data, "LTGV", labels=["Truth"] + [cases[idx]["name"] for idx in selected], ifclose=False)
+    plot_trajectory(
+        np.array(res),
+        t_data,
+        "LTGV",
+        labels=["Truth"] + [cases[idx]["name"] for idx in selected],
+        ifclose=False,
+    )
 
 
 def main():

@@ -1,10 +1,12 @@
+from collections.abc import Callable
+
 import torch
 import torch.nn as nn
-from typing import Callable, Optional, Union
 
-from dymad.modules.helpers import _resolve_activation, _resolve_init, INIT_MAP_W, INIT_MAP_B
+from dymad.modules.helpers import INIT_MAP_B, INIT_MAP_W, _resolve_activation, _resolve_init
 from dymad.modules.linear import FlexLinear
 from dymad.modules.misc import TakeFirst
+
 
 class MLP(nn.Module):
     r"""
@@ -55,12 +57,13 @@ class MLP(nn.Module):
         output_dim: int,
         *,
         n_layers: int = 2,
-        activation: Union[str, nn.Module, Callable[[], nn.Module]] = nn.ReLU,
-        weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
+        activation: str | nn.Module | Callable[[], nn.Module] = nn.ReLU,
+        weight_init: str | Callable[[torch.Tensor, float], None] = nn.init.xavier_uniform_,
         bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
-        gain: Optional[float] = 1.0,
+        gain: float | None = 1.0,
         end_activation: bool = True,
-        dtype=None, device=None
+        dtype=None,
+        device=None,
     ):
         super().__init__()
 
@@ -74,8 +77,7 @@ class MLP(nn.Module):
         elif n_layers == 1:
             if end_activation:
                 self.net = nn.Sequential(
-                    nn.Linear(input_dim, output_dim, dtype=dtype, device=device),
-                    _act()
+                    nn.Linear(input_dim, output_dim, dtype=dtype, device=device), _act()
                 )
             else:
                 self.net = nn.Linear(input_dim, output_dim, dtype=dtype, device=device)
@@ -94,16 +96,20 @@ class MLP(nn.Module):
 
         # Compute gain
         act_name = _act().__class__.__name__.lower()
-        _g = nn.init.calculate_gain(act_name if act_name not in ["gelu", "prelu", "identity"] else "relu")
-        self._gain = gain*_g
+        _g = nn.init.calculate_gain(
+            act_name if act_name not in ["gelu", "prelu", "identity"] else "relu"
+        )
+        self._gain = gain * _g
 
         # Initialise weights & biases
         self.apply(self._init_linear)
 
     def diagnostic_info(self) -> str:
-        return f"Weight init: {self._weight_init}, " + \
-               f"Weight gain: {self._gain}, " + \
-               f"Bias init: {self._bias_init}"
+        return (
+            f"Weight init: {self._weight_init}, "
+            + f"Weight gain: {self._gain}, "
+            + f"Bias init: {self._bias_init}"
+        )
 
     def _init_linear(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
@@ -115,31 +121,42 @@ class MLP(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
+
 class ResBlockMLP(MLP):
     """
     Residual block with MLP as the nonlinearity.
 
     See `MLP` for the arguments.
     """
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int,
-                 n_layers: int = 2,
-                 activation: Union[str, nn.Module, Callable[[], nn.Module]] = nn.ReLU,
-                 weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
-                 bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
-                 gain: Optional[float] = 1.0,
-                 end_activation: bool = True,
-                 dtype=None, device=None
-                 ):
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        n_layers: int = 2,
+        activation: str | nn.Module | Callable[[], nn.Module] = nn.ReLU,
+        weight_init: str | Callable[[torch.Tensor, float], None] = nn.init.xavier_uniform_,
+        bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+        gain: float | None = 1.0,
+        end_activation: bool = True,
+        dtype=None,
+        device=None,
+    ):
         assert input_dim == output_dim, "Input and output dimensions must match for ResBlock"
-        super().__init__(input_dim, hidden_dim, output_dim,
-                         n_layers=n_layers,
-                         activation=activation,
-                         weight_init=weight_init,
-                         bias_init=bias_init,
-                         gain=gain,
-                         end_activation=end_activation,
-                         dtype=dtype,
-                         device=device)
+        super().__init__(
+            input_dim,
+            hidden_dim,
+            output_dim,
+            n_layers=n_layers,
+            activation=activation,
+            weight_init=weight_init,
+            bias_init=bias_init,
+            gain=gain,
+            end_activation=end_activation,
+            dtype=dtype,
+            device=device,
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -153,6 +170,7 @@ class ResBlockMLP(MLP):
         """
         return x + self.net(x)
 
+
 class IdenCatMLP(MLP):
     """
     Identity concatenation MLP.
@@ -164,24 +182,35 @@ class IdenCatMLP(MLP):
 
     See `MLP` for the arguments.
     """
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int,
-                 n_layers: int = 2,
-                 activation: Union[str, nn.Module, Callable[[], nn.Module]] = nn.ReLU,
-                 weight_init: Union[str, Callable[[torch.Tensor, float], None]] = nn.init.xavier_uniform_,
-                 bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
-                 gain: Optional[float] = 1.0,
-                 end_activation: bool = True,
-                 dtype=None, device=None):
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        n_layers: int = 2,
+        activation: str | nn.Module | Callable[[], nn.Module] = nn.ReLU,
+        weight_init: str | Callable[[torch.Tensor, float], None] = nn.init.xavier_uniform_,
+        bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+        gain: float | None = 1.0,
+        end_activation: bool = True,
+        dtype=None,
+        device=None,
+    ):
         assert output_dim > input_dim, "Output dimension must be greater than input dimension"
-        super().__init__(input_dim, hidden_dim, output_dim-input_dim,
-                         n_layers=n_layers,
-                         activation=activation,
-                         weight_init=weight_init,
-                         bias_init=bias_init,
-                         gain=gain,
-                         end_activation=end_activation,
-                         dtype=dtype,
-                         device=device)
+        super().__init__(
+            input_dim,
+            hidden_dim,
+            output_dim - input_dim,
+            n_layers=n_layers,
+            activation=activation,
+            weight_init=weight_init,
+            bias_init=bias_init,
+            gain=gain,
+            end_activation=end_activation,
+            dtype=dtype,
+            device=device,
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

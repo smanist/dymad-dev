@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -11,7 +11,6 @@ import torch
 
 from dymad.io import load_model
 from dymad.models import DKMSK
-
 from tests.slow_regression_utils import (
     assert_summary_against_baseline,
     build_mpl_env,
@@ -21,7 +20,6 @@ from tests.slow_regression_utils import (
     load_summary,
     write_baseline_store,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "lorenz63"
@@ -103,7 +101,9 @@ def test_lorenz63_cli(case: Case, tmp_path: Path, request, baseline_store):
     _run_case(case, tmp_path)
     checkpoint = tmp_path / case.run_dir_name / f"{case.run_dir_name}.pt"
     summary_path = tmp_path / case.run_dir_name / f"{case.run_dir_name}_summary.npz"
-    cv_results = np.load(tmp_path / case.run_dir_name / f"{case.run_dir_name}_cv.npz", allow_pickle=True)
+    cv_results = np.load(
+        tmp_path / case.run_dir_name / f"{case.run_dir_name}_cv.npz", allow_pickle=True
+    )
     assert checkpoint.exists()
     assert summary_path.exists()
     assert len(cv_results["all_results"]) == case.expected_cv_results

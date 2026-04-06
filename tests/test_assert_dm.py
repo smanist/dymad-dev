@@ -5,14 +5,16 @@ from scipy.special import erfinv
 
 from dymad.numerics import DM, DMF, VBDM
 
+
 def eig_plot(Eigenf, V):
     Q = np.linalg.solve(V.T @ V, V.T @ Eigenf)
     V_plot = V @ Q
     return V_plot
 
+
 def compute_basis_and_errors(psi, theta, indices):
     _p = psi[:, indices]
-    _k = (indices[1]//2)
+    _k = indices[1] // 2
     _c = np.cos(_k * theta)
     _s = np.sin(_k * theta)
     c = np.linalg.lstsq(_p, np.hstack((_c, _s)))[0]
@@ -21,7 +23,8 @@ def compute_basis_and_errors(psi, theta, indices):
     error_sin = np.linalg.norm(basis[:, 1] - _s.reshape(-1))
     return basis, (error_cos, error_sin)
 
-def run_dm_s1(model, N = 1000):
+
+def run_dm_s1(model, N=1000):
     # Parameters
     # 1 for fitting, 2 for interpolation
     theta1 = np.linspace(0, 2 * np.pi * (N - 1) / N, N).reshape(-1, 1)
@@ -31,14 +34,14 @@ def run_dm_s1(model, N = 1000):
 
     k = int(np.sqrt(N))
     nvars = 10
-    epsilon = None #1e-3
+    epsilon = None  # 1e-3
     alpha = 1
 
-    if model == 'dm':
+    if model == "dm":
         dm = DM(nvars, n_neighbors=k, alpha=alpha, epsilon=epsilon)
-    elif model == 'vbdm':
-        dm = VBDM(n_components=nvars, n_neighbors=k, Kb=k//2, operator="lb")
-    elif model == 'dmfk':
+    elif model == "vbdm":
+        dm = VBDM(n_components=nvars, n_neighbors=k, Kb=k // 2, operator="lb")
+    elif model == "dmfk":
         dm = DMF(nvars, n_neighbors=k, alpha=alpha, epsilon=epsilon)
     else:
         dm = DMF(nvars, alpha=alpha, epsilon=epsilon)
@@ -52,22 +55,23 @@ def run_dm_s1(model, N = 1000):
 
     return (psi1, theta1), (psi2, theta2), eigval
 
-@pytest.mark.parametrize("model", ['dm', 'dmf', 'dmfk'])
+
+@pytest.mark.parametrize("model", ["dm", "dmf", "dmfk"])
 def test_dm_s1(model):
     (psi1, theta1), (psi2, theta2), eigval = run_dm_s1(model, N=100)
 
     errors1, errors2 = [], []
     for i in range(4):
-        _, error1 = compute_basis_and_errors(psi1, theta1, [2*i+1, 2*(i+1)])
+        _, error1 = compute_basis_and_errors(psi1, theta1, [2 * i + 1, 2 * (i + 1)])
         errors1.append(error1)
-        _, error2 = compute_basis_and_errors(psi2, theta2, [2*i+1, 2*(i+1)])
+        _, error2 = compute_basis_and_errors(psi2, theta2, [2 * i + 1, 2 * (i + 1)])
         errors2.append(error2)
     errors1 = np.hstack(errors1)
     errors2 = np.hstack(errors2)
 
-    if model == 'dm':
+    if model == "dm":
         eps1, eps2, eps3 = 0.005, 0.01, 2e-3
-    elif model == 'dmfk':
+    elif model == "dmfk":
         eps1, eps2, eps3 = 0.006, 0.02, 2e-3
     else:
         eps1, eps2, eps3 = 1e-13, 1e-13, 0.6
@@ -76,22 +80,23 @@ def test_dm_s1(model):
     assert np.max(errors2) < eps2, "DM S1 basis interpolation"
 
     ref = np.array([0, 1, 1, 4, 4, 9, 9, 16, 16, 25])
-    err = np.abs(eigval-ref)/np.maximum(1e-3, ref)
+    err = np.abs(eigval - ref) / np.maximum(1e-3, ref)
     assert np.max(err) < eps3, "DM S1 eigenvalues"
 
-def run_vbdm(N = 201, ifrand = 1):
-    K = int(np.sqrt(N))*10
+
+def run_vbdm(N=201, ifrand=1):
+    K = int(np.sqrt(N)) * 10
     if ifrand:
-        t = np.random.rand(N-1) * 2*np.pi
+        t = np.random.rand(N - 1) * 2 * np.pi
     else:
-        t = np.linspace(0, 2*np.pi, N)[:-1]
+        t = np.linspace(0, 2 * np.pi, N)[:-1]
     X = np.vstack([np.cos(t), np.sin(t)]).T
 
     M = 201
-    s = np.linspace(0, 2*np.pi, M)
+    s = np.linspace(0, 2 * np.pi, M)
     Y = np.vstack([np.cos(s), np.sin(s)]).T
 
-    vbdm = VBDM(n_components=6, n_neighbors=K, Kb=K//2, operator="lb")
+    vbdm = VBDM(n_components=6, n_neighbors=K, Kb=K // 2, operator="lb")
     vbdm.fit(X)
     ypsi, (yrho, yqes, ypeq) = vbdm.transform(Y, ret_den=True)
     ytmp = vbdm.transform(X, ret_den=False)
@@ -102,6 +107,7 @@ def run_vbdm(N = 201, ifrand = 1):
     peq_ref = UnivariateSpline(t[IDX], vbdm._peq[IDX], s=0)(s)
 
     return vbdm, (t, s), (ytmp, ypsi), (yrho, yqes, ypeq), (rho_ref, qes_ref, peq_ref)
+
 
 def test_vbdm():
     vbdm, _, (ytmp, _), (yrho, yqes, ypeq), (rho_ref, qes_ref, peq_ref) = run_vbdm(N=401)
@@ -115,6 +121,7 @@ def test_vbdm():
 
     assert np.min(np.abs(vbdm._lambda + 1)) < 0.2, "VBDM lambda"
 
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
@@ -126,17 +133,17 @@ if __name__ == "__main__":
     ifou = 1  # Additional test for VBDM
 
     if ifdm:
-        models = ['dm', 'dmf', 'dmfk', 'vbdm']
+        models = ["dm", "dmf", "dmfk", "vbdm"]
         for _mdl in models:
             print(_mdl)
             (psi1, theta1), (psi2, theta2), eigval = run_dm_s1(_mdl, N=1000)
 
             ref = np.array([0, 1, 1, 4, 4, 9, 9, 16, 16, 25])
-            if _mdl == 'vbdm':
+            if _mdl == "vbdm":
                 eigval = -eigval
 
             print(eigval)
-            print((eigval-ref)/np.maximum(1e-3, ref))
+            print((eigval - ref) / np.maximum(1e-3, ref))
 
             # Compute and plot results
             _, axes = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
@@ -150,12 +157,12 @@ if __name__ == "__main__":
                 basis2, error2 = compute_basis_and_errors(psi2, theta2, indices)
                 errors2.append(error2)
 
-                ax.plot(theta1, np.cos((i+1) * theta1), 'r', label='Cosine')
-                ax.plot(theta1, basis1[:, 0], 'k--', label='Basis Cosine')
-                ax.plot(theta2, basis2[:, 0], 'g:', linewidth=2, label='Basis Cosine, Interp')
-                ax.plot(theta1, np.sin((i+1) * theta1), 'r', label='Sine')
-                ax.plot(theta1, basis1[:, 1], 'k--', label='Basis Sine')
-                ax.plot(theta2, basis2[:, 1], 'g:', linewidth=2, label='Basis Sine, Interp')
+                ax.plot(theta1, np.cos((i + 1) * theta1), "r", label="Cosine")
+                ax.plot(theta1, basis1[:, 0], "k--", label="Basis Cosine")
+                ax.plot(theta2, basis2[:, 0], "g:", linewidth=2, label="Basis Cosine, Interp")
+                ax.plot(theta1, np.sin((i + 1) * theta1), "r", label="Sine")
+                ax.plot(theta1, basis1[:, 1], "k--", label="Basis Sine")
+                ax.plot(theta2, basis2[:, 1], "g:", linewidth=2, label="Basis Sine, Interp")
                 ax.set_xlim([0, 2 * np.pi])
                 ax.set_ylim([-1, 1])
                 ax.set_title(titles[i], fontsize=14)
@@ -166,27 +173,29 @@ if __name__ == "__main__":
             print("Errors for theta2:", np.hstack(errors2))
 
     if ifvb:
-        vbdm, (t, s), (ytmp, ypsi), (yrho, yqes, ypeq), (rho_ref, qes_ref, peq_ref) = run_vbdm(N=201, ifrand=ifrand)
+        vbdm, (t, s), (ytmp, ypsi), (yrho, yqes, ypeq), (rho_ref, qes_ref, peq_ref) = run_vbdm(
+            N=201, ifrand=ifrand
+        )
 
         err = np.linalg.norm(vbdm._psi - ytmp, axis=0) / np.linalg.norm(vbdm._psi, axis=0).mean()
 
         f, ax = plt.subplots(nrows=3, sharex=True)
-        ax[0].plot(t, vbdm._rho, 'b.')
-        ax[0].plot(s, yrho, 'r-')
-        ax[1].plot(t, vbdm._qest, 'b.')
-        ax[1].plot(s, yqes, 'r-')
-        ax[2].plot(t, vbdm._peq, 'b.')
-        ax[2].plot(s, ypeq, 'r-')
+        ax[0].plot(t, vbdm._rho, "b.")
+        ax[0].plot(s, yrho, "r-")
+        ax[1].plot(t, vbdm._qest, "b.")
+        ax[1].plot(s, yqes, "r-")
+        ax[2].plot(t, vbdm._peq, "b.")
+        ax[2].plot(s, ypeq, "r-")
 
         I = np.argmin(t)
         f, ax = plt.subplots(nrows=6, sharex=True)
         for _i in range(6):
-            _s = np.sign(vbdm._psi[I,_i])
-            ax[_i].plot(t, vbdm._psi[:,_i]*_s, 'b.', label='VBDM')
-            ax[_i].plot(s, ypsi[:,_i]*_s, 'r-', label='Interpolate')
-            ax[_i].set_title(f'Error={err[_i]:4.3e}')
+            _s = np.sign(vbdm._psi[I, _i])
+            ax[_i].plot(t, vbdm._psi[:, _i] * _s, "b.", label="VBDM")
+            ax[_i].plot(s, ypsi[:, _i] * _s, "r-", label="Interpolate")
+            ax[_i].set_title(f"Error={err[_i]:4.3e}")
         ax[0].set_ylim([0, 2])
-        ax[-1].set_xlabel(r'$\theta$')
+        ax[-1].set_xlabel(r"$\theta$")
         ax[-1].legend()
 
     if ifs2:
@@ -196,18 +205,14 @@ if __name__ == "__main__":
         dim = 2
         alpha = 1
         nvars = 20
-        epsilon = None # 1e-3
+        epsilon = None  # 1e-3
 
         # Generate random spherical data
         test = np.random.rand(N, 2)
         THET = 2 * np.pi * test[:, 0]
         PHI = np.pi * test[:, 1]
 
-        x = np.column_stack([
-            np.sin(PHI) * np.cos(THET),
-            np.sin(PHI) * np.sin(THET),
-            np.cos(PHI)
-        ])
+        x = np.column_stack([np.sin(PHI) * np.cos(THET), np.sin(PHI) * np.sin(THET), np.cos(PHI)])
 
         # Step 1: Compute Diffusion Maps
         dm = DM(nvars, k, alpha=alpha, epsilon=epsilon)
@@ -219,7 +224,9 @@ if __name__ == "__main__":
         # Eigenfunction projection
         V_plot0 = np.zeros((psitrue0.shape[0], 3))
         V_plot0[:, :2] = eig_plot(psitrue0[:, :2], dm._psi[:, 1:3])
-        V_plot0[:, 2] = eig_plot(psitrue0[:, 2].reshape(-1,1), dm._psi[:, 3].reshape(-1,1)).reshape(-1)
+        V_plot0[:, 2] = eig_plot(
+            psitrue0[:, 2].reshape(-1, 1), dm._psi[:, 3].reshape(-1, 1)
+        ).reshape(-1)
 
         # Compute errors
         eigvectorerror0 = np.linalg.norm(V_plot0 - psitrue0, axis=0, ord=np.inf)
@@ -228,10 +235,10 @@ if __name__ == "__main__":
         plt.figure(figsize=(12, 4))
         for i in range(3):
             plt.subplot(1, 3, i + 1)
-            plt.scatter(THET, PHI, c=dm._psi[:, i + 1], s=5, cmap='viridis')
-            plt.xlabel(r'$\theta$', fontsize=14)
-            plt.ylabel(r'$\phi$', fontsize=14)
-            plt.colorbar(label=f'Eigenvector {i+1}')
+            plt.scatter(THET, PHI, c=dm._psi[:, i + 1], s=5, cmap="viridis")
+            plt.xlabel(r"$\theta$", fontsize=14)
+            plt.ylabel(r"$\phi$", fontsize=14)
+            plt.colorbar(label=f"Eigenvector {i + 1}")
             plt.xlim(0, 2 * np.pi)
             plt.ylim(0, np.pi)
         plt.tight_layout()
@@ -245,20 +252,18 @@ if __name__ == "__main__":
         THET2 = THET2.T.ravel()
         PHI2 = PHI2.T.ravel()
 
-        x2 = np.column_stack([
-            np.sin(PHI2) * np.cos(THET2),
-            np.sin(PHI2) * np.sin(THET2),
-            np.cos(PHI2)
-        ])
+        x2 = np.column_stack(
+            [np.sin(PHI2) * np.cos(THET2), np.sin(PHI2) * np.sin(THET2), np.cos(PHI2)]
+        )
 
         # Visualize testing data
         plt.figure(figsize=(12, 4))
         for i in range(3):
             plt.subplot(1, 3, i + 1)
-            plt.scatter(THET2, PHI2, c=x2[:, i], s=5, cmap='viridis')
-            plt.xlabel(r'$\theta$', fontsize=14)
-            plt.ylabel(r'$\phi$', fontsize=14)
-            plt.colorbar(label=f'Component {i+1}')
+            plt.scatter(THET2, PHI2, c=x2[:, i], s=5, cmap="viridis")
+            plt.xlabel(r"$\theta$", fontsize=14)
+            plt.ylabel(r"$\phi$", fontsize=14)
+            plt.colorbar(label=f"Component {i + 1}")
             plt.xlim(0, 2 * np.pi)
             plt.ylim(0, np.pi)
         plt.tight_layout()
@@ -274,7 +279,9 @@ if __name__ == "__main__":
         psitrue = x2
         V_plot = np.zeros((psitrue.shape[0], 3))
         V_plot[:, :2] = eig_plot(psitrue[:, :2], eigvecnyst[:, 1:3])
-        V_plot[:, 2] = eig_plot(psitrue[:, 2].reshape(-1,1), eigvecnyst[:, 3].reshape(-1,1)).reshape(-1)
+        V_plot[:, 2] = eig_plot(
+            psitrue[:, 2].reshape(-1, 1), eigvecnyst[:, 3].reshape(-1, 1)
+        ).reshape(-1)
 
         eigvectorerror2 = np.linalg.norm(V_plot - psitrue, axis=0, ord=np.inf)
 
@@ -282,10 +289,10 @@ if __name__ == "__main__":
         plt.figure(figsize=(12, 4))
         for i in range(3):
             plt.subplot(1, 3, i + 1)
-            plt.scatter(THET2, PHI2, c=V_plot[:, i], s=5, cmap='viridis')
-            plt.xlabel(r'$\theta$', fontsize=14)
-            plt.ylabel(r'$\phi$', fontsize=14)
-            plt.colorbar(label=f'Projection {i+1}')
+            plt.scatter(THET2, PHI2, c=V_plot[:, i], s=5, cmap="viridis")
+            plt.xlabel(r"$\theta$", fontsize=14)
+            plt.ylabel(r"$\phi$", fontsize=14)
+            plt.colorbar(label=f"Projection {i + 1}")
             plt.xlim(0, 2 * np.pi)
             plt.ylim(0, np.pi)
         plt.tight_layout()
@@ -305,16 +312,16 @@ if __name__ == "__main__":
         K0 = int(np.sqrt(N))
         if ifrand:
             t = np.random.randn(N)
-            X = t.reshape(-1,1)
+            X = t.reshape(-1, 1)
         else:
-            t = np.linspace(0, 1, N+2)[1:-1]
-            X = np.sqrt(2) * erfinv(2*t-1).reshape(-1,1)
+            t = np.linspace(0, 1, N + 2)[1:-1]
+            X = np.sqrt(2) * erfinv(2 * t - 1).reshape(-1, 1)
 
         # Eigenvalues
         ss = [2, 4, 6, 8, 10]
         ls = []
         for _s in ss:
-            vbdm = VBDM(n_components=6, n_neighbors=K0*_s, Kb=K0*_s//2, operator="kb")
+            vbdm = VBDM(n_components=6, n_neighbors=K0 * _s, Kb=K0 * _s // 2, operator="kb")
             vbdm.fit(X)
             ls.append(vbdm._lambda)
         ls = np.vstack(ls).T
@@ -322,48 +329,48 @@ if __name__ == "__main__":
         lref = -np.arange(6)
         f = plt.figure()
         for _i in range(6):
-            plt.plot(ss, ls[_i], 'o-', markerfacecolor='none')
-            plt.plot(ss, np.ones_like(ss)*lref[_i], 'r--')
+            plt.plot(ss, ls[_i], "o-", markerfacecolor="none")
+            plt.plot(ss, np.ones_like(ss) * lref[_i], "r--")
 
         f = plt.figure()
-        plt.plot(X, vbdm._qest, 'b.')
-        plt.plot(X, vbdm._peq, 'r.')
+        plt.plot(X, vbdm._qest, "b.")
+        plt.plot(X, vbdm._peq, "r.")
 
         # Interpolation
         M = 2001
-        s = np.linspace(0, 1, M+2)[1:-1]
-        Y = np.sqrt(2) * erfinv(2*s-1)
-        Y = np.sort(Y).reshape(-1,1)
+        s = np.linspace(0, 1, M + 2)[1:-1]
+        Y = np.sqrt(2) * erfinv(2 * s - 1)
+        Y = np.sort(Y).reshape(-1, 1)
 
         ypsi, (yrho, yqes, ypeq) = vbdm.transform(Y, ret_den=True)
 
         f, ax = plt.subplots(nrows=3, sharex=True)
-        ax[0].plot(X, vbdm._rho, 'b.')
-        ax[0].plot(Y, yrho, 'r-')
-        ax[1].plot(X, vbdm._qest, 'b.')
-        ax[1].plot(Y, yqes, 'r-')
-        ax[2].plot(X, vbdm._peq, 'b.')
-        ax[2].plot(Y, ypeq, 'r-')
+        ax[0].plot(X, vbdm._rho, "b.")
+        ax[0].plot(Y, yrho, "r-")
+        ax[1].plot(X, vbdm._qest, "b.")
+        ax[1].plot(Y, yqes, "r-")
+        ax[2].plot(X, vbdm._peq, "b.")
+        ax[2].plot(Y, ypeq, "r-")
 
         # Eigenfunctions
-        H = np.hstack([
-            np.ones_like(X),
-            X,
-            (X**2-1)/np.sqrt(2),
-            (X**3-3*X)/np.sqrt(6),
-            (X**4-6*X**2+3)/np.sqrt(24),
-            (X**5-10*X**3+15*X)/np.sqrt(120)])
+        H = np.hstack(
+            [
+                np.ones_like(X),
+                X,
+                (X**2 - 1) / np.sqrt(2),
+                (X**3 - 3 * X) / np.sqrt(6),
+                (X**4 - 6 * X**2 + 3) / np.sqrt(24),
+                (X**5 - 10 * X**3 + 15 * X) / np.sqrt(120),
+            ]
+        )
 
         I = 0
         f, ax = plt.subplots(nrows=6, sharex=True)
         for _i in range(6):
-            _s = np.sign(H[I,_i])
-            ax[_i].plot(X, H[:,_i], 'go', markerfacecolor='none')
-            ax[_i].plot(X, vbdm._psi[:,_i]*_s * np.sign(vbdm._psi[I,_i]), 'b.')
-            ax[_i].plot(Y, ypsi[:,_i]*_s * np.sign(ypsi[I,_i]), 'r-')
+            _s = np.sign(H[I, _i])
+            ax[_i].plot(X, H[:, _i], "go", markerfacecolor="none")
+            ax[_i].plot(X, vbdm._psi[:, _i] * _s * np.sign(vbdm._psi[I, _i]), "b.")
+            ax[_i].plot(Y, ypsi[:, _i] * _s * np.sign(ypsi[I, _i]), "r-")
         ax[0].set_ylim([0, 2])
-
-
-
 
     plt.show()

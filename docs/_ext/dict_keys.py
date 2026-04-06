@@ -1,18 +1,20 @@
 """
 Credits to ChatGPT 5.2
 """
+
 from __future__ import annotations
 
 import importlib
-from typing import Any, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import Any
 
 from docutils import nodes
 from docutils.parsers.rst import Directive, directives
 from docutils.statemachine import ViewList
-
 from sphinx.pycode import ModuleAnalyzer
 
-def _safe_sorted_items(d: Any) -> List[Tuple[Any, Any]]:
+
+def _safe_sorted_items(d: Any) -> list[tuple[Any, Any]]:
     """Try to sort dict items by key (as str). Fall back to insertion order."""
     items = list(d.items())
     try:
@@ -21,7 +23,8 @@ def _safe_sorted_items(d: Any) -> List[Tuple[Any, Any]]:
         pass
     return items
 
-def _safe_sorted_keys(d: Any) -> List[Any]:
+
+def _safe_sorted_keys(d: Any) -> list[Any]:
     keys = list(d.keys())
     try:
         keys.sort(key=lambda k: str(k))
@@ -29,10 +32,11 @@ def _safe_sorted_keys(d: Any) -> List[Any]:
         pass
     return keys
 
+
 def _make_table(
-    rows: Iterable[Tuple[str, str]],
-    headers: Tuple[str, ...],
-    colwidths: Optional[Tuple[int, ...]] = None,
+    rows: Iterable[tuple[str, str]],
+    headers: tuple[str, ...],
+    colwidths: tuple[int, ...] | None = None,
 ) -> nodes.table:
     """
     Build a docutils table node.
@@ -84,8 +88,8 @@ class DictKeys(Directive):
     required_arguments = 1
 
     option_spec = {
-        "key-header": directives.unchanged,     # default "Key"
-        "value-header": directives.unchanged,   # default "Value"
+        "key-header": directives.unchanged,  # default "Key"
+        "value-header": directives.unchanged,  # default "Value"
     }
 
     def _import_target(self, target: str) -> Any:
@@ -122,7 +126,7 @@ class DictKeys(Directive):
                 return text or None
         return None
 
-    def run(self) -> List[nodes.Node]:
+    def run(self) -> list[nodes.Node]:
         target = self.arguments[0].strip()  # e.g. my_package.MAP
         module_path, obj_name = target.rsplit(".", 1)
         module = importlib.import_module(module_path)

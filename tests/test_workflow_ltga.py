@@ -11,8 +11,9 @@ Sweep mode included for NODE training.
 
 import copy
 import os
-import pytest
 import shutil
+
+import pytest
 import torch
 
 from dymad.io import load_model
@@ -20,7 +21,7 @@ from dymad.models import DGKBF, DGKM, DGKMSK, DGLDM, GKBF, GKM, GLDM
 from dymad.training import LinearTrainer, NODETrainer, StackedTrainer, WeakFormTrainer
 
 mdl_kb = {
-    "name" : 'ltga_model',
+    "name": "ltga_model",
     "encoder_layers": 1,
     "decoder_layers": 1,
     "hidden_dimension": 32,
@@ -30,7 +31,8 @@ mdl_kb = {
     "gcl": "sage",
     "activation": "none",
     "weight_init": "xavier_uniform",
-    "input_order": "cubic"}
+    "input_order": "cubic",
+}
 mdl_ld = {
     "name": "ltga_model",
     "encoder_layers": 1,
@@ -41,7 +43,8 @@ mdl_ld = {
     "gcl": "sage",
     "activation": "none",
     "weight_init": "xavier_uniform",
-    "input_order": "cubic"}
+    "input_order": "cubic",
+}
 mdl_km = {
     "name": "ltga_model",
     "encoder_layers": 0,
@@ -49,28 +52,19 @@ mdl_km = {
     "kernel_dimension": 2,
     "input_order": "cubic",
     "type": "share",
-    "kernel": {
-        "type": "sc_rbf",
-        "input_dim": 2,
-        "lengthscale_init": 1.0
-    },
-    "ridge_init": 1.e-4}
+    "kernel": {"type": "sc_rbf", "input_dim": 2, "lengthscale_init": 1.0},
+    "ridge_init": 1.0e-4,
+}
 
-ls_opt = {
-    "method": "full",
-    "interval": 3,
-    "times": 2}
+ls_opt = {"method": "full", "interval": 3, "times": 2}
 trn_wf = {
     "n_epochs": 10,
     "save_interval": 5,
     "load_checkpoint": False,
     "learning_rate": 5e-3,
     "decay_rate": 0.999,
-    "weak_form_params": {
-        "N": 13,
-        "dN": 2,
-        "ordpol": 2,
-        "ordint": 2}}
+    "weak_form_params": {"N": 13, "dN": 2, "ordpol": 2, "ordint": 2},
+}
 trn_wfls = copy.deepcopy(ls_opt)
 trn_wfls.update(trn_wf)
 trn_nd = {
@@ -82,9 +76,8 @@ trn_nd = {
     "sweep_lengths": [10, 20],
     "sweep_epoch_step": 5,
     "ode_method": "dopri5",
-    "ode_args": {
-        "rtol": 1.e-7,
-        "atol": 1.e-9}}
+    "ode_args": {"rtol": 1.0e-7, "atol": 1.0e-9},
+}
 trn_dt = {
     "n_epochs": 10,
     "save_interval": 5,
@@ -93,7 +86,8 @@ trn_dt = {
     "decay_rate": 0.999,
     "sweep_lengths": [3, 5],
     "sweep_epoch_step": 5,
-    "chop_mode": "initial"}
+    "chop_mode": "initial",
+}
 trn_ln = {
     "n_epochs": 1,
     "save_interval": 1,
@@ -142,40 +136,59 @@ def _mixed_schedule(trainer, base_cfg):
         _optimizer_phase(trainer, tail),
     ]
 
+
 cfgs = [
-    ('ldm_wf',    GLDM,  WeakFormTrainer, {"model": mdl_ld, "training" : trn_wf}),
-    ('ldm_node',  GLDM,  NODETrainer,     {"model": mdl_ld, "training" : trn_nd}),
-    ('kbf_wf',    GKBF,  WeakFormTrainer, {"model": mdl_kb, "training" : trn_wf}),
-    ('kbf_node',  GKBF,  NODETrainer,     {"model": mdl_kb, "training" : trn_nd}),
-    ('kbf_wfls',  GKBF,  StackedTrainer,  {"model": mdl_kb, "phases" : _mixed_schedule("Weak", trn_wf)}),
-    ('kbf_ndls',  GKBF,  StackedTrainer,  {"model": mdl_kb, "phases" : _mixed_schedule("NODE", trn_nd)}),
-    ('kbf_ln',    GKBF,  LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
-    ('km_ln',     GKM,   LinearTrainer,   {"model": mdl_km, "training" : trn_l2}),
-    ('dldm_nd',   DGLDM, NODETrainer,     {"model": mdl_ld, "training" : trn_dt}),
-    ('dkbf_nd',   DGKBF, NODETrainer,     {"model": mdl_kb, "training" : trn_dt}),
-    ('dkbf_ndls', DGKBF, StackedTrainer,  {"model": mdl_kb, "phases" : _mixed_schedule("NODE", trn_dt)}),
-    ('dkbf_ln',   DGKBF, LinearTrainer,   {"model": mdl_kb, "training" : trn_ln}),
-    ('dkm_ln',    DGKM,  LinearTrainer,   {"model": mdl_km, "training" : trn_l2}),
-    ('dkmsk_ln',  DGKMSK,LinearTrainer,   {"model": mdl_km, "training" : trn_l2}),
-    ]
+    ("ldm_wf", GLDM, WeakFormTrainer, {"model": mdl_ld, "training": trn_wf}),
+    ("ldm_node", GLDM, NODETrainer, {"model": mdl_ld, "training": trn_nd}),
+    ("kbf_wf", GKBF, WeakFormTrainer, {"model": mdl_kb, "training": trn_wf}),
+    ("kbf_node", GKBF, NODETrainer, {"model": mdl_kb, "training": trn_nd}),
+    (
+        "kbf_wfls",
+        GKBF,
+        StackedTrainer,
+        {"model": mdl_kb, "phases": _mixed_schedule("Weak", trn_wf)},
+    ),
+    (
+        "kbf_ndls",
+        GKBF,
+        StackedTrainer,
+        {"model": mdl_kb, "phases": _mixed_schedule("NODE", trn_nd)},
+    ),
+    ("kbf_ln", GKBF, LinearTrainer, {"model": mdl_kb, "training": trn_ln}),
+    ("km_ln", GKM, LinearTrainer, {"model": mdl_km, "training": trn_l2}),
+    ("dldm_nd", DGLDM, NODETrainer, {"model": mdl_ld, "training": trn_dt}),
+    ("dkbf_nd", DGKBF, NODETrainer, {"model": mdl_kb, "training": trn_dt}),
+    (
+        "dkbf_ndls",
+        DGKBF,
+        StackedTrainer,
+        {"model": mdl_kb, "phases": _mixed_schedule("NODE", trn_dt)},
+    ),
+    ("dkbf_ln", DGKBF, LinearTrainer, {"model": mdl_kb, "training": trn_ln}),
+    ("dkm_ln", DGKM, LinearTrainer, {"model": mdl_km, "training": trn_l2}),
+    ("dkmsk_ln", DGKMSK, LinearTrainer, {"model": mdl_km, "training": trn_l2}),
+]
+
 
 def train_case(idx, data, path):
     _, MDL, Trainer, opt = cfgs[idx]
     opt.update({"data": {"path": data}})
-    config_path = path/'ltg_model.yaml'
+    config_path = path / "ltg_model.yaml"
     trainer = Trainer(config_path, MDL, config_mod=opt)
     trainer.train()
+
 
 def predict_case(idx, sample, path):
     x_data, t_data, edge_index = sample
     _, MDL, _, opt = cfgs[idx]
-    _, prd_func = load_model(MDL, path/'ltga_model/ltga_model.pt')
+    _, prd_func = load_model(MDL, path / "ltga_model/ltga_model.pt")
     with torch.no_grad():
         prd_func(x_data, t_data, ei=torch.tensor(edge_index))
+
 
 @pytest.mark.parametrize("idx", range(len(cfgs)))
 def test_ltga(ltga_data, ltga_test, env_setup, idx):
     train_case(idx, ltga_data, env_setup)
     predict_case(idx, ltga_test, env_setup)
-    if os.path.exists(env_setup/'ltga_model'):
-        shutil.rmtree(env_setup/'ltga_model')
+    if os.path.exists(env_setup / "ltga_model"):
+        shutil.rmtree(env_setup / "ltga_model")

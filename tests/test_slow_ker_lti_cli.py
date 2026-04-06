@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -14,9 +14,13 @@ import torch
 from dymad.io import load_model
 from dymad.models import DKM, DKMSK, KM
 from dymad.utils import TrajectorySampler
-
-from tests.slow_regression_utils import assert_summary_against_baseline, extract_record, load_baselines, load_summary, scaled_limit
-
+from tests.slow_regression_utils import (
+    assert_summary_against_baseline,
+    extract_record,
+    load_baselines,
+    load_summary,
+    scaled_limit,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "ker_lti"
@@ -26,18 +30,26 @@ TEST_SEED = 12345
 B = 30
 N = 41
 t_grid = np.linspace(0, 2, N)
-A = np.array([[0., 1.], [-1., -0.1]])
+A = np.array([[0.0, 1.0], [-1.0, -0.1]])
 
 
 def f(t, x, u):
     return (x @ A.T) + u
 
 
-g = lambda t, x, u: x
+def g(t, x, u):
+    return x
+
+
 CONFIG_CHR = {
     "control": {
         "kind": "chirp",
-        "params": {"t1": 4.0, "freq_range": (0.5, 2.0), "amp_range": (0.5, 1.0), "phase_range": (0.0, 360.0)}
+        "params": {
+            "t1": 4.0,
+            "freq_range": (0.5, 2.0),
+            "amp_range": (0.5, 1.0),
+            "phase_range": (0.0, 360.0),
+        },
     }
 }
 
@@ -82,7 +94,19 @@ def _run_case(case: Case, workdir: Path) -> None:
     env["MPLBACKEND"] = "Agg"
     env["MPLCONFIGDIR"] = str(mpl_dir)
     subprocess.run(
-        [sys.executable, str(SCRIPT_ROOT / "ker_lti_cli.py"), "--case", str(case.idx), "--workdir", str(workdir), "--seed", str(TEST_SEED), "--no-plot", "--no-predict", "--no-show"],
+        [
+            sys.executable,
+            str(SCRIPT_ROOT / "ker_lti_cli.py"),
+            "--case",
+            str(case.idx),
+            "--workdir",
+            str(workdir),
+            "--seed",
+            str(TEST_SEED),
+            "--no-plot",
+            "--no-predict",
+            "--no-show",
+        ],
         check=True,
         cwd=REPO_ROOT,
         env=env,
@@ -96,7 +120,7 @@ def baseline_store(request):
         return
     store = {}
     if BASELINE_PATH.exists():
-        with open(BASELINE_PATH, "r") as fh:
+        with open(BASELINE_PATH) as fh:
             store = json.load(fh)
     yield store
     with open(BASELINE_PATH, "w") as fh:

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -10,9 +10,8 @@ import pytest
 import torch
 
 from dymad.io import load_model
-from dymad.models import DSDM, DLTI, KBF
+from dymad.models import DSDM, KBF
 from dymad.utils import TrajectorySampler
-
 from tests.slow_regression_utils import (
     assert_summary_against_baseline,
     build_mpl_env,
@@ -22,7 +21,6 @@ from tests.slow_regression_utils import (
     load_summary,
     write_baseline_store,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "lti_delay"
@@ -36,7 +34,9 @@ def f(t, x, u):
     return (x @ A.T) + u
 
 
-g = lambda t, x, u: x
+def g(t, x, u):
+    return x
+
 
 CONFIG_GAU = {
     "control": {

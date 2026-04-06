@@ -1,8 +1,8 @@
 import argparse
 import copy
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,22 +12,50 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.cli_helpers import add_common_cli_args, print_case_table, resolve_case_indices, set_seed, stage_workdir
+from scripts.cli_helpers import (
+    add_common_cli_args,
+    print_case_table,
+    resolve_case_indices,
+    set_seed,
+    stage_workdir,
+)
+from scripts.pirom_res.res_train import DPJ, DPT, f, mdl_kl, t_grid, trn_nd, trn_wf
 
 from dymad.io import load_model
 from dymad.training import NODETrainer, WeakFormTrainer
 from dymad.utils import TrajectorySampler, plot_multi_trajs, plot_summary
 
-from scripts.pirom_res.res_train import DPT, DPJ, f, mdl_kl, t_grid, trn_nd, trn_wf
-
-
 BASE_DIR = Path(__file__).resolve().parent
 
 cases = [
-    {"name": "dp_nd", "model": DPT, "trainer": NODETrainer, "config": "res_model.yaml", "training": trn_nd},
-    {"name": "dp_wf", "model": DPT, "trainer": WeakFormTrainer, "config": "res_model.yaml", "training": trn_wf},
-    {"name": "dj_nd", "model": DPJ, "trainer": NODETrainer, "config": "res_model.yaml", "training": trn_nd},
-    {"name": "dj_wf", "model": DPJ, "trainer": WeakFormTrainer, "config": "res_model.yaml", "training": trn_wf},
+    {
+        "name": "dp_nd",
+        "model": DPT,
+        "trainer": NODETrainer,
+        "config": "res_model.yaml",
+        "training": trn_nd,
+    },
+    {
+        "name": "dp_wf",
+        "model": DPT,
+        "trainer": WeakFormTrainer,
+        "config": "res_model.yaml",
+        "training": trn_wf,
+    },
+    {
+        "name": "dj_nd",
+        "model": DPJ,
+        "trainer": NODETrainer,
+        "config": "res_model.yaml",
+        "training": trn_nd,
+    },
+    {
+        "name": "dj_wf",
+        "model": DPJ,
+        "trainer": WeakFormTrainer,
+        "config": "res_model.yaml",
+        "training": trn_wf,
+    },
 ]
 DEFAULT_CASES = [0, 1, 2, 3]
 
@@ -39,13 +67,19 @@ def parse_args():
 
 
 def prepare_workdir(root: Path):
-    stage_workdir(root, BASE_DIR, ["res_model.yaml", "res_test.yaml", "data/res.npz"], data_dir=True)
+    stage_workdir(
+        root, BASE_DIR, ["res_model.yaml", "res_test.yaml", "data/res.npz"], data_dir=True
+    )
 
 
 def train(selected: list[int], root: Path):
     for idx in selected:
         case = cases[idx]
-        opt = {"data": {"path": str(root / "data" / "res.npz")}, "model": copy.deepcopy(mdl_kl), "training": copy.deepcopy(case["training"])}
+        opt = {
+            "data": {"path": str(root / "data" / "res.npz")},
+            "model": copy.deepcopy(mdl_kl),
+            "training": copy.deepcopy(case["training"]),
+        }
         opt["model"]["name"] = f"res_{case['name']}"
         trainer = case["trainer"](root / case["config"], case["model"], config_mod=opt)
         trainer.train()
@@ -55,7 +89,7 @@ def plot(selected: list[int]):
     labels = [cases[idx]["name"] for idx in selected]
     npz_files = [f"res_{label}" for label in labels]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
-    for label, npz in zip(labels, npzs):
+    for label, npz in zip(labels, npzs, strict=False):
         print(f"Epoch time {label}: {npz['avg_epoch_time']}")
 
 
@@ -76,7 +110,13 @@ def predict(selected: list[int]):
             )
         res.append(pred)
 
-    plot_multi_trajs(np.array(res), t_data, "DP", labels=["Truth"] + [cases[idx]["name"] for idx in selected], ifclose=False)
+    plot_multi_trajs(
+        np.array(res),
+        t_data,
+        "DP",
+        labels=["Truth"] + [cases[idx]["name"] for idx in selected],
+        ifclose=False,
+    )
 
 
 def main():

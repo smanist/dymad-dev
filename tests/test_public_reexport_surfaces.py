@@ -4,7 +4,6 @@ import dymad.core as core
 import dymad.models as models
 import dymad.training as training
 
-
 EXPECTED_CORE_SURFACE = {
     "AddOneTransform",
     "ComposeTransform",

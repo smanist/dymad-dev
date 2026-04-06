@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Callable, Dict, List, Optional, Type
+from collections.abc import Callable
+from typing import Any
 
 import torch
 
@@ -15,11 +16,11 @@ class PhasePipeline:
 
     def __init__(
         self,
-        config: Dict[str, Any],
-        model_class: Type,
+        config: dict[str, Any],
+        model_class: type,
         device: torch.device,
         dtype: torch.dtype,
-        execution_services: Optional[ExecutionServices] = None,
+        execution_services: ExecutionServices | None = None,
     ):
         self.config = copy.deepcopy(config)
         self.model_class = model_class
@@ -30,7 +31,7 @@ class PhasePipeline:
         self.config = self.execution_services.apply_to_config(self.config)
         self.device = self.execution_services.device
         self.dtype = dtype
-        self.phase_specs: List[PhaseSpec] = normalize_phase_specs(self.config)
+        self.phase_specs: list[PhaseSpec] = normalize_phase_specs(self.config)
         self.phases = self.phase_specs
         if not self.phase_specs:
             raise ValueError("Experiment config must define at least one phase.")
@@ -43,7 +44,7 @@ class PhasePipeline:
         artifacts: ArtifactRegistry | None = None,
         run_name: str,
         checkpoint_callback: Callable[[TrainerState, ArtifactRegistry], None] | None = None,
-    ) -> List[PhaseResult]:
+    ) -> list[PhaseResult]:
         artifacts = ArtifactRegistry() if artifacts is None else artifacts
         results: list[PhaseResult] = []
         active_state = initial_state

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import torch
 
@@ -23,10 +23,7 @@ def _stack_optional(items: Iterable[torch.Tensor | None]) -> torch.Tensor | None
     if not present:
         return None
     ref = present[0]
-    filled = tuple(
-        value if value is not None else torch.zeros_like(ref)
-        for value in values
-    )
+    filled = tuple(value if value is not None else torch.zeros_like(ref) for value in values)
     return torch.stack(filled)
 
 
@@ -47,7 +44,7 @@ class RegularTrainerBatch:
             object.__setattr__(self, "runtime", to_padded_regular_runtime(self.runtime))
 
     @classmethod
-    def collate_series(cls, items: Iterable[RegularSeries]) -> "RegularTrainerBatch":
+    def collate_series(cls, items: Iterable[RegularSeries]) -> RegularTrainerBatch:
         series = RegularSeriesBatch.collate(items)
         return cls(runtime=to_padded_regular_runtime(series), series=series)
 
@@ -57,7 +54,7 @@ class RegularTrainerBatch:
         runtime: RegularRuntime,
         *,
         series: RegularSeriesBatch | None = None,
-    ) -> "RegularTrainerBatch":
+    ) -> RegularTrainerBatch:
         return cls(runtime=runtime, series=series)
 
     def __len__(self) -> int:
@@ -79,19 +76,21 @@ class RegularTrainerBatch:
         self,
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
-    ) -> "RegularTrainerBatch":
+    ) -> RegularTrainerBatch:
         runtime = self.runtime.to(device=device, dtype=dtype)
         series = self.series.to(device=device, dtype=dtype) if self.series is not None else None
         return RegularTrainerBatch(runtime=runtime, series=series)
 
-    def truncate(self, num_steps: int) -> "RegularTrainerBatch":
+    def truncate(self, num_steps: int) -> RegularTrainerBatch:
         runtime = self.runtime.truncate(num_steps)
         series = None
         if self.series is not None:
-            series = RegularSeriesBatch.collate(item.slice_steps(0, num_steps) for item in self.series)
+            series = RegularSeriesBatch.collate(
+                item.slice_steps(0, num_steps) for item in self.series
+            )
         return RegularTrainerBatch(runtime=runtime, series=series)
 
-    def window(self, window: int, stride: int) -> "RegularTrainerBatch":
+    def window(self, window: int, stride: int) -> RegularTrainerBatch:
         runtime = self.runtime.window(window, stride)
         return RegularTrainerBatch.from_runtime(runtime)
 
@@ -111,12 +110,16 @@ class RegularTrainerBatch:
     def control_tensor(self) -> torch.Tensor | None:
         if self.runtime.is_uniform_length:
             return self.runtime.u
-        return _stack_optional(item.u[0] if item.u is not None else None for item in self.runtime.iter_series())
+        return _stack_optional(
+            item.u[0] if item.u is not None else None for item in self.runtime.iter_series()
+        )
 
     def target_tensor(self) -> torch.Tensor | None:
         if self.runtime.is_uniform_length:
             return self.runtime.y
-        return _stack_optional(item.y[0] if item.y is not None else None for item in self.runtime.iter_series())
+        return _stack_optional(
+            item.y[0] if item.y is not None else None for item in self.runtime.iter_series()
+        )
 
     def params_tensor(self) -> torch.Tensor | None:
         return self.runtime.p
@@ -139,7 +142,7 @@ class GraphTrainerBatch:
             object.__setattr__(self, "runtime", to_padded_graph_runtime(self.runtime))
 
     @classmethod
-    def collate_series(cls, items: Iterable[GraphSeries]) -> "GraphTrainerBatch":
+    def collate_series(cls, items: Iterable[GraphSeries]) -> GraphTrainerBatch:
         series = GraphSeriesBatch.collate(items)
         return cls(runtime=to_padded_graph_runtime(series), series=series)
 
@@ -149,7 +152,7 @@ class GraphTrainerBatch:
         runtime: GraphRuntime,
         *,
         series: GraphSeriesBatch | None = None,
-    ) -> "GraphTrainerBatch":
+    ) -> GraphTrainerBatch:
         return cls(runtime=runtime, series=series)
 
     def __len__(self) -> int:
@@ -171,19 +174,21 @@ class GraphTrainerBatch:
         self,
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
-    ) -> "GraphTrainerBatch":
+    ) -> GraphTrainerBatch:
         runtime = self.runtime.to(device=device, dtype=dtype)
         series = self.series.to(device=device, dtype=dtype) if self.series is not None else None
         return GraphTrainerBatch(runtime=runtime, series=series)
 
-    def truncate(self, num_steps: int) -> "GraphTrainerBatch":
+    def truncate(self, num_steps: int) -> GraphTrainerBatch:
         runtime = self.runtime.truncate(num_steps)
         series = None
         if self.series is not None:
-            series = GraphSeriesBatch.collate(item.slice_steps(0, num_steps) for item in self.series)
+            series = GraphSeriesBatch.collate(
+                item.slice_steps(0, num_steps) for item in self.series
+            )
         return GraphTrainerBatch(runtime=runtime, series=series)
 
-    def window(self, window: int, stride: int) -> "GraphTrainerBatch":
+    def window(self, window: int, stride: int) -> GraphTrainerBatch:
         runtime = self.runtime.window(window, stride)
         return GraphTrainerBatch.from_runtime(runtime)
 
@@ -203,7 +208,9 @@ class GraphTrainerBatch:
     def control_tensor(self) -> torch.Tensor | None:
         if self.runtime.is_uniform_length:
             return self.runtime.ug
-        return _stack_optional(item.ug[0] if item.ug is not None else None for item in self.runtime.iter_series())
+        return _stack_optional(
+            item.ug[0] if item.ug is not None else None for item in self.runtime.iter_series()
+        )
 
     def edge_index_payload(self) -> tuple[torch.Tensor | tuple[torch.Tensor, ...], ...]:
         if self.series is not None:
@@ -213,12 +220,16 @@ class GraphTrainerBatch:
     def edge_weight_payload(self) -> tuple[torch.Tensor | tuple[torch.Tensor, ...] | None, ...]:
         if self.series is not None:
             return tuple(item.edge_weight for item in self.series)
-        return tuple(item.ew[0] if item.ew is not None else None for item in self.runtime.iter_series())
+        return tuple(
+            item.ew[0] if item.ew is not None else None for item in self.runtime.iter_series()
+        )
 
     def edge_attr_payload(self) -> tuple[torch.Tensor | tuple[torch.Tensor, ...] | None, ...]:
         if self.series is not None:
             return tuple(item.edge_attr for item in self.series)
-        return tuple(item.ea[0] if item.ea is not None else None for item in self.runtime.iter_series())
+        return tuple(
+            item.ea[0] if item.ea is not None else None for item in self.runtime.iter_series()
+        )
 
 
 TrainerBatch = RegularTrainerBatch | GraphTrainerBatch

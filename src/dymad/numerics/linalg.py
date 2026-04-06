@@ -1,12 +1,13 @@
 import logging
+
 import numpy as np
 import scipy.linalg as spl
 import torch
-from typing import Tuple
 
 from dymad.numerics.complex import disc2cont
 
 logger = logging.getLogger(__name__)
+
 
 def truncated_svd(X, order):
     """
@@ -24,36 +25,30 @@ def truncated_svd(X, order):
     if isinstance(order, float):
         if order > 0:
             _s2 = _S**2
-            _I = np.argmax(np.cumsum(_s2)/np.sum(_s2) > order)
+            _I = np.argmax(np.cumsum(_s2) / np.sum(_s2) > order)
         else:
             _n, _m = X.shape
-            _bt = min(_n, _m)/max(_n, _m)
-            _om = 0.56*_bt**3 - 0.95*_bt**2 + 1.82*_bt + 1.43
+            _bt = min(_n, _m) / max(_n, _m)
+            _om = 0.56 * _bt**3 - 0.95 * _bt**2 + 1.82 * _bt + 1.43
             _I = np.argmax(_S < _om * np.median(_S))
-        _Ur = _U[:,:_I]
+        _Ur = _U[:, :_I]
         _Sr = _S[:_I]
         _Vr = _Vh[:_I].conj().T
     elif isinstance(order, int):
-        _Ur = _U[:,:order]
+        _Ur = _U[:, :order]
         _Sr = _S[:order]
         _Vr = _Vh[:order].conj().T
-    elif order.lower() == 'full':
+    elif order.lower() == "full":
         _Ur, _Sr, _Vr = _U, _S, _Vh.conj().T
     else:
         raise NotImplementedError(f"Undefined threshold for order={order}")
     return _Ur, _Sr, _Vr
 
-def randomized_svd(
-    loader, N,
-    k,
-    oversample = 10,
-    n_iter = 0,
-    return_u = False,
-    dtype = np.float64,
-    seed = 0):
+
+def randomized_svd(loader, N, k, oversample=10, n_iter=0, return_u=False, dtype=np.float64, seed=0):
     """
     Two-pass randomized SVD for a matrix stored as row-blocks:
-    
+
     A^T = [A_0^T, A_1^T, ..., A_{N-1}^T]
 
     where A_i shape (n_i, d), A shape (N=sum_i n_i, d)
@@ -84,7 +79,7 @@ def randomized_svd(
     d = loader(0).shape[1]
     l = k + oversample  # total sketch dimension
 
-    rng   = np.random.default_rng(seed)
+    rng = np.random.default_rng(seed)
     Omega = rng.standard_normal((d, l)).astype(dtype)
 
     # First pass: Y = Σ_i X_i^T (X_i @ Omega)
@@ -116,10 +111,10 @@ def randomized_svd(
 
     # Eigendecomposition of small matrix B
     logger.info("Eigendecomposition:")
-    S2, W = np.linalg.eigh(B)      # ascending order
-    idx   = np.argsort(S2)[::-1][:k]
-    S     = np.sqrt(S2[idx]).astype(dtype)
-    V     = Q.dot(W[:, idx])
+    S2, W = np.linalg.eigh(B)  # ascending order
+    idx = np.argsort(S2)[::-1][:k]
+    S = np.sqrt(S2[idx]).astype(dtype)
+    V = Q.dot(W[:, idx])
 
     # Optionally compute left singular vectors U
     if return_u:
@@ -138,6 +133,7 @@ def randomized_svd(
     if return_u:
         return U, S, V
     return S, V
+
 
 def truncated_lstsq(A, B, tsvd=None):
     """
@@ -160,6 +156,7 @@ def truncated_lstsq(A, B, tsvd=None):
     _B = (_Ur.conj().T @ B) / _Sr.reshape(-1, 1)
     return _Vr, _B.T
 
+
 def check_direction(v1, v2):
     """
     The cosine values between v1 and v2.
@@ -168,10 +165,13 @@ def check_direction(v1, v2):
         # Just one vector
         return _check_direction(v1, v2)
     _, _N = v1.shape
-    _d = np.zeros(_N,)
+    _d = np.zeros(
+        _N,
+    )
     for _i in range(_N):
-        _d[_i] = _check_direction(v1[:,_i], v2[:,_i])
+        _d[_i] = _check_direction(v1[:, _i], v2[:, _i])
     return _d
+
 
 def _check_direction(v1, v2):
     """
@@ -179,8 +179,9 @@ def _check_direction(v1, v2):
     """
     _v1 = v1.reshape(-1)
     _v2 = v2.reshape(-1)
-    _cc = _v1.conj().dot(_v2) / (np.linalg.norm(_v1)*np.linalg.norm(_v2))
+    _cc = _v1.conj().dot(_v2) / (np.linalg.norm(_v1) * np.linalg.norm(_v2))
     return np.abs(_cc)
+
 
 def check_orthogonality(U, V, M=None):
     """
@@ -192,8 +193,9 @@ def check_orthogonality(U, V, M=None):
     else:
         _M = np.array(M)
     _L = U.conj().T.dot(_M).dot(V)
-    _err = np.mean(np.abs(_L-np.eye(_m)))
+    _err = np.mean(np.abs(_L - np.eye(_m)))
     return _L, _err
+
 
 def scaled_eig(A, B=None):
     """
@@ -216,9 +218,10 @@ def scaled_eig(A, B=None):
         _scl = np.diag(_vl.conj().T.dot(B).dot(_vr))
     _sr = np.sqrt(_scl)
     _sl = _sr.conj()
-    _vr = _vr / _sr.reshape(1,-1)
-    _vl = _vl / _sl.reshape(1,-1)
+    _vr = _vr / _sr.reshape(1, -1)
+    _vl = _vl / _sl.reshape(1, -1)
     return _wd, _vl, _vr
+
 
 def eig_low_rank(U, V):
     """Approach like Exact DMD.
@@ -235,9 +238,10 @@ def eig_low_rank(U, V):
     """
     _At = V.T.dot(U)
     _w, _vl, _vr = scaled_eig(_At)
-    _vl = V.dot(_vl) / _w.conj().reshape(1,-1)
+    _vl = V.dot(_vl) / _w.conj().reshape(1, -1)
     _vr = U.dot(_vr)
     return _w, _vl, _vr
+
 
 def truncate_sequence(seq, order):
     """
@@ -255,11 +259,12 @@ def truncate_sequence(seq, order):
         idx = _idx[msk]
     elif isinstance(order, int):
         idx = _idx[:order]
-    elif order.lower() == 'full':
+    elif order.lower() == "full":
         idx = _idx
     else:
         raise NotImplementedError(f"Undefined threshold for order={order}")
     return idx
+
 
 def make_random_matrix(Ndim, Nrnk, zrng, wrng, dt=-1):
     """
@@ -268,25 +273,26 @@ def make_random_matrix(Ndim, Nrnk, zrng, wrng, dt=-1):
     mapped to discrete-time.
     The eigenpairs are always assumed to be conjugate.
     """
-    _Nr = Nrnk//2
+    _Nr = Nrnk // 2
     _U = np.random.rand(Ndim, _Nr) + 1j * np.random.rand(Ndim, _Nr)
     U0 = np.hstack([_U, _U.conj()])
     V0 = np.linalg.pinv(U0).conj().T
-    z0 = np.random.rand(_Nr) * (zrng[1]-zrng[0]) + zrng[0]
-    w0 = np.random.rand(_Nr) * (wrng[1]-wrng[0]) + wrng[0]
-    _L = z0 + 1j*w0
+    z0 = np.random.rand(_Nr) * (zrng[1] - zrng[0]) + zrng[0]
+    w0 = np.random.rand(_Nr) * (wrng[1] - wrng[0]) + wrng[0]
+    _L = z0 + 1j * w0
     if dt > 0:
-        _L = np.exp(_L*dt)
+        _L = np.exp(_L * dt)
     L0 = np.hstack([_L, _L.conj()])
-    A  = U0.dot(np.diag(L0)).dot(V0.conj().T)
+    A = U0.dot(np.diag(L0)).dot(V0.conj().T)
     return A, (L0, U0, V0)
+
 
 def real_lowrank_from_eigpairs(
     lam: np.ndarray,
     U: np.ndarray,
     V: np.ndarray,
     tol: float = 1e-12,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Construct a real low-rank factorization V_real @ B @ U_real.T from (possibly complex)
     eigenpairs of a real matrix A = sum_i lam_i * v_i * u_i^H.
@@ -325,30 +331,31 @@ def real_lowrank_from_eigpairs(
         else:
             # find its conjugate partner by matching values
             conj_idx = None
-            for j in range(i+1, r):
+            for j in range(i + 1, r):
                 if used[j]:
                     continue
                 if np.abs(lam[j] - np.conj(l)) <= 1e-10 * (1.0 + np.abs(l)):
                     conj_idx = j
                     break
             if conj_idx is None:
-                raise RuntimeError("Could not find conjugate partner for eigenvalue index {}".format(i))
+                raise RuntimeError(f"Could not find conjugate partner for eigenvalue index {i}")
 
             # Use only the 'positive imag' representative to build a 2x2 real block
             if l.imag < 0:
                 # swap to always use the positive imaginary one
                 i, conj_idx = conj_idx, i
-                l = lam[i]; v = V[:, i]; u = U[:, i]
+                l = lam[i]
+                v = V[:, i]
+                u = U[:, i]
 
             # For the conjugate pair sum,
             #   S_pair = l v u^T + l̄ v̄ ū^T = 2 V_block @ C @ U_block^T
             #   with C = [[a, b], [-b, a]]
             # We scale each block by sqrt(2)
-            U_block = scl*np.stack([np.real(u), np.imag(u)], axis=1)
-            V_block = scl*np.stack([np.real(v), np.imag(v)], axis=1)
+            U_block = scl * np.stack([np.real(u), np.imag(u)], axis=1)
+            V_block = scl * np.stack([np.real(v), np.imag(v)], axis=1)
             a, b = np.real(l), np.imag(l)
-            C_block = np.array([[a, b],
-                                [-b, a]], dtype=float)
+            C_block = np.array([[a, b], [-b, a]], dtype=float)
 
             U_blocks.append(U_block)
             V_blocks.append(V_block)
@@ -365,16 +372,17 @@ def real_lowrank_from_eigpairs(
     ofs = 0
     for Bi in B_blocks:
         k = Bi.shape[0]
-        B[ofs:ofs+k, ofs:ofs+k] = Bi
+        B[ofs : ofs + k, ofs : ofs + k] = Bi
         ofs += k
 
     return B, U_real, V_real
 
+
 def mode_split(
     l: np.ndarray,
     U: np.ndarray,
-    comp: str = 'ri',
-) -> Tuple[np.ndarray, np.ndarray]:
+    comp: str = "ri",
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Split eigenvalues and modes according to the requested components.
 
@@ -400,26 +408,27 @@ def mode_split(
     assert U.shape[0] == r, "Mismatch in number of modes"
     n = U.shape[1]
 
-    assert all([c in 'riap' for c in comp]), "Invalid comp string"
+    assert all([c in "riap" for c in comp]), "Invalid comp string"
 
     l_split, U_split = [], []
     for c in comp:
-        if c == 'r':
+        if c == "r":
             l_split.append(l.real.reshape(r, 1))
             U_split.append(U.real.reshape(r, 1, n))
-        elif c == 'i':
+        elif c == "i":
             l_split.append(l.imag.reshape(r, 1))
             U_split.append(U.imag.reshape(r, 1, n))
-        elif c == 'a':
+        elif c == "a":
             l_split.append(np.abs(l).reshape(r, 1))
             U_split.append(np.abs(U).reshape(r, 1, n))
-        elif c == 'p':
+        elif c == "p":
             l_split.append(np.angle(l).reshape(r, 1))
             U_split.append(np.angle(U).reshape(r, 1, n))
     l_split = np.hstack(l_split)
     U_split = np.concatenate(U_split, axis=1)
 
     return l_split, U_split
+
 
 def _phiS(U: torch.Tensor, V: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
     """
@@ -447,21 +456,21 @@ def _phiS(U: torch.Tensor, V: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
     X = s.view(m, 1, 1) * S.unsqueeze(0)  # (m, r, r)
 
     # Build block matrices [[X_i, I],[0, 0]] of size (2r x 2r), batched over m
-    Z = torch.zeros((m, 2*r, 2*r), dtype=U.dtype, device=U.device)
+    Z = torch.zeros((m, 2 * r, 2 * r), dtype=U.dtype, device=U.device)
     Z[:, :r, :r] = X
     I_r = torch.eye(r, dtype=U.dtype, device=U.device).expand(m, r, r)
     Z[:, :r, r:] = I_r  # top-right block = I
 
     # Exponential of each block; top-right block is phi_1(X_i)
-    EZ = torch.matrix_exp(Z)              # (m, 2r, 2r)
-    phi = EZ[:, :r, r:]                   # (m, r, r)
+    EZ = torch.matrix_exp(Z)  # (m, 2r, 2r)
+    phi = EZ[:, :r, r:]  # (m, r, r)
 
     return phi
 
-def expm_low_rank(U: torch.Tensor,
-                  V: torch.Tensor,
-                  s: torch.Tensor,
-                  b: torch.Tensor) -> torch.Tensor:
+
+def expm_low_rank(
+    U: torch.Tensor, V: torch.Tensor, s: torch.Tensor, b: torch.Tensor
+) -> torch.Tensor:
     """
     Compute B_i = b @ exp(s_i * U V^T) for i=1..m, in batch.
 
@@ -486,15 +495,15 @@ def expm_low_rank(U: torch.Tensor,
     device, dtype = U.device, U.dtype
 
     # Cast s and b to match U/V
-    s = s.reshape(-1).to(device=device, dtype=dtype)   # (m,)
-    b = b.to(device=device, dtype=dtype)               # (batch, n)
+    s = s.reshape(-1).to(device=device, dtype=dtype)  # (m,)
+    b = b.to(device=device, dtype=dtype)  # (batch, n)
 
     # Get phi_1(s_i * S) for all s_i: (m, r, r)
     phi = _phiS(U, V, s)
 
     # Precompute invariants
-    BU = b @ U                                        # (batch, r)
-    Vt = V.transpose(0, 1)                            # (r, n)
+    BU = b @ U  # (batch, r)
+    Vt = V.transpose(0, 1)  # (r, n)
 
     # Build M_i = s_i * phi_1(s_i * S): (m, r, r)
     M = s.view(-1, 1, 1) * phi
@@ -502,18 +511,17 @@ def expm_low_rank(U: torch.Tensor,
     # (m, batch, r) = (m, 1, r, r) @ (1, batch, r, 1) style via bmm
     # Use batched matmul: (m, batch, r) = (m, batch, r) @ (m, r, r)
     BU_expanded = BU.unsqueeze(0).expand(M.shape[0], -1, -1)  # (m, batch, r)
-    tmp = torch.bmm(BU_expanded, M)                           # (m, batch, r)
+    tmp = torch.bmm(BU_expanded, M)  # (m, batch, r)
 
     # Final update: (m, batch, n) = (m, batch, r) @ (r, n)
-    update = torch.matmul(tmp, Vt)                            # (m, batch, n)
+    update = torch.matmul(tmp, Vt)  # (m, batch, n)
 
     # Add the identity contribution b: broadcast to (m, batch, n)
     out = b.unsqueeze(0) + update
     return out
 
-def expm_full_rank(W: torch.Tensor,
-                   s: torch.Tensor,
-                   b: torch.Tensor) -> torch.Tensor:
+
+def expm_full_rank(W: torch.Tensor, s: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     """
     Compute B_i = b @ exp(s_i * W) for i=1..m, in batch.
 
@@ -530,18 +538,19 @@ def expm_full_rank(W: torch.Tensor,
     assert b.ndim == 2 and b.shape[1] == n
 
     device, dtype = W.device, W.dtype
-    s = s.reshape(-1).to(device=device, dtype=dtype)   # (m,)
+    s = s.reshape(-1).to(device=device, dtype=dtype)  # (m,)
     m = s.shape[0]
-    b = b.to(device=device, dtype=dtype)               # (batch, n)
+    b = b.to(device=device, dtype=dtype)  # (batch, n)
 
     # Batch compute matrix exponentials: (m, n, n)
-    W_batch = s[:, None, None] * W[None, :, :]         # (m, n, n)
-    expW = torch.matrix_exp(W_batch)                   # (m, n, n)
+    W_batch = s[:, None, None] * W[None, :, :]  # (m, n, n)
+    expW = torch.matrix_exp(W_batch)  # (m, n, n)
     # Batch multiply: (m, batch, n) = (m, batch, n) @ (m, n, n)
-    b_expanded = b.unsqueeze(0).expand(m, -1, -1)      # (m, batch, n)
-    out = torch.bmm(b_expanded, expW)                  # (m, batch, n)
+    b_expanded = b.unsqueeze(0).expand(m, -1, -1)  # (m, batch, n)
+    out = torch.bmm(b_expanded, expW)  # (m, batch, n)
 
     return out
+
 
 def logm_low_rank(V: np.ndarray, U: np.ndarray, dt: float = 1.0):
     """

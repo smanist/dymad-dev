@@ -1,14 +1,14 @@
-import pytest
 import numpy as np
+import pytest
 
 from dymad.exec.context import build_default_context
-from dymad.sako.adapter import SpectralEigensystem
 from dymad.facade.handles import (
     CheckpointHandle,
     HandleValidationError,
     PredictionHandle,
     SpectralSnapshotHandle,
 )
+from dymad.sako.adapter import SpectralEigensystem
 from dymad.sako.snapshot import build_spectral_snapshot
 
 

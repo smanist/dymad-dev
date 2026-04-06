@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from typing import Any, Iterable
+from typing import Any
 
 import torch
 
@@ -19,7 +20,7 @@ class RegularSeries:
     params: torch.Tensor | None = None
     meta: dict[str, Any] = field(default_factory=dict)
 
-    def slice_steps(self, start: int, end: int) -> "RegularSeries":
+    def slice_steps(self, start: int, end: int) -> RegularSeries:
         return replace(
             self,
             time=self.time[start:end],
@@ -29,17 +30,17 @@ class RegularSeries:
             meta=dict(self.meta),
         )
 
-    def with_state(self, new_state: torch.Tensor) -> "RegularSeries":
+    def with_state(self, new_state: torch.Tensor) -> RegularSeries:
         return replace(self, state=new_state, meta=dict(self.meta))
 
-    def with_control(self, new_control: torch.Tensor | None) -> "RegularSeries":
+    def with_control(self, new_control: torch.Tensor | None) -> RegularSeries:
         return replace(self, control=new_control, meta=dict(self.meta))
 
     def to(
         self,
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
-    ) -> "RegularSeries":
+    ) -> RegularSeries:
         def _move(tensor: torch.Tensor | None) -> torch.Tensor | None:
             if tensor is None:
                 return None
@@ -55,7 +56,7 @@ class RegularSeries:
             meta=dict(self.meta),
         )
 
-    def window(self, window: int, stride: int) -> "RegularSeriesBatch":
+    def window(self, window: int, stride: int) -> RegularSeriesBatch:
         if window <= 0:
             raise ValueError("window must be positive")
         if stride <= 0:
@@ -76,7 +77,7 @@ class RegularSeriesBatch:
     items: tuple[RegularSeries, ...]
 
     @classmethod
-    def collate(cls, items: Iterable[RegularSeries]) -> "RegularSeriesBatch":
+    def collate(cls, items: Iterable[RegularSeries]) -> RegularSeriesBatch:
         items = tuple(items)
         if cls is not RegularSeriesBatch:
             return cls(items)
@@ -105,15 +106,17 @@ class RegularSeriesBatch:
     def is_uniform_length(self) -> bool:
         return len(set(self.step_lengths)) <= 1
 
-    def slice_batch(self, indices: Iterable[int]) -> "RegularSeriesBatch":
+    def slice_batch(self, indices: Iterable[int]) -> RegularSeriesBatch:
         return RegularSeriesBatch.collate(self.items[index] for index in indices)
 
     def to(
         self,
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
-    ) -> "RegularSeriesBatch":
-        return RegularSeriesBatch.collate(item.to(device=device, dtype=dtype) for item in self.items)
+    ) -> RegularSeriesBatch:
+        return RegularSeriesBatch.collate(
+            item.to(device=device, dtype=dtype) for item in self.items
+        )
 
 
 @dataclass(frozen=True)
