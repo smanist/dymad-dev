@@ -13,6 +13,19 @@ from dymad.utils import ControlInterpolator
 
 logger = logging.getLogger(__name__)
 
+
+def _odeint_with_rk4_fallback(ode_func, z0, ts, *, method: str, log_prefix: str, **kwargs):
+    try:
+        return odeint(ode_func, z0, ts, method=method, **kwargs)
+    except AssertionError as exc:
+        if "underflow in dt" not in str(exc) or method == "rk4":
+            raise
+        logger.warning("%s: solver %s hit '%s'; retrying with rk4", log_prefix, method, exc)
+        retry_kwargs = dict(kwargs)
+        retry_kwargs.pop("rtol", None)
+        retry_kwargs.pop("atol", None)
+        return odeint(ode_func, z0, ts, method="rk4", **retry_kwargs)
+
 def _runtime_is_graph(runtime) -> bool:
     return bool(getattr(runtime, "is_graph", getattr(runtime, "_has_graph", False)))
 
@@ -228,7 +241,14 @@ def predict_continuous(
         return z_dot
 
     logger.debug(f"predict_continuous: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order if _has_u else 'N/A'}")
-    z_traj = odeint(ode_func, z0, _ts, method=method, **kwargs)
+    z_traj = _odeint_with_rk4_fallback(
+        ode_func,
+        z0,
+        _ts,
+        method=method,
+        log_prefix="predict_continuous",
+        **kwargs,
+    )
     logger.debug(f"predict_continuous: Completed integration, trajectory shape: {z_traj.shape}")
 
     x_traj = _proc_ztraj(z_traj, model, _ws, n_steps, is_batch)
@@ -285,7 +305,14 @@ def predict_continuous_np(
         return z_dot
 
     logger.debug(f"predict_continuous_np: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order if _has_u else 'N/A'}")
-    z_traj = odeint(ode_func, z0, _ts, method=method, **kwargs)
+    z_traj = _odeint_with_rk4_fallback(
+        ode_func,
+        z0,
+        _ts,
+        method=method,
+        log_prefix="predict_continuous_np",
+        **kwargs,
+    )
     logger.debug(f"predict_continuous_np: Completed integration, trajectory shape: {z_traj.shape}")
 
     x_traj = _proc_ztraj(z_traj, model, _ws, n_steps, is_batch)
