@@ -473,6 +473,34 @@ class BasePhase:
             )
             return None
 
+        plot_cfg = copy.deepcopy(self.config.get("plotting", {}))
+        if not plot_cfg.get("prediction", True):
+            logger.info("Skipping per-run prediction plot for '%s': plotting.prediction is false.", run_name)
+            return None
+
+        xidx = plot_cfg.get("xidx")
+        uidx = plot_cfg.get("uidx")
+        max_state_dims = int(plot_cfg.get("max_state_dims", 16))
+        max_control_dims = int(plot_cfg.get("max_control_dims", 8))
+        raw_state_dims = sample_md.get("n_state_features")
+        raw_control_dims = sample_md.get("n_control_features")
+        if xidx is None and raw_state_dims is not None and int(raw_state_dims) > max_state_dims:
+            logger.info(
+                "Skipping per-run prediction plot for '%s': raw state dimension %d exceeds max_state_dims=%d.",
+                run_name,
+                int(raw_state_dims),
+                max_state_dims,
+            )
+            return None
+        if uidx is None and raw_control_dims is not None and int(raw_control_dims) > max_control_dims:
+            logger.info(
+                "Skipping per-run prediction plot for '%s': raw control dimension %d exceeds max_control_dims=%d.",
+                run_name,
+                int(raw_control_dims),
+                max_control_dims,
+            )
+            return None
+
         time_tensor = runtime.t[0] if runtime.t.ndim > 1 else runtime.t
         state_tensor = runtime.x[0] if runtime.x.ndim > 2 else runtime.x
         control_tensor = None
@@ -536,6 +564,8 @@ class BasePhase:
             labels=["Truth", "Prediction"],
             ifclose=True,
             prefix=self.execution_services.checkpoint_prefix,
+            xidx=xidx,
+            uidx=uidx,
         )
         return self.execution_services.checkpoint_file(f"{run_name}_prediction.png")
 

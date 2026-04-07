@@ -290,6 +290,9 @@ def _can_build_native_lift(kwargs: dict[str, Any], state_dict: dict[str, Any] | 
 
 
 def _load_native_stage_state(module: TransformModule, state_dict: dict[str, Any]) -> None:
+    def _state_tensor(value):
+        return torch.as_tensor(value)
+
     if isinstance(module, IdentityTransform):
         module.input_dim = state_dict.get("inp")
         module.output_dim = state_dict.get("out")
@@ -301,8 +304,8 @@ def _load_native_stage_state(module: TransformModule, state_dict: dict[str, Any]
         return
 
     if isinstance(module, ScalerTransform):
-        off = torch.as_tensor(state_dict["off"], dtype=torch.get_default_dtype())
-        scl = torch.as_tensor(state_dict["scl"], dtype=torch.get_default_dtype())
+        off = _state_tensor(state_dict["off"])
+        scl = _state_tensor(state_dict["scl"])
         module.offset = off
         module.scale = scl
         module.input_dim = state_dict.get("inp")
@@ -324,8 +327,8 @@ def _load_native_stage_state(module: TransformModule, state_dict: dict[str, Any]
     if isinstance(module, SVDTransform):
         module.order = state_dict["order"]
         module.ifcen = state_dict["ifcen"]
-        module.projection = torch.as_tensor(state_dict["P"], dtype=torch.get_default_dtype())
-        module.offset = torch.as_tensor(state_dict["off"], dtype=torch.get_default_dtype())
+        module.projection = _state_tensor(state_dict["P"])
+        module.offset = _state_tensor(state_dict["off"])
         module.input_dim = state_dict.get("inp")
         module.output_dim = state_dict.get("out")
         module.invertibility = "exact" if module.input_dim == module.output_dim else "approximate"

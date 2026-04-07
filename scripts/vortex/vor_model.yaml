@@ -16,3 +16,6 @@ split:
 
 dataloader:
   batch_size: 1
+
+plotting:
+  xidx: [0, 1, 2, 3]

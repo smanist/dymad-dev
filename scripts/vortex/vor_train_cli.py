@@ -1,4 +1,9 @@
+import argparse
 import copy
+import os
+import random
+import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,6 +13,13 @@ from dymad.io import load_model
 from dymad.models import DKBF, DKMSK, KBF
 from dymad.training import LinearTrainer, StackedTrainer
 from dymad.utils import animate, compare_contour, plot_summary, setup_logging
+
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = BASE_DIR / "vor_model.yaml"
+DEFAULT_DATA_PATH = BASE_DIR / "data" / "cylinder.npz"
+DEFAULT_CASES = [0, 1, 2, 3, 4]
+NX = 199
+NY = 449
 
 
 def gen_mdl_kb(e, l, k):
@@ -117,8 +129,6 @@ def _alternating_schedule(
     return phases
 
 
-config_path = "vor_model.yaml"
-
 cfgs = [
     (
         "kbf_node",
@@ -164,59 +174,138 @@ cfgs = [
     ),
 ]
 
-IDX = [0, 1, 2, 3, 4]
 
-iftrn = 1
-ifplt = 1
-ifprd = 1
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
-if iftrn:
-    for i in IDX:
-        mdl, MDL, Trainer, opt = cfgs[i]
-        opt["model"]["name"] = f"kp_{mdl}"
-        trainer = Trainer(config_path, MDL, config_mod=opt)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run vortex training cases.")
+    parser.add_argument("--case", nargs="+", type=int)
+    parser.add_argument("--list-cases", action="store_true")
+    parser.add_argument("--workdir", type=Path)
+    parser.add_argument("--data-path", type=Path, default=DEFAULT_DATA_PATH)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--no-train", action="store_true")
+    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--no-predict", action="store_true")
+    parser.add_argument("--no-show", action="store_true")
+    return parser.parse_args()
+
+
+def resolve_indices(values):
+    indices = DEFAULT_CASES if values is None else values
+    invalid = [idx for idx in indices if idx < 0 or idx >= len(cfgs)]
+    if invalid:
+        raise ValueError(f"Invalid case indices: {invalid}")
+    return indices
+
+
+def print_cases():
+    for idx, (name, _, _, _) in enumerate(cfgs):
+        print(f"{idx}: {name}")
+
+
+def prepare_workdir(root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    config_path = root / "vor_model.yaml"
+    if not config_path.exists():
+        shutil.copy2(CONFIG_PATH, config_path)
+    return config_path
+
+
+def resolve_data_path(path: Path) -> Path:
+    data_path = path if path.is_absolute() else (Path.cwd() / path).resolve()
+    if not data_path.exists():
+        raise FileNotFoundError(f"Vortex data not found: {data_path}")
+    return data_path
+
+
+def train(selected, data_path: Path, config_path: Path):
+    for idx in selected:
+        mdl, model_class, trainer_class, opt = cfgs[idx]
+        opt_local = copy.deepcopy(opt)
+        opt_local["model"]["name"] = f"kp_{mdl}"
+        opt_local["data"] = {"path": str(data_path)}
+        trainer = trainer_class(str(config_path), model_class, config_mod=opt_local)
         trainer.train()
 
-if ifplt:
-    labels = [cfgs[i][0] for i in IDX]
-    npz_files = [f"kp_{l}" for l in labels]
-    npzs = plot_summary(npz_files, labels=labels, ifclose=False)
 
-if ifprd:
-    # dat = np.load('./data/test.npz')
-    dat = np.load("./data/cylinder.npz")
+def plot(selected):
+    labels = [cfgs[idx][0] for idx in selected]
+    npz_files = [f"kp_{label}" for label in labels]
+    npzs = plot_summary(npz_files, labels=labels, ifclose=False)
+    for label, npz in zip(labels, npzs, strict=False):
+        print(f"Epoch time: {label} - {npz['avg_epoch_time']}")
+
+
+def predict(selected, data_path: Path):
+    dat = np.load(data_path)
     x_data, t_data = dat["x"], dat["t"]
-    Nx, Ny = 199, 449
 
     res = [x_data]
-    for i in IDX:
-        mdl, MDL, Trainer, _ = cfgs[i]
-        model, prd_func = load_model(MDL, f"kp_{mdl}.pt")
+    for idx in selected:
+        mdl, model_class, _, _ = cfgs[idx]
+        _, predict_fn = load_model(model_class, f"kp_{mdl}.pt")
         with torch.no_grad():
-            pred = prd_func(x_data, t_data)
+            pred = predict_fn(x_data, t_data)
         res.append(pred)
 
     setup_logging()
+    n_cases = len(selected)
 
-    N = len(IDX)
-
-    def contour_fig(j):
-        fig, ax = plt.subplots(N, 3, sharex=True, sharey=True, figsize=(12, 1.5 * N))
-        colorbar = j == 0
-        for i in range(N):
+    def contour_fig(step_idx):
+        fig, ax = plt.subplots(n_cases, 3, sharex=True, sharey=True, figsize=(12, 1.5 * n_cases))
+        ax = np.atleast_2d(ax)
+        colorbar = step_idx == 0
+        for row, cfg_idx in enumerate(selected):
             compare_contour(
-                res[0][j].reshape(Nx, Ny),
-                res[i + 1][j].reshape(Nx, Ny),
+                res[0][step_idx].reshape(NX, NY),
+                res[row + 1][step_idx].reshape(NX, NY),
                 vmin=-12,
                 vmax=12,
-                axes=(fig, ax[i]),
+                axes=(fig, ax[row]),
                 colorbar=colorbar,
             )
-            ax[i, 1].set_title(cfgs[IDX[i]][0])
-        for _ax in ax.flatten():
-            _ax.set_axis_off()
+            ax[row, 1].set_title(cfgs[cfg_idx][0])
+        for axis in ax.flatten():
+            axis.set_axis_off()
         return fig, ax
 
     animate(contour_fig, filename="vis.mp4", fps=10, n_frames=len(t_data))
 
-plt.show()
+
+def main():
+    args = parse_args()
+    if args.seed is not None:
+        set_seed(args.seed)
+
+    root = BASE_DIR if args.workdir is None else args.workdir.resolve()
+    config_path = CONFIG_PATH if args.workdir is None else prepare_workdir(root)
+    root.mkdir(parents=True, exist_ok=True)
+    os.chdir(root)
+
+    if args.list_cases:
+        print_cases()
+        return 0
+
+    selected = resolve_indices(args.case)
+    data_path = resolve_data_path(args.data_path.resolve())
+
+    if not args.no_train:
+        train(selected, data_path, config_path)
+    if not args.no_plot:
+        plot(selected)
+    if not args.no_predict:
+        predict(selected, data_path)
+    if not args.no_show and (not args.no_plot or not args.no_predict):
+        plt.show()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
