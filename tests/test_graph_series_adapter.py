@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
-import torch
 import pytest
+import torch
 
 from dymad.core import FixedGraphSeries
 from dymad.core.graph_series import VariableEdgeGraphSeries

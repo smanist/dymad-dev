@@ -29,8 +29,8 @@ from dymad.core.torch_transforms import (
     DelayEmbeddingTransform,
     IdentityTransform,
     LiftTransform,
-    SVDTransform,
     ScalerTransform,
+    SVDTransform,
 )
 from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 from dymad.core.transform_builder import build_transform_module

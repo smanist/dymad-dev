@@ -17,9 +17,9 @@ from dymad.core.runtime import (
     UniformRegularRuntime,
 )
 from dymad.core.series import RegularSeriesBatch
+from dymad.core.torch_transforms import AutoencoderTransform, ComposeTransform
 from dymad.core.transform_builder import build_transform_module
 from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline
-from dymad.core.torch_transforms import AutoencoderTransform, ComposeTransform
 from dymad.io.series_adapter import SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManager
 from dymad.utils.misc import load_config

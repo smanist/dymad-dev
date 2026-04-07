@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Callable
-from typing import Any
 
 import numpy as np
 import sklearn.manifold as skm
-import torch
 
 from dymad.core.transform_module import ExternalTransformModule
 from dymad.numerics import DM, DMF, VBDM, Manifold, ManifoldAltTree, complex_step

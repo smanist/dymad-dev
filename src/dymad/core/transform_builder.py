@@ -19,8 +19,8 @@ from dymad.core.torch_transforms import (
     DelayEmbeddingTransform,
     IdentityTransform,
     LiftTransform,
-    SVDTransform,
     ScalerTransform,
+    SVDTransform,
 )
 from dymad.core.transform_module import ExternalTransformModule, TransformModule
 
