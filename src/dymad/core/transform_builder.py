@@ -1,4 +1,4 @@
-"""Explicit transform-construction boundary for typed and legacy paths."""
+"""Explicit transform-construction boundary for typed-native and external paths."""
 
 from __future__ import annotations
 
@@ -6,22 +6,23 @@ from typing import Any
 
 import torch
 
+from dymad.core.external_transforms import (
+    CallableExternalTransform,
+    DiffMapTransform,
+    DiffMapVBTransform,
+    IsomapTransform,
+)
 from dymad.core.torch_transforms import (
     AddOneTransform,
+    AutoencoderTransform,
     ComposeTransform,
     DelayEmbeddingTransform,
     IdentityTransform,
     LiftTransform,
+    SVDTransform,
     ScalerTransform,
 )
-from dymad.core.transform_module import (
-    LegacyTransformModuleAdapter,
-    NDRTransformModuleAdapter,
-    TransformModule,
-)
-from dymad.transform import make_transform
-from dymad.transform.base import Transform
-from dymad.transform.collection import TRN_MAP
+from dymad.core.transform_module import ExternalTransformModule, TransformModule
 
 _TYPE_ALIASES = {
     "diffmap": "dm",
@@ -30,13 +31,8 @@ _TYPE_ALIASES = {
 }
 
 
-def build_legacy_transform(config) -> Transform:
-    """Construct a legacy transform behind one explicit compatibility boundary."""
-    return make_transform(_normalize_stage_configs(config))
-
-
 def build_transform_module(config, state_dict: dict[str, Any] | None = None) -> TransformModule:
-    """Build a typed transform module from legacy config/state inputs."""
+    """Build a typed transform module from config/state inputs."""
     stages = _normalize_stage_configs(config)
     if not stages:
         module = IdentityTransform()
@@ -73,9 +69,6 @@ def export_transform_state(module: TransformModule) -> dict[str, Any]:
             "out": module.output_dim,
         }
 
-    if isinstance(module, (LegacyTransformModuleAdapter, NDRTransformModuleAdapter)):
-        return module.legacy_transform.state_dict()
-
     if isinstance(module, IdentityTransform):
         return {"inp": module.input_dim, "out": module.output_dim}
 
@@ -107,6 +100,80 @@ def export_transform_state(module: TransformModule) -> dict[str, Any]:
             "finv": module.finv,
             "fargs": dict(module.kwargs),
         }
+
+    if isinstance(module, SVDTransform):
+        return {
+            "order": module.order,
+            "ifcen": module.ifcen,
+            "inp": module.input_dim,
+            "out": module.output_dim,
+            "P": module.projection.detach().cpu().numpy(),
+            "off": module.offset.detach().cpu().numpy(),
+        }
+
+    if isinstance(module, CallableExternalTransform):
+        return {
+            "inp": module.input_dim,
+            "out": module.output_dim,
+            "C": module._pseudo_inverse_matrix,
+            "fobs": module.fobs,
+            "finv": module.finv,
+            "fargs": dict(module.kwargs),
+        }
+
+    if isinstance(module, DiffMapVBTransform):
+        return {
+            "inv": module.inverse_mode,
+            "Knn": module.knn,
+            "Kphi": module.kphi,
+            "order": module.order,
+            "rcond": module.rcond,
+            "inp": module.input_dim,
+            "out": module.output_dim,
+            "X": module._X,
+            "Z": module._Z,
+            "alpha": module.alpha,
+            "epsilon": module.epsilon,
+            "mode": module.mode,
+            "DM": module._ndr.state_dict(),
+            "Kb": module.kb,
+        }
+
+    if isinstance(module, DiffMapTransform):
+        return {
+            "inv": module.inverse_mode,
+            "Knn": module.knn,
+            "Kphi": module.kphi,
+            "order": module.order,
+            "rcond": module.rcond,
+            "inp": module.input_dim,
+            "out": module.output_dim,
+            "X": module._X,
+            "Z": module._Z,
+            "alpha": module.alpha,
+            "epsilon": module.epsilon,
+            "mode": module.mode,
+            "DM": module._ndr.state_dict(),
+        }
+
+    if isinstance(module, IsomapTransform):
+        return {
+            "inv": module.inverse_mode,
+            "Knn": module.knn,
+            "Kphi": module.kphi,
+            "order": module.order,
+            "rcond": module.rcond,
+            "inp": module.input_dim,
+            "out": module.output_dim,
+            "X": module._X,
+            "Z": module._Z,
+        }
+
+    if isinstance(module, AutoencoderTransform):
+        raise TypeError("AutoencoderTransform is runtime-only and is not exported to checkpoint state.")
+
+    if isinstance(module, ExternalTransformModule):
+        raise TypeError(f"Legacy export is not implemented for {type(module).__name__}")
 
     raise TypeError(f"Legacy export is not implemented for {type(module).__name__}")
 
@@ -169,33 +236,52 @@ def _build_stage_module(
             _load_native_stage_state(module, state_dict)
         return module
 
-    if stage_type == "lift" and _can_build_native_lift(kwargs, state_dict):
-        module = LiftTransform(**kwargs)
+    if stage_type == "svd":
+        module = SVDTransform(order=kwargs.get("order", 1.0), ifcen=kwargs.get("ifcen", False))
         if state_dict is not None:
             _load_native_stage_state(module, state_dict)
         return module
 
-    legacy_transform = _instantiate_legacy_stage(stage_type, kwargs)
-    if state_dict is not None:
-        legacy_transform.load_state_dict(state_dict)
+    if stage_type == "lift":
+        if _can_build_native_lift(kwargs, state_dict):
+            module = LiftTransform(**kwargs)
+            if state_dict is not None:
+                _load_native_stage_state(module, state_dict)
+            return module
+        module = CallableExternalTransform(
+            kwargs.get("fobs"),
+            kwargs.get("finv"),
+            **{k: v for k, v in kwargs.items() if k not in {"fobs", "finv"}},
+        )
+        if state_dict is not None:
+            _load_callable_external_state(module, state_dict)
+        return module
 
-    if stage_type in {"dm", "vbdm", "isomap"}:
-        return NDRTransformModuleAdapter(legacy_transform)
-    return LegacyTransformModuleAdapter(
-        legacy_transform,
-        invertibility="approximate",
-        supports_gradients="false",
-    )
+    if stage_type == "dm":
+        module = DiffMapTransform(**kwargs)
+        if state_dict is not None:
+            _load_dm_state(module, state_dict)
+        return module
 
+    if stage_type == "vbdm":
+        module = DiffMapVBTransform(**kwargs)
+        if state_dict is not None:
+            _load_vbdm_state(module, state_dict)
+        return module
 
-def _instantiate_legacy_stage(stage_type: str, kwargs: dict[str, Any]) -> Transform:
-    if stage_type not in TRN_MAP:
-        raise ValueError(f"Unknown transform type: {stage_type}")
-    return TRN_MAP[stage_type](**kwargs)
+    if stage_type == "isomap":
+        module = IsomapTransform(**kwargs)
+        if state_dict is not None:
+            _load_isomap_state(module, state_dict)
+        return module
+
+    raise ValueError(f"Unknown transform type: {stage_type}")
 
 
 def _can_build_native_lift(kwargs: dict[str, Any], state_dict: dict[str, Any] | None) -> bool:
     fobs = kwargs.get("fobs")
+    if callable(fobs):
+        return False
     if fobs not in {"poly", "mixed"}:
         return False
     if state_dict is None:
@@ -235,12 +321,72 @@ def _load_native_stage_state(module: TransformModule, state_dict: dict[str, Any]
         module._feature_sizes = module._infer_feature_sizes()
         return
 
+    if isinstance(module, SVDTransform):
+        module.order = state_dict["order"]
+        module.ifcen = state_dict["ifcen"]
+        module.projection = torch.as_tensor(state_dict["P"], dtype=torch.get_default_dtype())
+        module.offset = torch.as_tensor(state_dict["off"], dtype=torch.get_default_dtype())
+        module.input_dim = state_dict.get("inp")
+        module.output_dim = state_dict.get("out")
+        module.invertibility = "exact" if module.input_dim == module.output_dim else "approximate"
+        return
+
     raise TypeError(f"Native state loading is not implemented for {type(module).__name__}")
 
 
+def _load_callable_external_state(
+    module: CallableExternalTransform,
+    state_dict: dict[str, Any],
+) -> None:
+    module.input_dim = state_dict.get("inp")
+    module.output_dim = state_dict.get("out")
+    module.fobs = state_dict.get("fobs")
+    module.finv = state_dict.get("finv")
+    module.kwargs = dict(state_dict.get("fargs", {}))
+    module._pseudo_inverse_matrix = state_dict.get("C")
+
+
+def _load_isomap_state(module: IsomapTransform, state_dict: dict[str, Any]) -> None:
+    module.inverse_mode = state_dict["inv"]
+    module.knn = state_dict["Knn"]
+    module.kphi = state_dict["Kphi"]
+    module.order = state_dict["order"]
+    module.rcond = state_dict["rcond"]
+    module.input_dim = state_dict["inp"]
+    module.output_dim = state_dict["out"]
+    module.embedding_dim = state_dict["out"]
+    module._X = state_dict["X"]
+    module._Z = state_dict["Z"]
+    module._make_ndr()
+    module._Z = module._ndr.fit_transform(module._X)
+    module._prepare_inverse()
+
+
+def _load_dm_state(module: DiffMapTransform, state_dict: dict[str, Any]) -> None:
+    module.inverse_mode = state_dict["inv"]
+    module.knn = state_dict["Knn"]
+    module.kphi = state_dict["Kphi"]
+    module.order = state_dict["order"]
+    module.rcond = state_dict["rcond"]
+    module.input_dim = state_dict["inp"]
+    module.output_dim = state_dict["out"]
+    module.embedding_dim = state_dict["out"]
+    module.alpha = state_dict["alpha"]
+    module.epsilon = state_dict["epsilon"]
+    module.mode = state_dict["mode"]
+    module._X = state_dict["X"]
+    module._Z = state_dict["Z"]
+    module._make_ndr()
+    module._ndr.load_state_dict(state_dict["DM"])
+    module._prepare_inverse()
+
+
+def _load_vbdm_state(module: DiffMapVBTransform, state_dict: dict[str, Any]) -> None:
+    module.kb = state_dict["Kb"]
+    _load_dm_state(module, state_dict)
+
+
 def _legacy_type_name(module: TransformModule) -> str:
-    if isinstance(module, (LegacyTransformModuleAdapter, NDRTransformModuleAdapter)):
-        return str(module.legacy_transform)
     if isinstance(module, IdentityTransform):
         return "identity"
     if isinstance(module, AddOneTransform):
@@ -251,4 +397,14 @@ def _legacy_type_name(module: TransformModule) -> str:
         return "delay"
     if isinstance(module, LiftTransform):
         return "lift"
+    if isinstance(module, SVDTransform):
+        return "svd"
+    if isinstance(module, CallableExternalTransform):
+        return "lift"
+    if isinstance(module, DiffMapVBTransform):
+        return "vbdm"
+    if isinstance(module, DiffMapTransform):
+        return "dm"
+    if isinstance(module, IsomapTransform):
+        return "isomap"
     raise TypeError(f"Legacy type-name export is not implemented for {type(module).__name__}")

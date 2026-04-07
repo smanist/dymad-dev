@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+import pytest
 
 from dymad.core import FixedGraphSeries
 from dymad.core.graph_series import VariableEdgeGraphSeries
@@ -164,3 +165,67 @@ def test_graph_transform_pipeline_aligns_variable_edge_sequences_with_delay() ->
     assert aligned.time.shape[0] == 2
     assert len(aligned.edge_index) == 2
     assert len(aligned.edge_weight) == 2
+
+
+@pytest.mark.parametrize("field", ["edge_weight", "edge_attr"])
+def test_graph_transform_pipeline_scales_variable_edge_payloads(field: str) -> None:
+    manager = TrajectoryManagerGraph.__new__(TrajectoryManagerGraph)
+    manager.metadata = {
+        "config": {
+            "transform_x": None,
+            "transform_u": None,
+            "transform_p": None,
+            "transform_ew": {"type": "Scaler", "mode": "-11"},
+            "transform_ea": {"type": "Scaler", "mode": "01"},
+        },
+        "n_aux_features": 0,
+        "n_control_features": 0,
+        "n_parameters": 0,
+        "n_edge_weights": 1,
+        "n_edge_features": 2,
+    }
+    manager.n_nodes = 2
+    manager.dtype = torch.float32
+    manager.device = torch.device("cpu")
+    manager.t = [np.array([0.0, 1.0], dtype=np.float32)]
+    manager.x = [np.array([[1.0, 0.0], [2.0, 1.0]], dtype=np.float32)]
+    manager.y = [np.empty((2, 0), dtype=np.float32)]
+    manager.u = [np.empty((2, 0), dtype=np.float32)]
+    manager.p = [np.empty((0,), dtype=np.float32)]
+    manager.ei = [
+        [
+            np.array([[0, 1], [1, 0]], dtype=np.int64),
+            np.array([[0], [1]], dtype=np.int64),
+        ]
+    ]
+    manager.ew = [
+        [
+            np.array([1.0, 3.0], dtype=np.float32),
+            np.array([0.5], dtype=np.float32),
+        ]
+    ]
+    manager.ea = [
+        [
+            np.array([[1.0, 4.0], [2.0, 6.0]], dtype=np.float32),
+            np.array([[3.0, 8.0]], dtype=np.float32),
+        ]
+    ]
+    manager._init_transforms()
+
+    raw_batch = manager._create_raw_graph_series_by_index(torch.tensor([0]))
+    pipeline = manager._build_graph_transform_pipeline()
+    pipeline.fit(raw_batch)
+    transformed = list(pipeline(raw_batch))[0]
+
+    if field == "edge_weight":
+        assert isinstance(transformed.edge_weight, tuple)
+        assert tuple(step.shape for step in transformed.edge_weight) == ((2,), (1,))
+        recovered = pipeline.inverse_field("edge_weight", transformed.edge_weight)
+        assert isinstance(recovered, tuple)
+        assert tuple(step.shape for step in recovered) == ((2,), (1,))
+    else:
+        assert isinstance(transformed.edge_attr, tuple)
+        assert tuple(step.shape for step in transformed.edge_attr) == ((2, 2), (1, 2))
+        recovered = pipeline.inverse_field("edge_attr", transformed.edge_attr)
+        assert isinstance(recovered, tuple)
+        assert tuple(step.shape for step in recovered) == ((2, 2), (1, 2))

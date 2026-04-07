@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -13,7 +13,6 @@ from torch import nn
 
 from dymad.core.graph_series import GraphSeries, GraphSeriesBatch
 from dymad.core.series import RegularSeries, RegularSeriesBatch
-from dymad.transform.base import Transform
 
 FieldName = Literal[
     "state",
@@ -44,6 +43,83 @@ def _replace_field(series: SeriesItem, field: FieldName, payload) -> SeriesItem:
     return replace(series, **{field: payload}, meta=dict(series.meta))
 
 
+def _module_device_dtype(module: nn.Module) -> tuple[torch.device, torch.dtype]:
+    for tensor in module.parameters():
+        return tensor.device, tensor.dtype
+    for tensor in module.buffers():
+        return tensor.device, tensor.dtype
+    return torch.device("cpu"), torch.get_default_dtype()
+
+
+def _ref_to_tensor(ref, *, device: torch.device, dtype: torch.dtype) -> tuple[torch.Tensor, bool]:
+    if isinstance(ref, torch.Tensor):
+        return ref.to(device=device, dtype=dtype), True
+    return torch.as_tensor(ref, device=device, dtype=dtype), False
+
+
+def _restore_like(value: torch.Tensor, *, as_tensor: bool):
+    if as_tensor:
+        return value
+    return value.detach().cpu().numpy()
+
+
+def _flatten_jacobian(jacobian: torch.Tensor, out_shape: torch.Size, in_shape: torch.Size) -> torch.Tensor:
+    return jacobian.reshape(int(np.prod(out_shape)), int(np.prod(in_shape)))
+
+
+def _autograd_jacobian(
+    fn,
+    ref,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+):
+    tensor_ref, as_tensor = _ref_to_tensor(ref, device=device, dtype=dtype)
+    flat_ref = tensor_ref.reshape(-1).detach().clone().requires_grad_(True)
+    input_shape = tensor_ref.shape
+
+    def _flat_fn(flat_input: torch.Tensor) -> torch.Tensor:
+        payload = flat_input.reshape(input_shape)
+        return fn(payload).reshape(-1)
+
+    jacobian = torch.autograd.functional.jacobian(_flat_fn, flat_ref)
+    output_shape = _flat_fn(flat_ref).shape
+    flat_jac = _flatten_jacobian(jacobian, output_shape, flat_ref.shape)
+    return _restore_like(flat_jac, as_tensor=as_tensor)
+
+
+class _ExternalForwardAutograd(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, module: ExternalTransformModule, data: torch.Tensor):
+        output = module._forward_external_tensor(data)
+        ctx.module = module
+        ctx.save_for_backward(data.detach(), output.detach())
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        module: ExternalTransformModule = ctx.module
+        ref, _output = ctx.saved_tensors
+        grad_input = module.forward_vjp(ref, grad_output)
+        return None, grad_input
+
+
+class _ExternalInverseAutograd(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, module: ExternalTransformModule, data: torch.Tensor):
+        output = module._inverse_external_tensor(data)
+        ctx.module = module
+        ctx.save_for_backward(data.detach(), output.detach())
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        module: ExternalTransformModule = ctx.module
+        ref, _output = ctx.saved_tensors
+        grad_input = module.inverse_vjp(ref, grad_output)
+        return None, grad_input
+
+
 @dataclass(frozen=True)
 class TransformMetadata:
     input_dim: int | None
@@ -70,6 +146,18 @@ class TransformModule(nn.Module, ABC):
         self.invertibility = invertibility
         self.supports_gradients = supports_gradients
 
+    @property
+    def _inp_dim(self) -> int | None:
+        return self.input_dim
+
+    @property
+    def _out_dim(self) -> int | None:
+        return self.output_dim
+
+    @property
+    def NT(self) -> int:
+        return 1
+
     def fit(self, data: Sequence[torch.Tensor]) -> TransformModule:
         return self
 
@@ -80,11 +168,113 @@ class TransformModule(nn.Module, ABC):
     def inverse(self, data: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError(f"{type(self).__name__} does not implement inverse(...)")
 
-    def transform_batch(self, data: Sequence[torch.Tensor]) -> list[torch.Tensor]:
-        return [self(item) for item in data]
+    def append(self, transform: TransformModule) -> None:
+        raise TypeError(f"{type(self).__name__} does not support append(...)")
 
-    def inverse_batch(self, data: Sequence[torch.Tensor]) -> list[torch.Tensor]:
-        return [self.inverse(item) for item in data]
+    def transform_batch(
+        self,
+        data: Sequence[torch.Tensor],
+        rng: list[int] | None = None,
+    ) -> list[torch.Tensor]:
+        return [self.forward_range(item, rng=rng) for item in data]
+
+    def inverse_batch(
+        self,
+        data: Sequence[torch.Tensor],
+        rng: list[int] | None = None,
+    ) -> list[torch.Tensor]:
+        return [self.inverse_range(item, rng=rng) for item in data]
+
+    def _normalize_single_range(self, rng: list[int] | None) -> list[int]:
+        if rng is None:
+            return [0, 1]
+        if len(rng) != 2 or rng != [0, 1]:
+            raise ValueError(f"{type(self).__name__} only supports the full range [0, 1].")
+        return rng
+
+    def forward_range(self, data: torch.Tensor, rng: list[int] | None = None) -> torch.Tensor:
+        self._normalize_single_range(rng)
+        return self(data)
+
+    def inverse_range(self, data: torch.Tensor, rng: list[int] | None = None) -> torch.Tensor:
+        self._normalize_single_range(rng)
+        return self.inverse(data)
+
+    def transform(self, data: list[np.ndarray], rng: list[int] | None = None) -> list[np.ndarray]:
+        return self.transform_arrays(data, rng=rng)
+
+    def inverse_transform(
+        self,
+        data: list[np.ndarray],
+        rng: list[int] | None = None,
+    ) -> list[np.ndarray]:
+        return self.inverse_transform_arrays(data, rng=rng)
+
+    def transform_arrays(
+        self,
+        data: list[np.ndarray],
+        rng: list[int] | None = None,
+    ) -> list[np.ndarray]:
+        device, dtype = _module_device_dtype(self)
+        payloads = [torch.as_tensor(item, device=device, dtype=dtype) for item in data]
+        outputs = self.transform_batch(payloads, rng=rng)
+        return [item.detach().cpu().numpy() for item in outputs]
+
+    def inverse_transform_arrays(
+        self,
+        data: list[np.ndarray],
+        rng: list[int] | None = None,
+    ) -> list[np.ndarray]:
+        device, dtype = _module_device_dtype(self)
+        payloads = [torch.as_tensor(item, device=device, dtype=dtype) for item in data]
+        outputs = self.inverse_batch(payloads, rng=rng)
+        return [item.detach().cpu().numpy() for item in outputs]
+
+    def forward_jacobian(self, ref):
+        device, dtype = _module_device_dtype(self)
+        return _autograd_jacobian(self.forward, ref, device=device, dtype=dtype)
+
+    def inverse_jacobian(self, ref):
+        device, dtype = _module_device_dtype(self)
+        return _autograd_jacobian(self.inverse, ref, device=device, dtype=dtype)
+
+    def forward_vjp(self, ref, cotangent):
+        device, dtype = _module_device_dtype(self)
+        ref_tensor, ref_is_tensor = _ref_to_tensor(ref, device=device, dtype=dtype)
+        cotangent_tensor, cot_is_tensor = _ref_to_tensor(cotangent, device=device, dtype=dtype)
+        jacobian = self.forward_jacobian(ref_tensor)
+        jacobian_tensor = torch.as_tensor(jacobian, device=device, dtype=dtype)
+        grad = jacobian_tensor.transpose(0, 1).matmul(cotangent_tensor.reshape(-1))
+        grad = grad.reshape(ref_tensor.shape)
+        return _restore_like(grad, as_tensor=ref_is_tensor or cot_is_tensor)
+
+    def inverse_vjp(self, ref, cotangent):
+        device, dtype = _module_device_dtype(self)
+        ref_tensor, ref_is_tensor = _ref_to_tensor(ref, device=device, dtype=dtype)
+        cotangent_tensor, cot_is_tensor = _ref_to_tensor(cotangent, device=device, dtype=dtype)
+        jacobian = self.inverse_jacobian(ref_tensor)
+        jacobian_tensor = torch.as_tensor(jacobian, device=device, dtype=dtype)
+        grad = jacobian_tensor.transpose(0, 1).matmul(cotangent_tensor.reshape(-1))
+        grad = grad.reshape(ref_tensor.shape)
+        return _restore_like(grad, as_tensor=ref_is_tensor or cot_is_tensor)
+
+    def get_forward_modes(self, ref=None, rng: list[int] | None = None, **_kwargs) -> np.ndarray:
+        if ref is None:
+            raise ValueError("A reference point is required to compute forward modes.")
+        if rng is None:
+            return np.asarray(self.forward_jacobian(ref))
+        return np.asarray(self._module_for_range(rng).forward_jacobian(ref))
+
+    def get_backward_modes(self, ref=None, rng: list[int] | None = None, **_kwargs) -> np.ndarray:
+        if ref is None:
+            raise ValueError("A reference point is required to compute backward modes.")
+        module = self if rng is None else self._module_for_range(rng)
+        jacobian = np.asarray(module.inverse_jacobian(ref))
+        return jacobian.T
+
+    def _module_for_range(self, rng: list[int]) -> TransformModule:
+        self._normalize_single_range(rng)
+        return self
 
     @property
     def metadata(self) -> TransformMetadata:
@@ -97,80 +287,117 @@ class TransformModule(nn.Module, ABC):
         )
 
 
-class LegacyTransformModuleAdapter(TransformModule):
-    """Torch-facing adapter over a fitted legacy NumPy-list transform."""
+class ExternalTransformModule(TransformModule, ABC):
+    """Typed wrapper over CPU / external transforms with explicit derivative contracts."""
 
     def __init__(
         self,
-        legacy_transform: Transform,
         *,
-        to_legacy=None,
-        from_legacy=None,
-        invertibility: Invertibility = "exact",
-        supports_gradients: GradientSupport = "false",
+        delay: int = 0,
+        invertibility: Invertibility = "approximate",
+        supports_gradients: GradientSupport = "approximate",
+        to_external=None,
+        from_external=None,
     ) -> None:
         super().__init__(
-            delay=int(getattr(legacy_transform, "delay", 0)),
+            delay=delay,
             invertibility=invertibility,
             supports_gradients=supports_gradients,
         )
-        self.legacy_transform = legacy_transform
-        self._to_legacy = to_legacy or self._tensor_to_numpy
-        self._from_legacy = from_legacy or self._numpy_to_tensor
-        self.input_dim = int(getattr(self.legacy_transform, "_inp_dim", 0) or 0) or None
-        self.output_dim = int(getattr(self.legacy_transform, "_out_dim", 0) or 0) or None
+        self._to_external = to_external or self._tensor_to_external
+        self._from_external = from_external or self._external_to_tensor
 
-    def fit(self, data: Sequence[torch.Tensor]) -> LegacyTransformModuleAdapter:
-        payloads = []
+    def fit(self, data: Sequence[torch.Tensor]) -> ExternalTransformModule:
+        payloads: list[Any] = []
         for item in data:
-            converted = self._to_legacy(item)
+            converted = self._to_external(item)
             if isinstance(converted, list):
                 payloads.extend(converted)
             else:
                 payloads.append(converted)
         if payloads:
-            self.legacy_transform.fit(payloads)
-            self.input_dim = int(getattr(self.legacy_transform, "_inp_dim", 0) or 0) or None
-            self.output_dim = int(getattr(self.legacy_transform, "_out_dim", 0) or 0) or None
-            self.delay = int(getattr(self.legacy_transform, "delay", 0))
+            self._fit_external(payloads)
         return self
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
-        converted = self._to_legacy(data)
-        if isinstance(converted, list):
-            output = self.legacy_transform.transform(converted)
-        else:
-            output = self.legacy_transform.transform([converted])[0]
-        return self._from_legacy(output, reference=data)
+        return _ExternalForwardAutograd.apply(self, data)
 
     def inverse(self, data: torch.Tensor) -> torch.Tensor:
-        converted = self._to_legacy(data)
+        return _ExternalInverseAutograd.apply(self, data)
+
+    def forward_jacobian(self, ref):
+        device, dtype = _module_device_dtype(self)
+        tensor_ref, as_tensor = _ref_to_tensor(ref, device=device, dtype=dtype)
+        jacobian = torch.as_tensor(
+            self._forward_jacobian_external(self._to_external(tensor_ref)),
+            device=device,
+            dtype=dtype,
+        )
+        return _restore_like(jacobian, as_tensor=as_tensor)
+
+    def inverse_jacobian(self, ref):
+        device, dtype = _module_device_dtype(self)
+        tensor_ref, as_tensor = _ref_to_tensor(ref, device=device, dtype=dtype)
+        jacobian_t = torch.as_tensor(
+            self._inverse_modes_external(self._to_external(tensor_ref)),
+            device=device,
+            dtype=dtype,
+        )
+        jacobian = jacobian_t.transpose(0, 1)
+        return _restore_like(jacobian, as_tensor=as_tensor)
+
+    def get_backward_modes(self, ref=None, rng: list[int] | None = None, **_kwargs) -> np.ndarray:
+        if ref is None:
+            raise ValueError("A reference point is required to compute backward modes.")
+        if rng is not None:
+            self._normalize_single_range(rng)
+        device, dtype = _module_device_dtype(self)
+        tensor_ref, _ = _ref_to_tensor(ref, device=device, dtype=dtype)
+        return np.asarray(self._inverse_modes_external(self._to_external(tensor_ref)))
+
+    def _forward_external_tensor(self, data: torch.Tensor) -> torch.Tensor:
+        converted = self._to_external(data)
         if isinstance(converted, list):
-            output = self.legacy_transform.inverse_transform(converted)
+            output = self._forward_external(converted)
         else:
-            output = self.legacy_transform.inverse_transform([converted])[0]
-        return self._from_legacy(output, reference=data)
+            output = self._forward_external([converted])[0]
+        return self._from_external(output, reference=data)
+
+    def _inverse_external_tensor(self, data: torch.Tensor) -> torch.Tensor:
+        converted = self._to_external(data)
+        if isinstance(converted, list):
+            output = self._inverse_external(converted)
+        else:
+            output = self._inverse_external([converted])[0]
+        return self._from_external(output, reference=data)
 
     @staticmethod
-    def _tensor_to_numpy(data: torch.Tensor) -> np.ndarray:
+    def _tensor_to_external(data: torch.Tensor) -> np.ndarray:
         return data.detach().cpu().numpy()
 
     @staticmethod
-    def _numpy_to_tensor(data, *, reference: torch.Tensor) -> torch.Tensor:
+    def _external_to_tensor(data, *, reference: torch.Tensor) -> torch.Tensor:
         return torch.as_tensor(data, dtype=reference.dtype, device=reference.device)
 
+    @abstractmethod
+    def _fit_external(self, data: list[Any]) -> None:
+        raise NotImplementedError
 
-class NDRTransformModuleAdapter(LegacyTransformModuleAdapter):
-    """Explicit wrapper for non-differentiable dimensionality-reduction transforms."""
+    @abstractmethod
+    def _forward_external(self, data: list[Any]) -> list[Any]:
+        raise NotImplementedError
 
-    def __init__(self, legacy_transform: Transform, *, to_legacy=None, from_legacy=None) -> None:
-        super().__init__(
-            legacy_transform,
-            to_legacy=to_legacy,
-            from_legacy=from_legacy,
-            invertibility="approximate",
-            supports_gradients="false",
-        )
+    @abstractmethod
+    def _inverse_external(self, data: list[Any]) -> list[Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def _forward_jacobian_external(self, ref: Any) -> np.ndarray:
+        raise NotImplementedError
+
+    @abstractmethod
+    def _inverse_modes_external(self, ref: Any) -> np.ndarray:
+        raise NotImplementedError
 
 
 class FieldTransformModule(nn.Module):
@@ -200,7 +427,9 @@ class FieldTransformModule(nn.Module):
             payload = getattr(series, self.field)
             if payload is None:
                 continue
-            if isinstance(payload, tuple):
+            if self.field == "edge_weight":
+                payloads.extend(self._edge_weight_payloads(payload))
+            elif isinstance(payload, tuple):
                 payloads.extend(payload)
             else:
                 payloads.append(payload)
@@ -212,7 +441,9 @@ class FieldTransformModule(nn.Module):
         payload = getattr(series, self.field)
         if payload is None:
             return series
-        if isinstance(payload, tuple):
+        if self.field == "edge_weight":
+            payload = self._transform_edge_weight_payload(payload)
+        elif isinstance(payload, tuple):
             payload = tuple(self.transform(item) for item in payload)
         else:
             payload = self.transform(payload)
@@ -221,9 +452,48 @@ class FieldTransformModule(nn.Module):
     def inverse_payload(self, payload):
         if payload is None:
             return None
+        if self.field == "edge_weight":
+            return self._transform_edge_weight_payload(payload, inverse=True)
         if isinstance(payload, tuple):
             return tuple(self.transform.inverse(item) for item in payload)
         return self.transform.inverse(payload)
+
+    @staticmethod
+    def _edge_weight_step_to_features(step: torch.Tensor) -> torch.Tensor:
+        if step.ndim == 1:
+            return step.reshape(-1, 1)
+        return step.reshape(-1, step.shape[-1])
+
+    def _edge_weight_payloads(self, payload) -> list[torch.Tensor]:
+        if isinstance(payload, tuple):
+            return [self._edge_weight_step_to_features(step) for step in payload]
+        if payload.ndim == 1:
+            return [self._edge_weight_step_to_features(payload)]
+        return [self._edge_weight_step_to_features(step) for step in payload]
+
+    def _transform_edge_weight_step(
+        self,
+        step: torch.Tensor,
+        *,
+        inverse: bool = False,
+    ) -> torch.Tensor:
+        payload = self._edge_weight_step_to_features(step)
+        transformed = self.transform.inverse(payload) if inverse else self.transform(payload)
+        if transformed.ndim == 2 and transformed.shape[-1] == 1:
+            return transformed.reshape(-1)
+        return transformed
+
+    def _transform_edge_weight_payload(self, payload, *, inverse: bool = False):
+        if isinstance(payload, tuple):
+            return tuple(
+                self._transform_edge_weight_step(step, inverse=inverse) for step in payload
+            )
+        if payload.ndim == 1:
+            return self._transform_edge_weight_step(payload, inverse=inverse)
+        return torch.stack(
+            [self._transform_edge_weight_step(step, inverse=inverse) for step in payload],
+            dim=0,
+        )
 
 
 class SeriesTransformPipeline(nn.Module):

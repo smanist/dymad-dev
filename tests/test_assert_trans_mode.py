@@ -1,8 +1,9 @@
 import numpy as np
 import pytest
+import torch
 
-from dymad.numerics import Manifold, central_diff, complex_step
-from dymad.transform import make_transform
+from dymad.core import build_transform_module
+from dymad.numerics import Manifold, central_diff
 
 
 def check_data(out, ref, label=""):
@@ -21,14 +22,14 @@ Xn = np.array([1.32, 2.4])
 def test_modes_const():
     # ----------
     # Initialize
-    mktr = make_transform(
+    mktr = build_transform_module(
         [
             {"type": "scaler", "mode": "std"},
             {"type": "lift", "fobs": "poly", "Ks": [2, 3]},
             {"type": "svd", "order": 2, "ifcen": True},
         ]
     )
-    mktr.fit(Xs)
+    mktr.fit([torch.as_tensor(item, dtype=torch.float64) for item in Xs])
 
     # ----------
     # Forward
@@ -36,7 +37,7 @@ def test_modes_const():
         return mktr.transform([x])[0].squeeze()
 
     modes_f = mktr.get_forward_modes(ref=Xn)
-    modes_c = complex_step(forward, Xn)
+    modes_c = central_diff(forward, Xn)
     assert np.allclose(modes_f, modes_c), f"Forward modes failed: {modes_f} != {modes_c}"
 
     # ----------
@@ -45,7 +46,7 @@ def test_modes_const():
         return mktr.inverse_transform([z])[0].squeeze()
 
     modes_f = mktr.get_backward_modes(ref=Xn)
-    modes_c = complex_step(backward, Xn).T
+    modes_c = central_diff(backward, Xn).T
     assert np.allclose(modes_f, modes_c), f"Backward modes failed: {modes_f} != {modes_c}"
 
 
@@ -66,8 +67,8 @@ def run_modes_ndr(N=1000, skp=100, ndr="dm"):
         }
     elif ndr == "isomap":
         trn_ndr = {"type": "isomap", "edim": 2, "Knn": 15, "Kphi": 4, "inverse": "gmls", "order": 1}
-    trns = make_transform(trn_ndr)
-    trns.fit([x])
+    trns = build_transform_module(trn_ndr)
+    trns.fit([torch.as_tensor(x, dtype=torch.float64)])
     z = trns.transform([x])[0]
 
     # Preparation
@@ -107,6 +108,33 @@ def test_modes_ndr(ndr):
 
     assert np.mean(err_f) < eps_f, f"{ndr} forward modes failed: {np.mean(err_f)}"
     assert np.mean(err_b) < 2e-5, f"{ndr} backward modes failed: {np.mean(err_b)}"
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"type": "DiffMap", "edim": 2, "mode": "knn", "Knn": 20, "inverse": "pinv"},
+        {"type": "Isomap", "edim": 2, "Knn": 20, "inverse": "pinv"},
+    ],
+)
+def test_ndr_pinv_backward_modes_match_inverse_jacobian_transpose(config) -> None:
+    tt = np.linspace(0, np.pi, 201)
+    cc = np.cos(tt)
+    ss = np.sin(tt)
+    mixing = np.random.default_rng(1).random((2, 20))
+    payload = (np.vstack([cc, ss]).T @ mixing).astype(np.float64)
+
+    module = build_transform_module(config)
+    module.fit([torch.as_tensor(payload, dtype=torch.float64)])
+    latent = module.transform([payload])[0][len(tt) // 3]
+    child = module.transforms[0]
+
+    modes = module.get_backward_modes(ref=latent)
+
+    assert modes.shape == (latent.shape[0], payload.shape[1])
+    assert child._pseudo_inverse_matrix is not None
+    assert child._pseudo_inverse_matrix.shape == modes.shape
+    assert np.allclose(modes, child._pseudo_inverse_matrix)
 
 
 if __name__ == "__main__":

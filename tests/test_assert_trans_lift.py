@@ -1,92 +1,51 @@
+from __future__ import annotations
+
 import numpy as np
+import torch
 
-from dymad.transform import Lift
-from dymad.transform.lift import mixed_cross, mixed_inverse, poly_cross, poly_inverse
-
-
-def check_data(out, ref, label=""):
-    for _s, _t in zip(out, ref, strict=False):
-        assert np.allclose(_s, _t), f"{label} failed: {_s} != {_t}"
-    print(f"{label} passed.")
+from dymad.core import build_transform_module
+from dymad.core.transform_builder import export_transform_state
 
 
-def check_class(inp, out, label, fobs, finv, **kwargs):
-    # First pass
-    lift = Lift(fobs, finv, **kwargs)
-    lift.fit(inp)
-    Xt = lift.transform(inp)
-    if out is not None:
-        check_data(Xt, out, label=f"{label} Transform (Lift)")
-    Xr = lift.inverse_transform(Xt)
-    check_data(Xr, inp, label=f"{label} Inverse (Lift)")
+def _fit(module, arrays):
+    module.fit([torch.as_tensor(item, dtype=torch.float64) for item in arrays])
+    return module
 
-    # Reload test
-    stt = lift.state_dict()
-    reld = Lift()
-    reld.load_state_dict(stt)
-    Xt = reld.transform(inp)
-    if out is not None:
-        check_data(Xt, out, label=f"{label} Transform (Lift/Reload)")
-    Xr = reld.inverse_transform(Xt)
-    check_data(Xr, inp, label=f"{label} Inverse (Lift/Reload)")
+
+def _check_reload(config, arrays, expected=None):
+    module = _fit(build_transform_module(config), arrays)
+    transformed = module.transform(arrays)
+    if expected is not None:
+        for actual, target in zip(transformed, expected, strict=False):
+            assert np.allclose(actual, target)
+    recovered = module.inverse_transform(transformed)
+    for actual, target in zip(recovered, arrays, strict=False):
+        assert np.allclose(actual, target)
+
+    reloaded = build_transform_module(config, export_transform_state(module))
+    transformed_reload = reloaded.transform(arrays)
+    recovered_reload = reloaded.inverse_transform(transformed_reload)
+    for actual, target in zip(recovered_reload, arrays, strict=False):
+        assert np.allclose(actual, target)
 
 
 def test_poly():
-    # Test data
-    Xs = np.array([[1.0, 2.0, -0.1], [1.1, 3.0, -0.2], [1.2, 4.0, -0.3], [1.3, 5.0, -0.4]])
-    Ks = [3, 2, 4]
+    xs = np.array([[1.0, 2.0, -0.1], [1.1, 3.0, -0.2], [1.2, 4.0, -0.3], [1.3, 5.0, -0.4]])
+    ks = [3, 2, 4]
 
-    # Manual computation
-    Xp = []
-    _x1, _x2, _x3 = Xs.T
-    for k1 in range(Ks[0]):
-        for k2 in range(Ks[1]):
-            for k3 in range(Ks[2]):
-                Xp.append((_x1**k1) * (_x2**k2) * (_x3**k3))
-    Xp = np.vstack(Xp).T
+    xp = []
+    x1, x2, x3 = xs.T
+    for k1 in range(ks[0]):
+        for k2 in range(ks[1]):
+            for k3 in range(ks[2]):
+                xp.append((x1**k1) * (x2**k2) * (x3**k3))
+    xp = np.vstack(xp).T
 
-    # Tests - Raw
-    Xt = poly_cross(Xs, Ks)
-    check_data(Xt, Xp, label="Poly Cross")
-
-    Xr = poly_inverse(Xt, Ks)
-    check_data(Xr, Xs, label="Poly Inverse")
-
-    # Tests - Lift class
-    check_class([Xs, Xs], [Xp, Xp], "Poly", "poly", None, Ks=Ks)
-
-
-def test_mixed_mf():
-    # Test data
-    Xs = np.array([[1.0, 0.4, -0.1], [1.1, 0.3, -0.2], [1.2, 0.2, -0.3], [1.3, 0.1, -0.4]])
-    Ks = [3, 2, 4]
-
-    # Manual computation
-    Xp = []
-    _x1, _x2, _x3 = Xs.T
-    _p = [np.ones_like(_x2), np.cos(_x2), np.sin(_x2), np.cos(2 * _x2), np.sin(2 * _x2)]
-    for k1 in range(Ks[0]):
-        for k2 in range(2 * Ks[1] + 1):
-            for k3 in range(Ks[2]):
-                Xp.append((_x1**k1) * _p[k2] * (_x3**k3))
-    Xp = np.vstack(Xp).T
-
-    # Tests - Raw
-    opts = [(0, "m", 3), (1, "f", 2), (2, "m", 4)]
-
-    Xt = mixed_cross(Xs, opts)
-    check_data(Xt, Xp, label="Mixed Cross")
-
-    Xr = mixed_inverse(Xt, opts)
-    check_data(Xr, Xs, label="Mixed Inverse")
-
-    # Tests - Lift class
-    check_class([Xs, Xs], [Xp, Xp], "Mixed", "mixed", None, opts=opts)
+    _check_reload({"type": "lift", "fobs": "poly", "Ks": ks}, [xs, xs], [xp, xp])
 
 
 def test_mixed_mfp():
-    # Test data
-    Xs = np.array(
+    xs = np.array(
         [
             [1.0, 0.4, -0.1, 2.0],
             [1.1, 0.3, -0.2, 2.1],
@@ -94,52 +53,31 @@ def test_mixed_mfp():
             [1.3, -0.1, -0.4, 2.3],
         ]
     )
-    Ks = [5, 3, 2, 4]
+    ks = [5, 3, 2, 4]
 
-    # Manual computation
-    Xp = []
-    _x1, _x2, _x3, _x4 = Xs.T
-    _r = np.sqrt(_x2**2 + _x4**2)
-    _t = np.arctan2(_x2, _x4)
-    _p1 = [np.ones_like(_x3), np.cos(_x3), np.sin(_x3), np.cos(2 * _x3), np.sin(2 * _x3)]
-    _p2 = [
-        np.ones_like(_t),
-        np.cos(_t),
-        np.sin(_t),
-        np.cos(2 * _t),
-        np.sin(2 * _t),
-        np.cos(3 * _t),
-        np.sin(3 * _t),
+    xp = []
+    x1, x2, x3, x4 = xs.T
+    radius = np.sqrt(x2**2 + x4**2)
+    theta = np.arctan2(x2, x4)
+    p1 = [np.ones_like(x3), np.cos(x3), np.sin(x3), np.cos(2 * x3), np.sin(2 * x3)]
+    p2 = [
+        np.ones_like(theta),
+        np.cos(theta),
+        np.sin(theta),
+        np.cos(2 * theta),
+        np.sin(2 * theta),
+        np.cos(3 * theta),
+        np.sin(3 * theta),
     ]
-    for k1 in range(Ks[0]):
-        for k2 in range(2 * Ks[1] + 1):
-            for k3 in range(2 * Ks[2] + 1):
-                for k4 in range(Ks[3]):
-                    Xp.append((_x1**k1) * _p2[k2] * _p1[k3] * (_r**k4))
-    Xp = np.vstack(Xp).T
+    for k1 in range(ks[0]):
+        for k2 in range(2 * ks[1] + 1):
+            for k3 in range(2 * ks[2] + 1):
+                for k4 in range(ks[3]):
+                    xp.append((x1**k1) * p2[k2] * p1[k3] * (radius**k4))
+    xp = np.vstack(xp).T
 
-    # Tests - Raw
     opts = [(0, "m", 5), (2, "f", 2), ([3, 1], "p", [4, 3])]
-
-    Xt = mixed_cross(Xs, opts)
-    check_data(Xt, Xp, label="Mixed Cross")
-
-    Xr = mixed_inverse(Xt, opts)
-    check_data(Xr, Xs, label="Mixed Inverse")
-
-    # Tests - Lift class
-    check_class([Xs, Xs], [Xp, Xp], "Mixed", "mixed", None, opts=opts)
-
-
-def test_mixed_more():
-    Xs = np.random.rand(10, 6)
-    opts = [(0, "m", 5), ([2, 4], "p", [2, 3]), ([3, 1], "p", [4, 3]), (5, "f", 3)]
-
-    Xt = mixed_cross(Xs, opts)
-    Xr = mixed_inverse(Xt, opts)
-    check_data(Xr, Xs, label="Mixed More Inverse")
-
-    check_class([Xs, Xs], None, "Mixed", "mixed", None, opts=opts)
+    _check_reload({"type": "lift", "fobs": "mixed", "opts": opts}, [xs, xs], [xp, xp])
 
 
 def test_custom_finv():
@@ -149,17 +87,19 @@ def test_custom_finv():
     def finv(z, a=1.0):
         return np.vstack([z[:, 0], np.log(z[:, 1]) / a]).T
 
-    Xs = np.array([[1.0, 0.4], [1.1, 0.3], [1.2, 0.2], [1.3, 0.1]])
-    Xp = np.array([[1.0, np.exp(0.4)], [1.1, np.exp(0.3)], [1.2, np.exp(0.2)], [1.3, np.exp(0.1)]])
+    xs = np.array([[1.0, 0.4], [1.1, 0.3], [1.2, 0.2], [1.3, 0.1]])
+    xp = np.array(
+        [[1.0, np.exp(0.4)], [1.1, np.exp(0.3)], [1.2, np.exp(0.2)], [1.3, np.exp(0.1)]]
+    )
 
-    check_class([Xs, Xs], [Xp, Xp], "Custom finv", fobs, finv, a=1.0)
+    _check_reload({"type": "lift", "fobs": fobs, "finv": finv, "a": 1.0}, [xs, xs], [xp, xp])
 
 
 def test_custom_pinv():
     def fobs(x):
         return np.vstack([x[:, 0], x[:, 0] + x[:, 1]]).T
 
-    Xs = np.array([[1.0, 0.4], [1.1, 0.3], [1.2, 0.2], [1.3, 0.1]])
-    Xp = np.array([[1.0, 1.4], [1.1, 1.4], [1.2, 1.4], [1.3, 1.4]])
+    xs = np.array([[1.0, 0.4], [1.1, 0.3], [1.2, 0.2], [1.3, 0.1]])
+    xp = np.array([[1.0, 1.4], [1.1, 1.4], [1.2, 1.4], [1.3, 1.4]])
 
-    check_class([Xs, Xs], [Xp, Xp], "Custom pinv", fobs, None)
+    _check_reload({"type": "lift", "fobs": fobs}, [xs, xs], [xp, xp])

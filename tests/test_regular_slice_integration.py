@@ -5,11 +5,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from dymad.core import GraphModelContext, RegularModelContext
+from dymad.core import GraphModelContext, RegularModelContext, build_transform_module
+from dymad.core.transform_builder import export_transform_state
 from dymad.core.transform_module import SeriesTransformPipeline
 from dymad.io import load_model
 from dymad.io.trajectory_manager import TrajectoryManager
-from dymad.transform import make_transform
 
 
 class DummyPredictModel:
@@ -42,10 +42,10 @@ def _build_checkpoint_payload():
         np.array([[0.0], [1.0], [2.0]], dtype=float),
         np.array([[1.0], [2.0], [3.0]], dtype=float),
     ]
-    transform_x = make_transform({"type": "Scaler", "mode": "01"})
-    transform_u = make_transform({"type": "Scaler", "mode": "-11"})
-    transform_x.fit(x_fit)
-    transform_u.fit(u_fit)
+    transform_x = build_transform_module({"type": "Scaler", "mode": "01"})
+    transform_u = build_transform_module({"type": "Scaler", "mode": "-11"})
+    transform_x.fit([torch.as_tensor(item, dtype=torch.float32) for item in x_fit])
+    transform_u.fit([torch.as_tensor(item, dtype=torch.float32) for item in u_fit])
     return {
         "config": {
             "data": {"double_precision": False},
@@ -53,8 +53,8 @@ def _build_checkpoint_payload():
             "transform_u": {"type": "Scaler", "mode": "-11"},
         },
         "train_md": {
-            "transform_x_state": transform_x.state_dict(),
-            "transform_u_state": transform_u.state_dict(),
+            "transform_x_state": export_transform_state(transform_x),
+            "transform_u_state": export_transform_state(transform_u),
         },
         "model_state_dict": {"dummy": torch.tensor(1.0)},
     }
@@ -301,15 +301,15 @@ def test_checkpoint_prediction_aligns_full_time_for_delayed_runtime(
     import dymad.io.checkpoint as checkpoint_module
 
     payload = _build_checkpoint_payload()
-    delayed = make_transform({"type": "delay", "delay": 1})
+    delayed = build_transform_module({"type": "delay", "delay": 1})
     delayed.fit(
         [
-            np.array([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=float),
-            np.array([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=float),
+            torch.as_tensor([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=torch.float32),
+            torch.as_tensor([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=torch.float32),
         ]
     )
     payload["config"]["transform_x"] = {"type": "delay", "delay": 1}
-    payload["train_md"]["transform_x_state"] = delayed.state_dict()
+    payload["train_md"]["transform_x_state"] = export_transform_state(delayed)
 
     monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
 
@@ -337,15 +337,15 @@ def test_graph_checkpoint_prediction_aligns_full_time_for_delayed_runtime(
     import dymad.io.checkpoint as checkpoint_module
 
     payload = _build_checkpoint_payload()
-    delayed = make_transform({"type": "delay", "delay": 1})
+    delayed = build_transform_module({"type": "delay", "delay": 1})
     delayed.fit(
         [
-            np.array([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=float),
-            np.array([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=float),
+            torch.as_tensor([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]], dtype=torch.float32),
+            torch.as_tensor([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=torch.float32),
         ]
     )
     payload["config"]["transform_x"] = {"type": "delay", "delay": 1}
-    payload["train_md"]["transform_x_state"] = delayed.state_dict()
+    payload["train_md"]["transform_x_state"] = export_transform_state(delayed)
 
     monkeypatch.setattr(checkpoint_module.torch, "load", lambda *args, **kwargs: payload)
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from dymad.core import build_transform_module
 from dymad.core.series import RegularSeries
 from dymad.io.series_adapter import SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManager
-from dymad.transform import make_transform
 
 
 def test_regular_series_adapter_builds_typed_series_from_arrays() -> None:
@@ -65,20 +65,20 @@ def test_regular_series_pipeline_matches_transform_path(tmp_path) -> None:
     manager.apply_data_transformations()
 
     series_dataset = manager.create_regular_series_dataset()
-    legacy_x = make_transform(config["transform_x"])
-    legacy_u = make_transform(config["transform_u"])
     raw_x = [sample for sample in x]
     raw_u = [sample for sample in u]
-    legacy_x.fit(raw_x)
-    legacy_u.fit(raw_u)
-    ref_x = legacy_x.transform(raw_x)
-    ref_u = legacy_u.transform(raw_u)
-    common_delay = max(legacy_x.delay, legacy_u.delay)
+    transform_x = build_transform_module(config["transform_x"])
+    transform_u = build_transform_module(config["transform_u"])
+    transform_x.fit([torch.as_tensor(sample, dtype=torch.float32) for sample in raw_x])
+    transform_u.fit([torch.as_tensor(sample, dtype=torch.float32) for sample in raw_u])
+    ref_x = transform_x.transform(raw_x)
+    ref_u = transform_u.transform(raw_u)
+    common_delay = max(transform_x.delay, transform_u.delay)
 
     for index, series in enumerate(series_dataset):
         expected_t = t[index][common_delay:]
-        expected_x = ref_x[index][common_delay - legacy_x.delay :]
-        expected_u = ref_u[index][common_delay - legacy_u.delay :]
+        expected_x = ref_x[index][common_delay - transform_x.delay :]
+        expected_u = ref_u[index][common_delay - transform_u.delay :]
         torch.testing.assert_close(
             series.time, torch.as_tensor(expected_t, dtype=series.time.dtype)
         )

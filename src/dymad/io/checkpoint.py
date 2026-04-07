@@ -19,9 +19,9 @@ from dymad.core.runtime import (
 from dymad.core.series import RegularSeriesBatch
 from dymad.core.transform_builder import build_transform_module
 from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline
+from dymad.core.torch_transforms import AutoencoderTransform, ComposeTransform
 from dymad.io.series_adapter import SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManager
-from dymad.transform import Autoencoder
 from dymad.utils.misc import load_config
 
 logger = logging.getLogger(__name__)
@@ -703,7 +703,9 @@ class DataInterface:
             def decoder(z):
                 return self.model.decoder(z, None)
 
-            enc = Autoencoder(self.model, encoder, decoder)
+            enc = AutoencoderTransform(self.model, encoder, decoder)
+            if not isinstance(self._trans_x, ComposeTransform):
+                self._trans_x = ComposeTransform([self._trans_x])
             self._trans_x.append(enc)
 
         self.NT = self._trans_x.NT

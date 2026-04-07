@@ -1,5 +1,11 @@
 """Core data abstractions for the DyMAD migration."""
 
+from dymad.core.external_transforms import (
+    CallableExternalTransform,
+    DiffMapTransform,
+    DiffMapVBTransform,
+    IsomapTransform,
+)
 from dymad.core.graph_series import (
     FixedGraphSeries,
     GraphSeries,
@@ -18,23 +24,30 @@ from dymad.core.series import (
 )
 from dymad.core.torch_transforms import (
     AddOneTransform,
+    AutoencoderTransform,
     ComposeTransform,
     DelayEmbeddingTransform,
     IdentityTransform,
     LiftTransform,
+    SVDTransform,
     ScalerTransform,
 )
 from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 from dymad.core.transform_builder import build_transform_module
 from dymad.core.transform_module import (
+    ExternalTransformModule,
     FieldTransformModule,
-    NDRTransformModuleAdapter,
     SeriesTransformPipeline,
 )
 
 __all__ = [
     "AddOneTransform",
+    "AutoencoderTransform",
+    "CallableExternalTransform",
     "ComposeTransform",
+    "DiffMapTransform",
+    "DiffMapVBTransform",
+    "ExternalTransformModule",
     "FieldTransformModule",
     "FixedGraphSeries",
     "GraphSeries",
@@ -42,10 +55,10 @@ __all__ = [
     "GraphTrainerBatch",
     "GraphModelContext",
     "IdentityTransform",
+    "IsomapTransform",
     "build_model_context",
     "build_transform_module",
     "LiftTransform",
-    "NDRTransformModuleAdapter",
     "RegularSeries",
     "RegularSeriesBatch",
     "RegularTrainerBatch",
@@ -55,6 +68,7 @@ __all__ = [
     "RegularModelContext",
     "ScalerTransform",
     "SeriesTransformPipeline",
+    "SVDTransform",
     "UniformLengthGraphSeriesBatch",
     "UniformLengthRegularSeriesBatch",
     "UniformGraphRuntime",

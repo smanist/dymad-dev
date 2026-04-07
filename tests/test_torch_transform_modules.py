@@ -16,8 +16,8 @@ from dymad.core import (
     RegularSeriesBatch,
     ScalerTransform,
     SeriesTransformPipeline,
+    build_transform_module,
 )
-from dymad.transform import make_transform
 
 
 def _as_torch_batch(arrays: list[np.ndarray]) -> list[torch.Tensor]:
@@ -29,15 +29,15 @@ def test_torch_compose_transform_matches_legacy_regular_payloads() -> None:
         np.array([[0.0, 1.0], [1.0, 3.0], [2.0, 5.0], [3.0, 7.0]], dtype=float),
         np.array([[1.0, 2.0], [2.0, 4.0], [3.0, 6.0], [4.0, 8.0]], dtype=float),
     ]
-    legacy = make_transform(
+    reference = build_transform_module(
         [
             {"type": "Scaler", "mode": "01"},
             {"type": "delay", "delay": 1},
             {"type": "add_one"},
         ]
     )
-    legacy.fit(payloads)
-    legacy_out = legacy.transform(payloads)
+    reference.fit(_as_torch_batch(payloads))
+    legacy_out = reference.transform(payloads)
 
     transform = ComposeTransform(
         [
@@ -133,9 +133,9 @@ def test_lift_transform_poly_matches_legacy_behavior() -> None:
         ],
         dtype=float,
     )
-    legacy = make_transform({"type": "Lift", "fobs": "poly", "Ks": [3, 2, 4]})
-    legacy.fit([payload])
-    expected = legacy.transform([payload])[0]
+    reference = build_transform_module({"type": "Lift", "fobs": "poly", "Ks": [3, 2, 4]})
+    reference.fit([torch.as_tensor(payload, dtype=torch.float32)])
+    expected = reference.transform([payload])[0]
 
     transform = LiftTransform(fobs="poly", Ks=[3, 2, 4])
     transform.fit([torch.as_tensor(payload, dtype=torch.float32)])
@@ -161,9 +161,9 @@ def test_lift_transform_mixed_matches_legacy_behavior() -> None:
         (2, "f", 2),
         ([3, 1], "p", [4, 3]),
     ]
-    legacy = make_transform({"type": "Lift", "fobs": "mixed", "opts": opts})
-    legacy.fit([payload])
-    expected = legacy.transform([payload])[0]
+    reference = build_transform_module({"type": "Lift", "fobs": "mixed", "opts": opts})
+    reference.fit([torch.as_tensor(payload, dtype=torch.float32)])
+    expected = reference.transform([payload])[0]
 
     transform = LiftTransform(fobs="mixed", opts=opts)
     transform.fit([torch.as_tensor(payload, dtype=torch.float32)])

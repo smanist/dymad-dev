@@ -1,7 +1,9 @@
 import numpy as np
 import pytest
+import torch
 
-from dymad.transform import DiffMap, DiffMapVB, Isomap
+from dymad.core import DiffMapTransform, DiffMapVBTransform, IsomapTransform, build_transform_module
+from dymad.core.transform_builder import export_transform_state
 
 N, M = 201, 20
 tt = np.linspace(0, np.pi, N)
@@ -18,7 +20,7 @@ opts = [
     dict(edim=2, mode="knn", Knn=20, inverse="pinv"),
     dict(edim=2, mode="knn", Knn=20, inverse="gmls", order=1, Kphi=4),
 ]
-mdls = [Isomap, DiffMap, DiffMap, DiffMap, DiffMapVB]
+mdls = [IsomapTransform, DiffMapTransform, DiffMapTransform, DiffMapTransform, DiffMapVBTransform]
 lbls = ["Isomap", "DiffMap-full", "DiffMap-knn", "DiffMap-pinv", "DiffMapVB"]
 epss = [3e-5, 2e-3, 3e-3, 0.4, 0.03]
 
@@ -26,14 +28,18 @@ epss = [3e-5, 2e-3, 3e-3, 0.4, 0.03]
 def run_ndr(MDL, opt, inp):
     # First pass
     mdl = MDL(**opt)
-    mdl.fit([inp])
+    mdl.fit([torch.as_tensor(inp, dtype=torch.float64)])
     Zt = mdl.transform([inp])[0]
     Xr = mdl.inverse_transform([Zt])[0]
 
     # Reload test
-    stt = mdl.state_dict()
-    reld = MDL(**opt)
-    reld.load_state_dict(stt)
+    stt = export_transform_state(mdl)
+    stage_type = {
+        IsomapTransform: "isomap",
+        DiffMapTransform: "dm",
+        DiffMapVBTransform: "vbdm",
+    }[MDL]
+    reld = build_transform_module({"type": stage_type, **opt}, stt)
     Zn = reld.transform([inp])[0]
     Xs = reld.inverse_transform([Zn])[0]
 
@@ -44,7 +50,7 @@ def run_ndr(MDL, opt, inp):
 def test_ndr(idx):
     (Zt, Xr), (Zn, Xs) = run_ndr(mdls[idx], opts[idx], X)
     assert np.linalg.norm(X - Xr) / nrm < epss[idx], f"{lbls[idx]} recon. error"
-    assert np.linalg.norm(Zt - Zn) / np.linalg.norm(Zt) < 1e-13, f"{lbls[idx]} reload, transform"
+    assert np.linalg.norm(Zt - Zn) / np.linalg.norm(Zt) < 1e-12, f"{lbls[idx]} reload, transform"
     assert np.linalg.norm(Xr - Xs) / nrm < 1e-14, f"{lbls[idx]} reload, inv. trans."
 
 

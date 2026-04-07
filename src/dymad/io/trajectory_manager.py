@@ -11,13 +11,11 @@ from dymad.core.graph_series import GraphSeries, GraphSeriesBatch
 from dymad.core.series import RegularSeries, RegularSeriesBatch
 from dymad.core.trainer_batch import GraphTrainerBatch, RegularTrainerBatch
 from dymad.core.transform_builder import (
-    build_legacy_transform,
     build_transform_module,
     export_transform_state,
 )
 from dymad.core.transform_module import (
     FieldTransformModule,
-    LegacyTransformModuleAdapter,
     SeriesTransformPipeline,
 )
 from dymad.io.series_adapter import SeriesAdapter
@@ -273,21 +271,70 @@ class TrajectoryManager:
 
     def _init_transforms(self) -> None:
         self._transform_fitted = False
-        self._data_transform_x = build_legacy_transform(
-            self.metadata["config"].get("transform_x", None)
-        )
-        self._data_transform_y = build_legacy_transform(
-            self.metadata["config"].get("transform_y", None)
-        )
-        self._data_transform_p = build_legacy_transform(
-            self.metadata["config"].get("transform_p", None)
-        )
+        self._data_transform_x = build_transform_module(self.metadata["config"].get("transform_x", None))
+        self._data_transform_y = build_transform_module(self.metadata["config"].get("transform_y", None))
+        self._data_transform_p = build_transform_module(self.metadata["config"].get("transform_p", None))
         cfg_transform_u = self.metadata["config"].get("transform_u", None)
-        self._data_transform_u = build_legacy_transform(cfg_transform_u)
-        if cfg_transform_u is None:
-            self.metadata["delay"] = self._data_transform_x.delay
-        else:
-            self.metadata["delay"] = max(self._data_transform_x.delay, self._data_transform_u.delay)
+        self._data_transform_u = build_transform_module(cfg_transform_u)
+        self._refresh_delay_from_modules()
+
+    def _refresh_delay_from_modules(self) -> None:
+        delays = [
+            int(getattr(module, "delay", 0))
+            for module in (
+                getattr(self, "_data_transform_x", None),
+                getattr(self, "_data_transform_y", None),
+                getattr(self, "_data_transform_u", None),
+                getattr(self, "_data_transform_p", None),
+                getattr(self, "_data_transform_ew", None),
+                getattr(self, "_data_transform_ea", None),
+            )
+            if module is not None
+        ]
+        self.metadata["delay"] = max(delays) if delays else 0
+
+    def _replace_transform_module(self, attr_name: str, config_key: str, state_dict) -> None:
+        setattr(
+            self,
+            attr_name,
+            build_transform_module(self.metadata["config"].get(config_key, None), state_dict),
+        )
+
+    def _export_transform_state(self, module) -> dict | None:
+        if module is None:
+            return None
+        return export_transform_state(module)
+
+    def _sync_transform_metadata(self) -> None:
+        self.metadata["transform_x_state"] = self._export_transform_state(self._data_transform_x)
+        self.metadata["transform_y_state"] = (
+            self._export_transform_state(self._data_transform_y)
+            if self.metadata.get("n_aux_features", 0) > 0
+            else None
+        )
+        self.metadata["transform_u_state"] = (
+            self._export_transform_state(self._data_transform_u)
+            if self.metadata.get("n_control_features", 0) > 0
+            else None
+        )
+        self.metadata["transform_p_state"] = (
+            self._export_transform_state(self._data_transform_p)
+            if self.metadata.get("n_parameters", 0) > 0
+            else None
+        )
+        if hasattr(self, "_data_transform_ew"):
+            self.metadata["transform_ew_state"] = (
+                self._export_transform_state(self._data_transform_ew)
+                if self.metadata.get("n_edge_weights", 0) > 0
+                else None
+            )
+        if hasattr(self, "_data_transform_ea"):
+            self.metadata["transform_ea_state"] = (
+                self._export_transform_state(self._data_transform_ea)
+                if self.metadata.get("n_edge_features", 0) > 0
+                else None
+            )
+        self._refresh_delay_from_modules()
 
     def _load_metadata(self, metadata: dict, data_key: str) -> None:
         if "data_key" in metadata:
@@ -338,31 +385,44 @@ class TrajectoryManager:
             raise ValueError("Either metadata or trajmgr must be provided, but not both.")
 
         if metadata is not None:
-            self._data_transform_x.load_state_dict(metadata["transform_x_state"])
-            if metadata.get("transform_y_state") is not None:
-                self._data_transform_y.load_state_dict(metadata["transform_y_state"])
-            if metadata.get("transform_u_state") is not None:
-                self._data_transform_u.load_state_dict(metadata["transform_u_state"])
-            if metadata.get("transform_p_state") is not None:
-                self._data_transform_p.load_state_dict(metadata["transform_p_state"])
+            self._replace_transform_module("_data_transform_x", "transform_x", metadata["transform_x_state"])
+            self._replace_transform_module(
+                "_data_transform_y",
+                "transform_y",
+                metadata.get("transform_y_state"),
+            )
+            self._replace_transform_module(
+                "_data_transform_u",
+                "transform_u",
+                metadata.get("transform_u_state"),
+            )
+            self._replace_transform_module(
+                "_data_transform_p",
+                "transform_p",
+                metadata.get("transform_p_state"),
+            )
         else:
-            self._data_transform_x.load_state_dict(trajmgr._data_transform_x.state_dict())
-            if hasattr(trajmgr, "_data_transform_y") and trajmgr._data_transform_y is not None:
-                self._data_transform_y.load_state_dict(trajmgr._data_transform_y.state_dict())
-            if hasattr(trajmgr, "_data_transform_u") and trajmgr._data_transform_u is not None:
-                self._data_transform_u.load_state_dict(trajmgr._data_transform_u.state_dict())
-            if hasattr(trajmgr, "_data_transform_p") and trajmgr._data_transform_p is not None:
-                self._data_transform_p.load_state_dict(trajmgr._data_transform_p.state_dict())
-        self.metadata["transform_x_state"] = self._data_transform_x.state_dict()
-        self.metadata["transform_y_state"] = (
-            self._data_transform_y.state_dict() if self._data_transform_y is not None else None
-        )
-        self.metadata["transform_u_state"] = (
-            self._data_transform_u.state_dict() if self._data_transform_u is not None else None
-        )
-        self.metadata["transform_p_state"] = (
-            self._data_transform_p.state_dict() if self._data_transform_p is not None else None
-        )
+            self._replace_transform_module(
+                "_data_transform_x",
+                "transform_x",
+                export_transform_state(trajmgr._data_transform_x),
+            )
+            self._replace_transform_module(
+                "_data_transform_y",
+                "transform_y",
+                self._export_transform_state(getattr(trajmgr, "_data_transform_y", None)),
+            )
+            self._replace_transform_module(
+                "_data_transform_u",
+                "transform_u",
+                self._export_transform_state(getattr(trajmgr, "_data_transform_u", None)),
+            )
+            self._replace_transform_module(
+                "_data_transform_p",
+                "transform_p",
+                self._export_transform_state(getattr(trajmgr, "_data_transform_p", None)),
+            )
+        self._sync_transform_metadata()
         self._transform_fitted = True
 
     def set_data_index(self, index: torch.Tensor | list[int] | None = None) -> None:
@@ -584,34 +644,17 @@ class TrajectoryManager:
         This method applies transformations defined in the configuration for x, y, u, p
         """
         assert self.data_index is not None, "Dataset must be split before applying transformations."
+        raw_batch = RegularSeriesBatch.collate(self._create_raw_regular_series_by_index(self.data_index))
+        pipeline = self._build_regular_transform_pipeline()
         if not self._transform_fitted:
-            logger.info("Fitting transformation for state features.")
-            X = [self.x[i] for i in self.data_index]
-            self._data_transform_x.fit(X)
-            self.metadata["transform_x_state"] = self._data_transform_x.state_dict()
-
-            if self.metadata["n_aux_features"] > 0:
-                logger.info("Fitting transformation for auxiliary features.")
-                Y = [self.y[i] for i in self.data_index]
-                self._data_transform_y.fit(Y)
-                self.metadata["transform_y_state"] = self._data_transform_y.state_dict()
-
-            if self.metadata["n_control_features"] > 0:
-                logger.info("Fitting transformation for control inputs.")
-                U = [self.u[i] for i in self.data_index]
-                self._data_transform_u.fit(U)
-                self.metadata["transform_u_state"] = self._data_transform_u.state_dict()
-
-            if self.metadata["n_parameters"] > 0:
-                logger.info("Fitting transformation for parameters.")
-                P = [self.p[i] for i in self.data_index]
-                self._data_transform_p.fit(P)
-                self.metadata["transform_p_state"] = self._data_transform_p.state_dict()
+            logger.info("Fitting regular transform pipeline on typed regular series.")
+            pipeline.fit(raw_batch)
+            self._sync_transform_metadata()
         else:
             logger.info("Transformations already fitted. Skipping fitting step.")
 
         logger.info("Applying transformations to state features and control inputs.")
-        self.typed_dataset = self._transform_regular_series_by_index(self.data_index)
+        self.typed_dataset = list(pipeline(raw_batch))
         self.dataset = self.typed_dataset
 
         if self.metadata["delay"] > 0:
@@ -663,22 +706,17 @@ class TrajectoryManager:
         return dataset
 
     def _build_regular_transform_pipeline(self) -> SeriesTransformPipeline:
-        cfg = self.metadata["config"]
         return SeriesTransformPipeline(
             [
                 FieldTransformModule(
                     "state",
-                    build_transform_module(
-                        cfg.get("transform_x", None), self.metadata.get("transform_x_state")
-                    ),
+                    self._data_transform_x,
                 ),
                 *(
                     [
                         FieldTransformModule(
                             "control",
-                            build_transform_module(
-                                cfg.get("transform_u", None), self.metadata.get("transform_u_state")
-                            ),
+                            self._data_transform_u,
                         )
                     ]
                     if self.metadata["n_control_features"] > 0
@@ -688,9 +726,7 @@ class TrajectoryManager:
                     [
                         FieldTransformModule(
                             "target",
-                            build_transform_module(
-                                cfg.get("transform_y", None), self.metadata.get("transform_y_state")
-                            ),
+                            self._data_transform_y,
                         )
                     ]
                     if self.metadata["n_aux_features"] > 0
@@ -700,9 +736,7 @@ class TrajectoryManager:
                     [
                         FieldTransformModule(
                             "params",
-                            build_transform_module(
-                                cfg.get("transform_p", None), self.metadata.get("transform_p_state")
-                            ),
+                            self._data_transform_p,
                             time_varying=False,
                         )
                     ]
@@ -720,19 +754,19 @@ class TrajectoryManager:
 
     def _update_dataset_metadata(self):
         # Bookkeeping metadata for the dataset.
-        self.metadata["n_total_state_features"] = self._data_transform_x._out_dim
+        self.metadata["n_total_state_features"] = self._data_transform_x.output_dim or 0
         if self.metadata["n_aux_features"] == 0:
             self.metadata["n_total_aux_features"] = 0
         else:
-            self.metadata["n_total_aux_features"] = self._data_transform_y._out_dim
+            self.metadata["n_total_aux_features"] = self._data_transform_y.output_dim or 0
         if self.metadata["n_control_features"] == 0:
             self.metadata["n_total_control_features"] = 0
         else:
-            self.metadata["n_total_control_features"] = self._data_transform_u._out_dim
+            self.metadata["n_total_control_features"] = self._data_transform_u.output_dim or 0
         if self.metadata["n_parameters"] == 0:
             self.metadata["n_total_parameters"] = 0
         else:
-            self.metadata["n_total_parameters"] = self._data_transform_p._out_dim
+            self.metadata["n_total_parameters"] = self._data_transform_p.output_dim or 0
         self.metadata["n_total_features"] = (
             self.metadata["n_total_state_features"] + self.metadata["n_total_control_features"]
         )
@@ -834,20 +868,17 @@ class TrajectoryManagerGraph(TrajectoryManager):
 
     def _init_transforms(self) -> None:
         super()._init_transforms()
-        self._data_transform_ew = build_legacy_transform(
-            self.metadata["config"].get("transform_ew", None)
-        )
+        self._data_transform_ew = build_transform_module(self.metadata["config"].get("transform_ew", None))
         if self._data_transform_ew.delay > 0:
             msg = "Edge weight transformations with delay embedding are not supported."
             logger.error(msg)
             raise ValueError(msg)
-        self._data_transform_ea = build_legacy_transform(
-            self.metadata["config"].get("transform_ea", None)
-        )
+        self._data_transform_ea = build_transform_module(self.metadata["config"].get("transform_ea", None))
         if self._data_transform_ea.delay > 0:
             msg = "Edge attribute transformations with delay embedding are not supported."
             logger.error(msg)
             raise ValueError(msg)
+        self._refresh_delay_from_modules()
 
     # --------------
     # Public interface - for modification
@@ -858,20 +889,28 @@ class TrajectoryManagerGraph(TrajectoryManager):
         super().set_transforms(metadata, trajmgr)
 
         if metadata is not None:
-            if metadata.get("transform_ew_state") is not None:
-                self._data_transform_ew.load_state_dict(metadata["transform_ew_state"])
-            if metadata.get("transform_ea_state") is not None:
-                self._data_transform_ea.load_state_dict(metadata["transform_ea_state"])
+            self._replace_transform_module(
+                "_data_transform_ew",
+                "transform_ew",
+                metadata.get("transform_ew_state"),
+            )
+            self._replace_transform_module(
+                "_data_transform_ea",
+                "transform_ea",
+                metadata.get("transform_ea_state"),
+            )
         else:
-            self._data_transform_ew.load_state_dict(trajmgr._data_transform_ew.state_dict())
-            if hasattr(trajmgr, "_data_transform_ea") and trajmgr._data_transform_ea is not None:
-                self._data_transform_ea.load_state_dict(trajmgr._data_transform_ea.state_dict())
-            if hasattr(trajmgr, "_data_transform_p") and trajmgr._data_transform_p is not None:
-                self._data_transform_p.load_state_dict(trajmgr._data_transform_p.state_dict())
-        self.metadata["transform_ew_state"] = self._data_transform_ew.state_dict()
-        self.metadata["transform_ea_state"] = (
-            self._data_transform_ea.state_dict() if self._data_transform_ea is not None else None
-        )
+            self._replace_transform_module(
+                "_data_transform_ew",
+                "transform_ew",
+                self._export_transform_state(getattr(trajmgr, "_data_transform_ew", None)),
+            )
+            self._replace_transform_module(
+                "_data_transform_ea",
+                "transform_ea",
+                self._export_transform_state(getattr(trajmgr, "_data_transform_ea", None)),
+            )
+        self._sync_transform_metadata()
         self._transform_fitted = True
 
     # --------------
@@ -993,7 +1032,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
         if not self._transform_fitted:
             logger.info("Fitting graph transform pipeline on typed graph series.")
             pipeline.fit(raw_batch)
-            self._sync_legacy_graph_transforms_from_pipeline(pipeline)
+            self._sync_transform_metadata()
         else:
             logger.info("Transformations already fitted. Skipping fitting step.")
 
@@ -1075,22 +1114,17 @@ class TrajectoryManagerGraph(TrajectoryManager):
         return dataset
 
     def _build_graph_transform_pipeline(self) -> SeriesTransformPipeline:
-        cfg = self.metadata["config"]
         return SeriesTransformPipeline(
             [
                 FieldTransformModule(
                     "node_state",
-                    build_transform_module(
-                        cfg.get("transform_x", None), self.metadata.get("transform_x_state")
-                    ),
+                    self._data_transform_x,
                 ),
                 *(
                     [
                         FieldTransformModule(
                             "control",
-                            build_transform_module(
-                                cfg.get("transform_u", None), self.metadata.get("transform_u_state")
-                            ),
+                            self._data_transform_u,
                         )
                     ]
                     if self.metadata["n_control_features"] > 0
@@ -1100,9 +1134,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
                     [
                         FieldTransformModule(
                             "target",
-                            build_transform_module(
-                                cfg.get("transform_y", None), self.metadata.get("transform_y_state")
-                            ),
+                            self._data_transform_y,
                         )
                     ]
                     if self.metadata["n_aux_features"] > 0
@@ -1112,9 +1144,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
                     [
                         FieldTransformModule(
                             "params",
-                            build_transform_module(
-                                cfg.get("transform_p", None), self.metadata.get("transform_p_state")
-                            ),
+                            self._data_transform_p,
                             time_varying=False,
                         )
                     ]
@@ -1125,11 +1155,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
                     [
                         FieldTransformModule(
                             "edge_weight",
-                            self._build_graph_edge_transform_module(
-                                cfg.get("transform_ew", None),
-                                self.metadata.get("transform_ew_state"),
-                                field="edge_weight",
-                            ),
+                            self._data_transform_ew,
                         )
                     ]
                     if self.metadata["n_edge_weights"] > 0
@@ -1139,11 +1165,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
                     [
                         FieldTransformModule(
                             "edge_attr",
-                            self._build_graph_edge_transform_module(
-                                cfg.get("transform_ea", None),
-                                self.metadata.get("transform_ea_state"),
-                                field="edge_attr",
-                            ),
+                            self._data_transform_ea,
                         )
                     ]
                     if self.metadata["n_edge_features"] > 0
@@ -1151,84 +1173,6 @@ class TrajectoryManagerGraph(TrajectoryManager):
                 ),
             ]
         )
-
-    def _build_graph_edge_transform_module(self, config, state_dict, *, field: str):
-        legacy_transform = build_legacy_transform(config)
-        if state_dict is not None:
-            legacy_transform.load_state_dict(state_dict)
-        if field == "edge_weight":
-            return LegacyTransformModuleAdapter(
-                legacy_transform,
-                to_legacy=self._graph_edge_weight_to_legacy,
-                from_legacy=self._graph_edge_weight_from_legacy,
-                invertibility="approximate",
-                supports_gradients="false",
-            )
-        if field == "edge_attr":
-            return LegacyTransformModuleAdapter(
-                legacy_transform,
-                to_legacy=self._graph_edge_attr_to_legacy,
-                from_legacy=self._graph_edge_attr_from_legacy,
-                invertibility="approximate",
-                supports_gradients="false",
-            )
-        raise ValueError(f"Unsupported graph edge field: {field}")
-
-    @staticmethod
-    def _graph_edge_weight_to_legacy(data: torch.Tensor) -> list[np.ndarray]:
-        array = data.detach().cpu().numpy()
-        return [step.reshape(-1, 1) for step in array]
-
-    @staticmethod
-    def _graph_edge_weight_from_legacy(data, *, reference: torch.Tensor) -> torch.Tensor:
-        stacked = np.stack([step.reshape(-1) for step in data], axis=0)
-        return torch.as_tensor(stacked, dtype=reference.dtype, device=reference.device)
-
-    @staticmethod
-    def _graph_edge_attr_to_legacy(data: torch.Tensor) -> list[np.ndarray]:
-        array = data.detach().cpu().numpy()
-        return [step for step in array]
-
-    @staticmethod
-    def _graph_edge_attr_from_legacy(data, *, reference: torch.Tensor) -> torch.Tensor:
-        stacked = np.stack(data, axis=0)
-        return torch.as_tensor(stacked, dtype=reference.dtype, device=reference.device)
-
-    def _sync_legacy_graph_transforms_from_pipeline(
-        self, pipeline: SeriesTransformPipeline
-    ) -> None:
-        stage_by_field = {stage.field: stage.transform for stage in pipeline.stages}
-
-        def _sync(field, legacy_attr, metadata_key):
-            module = stage_by_field.get(field)
-            if module is None:
-                self.metadata[metadata_key] = None
-                return
-            state = export_transform_state(module)
-            getattr(self, legacy_attr).load_state_dict(state)
-            self.metadata[metadata_key] = state
-
-        _sync("node_state", "_data_transform_x", "transform_x_state")
-        if self.metadata["n_aux_features"] > 0:
-            _sync("target", "_data_transform_y", "transform_y_state")
-        else:
-            self.metadata["transform_y_state"] = None
-        if self.metadata["n_control_features"] > 0:
-            _sync("control", "_data_transform_u", "transform_u_state")
-        else:
-            self.metadata["transform_u_state"] = None
-        if self.metadata["n_parameters"] > 0:
-            _sync("params", "_data_transform_p", "transform_p_state")
-        else:
-            self.metadata["transform_p_state"] = None
-        if self.metadata["n_edge_weights"] > 0:
-            _sync("edge_weight", "_data_transform_ew", "transform_ew_state")
-        else:
-            self.metadata["transform_ew_state"] = None
-        if self.metadata["n_edge_features"] > 0:
-            _sync("edge_attr", "_data_transform_ea", "transform_ea_state")
-        else:
-            self.metadata["transform_ea_state"] = None
 
     def _graph_data_reshape(self, data: np.ndarray, forward: bool) -> np.ndarray:
         """

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import numpy as np
 import torch
 
 from dymad.core.transform_module import TransformModule
@@ -288,16 +289,99 @@ class DelayEmbeddingTransform(TransformModule):
         return torch.cat((head, tail), dim=0)
 
 
+def _resolve_svd_rank(singular_values: torch.Tensor, order, *, beta: float = 1.0) -> int:
+    if isinstance(order, float):
+        if order > 0:
+            s2 = singular_values.square()
+            ratio = torch.cumsum(s2, dim=0) / torch.sum(s2)
+            idx = int(torch.argmax((ratio > order).to(torch.int64)).item())
+            return max(1, idx)
+        n = int(singular_values.numel())
+        omega = 0.56 * beta**3 - 0.95 * beta**2 + 1.82 * beta + 1.43
+        mask = singular_values < omega * torch.median(singular_values)
+        if not torch.any(mask):
+            return n
+        return max(1, int(torch.argmax(mask.to(torch.int64)).item()))
+    if isinstance(order, int):
+        if order >= 0:
+            return max(1, min(int(order), int(singular_values.numel())))
+        return max(1, int(singular_values.numel()) + int(order))
+    if isinstance(order, str) and order.lower() == "full":
+        return int(singular_values.numel())
+    raise NotImplementedError(f"Undefined threshold for order={order}")
+
+
+class SVDTransform(TransformModule):
+    def __init__(self, order: int | float | str = 1.0, ifcen: bool = False) -> None:
+        super().__init__(invertibility="approximate")
+        self.order = order
+        self.ifcen = bool(ifcen)
+        self.register_buffer("projection", torch.empty(0))
+        self.register_buffer("offset", torch.empty(0))
+
+    def fit(self, data: Sequence[torch.Tensor]) -> SVDTransform:
+        if not data:
+            return self
+        merged = torch.cat([item.reshape(-1, item.shape[-1]) for item in data], dim=0)
+        self.input_dim = int(merged.shape[-1])
+        if self.ifcen:
+            offset = torch.mean(merged, dim=0)
+            centered = merged - offset
+        else:
+            offset = torch.zeros(self.input_dim, dtype=merged.dtype, device=merged.device)
+            centered = merged
+        _u, singular_values, vh = torch.linalg.svd(centered, full_matrices=False)
+        beta = min(centered.shape) / max(centered.shape)
+        rank = _resolve_svd_rank(singular_values, self.order, beta=float(beta))
+        projection = vh[:rank].transpose(0, 1).contiguous()
+        self.projection = projection
+        self.offset = offset
+        self.output_dim = int(projection.shape[1])
+        self.invertibility = "exact" if self.output_dim == self.input_dim else "approximate"
+        return self
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        if self.projection.numel() == 0:
+            raise ValueError("SVDTransform parameters are not initialized. Call fit(...) first.")
+        return (data - self.offset).matmul(self.projection)
+
+    def inverse(self, data: torch.Tensor) -> torch.Tensor:
+        if self.projection.numel() == 0:
+            raise ValueError("SVDTransform parameters are not initialized. Call fit(...) first.")
+        return data.matmul(self.projection.transpose(0, 1)) + self.offset
+
+
+class AutoencoderTransform(TransformModule):
+    def __init__(self, model, encoder, decoder) -> None:
+        super().__init__(invertibility="approximate", supports_gradients="true")
+        self.model = model
+        self.encoder = encoder
+        self.decoder = decoder
+        self.input_dim = model.n_total_state_features
+        self.output_dim = model.latent_dimension
+        self.dtype = model.dtype
+        self.device = model.device
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        return self.encoder(data.to(device=self.device, dtype=self.dtype))
+
+    def inverse(self, data: torch.Tensor) -> torch.Tensor:
+        return self.decoder(data.to(device=self.device, dtype=self.dtype))
+
+
 class ComposeTransform(TransformModule):
-    def __init__(self, transforms: Sequence[TransformModule]) -> None:
+    def __init__(self, transforms: Sequence[TransformModule] | None = None) -> None:
         super().__init__()
-        self.transforms = torch.nn.ModuleList(list(transforms))
-        delayed = [stage for stage in self.transforms if stage.delay > 0]
-        if len(delayed) > 1:
-            raise ValueError("ComposeTransform supports at most one delayed stage.")
-        self.delay = delayed[0].delay if delayed else 0
-        self.invertibility = self._aggregate_invertibility()
-        self.supports_gradients = self._aggregate_gradient_support()
+        self.transforms = torch.nn.ModuleList(list(transforms or []))
+        self._refresh_metadata()
+
+    @property
+    def NT(self) -> int:
+        return len(self.transforms)
+
+    def append(self, transform: TransformModule) -> None:
+        self.transforms.append(transform)
+        self._refresh_metadata()
 
     def fit(self, data: Sequence[torch.Tensor]) -> ComposeTransform:
         current = list(data)
@@ -307,17 +391,53 @@ class ComposeTransform(TransformModule):
         if self.transforms:
             self.input_dim = self.transforms[0].input_dim
             self.output_dim = self.transforms[-1].output_dim
+        self._refresh_metadata()
         return self
 
+    def _proc_rng(self, rng: list[int] | None) -> list[int]:
+        if rng is None:
+            return [0, self.NT]
+        if len(rng) != 2:
+            raise ValueError("Range should be a two-element list [start, end].")
+        start, end = int(rng[0]), int(rng[1])
+        if not 0 <= start < end <= self.NT:
+            raise ValueError(f"Range should be within [0, {self.NT}].")
+        return [start, end]
+
     def forward(self, data: torch.Tensor) -> torch.Tensor:
-        for stage in self.transforms:
+        return self.forward_range(data)
+
+    def inverse(self, data: torch.Tensor) -> torch.Tensor:
+        return self.inverse_range(data)
+
+    def forward_range(self, data: torch.Tensor, rng: list[int] | None = None) -> torch.Tensor:
+        start, end = self._proc_rng(rng)
+        for stage in self.transforms[start:end]:
             data = stage(data)
         return data
 
-    def inverse(self, data: torch.Tensor) -> torch.Tensor:
-        for stage in reversed(self.transforms):
+    def inverse_range(self, data: torch.Tensor, rng: list[int] | None = None) -> torch.Tensor:
+        start, end = self._proc_rng(rng)
+        for stage in reversed(self.transforms[start:end]):
             data = stage.inverse(data)
         return data
+
+    def _module_for_range(self, rng: list[int]) -> TransformModule:
+        start, end = self._proc_rng(rng)
+        if end - start == 1:
+            return self.transforms[start]
+        return ComposeTransform(list(self.transforms[start:end]))
+
+    def _refresh_metadata(self) -> None:
+        delayed = [stage for stage in self.transforms if stage.delay > 0]
+        if len(delayed) > 1:
+            raise ValueError("ComposeTransform supports at most one delayed stage.")
+        self.delay = delayed[0].delay if delayed else 0
+        if self.transforms:
+            self.input_dim = self.transforms[0].input_dim
+            self.output_dim = self.transforms[-1].output_dim
+        self.invertibility = self._aggregate_invertibility()
+        self.supports_gradients = self._aggregate_gradient_support()
 
     def _aggregate_invertibility(self) -> str:
         if any(stage.invertibility == "none" for stage in self.transforms):

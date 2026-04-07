@@ -4,15 +4,23 @@ import numpy as np
 import pytest
 import torch
 
-from dymad.core import NDRTransformModuleAdapter, build_transform_module
-from dymad.transform import make_transform
+from dymad.core import DiffMapTransform, DiffMapVBTransform, IsomapTransform, build_transform_module
+from dymad.core.transform_builder import export_transform_state
 
 
 @pytest.mark.parametrize(
-    ("config", "rtol"),
+    ("config", "module_type", "rtol"),
     [
-        ({"type": "Isomap", "edim": 2, "Knn": 12, "inverse": "gmls", "order": 1, "Kphi": 4}, 1e-5),
-        ({"type": "DiffMap", "edim": 2, "mode": "knn", "Knn": 12, "inverse": "pinv"}, 1e-4),
+        (
+            {"type": "Isomap", "edim": 2, "Knn": 12, "inverse": "gmls", "order": 1, "Kphi": 4},
+            IsomapTransform,
+            1e-5,
+        ),
+        (
+            {"type": "DiffMap", "edim": 2, "mode": "knn", "Knn": 12, "inverse": "pinv"},
+            DiffMapTransform,
+            1e-4,
+        ),
         (
             {
                 "type": "DiffMapVB",
@@ -23,32 +31,33 @@ from dymad.transform import make_transform
                 "order": 1,
                 "Kphi": 4,
             },
+            DiffMapVBTransform,
             1e-4,
         ),
     ],
 )
-def test_build_transform_module_wraps_ndr_transforms(config, rtol: float) -> None:
+def test_build_transform_module_wraps_external_transforms(config, module_type, rtol: float) -> None:
     tt = np.linspace(0.0, np.pi, 81)
     cc = np.cos(tt)
     ss = np.sin(tt)
     mixing = np.random.default_rng(7).random((2, 6))
     payload = (np.vstack([cc, ss]).T @ mixing).astype(np.float32)
 
-    legacy = make_transform(config)
-    legacy.fit([payload])
-    legacy_out = legacy.transform([payload])[0]
-    state = legacy.state_dict()
+    module = build_transform_module(config)
+    module.fit([torch.as_tensor(payload)])
+    state = export_transform_state(module)
 
-    module = build_transform_module(config, state)
+    reloaded = build_transform_module(config, state)
 
-    assert module.supports_gradients == "false"
-    assert module.invertibility == "approximate"
-    assert isinstance(module.transforms[0], NDRTransformModuleAdapter)
+    assert reloaded.supports_gradients == "approximate"
+    assert reloaded.invertibility == "approximate"
+    assert isinstance(reloaded.transforms[0], module_type)
 
-    actual = module.transform_batch([torch.as_tensor(payload)])[0].cpu().numpy()
-    recovered = module.inverse_batch([torch.as_tensor(actual)])[0].cpu().numpy()
+    actual = reloaded.transform_batch([torch.as_tensor(payload)])[0].cpu().numpy()
+    recovered = reloaded.inverse_batch([torch.as_tensor(actual)])[0].cpu().numpy()
 
-    np.testing.assert_allclose(actual, legacy_out, rtol=1e-5, atol=1e-5)
-    np.testing.assert_allclose(
-        recovered, legacy.inverse_transform([legacy_out])[0], rtol=rtol, atol=rtol
-    )
+    expected = module.transform_batch([torch.as_tensor(payload)])[0].cpu().numpy()
+    reference_inverse = module.inverse_batch([torch.as_tensor(expected)])[0].cpu().numpy()
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(recovered, reference_inverse, rtol=rtol, atol=rtol)

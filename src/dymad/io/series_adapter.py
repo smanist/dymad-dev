@@ -14,6 +14,19 @@ class SeriesAdapter:
     """Build typed series objects from array-like payloads."""
 
     @staticmethod
+    def _collapse_constant_graph_tensor(
+        tensor: torch.Tensor,
+        *,
+        expected_rank: int,
+    ) -> torch.Tensor:
+        if tensor.ndim != expected_rank or tensor.shape[0] <= 1:
+            return tensor
+        ref = tensor[0]
+        if all(torch.equal(ref, tensor[index]) for index in range(1, tensor.shape[0])):
+            return ref
+        return tensor
+
+    @staticmethod
     def from_regular_arrays(
         time: Any,
         state: Any,
@@ -106,7 +119,11 @@ class SeriesAdapter:
         tensor = torch.as_tensor(edge_index, dtype=torch.long, device=device)
         if tensor.ndim == 3:
             if tensor.shape[1] == 2 or tensor.shape[2] == 2:
-                return tensor
+                normalized = torch.stack(
+                    tuple(SeriesAdapter._to_edge_index_tensor(step, device=device) for step in tensor),
+                    dim=0,
+                )
+                return SeriesAdapter._collapse_constant_graph_tensor(normalized, expected_rank=3)
             raise ValueError(
                 "time-varying edge_index tensors must have shape [n_steps, 2, n_edges] "
                 "or [n_steps, n_edges, 2]"
@@ -138,6 +155,12 @@ class SeriesAdapter:
         if isinstance(payload, (list, tuple)):
             tensors = tuple(torch.as_tensor(item, dtype=dtype, device=device) for item in payload)
             if tensors and len({tuple(item.shape) for item in tensors}) == 1:
-                return torch.stack(tensors, dim=0)
+                return SeriesAdapter._collapse_constant_graph_tensor(
+                    torch.stack(tensors, dim=0),
+                    expected_rank=tensors[0].ndim + 1,
+                )
             return tensors
-        return torch.as_tensor(payload, dtype=dtype, device=device)
+        tensor = torch.as_tensor(payload, dtype=dtype, device=device)
+        if tensor.ndim >= 2:
+            return SeriesAdapter._collapse_constant_graph_tensor(tensor, expected_rank=tensor.ndim)
+        return tensor
