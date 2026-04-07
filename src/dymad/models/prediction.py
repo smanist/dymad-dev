@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 import numpy as np
 import torch
 from torchdiffeq import odeint
 
 from dymad.core.model_context import ModelRuntimePayload, materialize_prediction_runtime
-from dymad.core.runtime import TypedRuntime
+from dymad.core.runtime import RaggedGraphRuntime, RaggedRegularRuntime
 from dymad.numerics import expm_full_rank, expm_low_rank
 from dymad.utils import ControlInterpolator
 
@@ -135,18 +136,16 @@ def _proc_ztraj(z_traj, model, ws, n_steps, is_batch):
 
 def _pad_ragged_predictions(
     outputs: list[torch.Tensor],
-    runtime: TypedRuntime,
+    runtime: RaggedRegularRuntime | RaggedGraphRuntime,
     *,
     is_graph: bool,
 ) -> torch.Tensor:
     if not outputs:
         raise ValueError("outputs must not be empty")
+    del is_graph
     batch_size = len(outputs)
-    max_steps = runtime.n_steps
-    if is_graph:
-        ref_shape = outputs[0].shape[1:]
-    else:
-        ref_shape = outputs[0].shape[1:]
+    max_steps = int(runtime.n_steps)
+    ref_shape = tuple(int(dim) for dim in outputs[0].shape[1:])
     out = torch.zeros(
         (batch_size, max_steps, *ref_shape),
         dtype=outputs[0].dtype,
@@ -162,7 +161,7 @@ def _predict_ragged_series(
     model,
     x0: torch.Tensor,
     ts: torch.Tensor | None,
-    ws: TypedRuntime,
+    ws: RaggedRegularRuntime | RaggedGraphRuntime,
     **kwargs,
 ) -> torch.Tensor:
     outputs: list[torch.Tensor] = []
@@ -215,25 +214,29 @@ def predict_continuous(
     """
     _x0, _ts, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
     if not _runtime_is_uniform_length(_ws):
+        ragged_ws = cast(RaggedRegularRuntime | RaggedGraphRuntime, _ws)
         return _predict_ragged_series(
             predict_continuous,
             model,
             _x0,
             _ts,
-            _ws,
+            ragged_ws,
             method=method,
             order=order,
             **kwargs,
         )
+    if _ts is None:
+        raise ValueError("predict_continuous requires time points.")
     _ts = _ts[0]
 
-    def bucket(t):
-        return torch.searchsorted(_ts, t).clamp(1, _ts.numel() - 1)
+    def bucket(t: torch.Tensor) -> int:
+        return int(torch.searchsorted(_ts, t).clamp(1, _ts.numel() - 1).item())
 
-    _has_u = _ws.u is not None
+    control_payload = _ws.u
+    _has_u = control_payload is not None
     if _has_u:
         logger.debug(f"predict_continuous: {'Batch' if is_batch else 'Single'} mode (controlled)")
-        u_intp = ControlInterpolator(_ts, _ws.u, order=order)
+        u_intp = ControlInterpolator(_ts, control_payload, order=order)
     else:
         logger.debug(f"predict_continuous: {'Batch' if is_batch else 'Single'} mode (autonomous)")
 
@@ -254,13 +257,16 @@ def predict_continuous(
     logger.debug(
         f"predict_continuous: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order if _has_u else 'N/A'}"
     )
-    z_traj = _odeint_with_rk4_fallback(
-        ode_func,
-        z0,
-        _ts,
-        method=method,
-        log_prefix="predict_continuous",
-        **kwargs,
+    z_traj = cast(
+        torch.Tensor,
+        _odeint_with_rk4_fallback(
+            ode_func,
+            z0,
+            _ts,
+            method=method,
+            log_prefix="predict_continuous",
+            **kwargs,
+        ),
     )
     logger.debug(f"predict_continuous: Completed integration, trajectory shape: {z_traj.shape}")
 
@@ -287,27 +293,31 @@ def predict_continuous_np(
     """
     _x0, _ts, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
     if not _runtime_is_uniform_length(_ws):
+        ragged_ws = cast(RaggedRegularRuntime | RaggedGraphRuntime, _ws)
         return _predict_ragged_series(
             predict_continuous_np,
             model,
             _x0,
             _ts,
-            _ws,
+            ragged_ws,
             method=method,
             order=order,
             **kwargs,
         )
+    if _ts is None:
+        raise ValueError("predict_continuous_np requires time points.")
     _ts = _ts[0]
 
-    def bucket(t):
-        return torch.searchsorted(_ts, t).clamp(1, _ts.numel() - 1)
+    def bucket(t: torch.Tensor) -> int:
+        return int(torch.searchsorted(_ts, t).clamp(1, _ts.numel() - 1).item())
 
-    _has_u = _ws.u is not None
+    control_payload = _ws.u
+    _has_u = control_payload is not None
     if _has_u:
         logger.debug(
             f"predict_continuous_np: {'Batch' if is_batch else 'Single'} mode (controlled)"
         )
-        u_intp = ControlInterpolator(_ts, _ws.u, order=order)
+        u_intp = ControlInterpolator(_ts, control_payload, order=order)
     else:
         logger.debug(
             f"predict_continuous_np: {'Batch' if is_batch else 'Single'} mode (autonomous)"
@@ -328,13 +338,16 @@ def predict_continuous_np(
     logger.debug(
         f"predict_continuous_np: Starting ODE integration with shape {z0.shape}, method {method}, and interpolation order {order if _has_u else 'N/A'}"
     )
-    z_traj = _odeint_with_rk4_fallback(
-        ode_func,
-        z0,
-        _ts,
-        method=method,
-        log_prefix="predict_continuous_np",
-        **kwargs,
+    z_traj = cast(
+        torch.Tensor,
+        _odeint_with_rk4_fallback(
+            ode_func,
+            z0,
+            _ts,
+            method=method,
+            log_prefix="predict_continuous_np",
+            **kwargs,
+        ),
     )
     logger.debug(f"predict_continuous_np: Completed integration, trajectory shape: {z_traj.shape}")
 
@@ -361,24 +374,24 @@ def predict_continuous_exp(
 
     Currently only for KBF-type models with linear dynamics.
     """
-    _x0, _, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
+    _x0, _ts, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
     if not _runtime_is_uniform_length(_ws):
+        ragged_ws = cast(RaggedRegularRuntime | RaggedGraphRuntime, _ws)
         return _predict_ragged_series(
             predict_continuous_exp,
             model,
             _x0,
-            ts
-            if isinstance(ts, torch.Tensor)
-            else torch.as_tensor(ts, dtype=_x0.dtype, device=_x0.device),
-            _ws,
+            cast(torch.Tensor, _ts),
+            ragged_ws,
             **kwargs,
         )
-    if _ws is not None:
-        assert _ws.u is None, "predict_discrete_exp only supports autonomous case."
+    if _ts is None:
+        raise ValueError("predict_continuous_exp requires time points.")
+    assert _ws.u is None, "predict_discrete_exp only supports autonomous case."
 
     # Get the system matrix
     if model.processor_net.mode == "full":
-        W = (model.processor_net.weight,)
+        W: tuple[torch.Tensor] | tuple[torch.Tensor, torch.Tensor] = (model.processor_net.weight,)
     else:
         U = model.processor_net.U
         V = model.processor_net.V
@@ -388,10 +401,10 @@ def predict_continuous_exp(
     z0 = model.encoder(_ws.get_step(0).set_x(_x0))
 
     logger.debug(f"predict_continuous_exp: Starting ODE integration with shape {z0.shape}")
-    if ts.dim() == 2:
-        dt = ts[0] - ts[0, 0]
+    if _ts.ndim == 2:
+        dt = _ts[0] - _ts[0, 0]
     else:
-        dt = ts - ts[0]  # (n_steps,)
+        dt = _ts - _ts[0]  # (n_steps,)
     if len(W) == 1:
         z_traj = expm_full_rank(W[0].T, dt, z0)
     elif len(W) == 2:
@@ -419,14 +432,17 @@ def predict_continuous_fenc(
     """
     _x0, _ts, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
     if not _runtime_is_uniform_length(_ws):
+        ragged_ws = cast(RaggedRegularRuntime | RaggedGraphRuntime, _ws)
         return _predict_ragged_series(
             predict_continuous_fenc,
             model,
             _x0,
             _ts,
-            _ws,
+            ragged_ws,
             **kwargs,
         )
+    if _ts is None:
+        raise ValueError("predict_continuous_fenc requires time points.")
 
     logger.debug(f"predict_continuous_fenc: {'Batch' if is_batch else 'Single'} mode")
 
@@ -485,7 +501,8 @@ def predict_discrete(
     """
     _x0, _, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
     if not _runtime_is_uniform_length(_ws):
-        return _predict_ragged_series(predict_discrete, model, _x0, None, _ws, **kwargs)
+        ragged_ws = cast(RaggedRegularRuntime | RaggedGraphRuntime, _ws)
+        return _predict_ragged_series(predict_discrete, model, _x0, None, ragged_ws, **kwargs)
 
     wtmp = _ws.get_step(0).set_x(_x0)
     ztmp = model.encoder(wtmp)  # The initial condition for dynamics
@@ -521,7 +538,8 @@ def predict_discrete_exp(
     """
     _x0, _, _ws, n_steps, is_batch = _prepare_data(x0, ts, ws, x0.device)
     if not _runtime_is_uniform_length(_ws):
-        return _predict_ragged_series(predict_discrete_exp, model, _x0, None, _ws, **kwargs)
+        ragged_ws = cast(RaggedRegularRuntime | RaggedGraphRuntime, _ws)
+        return _predict_ragged_series(predict_discrete_exp, model, _x0, None, ragged_ws, **kwargs)
 
     logger.debug(f"predict_discrete: {'Batch' if is_batch else 'Single'} mode")
 

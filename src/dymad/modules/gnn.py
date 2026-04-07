@@ -130,97 +130,101 @@ class GNN(nn.Module):
         assert edge_index.ndim >= 3, "edge_index must have shape (..., n_edges, 2)"
 
         _x_batch, _x_shape = x.shape[:-2], x.shape[-2:]
-        edge_index, edge_weights, edge_attr = self._broadcast_graph_payloads(
-            x,
-            edge_index,
-            edge_weights,
-            edge_attr,
-        )
         _e_batch = edge_index.shape[:-2]
-        assert _x_batch == _e_batch, (
-            f"Batch shape of x and edge_index must match. Got {_x_batch} and {_e_batch}."
+        if len(_e_batch) > len(_x_batch) or _x_batch[: len(_e_batch)] != _e_batch:
+            raise AssertionError(
+                f"Batch shape of x and edge_index must match or edge payloads must be a prefix. Got {_x_batch} and {_e_batch}."
+            )
+        edge_weights = self._expand_graph_payload(
+            edge_weights,
+            suffix_dims=1,
+            target_batch=_x_batch,
         )
+        edge_attr = self._expand_graph_payload(
+            edge_attr,
+            suffix_dims=2,
+            target_batch=_x_batch,
+        )
+        extra_dims = len(_x_batch) - len(_e_batch)
+        extra_batch = _x_batch[len(_e_batch) :]
 
         n_graphs = 1
-        for d in _x_batch:
+        for d in _e_batch:
             n_graphs *= d
 
-        x_flat = x.reshape(n_graphs, _x_shape[0], _x_shape[1])
+        if n_graphs == 0:
+            raise AssertionError("Graph batch dimensions must be non-empty.")
+
+        extra_indices = list(range(len(_e_batch), len(_x_batch)))
+        graph_indices = list(range(len(_e_batch)))
+        x_perm = x.permute(*extra_indices, *graph_indices, len(_x_batch), len(_x_batch) + 1)
+        x_cat = x_perm.reshape(*extra_batch, n_graphs * _x_shape[0], _x_shape[1])
+
         edge_index_flat = edge_index.reshape(n_graphs, edge_index.shape[-2], edge_index.shape[-1])
-
-        if n_graphs == 1:
-            ew = None if edge_weights is None else edge_weights.reshape(1, -1)[0]
-            ea = (
-                None
-                if edge_attr is None
-                else edge_attr.reshape(1, edge_attr.shape[-2], edge_attr.shape[-1])[0]
-            )
-            return self._forward_single(
-                x_flat, edge_index_flat[0].transpose(0, 1), ew, ea, **kwargs
-            )
-
         offsets = (
             torch.arange(
                 n_graphs,
                 device=edge_index.device,
                 dtype=edge_index.dtype,
-            )
+            ).view(n_graphs, 1, 1)
             * _x_shape[0]
         )
-        ei_cat = torch.cat(
-            [edge_index_flat[i] + offsets[i] for i in range(n_graphs)],
-            dim=0,
-        ).transpose(0, 1)
+        ei_cat = (edge_index_flat + offsets).reshape(-1, edge_index.shape[-1]).transpose(0, 1)
 
-        if edge_weights is None:
-            ew = None
-        else:
-            ew = edge_weights.values() if edge_weights.is_nested else edge_weights.reshape(-1)
+        ew = self._merge_graph_payload(
+            edge_weights,
+            graph_batch_ndim=len(_e_batch),
+            extra_batch=extra_batch,
+            suffix_dims=1,
+        )
+        ea = self._merge_graph_payload(
+            edge_attr,
+            graph_batch_ndim=len(_e_batch),
+            extra_batch=extra_batch,
+            suffix_dims=2,
+        )
 
-        if edge_attr is None:
-            ea = None
-        else:
-            ea = (
-                edge_attr.values()
-                if edge_attr.is_nested
-                else edge_attr.reshape(-1, edge_attr.shape[-1])
-            )
-
-        x_cat = x_flat.reshape(1, -1, _x_shape[1])
         out = self._forward_single(x_cat, ei_cat, ew, ea, **kwargs)
-        return out.reshape(*_x_batch, -1)
+        out = out.reshape(*extra_batch, *_e_batch, -1)
+        if extra_dims == 0:
+            return out
+        return out.permute(
+            *range(extra_dims, extra_dims + len(_e_batch)),
+            *range(extra_dims),
+            extra_dims + len(_e_batch),
+        )
 
-    def _broadcast_graph_payloads(self, x, edge_index, edge_weights, edge_attr):
-        x_batch = x.shape[:-2]
-        edge_batch = edge_index.shape[:-2]
-        if edge_batch == x_batch:
-            return edge_index, edge_weights, edge_attr
-        if len(edge_batch) > len(x_batch) or x_batch[: len(edge_batch)] != edge_batch:
+    def _expand_graph_payload(self, tensor, *, suffix_dims, target_batch):
+        if tensor is None:
+            return None
+        tensor_batch = tensor.shape[:-suffix_dims]
+        if tensor_batch == target_batch:
+            return tensor
+        if (
+            len(tensor_batch) > len(target_batch)
+            or target_batch[: len(tensor_batch)] != tensor_batch
+        ):
             raise AssertionError(
-                f"Batch shape of x and edge_index must match or edge payloads must be a prefix. Got {x_batch} and {edge_batch}."
+                f"Graph payload batch shape must match x or be a prefix. Got {tensor_batch} and {target_batch}."
             )
+        extra = len(target_batch) - len(tensor_batch)
+        view_shape = (*tensor_batch, *([1] * extra), *tensor.shape[-suffix_dims:])
+        expand_shape = (*target_batch, *tensor.shape[-suffix_dims:])
+        return tensor.reshape(view_shape).expand(expand_shape)
 
-        len(x_batch) - len(edge_batch)
+    def _merge_graph_payload(self, tensor, *, graph_batch_ndim, extra_batch, suffix_dims):
+        if tensor is None:
+            return None
 
-        def _expand(tensor, suffix_dims):
-            if tensor is None:
-                return None
-            tensor_batch = tensor.shape[:-suffix_dims]
-            if tensor_batch == x_batch:
-                return tensor
-            if len(tensor_batch) > len(x_batch) or x_batch[: len(tensor_batch)] != tensor_batch:
-                raise AssertionError(
-                    f"Graph payload batch shape must match x or be a prefix. Got {tensor_batch} and {x_batch}."
-                )
-            extra = len(x_batch) - len(tensor_batch)
-            view_shape = (*tensor_batch, *([1] * extra), *tensor.shape[-suffix_dims:])
-            expand_shape = (*x_batch, *tensor.shape[-suffix_dims:])
-            return tensor.reshape(view_shape).expand(expand_shape)
+        total_batch_ndim = tensor.ndim - suffix_dims
+        extra_indices = list(range(graph_batch_ndim, total_batch_ndim))
+        graph_indices = list(range(graph_batch_ndim))
+        suffix_indices = list(range(total_batch_ndim, tensor.ndim))
+        permuted = tensor.permute(*extra_indices, *graph_indices, *suffix_indices)
 
-        edge_index = _expand(edge_index, 2)
-        edge_weights = _expand(edge_weights, 1)
-        edge_attr = _expand(edge_attr, 2)
-        return edge_index, edge_weights, edge_attr
+        if len(suffix_indices) == 1:
+            return permuted.reshape(*extra_batch, -1)
+        return permuted.reshape(*extra_batch, -1, tensor.shape[-1])
 
     def _forward_single(self, x, edge_index, edge_weights, edge_attr, **kwargs):
         """

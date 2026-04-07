@@ -32,10 +32,14 @@ def _slice_edge_sequence(
     tensor: torch.Tensor | tuple[torch.Tensor, ...] | None,
     start: int,
     end: int,
+    *,
+    n_steps: int,
 ):
     if tensor is None:
         return None
     if isinstance(tensor, tuple):
+        return tensor[start:end]
+    if tensor.ndim >= 3 and tensor.shape[0] == n_steps:
         return tensor[start:end]
     return tensor
 
@@ -73,7 +77,7 @@ class GraphSeries:
 
     @property
     def fixed_topology(self) -> bool:
-        return isinstance(self.edge_index, torch.Tensor)
+        return isinstance(self.edge_index, torch.Tensor) and self.edge_index.ndim == 2
 
     def slice_steps(self, start: int, end: int) -> GraphSeries:
         n_steps = int(self.time.shape[0])
@@ -83,7 +87,7 @@ class GraphSeries:
             node_state=self.node_state[start:end],
             control=self.control[start:end] if self.control is not None else None,
             target=self.target[start:end] if self.target is not None else None,
-            edge_index=_slice_edge_sequence(self.edge_index, start, end),
+            edge_index=_slice_edge_sequence(self.edge_index, start, end, n_steps=n_steps),
             edge_weight=_slice_graph_tensor_if_time_varying(
                 self.edge_weight,
                 start=start,
@@ -138,10 +142,16 @@ class FixedGraphSeries(GraphSeries):
 class VariableEdgeGraphSeries(GraphSeries):
     """Graph series with per-step edge topology."""
 
-    edge_index: tuple[torch.Tensor, ...]
+    edge_index: torch.Tensor | tuple[torch.Tensor, ...]
 
     def __post_init__(self) -> None:
-        if len(self.edge_index) != self.time.shape[0]:
+        if isinstance(self.edge_index, torch.Tensor):
+            if self.edge_index.ndim != 3 or self.edge_index.shape[0] != self.time.shape[0]:
+                raise ValueError(
+                    "VariableEdgeGraphSeries.edge_index must have shape [n_steps, 2, n_edges] "
+                    "or [n_steps, n_edges, 2]"
+                )
+        elif len(self.edge_index) != self.time.shape[0]:
             raise ValueError("VariableEdgeGraphSeries.edge_index must align with time steps")
         if isinstance(self.edge_weight, tuple) and len(self.edge_weight) != self.time.shape[0]:
             raise ValueError("VariableEdgeGraphSeries.edge_weight must align with time steps")

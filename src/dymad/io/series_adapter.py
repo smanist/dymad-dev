@@ -77,7 +77,7 @@ class SeriesAdapter:
 
         cls = (
             FixedGraphSeries
-            if isinstance(edge_index_payload, torch.Tensor)
+            if isinstance(edge_index_payload, torch.Tensor) and edge_index_payload.ndim == 2
             else VariableEdgeGraphSeries
         )
         return cls(
@@ -100,10 +100,17 @@ class SeriesAdapter:
             )
             if steps and all(torch.equal(steps[0], step) for step in steps[1:]):
                 return steps[0]
+            if steps and len({tuple(step.shape) for step in steps}) == 1:
+                return torch.stack(steps, dim=0)
             return steps
         tensor = torch.as_tensor(edge_index, dtype=torch.long, device=device)
         if tensor.ndim == 3:
-            return SeriesAdapter._graph_edge_index_payload(tuple(tensor.unbind()), device=device)
+            if tensor.shape[1] == 2 or tensor.shape[2] == 2:
+                return tensor
+            raise ValueError(
+                "time-varying edge_index tensors must have shape [n_steps, 2, n_edges] "
+                "or [n_steps, n_edges, 2]"
+            )
         return SeriesAdapter._to_edge_index_tensor(tensor, device=device)
 
     @staticmethod
@@ -129,5 +136,8 @@ class SeriesAdapter:
         if payload is None:
             return None
         if isinstance(payload, (list, tuple)):
-            return tuple(torch.as_tensor(item, dtype=dtype, device=device) for item in payload)
+            tensors = tuple(torch.as_tensor(item, dtype=dtype, device=device) for item in payload)
+            if tensors and len({tuple(item.shape) for item in tensors}) == 1:
+                return torch.stack(tensors, dim=0)
+            return tensors
         return torch.as_tensor(payload, dtype=dtype, device=device)

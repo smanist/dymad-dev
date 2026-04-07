@@ -7,7 +7,14 @@ from dataclasses import dataclass
 import torch
 
 from dymad.core.model_context import GraphModelContext, RegularModelContext
-from dymad.core.runtime import GraphRuntimeStep, RegularRuntimeStep, TypedRuntime, TypedRuntimeStep
+from dymad.core.runtime import (
+    GraphRuntimeStep,
+    RaggedGraphRuntime,
+    RegularRuntimeStep,
+    TypedRuntime,
+    TypedRuntimeStep,
+    UniformGraphRuntime,
+)
 
 
 @dataclass(frozen=True)
@@ -32,7 +39,10 @@ class ComponentInputView:
 
     @property
     def state(self) -> torch.Tensor:
-        return self.runtime.x
+        state = self.runtime.x
+        if state is None:
+            raise ValueError("Runtime payload does not contain state.")
+        return state
 
     @property
     def control(self) -> torch.Tensor | None:
@@ -40,28 +50,62 @@ class ComponentInputView:
 
     @property
     def graph_state(self) -> torch.Tensor:
-        return self.runtime.xg
+        if not isinstance(
+            self.runtime, (GraphRuntimeStep, UniformGraphRuntime, RaggedGraphRuntime)
+        ):
+            raise TypeError("Graph state requested from a regular runtime payload.")
+        state = self.runtime.xg
+        if state is None:
+            raise ValueError("Graph runtime payload does not contain node state.")
+        return state
 
     @property
     def graph_control(self) -> torch.Tensor | None:
+        if not isinstance(
+            self.runtime, (GraphRuntimeStep, UniformGraphRuntime, RaggedGraphRuntime)
+        ):
+            raise TypeError("Graph control requested from a regular runtime payload.")
         return self.runtime.ug
 
     @property
     def edge_index(self) -> torch.Tensor:
-        return self.runtime.ei
+        if not isinstance(
+            self.runtime, (GraphRuntimeStep, UniformGraphRuntime, RaggedGraphRuntime)
+        ):
+            raise TypeError("Edge index requested from a regular runtime payload.")
+        edge_index = self.runtime.ei
+        if edge_index is None:
+            raise ValueError("Graph runtime payload does not contain edge indices.")
+        return edge_index
 
     @property
     def edge_weight(self) -> torch.Tensor | None:
+        if not isinstance(
+            self.runtime, (GraphRuntimeStep, UniformGraphRuntime, RaggedGraphRuntime)
+        ):
+            raise TypeError("Edge weight requested from a regular runtime payload.")
         return self.runtime.ew
 
     @property
     def edge_attr(self) -> torch.Tensor | None:
+        if not isinstance(
+            self.runtime, (GraphRuntimeStep, UniformGraphRuntime, RaggedGraphRuntime)
+        ):
+            raise TypeError("Edge attributes requested from a regular runtime payload.")
         return self.runtime.ea
 
     def unflatten_nodes(self, value: torch.Tensor) -> torch.Tensor:
+        if not isinstance(
+            self.runtime, (GraphRuntimeStep, UniformGraphRuntime, RaggedGraphRuntime)
+        ):
+            raise TypeError("Node unflatten requested from a regular runtime payload.")
         return self.runtime.g(value)
 
     def flatten_nodes(self, value: torch.Tensor) -> torch.Tensor:
+        if not isinstance(
+            self.runtime, (GraphRuntimeStep, UniformGraphRuntime, RaggedGraphRuntime)
+        ):
+            raise TypeError("Node flatten requested from a regular runtime payload.")
         return self.runtime.G(value)
 
 

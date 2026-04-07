@@ -224,6 +224,89 @@ def _stack_fixed_edge_index(series_items: tuple[GraphSeries, ...]) -> torch.Tens
     )
 
 
+def _normalize_time_varying_edge_index(edge_index: torch.Tensor) -> torch.Tensor:
+    if edge_index.ndim != 3:
+        raise TypeError("time-varying edge indices must be stored as rank-3 tensors")
+    if edge_index.shape[1] == 2:
+        return edge_index.transpose(1, 2)
+    if edge_index.shape[2] == 2:
+        return edge_index
+    raise ValueError(
+        "time-varying edge_index tensors must have shape [n_steps, 2, n_edges] "
+        "or [n_steps, n_edges, 2]"
+    )
+
+
+def _stack_time_varying_edge_index(
+    series_items: tuple[GraphSeries, ...],
+    *,
+    max_steps: int,
+) -> torch.Tensor:
+    tensors = [
+        _normalize_time_varying_edge_index(item.edge_index)
+        for item in series_items
+        if isinstance(item.edge_index, torch.Tensor)
+    ]
+    if len(tensors) != len(series_items):
+        raise TypeError("time-varying edge indices must be stored as rank-3 tensors")
+    max_edges = max(tensor.shape[1] for tensor in tensors)
+    ref = tensors[0]
+    out = torch.zeros(
+        (len(tensors), max_steps, max_edges, 2),
+        dtype=ref.dtype,
+        device=ref.device,
+    )
+    for idx, tensor in enumerate(tensors):
+        steps, edges = tensor.shape[:2]
+        out[idx, :steps, :edges] = tensor
+        if steps < max_steps:
+            out[idx, steps:, :edges] = tensor[0]
+    return out
+
+
+def _stack_time_varying_graph_field(
+    items: tuple[torch.Tensor | None, ...],
+    *,
+    max_steps: int,
+    time_ndim: int,
+) -> torch.Tensor | None:
+    present = tuple(item for item in items if item is not None)
+    if not present:
+        return None
+
+    ref = present[0]
+    max_edges = max(item.shape[1] if item.ndim == time_ndim else item.shape[0] for item in present)
+    feature_shape = ref.shape[2:] if ref.ndim == time_ndim else ref.shape[1:]
+    out = torch.zeros(
+        (len(items), max_steps, max_edges, *feature_shape),
+        dtype=ref.dtype,
+        device=ref.device,
+    )
+    for idx, item in enumerate(items):
+        if item is None:
+            continue
+        if item.ndim == time_ndim:
+            steps = item.shape[0]
+            edge_count = item.shape[1]
+            out[idx, :steps, :edge_count] = item
+            if steps < max_steps:
+                out[idx, steps:, :edge_count] = item[0]
+        else:
+            edge_count = item.shape[0]
+            out[idx, :, :edge_count] = item.unsqueeze(0).expand(max_steps, edge_count, *feature_shape)
+    if out.shape[-1:] == (1,):
+        return out.squeeze(-1)
+    return out
+
+
+def _pad_time_varying_edge_index(
+    series_items: tuple[GraphSeries, ...],
+    *,
+    max_steps: int,
+) -> torch.Tensor:
+    return _stack_time_varying_edge_index(series_items, max_steps=max_steps)
+
+
 def _stack_fixed_graph_field(
     items: tuple[torch.Tensor | None, ...],
     *,
@@ -1504,6 +1587,18 @@ def to_padded_graph_runtime(batch: GraphSeriesBatch) -> GraphRuntime:
                 max_steps=n_steps,
                 time_ndim=3,
             )
+        elif all(isinstance(item.edge_index, torch.Tensor) and item.edge_index.ndim == 3 for item in items):
+            edge_index = _stack_time_varying_edge_index(items, max_steps=n_steps)
+            edge_weight = _stack_time_varying_graph_field(
+                tuple(item.edge_weight for item in items),
+                max_steps=n_steps,
+                time_ndim=2,
+            )
+            edge_attr = _stack_time_varying_graph_field(
+                tuple(item.edge_attr for item in items),
+                max_steps=n_steps,
+                time_ndim=3,
+            )
         else:
             edge_index, edge_weight, edge_attr = _stack_graph_steps(items, max_steps=n_steps)
         return UniformGraphRuntime(
@@ -1545,6 +1640,18 @@ def to_padded_graph_runtime(batch: GraphSeriesBatch) -> GraphRuntime:
             time_ndim=2,
         )
         edge_attr = _stack_fixed_graph_field(
+            tuple(item.edge_attr for item in items),
+            max_steps=max_steps,
+            time_ndim=3,
+        )
+    elif all(isinstance(item.edge_index, torch.Tensor) and item.edge_index.ndim == 3 for item in items):
+        edge_index = _pad_time_varying_edge_index(items, max_steps=max_steps)
+        edge_weight = _stack_time_varying_graph_field(
+            tuple(item.edge_weight for item in items),
+            max_steps=max_steps,
+            time_ndim=2,
+        )
+        edge_attr = _stack_time_varying_graph_field(
             tuple(item.edge_attr for item in items),
             max_steps=max_steps,
             time_ndim=3,

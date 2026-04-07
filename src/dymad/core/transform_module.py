@@ -276,6 +276,8 @@ class SeriesTransformPipeline(nn.Module):
         if isinstance(series, GraphSeries):
             if isinstance(series.edge_index, tuple):
                 aligned_updates["edge_index"] = series.edge_index[self.delay :]
+            elif series.edge_index.ndim == 3 and series.edge_index.shape[0] == series.time.shape[0]:
+                aligned_updates["edge_index"] = series.edge_index[self.delay :]
             for graph_field, min_ndim in (("edge_weight", 2), ("edge_attr", 3)):
                 payload = getattr(series, graph_field)
                 trim = self.delay - field_delays.get(graph_field, 0)

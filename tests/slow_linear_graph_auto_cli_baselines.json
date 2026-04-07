@@ -1,0 +1,143 @@
+{
+  "kbf_ln": {
+    "metrics": {
+      "best_valid_total": 2.60623516428676e-11,
+      "crit_train_last": 2.527207889810776e-10,
+      "crit_valid_last": 3.485771494535012e-10,
+      "final_valid_loss": 2.60623516428676e-11,
+      "rmse": 3.4208260251985376e-05
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "crit_epoch_count": 1,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "model_name_prefix": "ltga_kbf_ln",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
+  "kbf_node": {
+    "metrics": {
+      "best_valid_total": 2.1068125294259216e-05,
+      "crit_train_last": 0.000214174742092765,
+      "crit_valid_last": 0.0002737267119445946,
+      "final_valid_loss": 2.1068125294259216e-05,
+      "rmse": 0.014697696072151352
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "crit_epoch_count": 50,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "model_name_prefix": "ltga_kbf_node",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  },
+  "kbf_wf": {
+    "metrics": {
+      "best_valid_total": 1.167513479190942e-08,
+      "crit_train_last": 5.948388295890854e-06,
+      "crit_valid_last": 6.003630768275936e-06,
+      "final_valid_loss": 1.167513479190942e-08,
+      "rmse": 0.0024800444289845213
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "crit_epoch_count": 50,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "model_name_prefix": "ltga_kbf_wf",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "total_training_time"
+      ]
+    }
+  }
+}

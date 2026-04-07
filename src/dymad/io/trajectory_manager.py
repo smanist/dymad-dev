@@ -1,5 +1,6 @@
 import copy
 import logging
+from dataclasses import replace
 from typing import Optional
 
 import numpy as np
@@ -32,6 +33,65 @@ def _stack_if_uniform(data):
         return np.stack(data, axis=0)
     except ValueError:
         return list(data)
+
+
+def _pack_graph_series_time_varying_topology(series: GraphSeries) -> GraphSeries:
+    if not isinstance(series.edge_index, tuple) or series.edge_weight is None:
+        return series
+
+    n_steps = len(series.edge_index)
+    edge_counts = [int(step.shape[1]) for step in series.edge_index]
+    max_edges = max(edge_counts)
+    if max_edges == 0:
+        return series
+
+    edge_index = torch.zeros(
+        (n_steps, 2, max_edges),
+        dtype=series.edge_index[0].dtype,
+        device=series.edge_index[0].device,
+    )
+    for step_index, step in enumerate(series.edge_index):
+        edge_index[step_index, :, : step.shape[1]] = step
+
+    edge_weight = series.edge_weight
+    packed_weight = None
+    if isinstance(edge_weight, tuple):
+        ref_weight = edge_weight[0]
+        packed_weight = torch.zeros(
+            (n_steps, max_edges),
+            dtype=ref_weight.dtype,
+            device=ref_weight.device,
+        )
+        for step_index, step_weight in enumerate(edge_weight):
+            weight = step_weight.squeeze(-1) if step_weight.ndim > 1 and step_weight.shape[-1] == 1 else step_weight
+            packed_weight[step_index, : weight.shape[0]] = weight
+    elif isinstance(edge_weight, torch.Tensor):
+        if edge_weight.ndim == 2 and edge_weight.shape[0] == n_steps:
+            packed_weight = edge_weight
+        elif edge_weight.ndim == 3 and edge_weight.shape[0] == n_steps and edge_weight.shape[-1] == 1:
+            packed_weight = edge_weight.squeeze(-1)
+
+    edge_attr = series.edge_attr
+    packed_attr = None
+    if isinstance(edge_attr, tuple):
+        ref_attr = edge_attr[0]
+        packed_attr = torch.zeros(
+            (n_steps, max_edges, ref_attr.shape[-1]),
+            dtype=ref_attr.dtype,
+            device=ref_attr.device,
+        )
+        for step_index, step_attr in enumerate(edge_attr):
+            packed_attr[step_index, : step_attr.shape[0]] = step_attr
+    elif isinstance(edge_attr, torch.Tensor):
+        packed_attr = edge_attr
+
+    return replace(
+        series,
+        edge_index=edge_index,
+        edge_weight=packed_weight if packed_weight is not None else edge_weight,
+        edge_attr=packed_attr if packed_attr is not None else edge_attr,
+        meta=dict(series.meta),
+    )
 
 
 def _process_data(data, x, label, base_dim=1, offset=0):
@@ -938,7 +998,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
             logger.info("Transformations already fitted. Skipping fitting step.")
 
         logger.info("Applying graph transformations through the typed series pipeline.")
-        transformed = list(pipeline(raw_batch))
+        transformed = [_pack_graph_series_time_varying_topology(item) for item in pipeline(raw_batch)]
         self.typed_dataset = transformed
         self.dataset = self.typed_dataset
 

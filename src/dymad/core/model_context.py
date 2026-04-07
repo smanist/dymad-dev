@@ -174,7 +174,7 @@ def _graph_series_from_runtime(payload: UniformGraphRuntime) -> GraphSeries:
     if payload.edge_index.ndim == 3:
         edge_index: torch.Tensor | tuple[torch.Tensor, ...] = payload.edge_index[0].transpose(0, 1)
     else:
-        edge_index_steps = tuple(step.transpose(0, 1) for step in payload.edge_index[0])
+        edge_index_steps = payload.edge_index[0].transpose(1, 2)
         if all(torch.equal(edge_index_steps[0], step) for step in edge_index_steps[1:]):
             edge_index = edge_index_steps[0]
         else:
@@ -185,16 +185,20 @@ def _graph_series_from_runtime(payload: UniformGraphRuntime) -> GraphSeries:
         if payload.edge_weight.ndim == 2:
             edge_weight = payload.edge_weight[0]
         else:
-            edge_weight = tuple(step for step in payload.edge_weight[0])
+            edge_weight = payload.edge_weight[0]
 
     edge_attr = None
     if payload.edge_attr is not None:
         if payload.edge_attr.ndim == 3:
             edge_attr = payload.edge_attr[0]
         else:
-            edge_attr = tuple(step for step in payload.edge_attr[0])
+            edge_attr = payload.edge_attr[0]
 
-    cls = FixedGraphSeries if isinstance(edge_index, torch.Tensor) else VariableEdgeGraphSeries
+    cls = (
+        FixedGraphSeries
+        if isinstance(edge_index, torch.Tensor) and edge_index.ndim == 2
+        else VariableEdgeGraphSeries
+    )
     return cls(
         time=payload.time[0],
         node_state=payload.node_state[0],
