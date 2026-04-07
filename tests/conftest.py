@@ -8,6 +8,8 @@ import pytest
 from dymad.utils import TrajectorySampler, adj_to_edge
 
 HERE = Path(__file__).parent
+SA_LTI_DATA_SEED = 123
+SA_LTI_TEST_SEED = 456
 
 
 def pytest_addoption(parser):
@@ -300,7 +302,7 @@ def sa_lti_data():
     def g(t, x):
         return x
 
-    sampler = TrajectorySampler(f, g, config=HERE / "sa_data.yaml")
+    sampler = TrajectorySampler(f, g, config=HERE / "sa_data.yaml", rng=SA_LTI_DATA_SEED)
     ts, xs, ys = sampler.sample(t_grid, batch=B)
     np.savez_compressed(HERE / "sa.npz", t=ts, x=ys)
 
@@ -329,7 +331,7 @@ def sa_lti_test():
     def g(t, x):
         return x
 
-    sampler = TrajectorySampler(f, g, config=HERE / "sa_data.yaml")
+    sampler = TrajectorySampler(f, g, config=HERE / "sa_data.yaml", rng=SA_LTI_TEST_SEED)
     ts, xs, ys = sampler.sample(t_grid, batch=1)
 
     # ---- Interface to the tests ----
