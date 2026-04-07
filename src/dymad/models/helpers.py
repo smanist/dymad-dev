@@ -1,8 +1,15 @@
 import copy
 import logging
+from collections.abc import Callable
+from typing import Any, cast
 
 from dymad.models.components import DEC_MAP, DYN_MAP, ENC_MAP, FZU_MAP, LIN_MAP
-from dymad.models.model_spec import ModelSpec, ModelSpecValidationError, ResolvedModelSpec
+from dymad.models.model_spec import (
+    ModelSpec,
+    ModelSpecValidationError,
+    PredictorKey,
+    ResolvedModelSpec,
+)
 from dymad.models.rollout_engine import select_rollout_engine
 from dymad.modules import make_autoencoder, make_network
 
@@ -150,6 +157,7 @@ def build_model(
 
     recipe_resolution = resolve_recipe(model_spec, model_config, data_meta, dtype, device)
     rollout_engine = select_rollout_engine(model_spec, model_config, recipe_resolution.dims)
+    predictor_key = cast(PredictorKey, rollout_engine.source.split(":", 1)[1])
     resolved = ResolvedModelSpec(
         model_spec=model_spec,
         dims=recipe_resolution.dims,
@@ -157,7 +165,7 @@ def build_model(
         feature_key=recipe_resolution.feature_key,
         dynamics_key=recipe_resolution.dynamics_key,
         decoder_key=recipe_resolution.decoder_key,
-        predictor_key=rollout_engine.source.split(":", 1)[1],
+        predictor_key=predictor_key,
         predictor=rollout_engine.predictor,
         input_order=recipe_resolution.input_order,
         processor_net=recipe_resolution.processor_net,
@@ -176,10 +184,11 @@ def build_model(
         ifgnn=graph_ae,
     )
 
-    predict = resolved.predictor
+    predict = cast(Callable[..., Any], resolved.predictor)
+    model_cls = cast(Callable[..., Any], model_spec.model_cls)
 
     # The full model
-    model = model_spec.model_cls(
+    model = model_cls(
         encoder=ENC_MAP[resolved.encoder_key],
         dynamics=(FZU_MAP[resolved.feature_key], DYN_MAP[resolved.dynamics_key]),
         decoder=DEC_MAP[resolved.decoder_key],
@@ -200,12 +209,15 @@ def build_model(
     model.model_spec = model_spec
     model.resolved_model_spec = resolved
 
-    logger.info(f"Built model: {model_spec.model_cls.__name__}")
+    model_cls_name = getattr(model_spec.model_cls, "__name__", type(model_spec.model_cls).__name__)
+    logger.info(f"Built model: {model_cls_name}")
     logger.info(
         f"- Encoder: {resolved.encoder_key}, Dynamics: {resolved.dynamics_key}, "
         f"Decoder: {resolved.decoder_key}, Features: {resolved.feature_key}"
     )
-    logger.info(f"- Using predictor: {predict.__name__}, input order: {resolved.input_order}")
+    logger.info(
+        f"- Using predictor: {getattr(predict, '__name__', repr(predict))}, input order: {resolved.input_order}"
+    )
     logger.info(f"- If graph model: {model.GRAPH}, continuous-time: {model.CONT}")
 
     return model
