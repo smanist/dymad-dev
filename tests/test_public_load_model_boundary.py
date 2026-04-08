@@ -18,28 +18,27 @@ def test_public_load_model_routes_via_boundary(monkeypatch, tmp_path: Path) -> N
     events: list[str] = []
 
     original_plan = context.executor.plan_checkpoint_prediction
-    original_materialize = context.executor.materialize_checkpoint_prediction
 
     def traced_plan(**kwargs):
         events.append("exec.plan")
         return original_plan(**kwargs)
 
-    def traced_materialize(**kwargs):
-        events.append("exec.materialize")
-        return original_materialize(**kwargs)
-
     monkeypatch.setattr(context.executor, "plan_checkpoint_prediction", traced_plan)
-    monkeypatch.setattr(context.executor, "materialize_checkpoint_prediction", traced_materialize)
+    monkeypatch.setattr(
+        context.executor,
+        "materialize_checkpoint_prediction",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("executor materializer should not run")),
+    )
 
     import dymad.io.checkpoint as checkpoint_module
 
     def fake_load_model(model_class, path):
-        events.append("legacy.load_model")
+        events.append("checkpoint.load_model")
         assert model_class is DummyModel
         assert path == str(checkpoint_path)
         return "model-object", "predict-function"
 
-    monkeypatch.setattr(checkpoint_module, "_load_model_legacy", fake_load_model)
+    monkeypatch.setattr(checkpoint_module, "_load_model_checkpoint", fake_load_model)
 
     model, predict_fn, trace = load_model(
         DummyModel,
@@ -53,6 +52,21 @@ def test_public_load_model_routes_via_boundary(monkeypatch, tmp_path: Path) -> N
     assert trace.plan.entrypoint == "dymad.io.checkpoint.load_model"
     assert events == [
         "exec.plan",
-        "exec.materialize",
-        "legacy.load_model",
+        "checkpoint.load_model",
     ]
+
+
+def test_executor_checkpoint_materializer_is_placeholder(tmp_path: Path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    plan = context.executor.plan_checkpoint_prediction(
+        model_ref="dymad.models.collections:LDM",
+        checkpoint_path="checkpoints/lti.pt",
+        horizon=3,
+    )
+
+    try:
+        context.executor.materialize_checkpoint_prediction(plan=plan, model_class=DummyModel)
+    except NotImplementedError as exc:
+        assert "dymad.io.load_model" in str(exc)
+    else:
+        raise AssertionError("CompatibilityExecutor.materialize_checkpoint_prediction should fail")

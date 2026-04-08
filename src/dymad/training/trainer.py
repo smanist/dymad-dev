@@ -9,6 +9,16 @@ from dymad.training.driver import SingleSplitDriver
 logger = logging.getLogger(__name__)
 
 
+def _select_single_stage_phase(base_config: dict[str, Any], *, name: str, trainer: str) -> dict[str, Any]:
+    phases = base_config.get("phases")
+    if not isinstance(phases, list) or not phases:
+        raise ValueError("Config must contain at least one phase after load_config normalization.")
+    cfg = copy.deepcopy(phases[0])
+    cfg.update({"name": name, "trainer": trainer})
+    cfg.setdefault("type", "optimizer")
+    return cfg
+
+
 class NODETrainer(SingleSplitDriver):
     """
     Simple interface for single-split single-stage training by NODE.
@@ -30,12 +40,9 @@ class NODETrainer(SingleSplitDriver):
             max_workers=max_workers,
         )
 
-        # By default, we don't specify the phases
-        # So we manually create a single NODE phase here
-        cfg = copy.deepcopy(self.base_config["training"])
-        del self.base_config["training"]
-        cfg.update({"name": "NODE", "trainer": "NODE"})
-        self.base_config.update({"phases": [cfg]})
+        self.base_config["phases"] = [
+            _select_single_stage_phase(self.base_config, name="NODE", trainer="NODE")
+        ]
 
 
 class WeakFormTrainer(SingleSplitDriver):
@@ -59,12 +66,9 @@ class WeakFormTrainer(SingleSplitDriver):
             max_workers=max_workers,
         )
 
-        # By default, we don't specify the phases
-        # So we manually create a single NODE phase here
-        cfg = copy.deepcopy(self.base_config["training"])
-        del self.base_config["training"]
-        cfg.update({"name": "WeakForm", "trainer": "Weak"})
-        self.base_config.update({"phases": [cfg]})
+        self.base_config["phases"] = [
+            _select_single_stage_phase(self.base_config, name="WeakForm", trainer="Weak")
+        ]
 
 
 class LinearTrainer(SingleSplitDriver):
@@ -88,12 +92,9 @@ class LinearTrainer(SingleSplitDriver):
             max_workers=max_workers,
         )
 
-        # By default, we don't specify the phases
-        # So we manually create a single NODE phase here
-        cfg = copy.deepcopy(self.base_config["training"])
-        del self.base_config["training"]
-        cfg.update({"name": "Linear", "trainer": "Linear"})
-        self.base_config.update({"phases": [cfg]})
+        self.base_config["phases"] = [
+            _select_single_stage_phase(self.base_config, name="Linear", trainer="Linear")
+        ]
 
 
 class StackedTrainer(SingleSplitDriver):

@@ -313,14 +313,7 @@ def _normalize_repeat_block(entry: dict[str, Any], index: int) -> list[PhaseSpec
 def normalize_phase_specs(config: dict[str, Any]) -> list[PhaseSpec]:
     raw_phases = copy.deepcopy(config.get("phases"))
     if raw_phases is None:
-        legacy_training = copy.deepcopy(config.get("training"))
-        if legacy_training is None:
-            raise PhaseSpecValidationError(
-                "Training config must contain 'phases' or a legacy 'training' block."
-            )
-        legacy_training.setdefault("name", "phase_0")
-        legacy_training.setdefault("trainer", "NODE")
-        raw_phases = [legacy_training]
+        raise PhaseSpecValidationError("Training config must contain 'phases'.")
 
     specs: list[PhaseSpec] = []
     for index, entry in enumerate(raw_phases):
@@ -416,13 +409,6 @@ class BasePhase:
         return copy.deepcopy(model_artifact.model.state_dict())
 
     def _prediction_settings(self) -> tuple[str, dict[str, Any]]:
-        training_cfg = self.config.get("training")
-        if isinstance(training_cfg, dict):
-            return (
-                training_cfg.get("ode_method", "dopri5"),
-                copy.deepcopy(training_cfg.get("ode_args", {})),
-            )
-
         phases = self.config.get("phases", [])
         for phase_cfg in phases:
             if not isinstance(phase_cfg, dict):

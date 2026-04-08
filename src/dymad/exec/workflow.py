@@ -55,14 +55,10 @@ class CompatibilityExecutor:
         plan: PredictionWorkflowPlan,
         model_class: type[Any],
     ) -> tuple[Any, Callable[..., Any]]:
-        request = self.facade.get_prediction_request(plan.prediction_handle)
-        if request.checkpoint_handle != plan.checkpoint_handle:
-            raise ValueError("plan checkpoint/prediction handles are inconsistent")
-        checkpoint = self.facade.get_checkpoint(request.checkpoint_handle)
-
-        from dymad.io.checkpoint import _load_model_legacy
-
-        return _load_model_legacy(model_class, checkpoint.checkpoint_path)
+        raise NotImplementedError(
+            "Checkpoint materialization is no longer routed through CompatibilityExecutor. "
+            "Use dymad.io.load_model for now; executor-native materialization is pending."
+        )
 
     def plan_spectral_analysis(
         self,

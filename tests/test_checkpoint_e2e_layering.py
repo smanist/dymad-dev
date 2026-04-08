@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dymad.exec.context import build_default_context
-from dymad.io.load_model_compat import load_model_compat
+from dymad.io import load_model
 
 
 class DummyModel:
@@ -19,19 +19,12 @@ def test_checkpoint_e2e_path_routes_facade_store_exec(monkeypatch, tmp_path: Pat
     captured: dict[str, object] = {}
 
     original_plan = context.executor.plan_checkpoint_prediction
-    original_materialize = context.executor.materialize_checkpoint_prediction
     original_register_checkpoint = context.facade.register_checkpoint
     original_prepare_prediction = context.facade.prepare_prediction_request
-    original_get_prediction = context.facade.get_prediction_request
-    original_get_checkpoint = context.facade.get_checkpoint
 
     def traced_plan(**kwargs):
         events.append("exec.plan")
         return original_plan(**kwargs)
-
-    def traced_materialize(**kwargs):
-        events.append("exec.materialize")
-        return original_materialize(**kwargs)
 
     def traced_register_checkpoint(*, model_ref: str, checkpoint_path: str, device: str = "cpu"):
         events.append("facade.register_checkpoint")
@@ -52,34 +45,28 @@ def test_checkpoint_e2e_path_routes_facade_store_exec(monkeypatch, tmp_path: Pat
             has_graph=has_graph,
         )
 
-    def traced_get_prediction_request(handle: str):
-        events.append("facade.get_prediction_request")
-        return original_get_prediction(handle)
-
-    def traced_get_checkpoint(handle: str):
-        events.append("facade.get_checkpoint")
-        return original_get_checkpoint(handle)
-
     monkeypatch.setattr(context.executor, "plan_checkpoint_prediction", traced_plan)
-    monkeypatch.setattr(context.executor, "materialize_checkpoint_prediction", traced_materialize)
+    monkeypatch.setattr(
+        context.executor,
+        "materialize_checkpoint_prediction",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("executor materializer should not run")),
+    )
     monkeypatch.setattr(context.facade, "register_checkpoint", traced_register_checkpoint)
     monkeypatch.setattr(
         context.facade, "prepare_prediction_request", traced_prepare_prediction_request
     )
-    monkeypatch.setattr(context.facade, "get_prediction_request", traced_get_prediction_request)
-    monkeypatch.setattr(context.facade, "get_checkpoint", traced_get_checkpoint)
 
     def fake_load_model(model_class, path):
-        events.append("legacy.load_model")
+        events.append("checkpoint.load_model")
         captured["model_class"] = model_class
         captured["checkpoint_path"] = path
         return "model-object", "predict-function"
 
     import dymad.io.checkpoint as checkpoint_module
 
-    monkeypatch.setattr(checkpoint_module, "_load_model_legacy", fake_load_model)
+    monkeypatch.setattr(checkpoint_module, "_load_model_checkpoint", fake_load_model)
 
-    model, predict_fn, trace = load_model_compat(
+    model, predict_fn, trace = load_model(
         DummyModel,
         checkpoint_path,
         context=context,
@@ -105,8 +92,5 @@ def test_checkpoint_e2e_path_routes_facade_store_exec(monkeypatch, tmp_path: Pat
         "exec.plan",
         "facade.register_checkpoint",
         "facade.prepare_prediction_request",
-        "exec.materialize",
-        "facade.get_prediction_request",
-        "facade.get_checkpoint",
-        "legacy.load_model",
+        "checkpoint.load_model",
     ]

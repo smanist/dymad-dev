@@ -1,3 +1,4 @@
+import copy
 import logging
 import os
 import sys
@@ -103,4 +104,81 @@ def load_config(config_path: str, config_mod: dict = None) -> dict:
                 config[key].update(value)
             else:
                 config[key] = value
+    _normalize_legacy_training_config(config)
     return config
+
+
+def _is_optimizer_phase_entry(entry: object) -> bool:
+    return isinstance(entry, dict) and (
+        entry.get("type") == "optimizer" or "trainer" in entry
+    )
+
+
+def _normalized_legacy_training_phase(training_cfg: dict, *, name: str, trainer: str) -> dict:
+    phase = copy.deepcopy(training_cfg)
+    phase.setdefault("type", "optimizer")
+    phase.setdefault("name", name)
+    phase.setdefault("trainer", trainer)
+    return phase
+
+
+def _first_optimizer_phase_index(phases: object) -> int:
+    if not isinstance(phases, list):
+        return 0
+    for index, phase in enumerate(phases):
+        if _is_optimizer_phase_entry(phase):
+            return index
+    return 0
+
+
+def _rewrite_legacy_training_param_grid(config: dict, phase_index: int) -> None:
+    cv_cfg = config.get("cv")
+    if not isinstance(cv_cfg, dict):
+        return
+    param_grid = cv_cfg.get("param_grid")
+    if not isinstance(param_grid, dict):
+        return
+    rewritten = {}
+    for key, value in param_grid.items():
+        if isinstance(key, str) and key.startswith("training."):
+            suffix = key.split(".", 1)[1]
+            rewritten[f"phases.{phase_index}.{suffix}"] = value
+        else:
+            rewritten[key] = value
+    cv_cfg["param_grid"] = rewritten
+
+
+def _normalize_legacy_training_config(config: dict) -> None:
+    phases = config.get("phases")
+    training_cfg = config.get("training")
+    if isinstance(training_cfg, dict):
+        if isinstance(phases, list):
+            merged = False
+            for index, phase in enumerate(phases):
+                if not _is_optimizer_phase_entry(phase):
+                    continue
+                merged_phase = copy.deepcopy(phase)
+                merged_phase.update(copy.deepcopy(training_cfg))
+                merged_phase.setdefault("type", "optimizer")
+                phases[index] = merged_phase
+                _rewrite_legacy_training_param_grid(config, index)
+                merged = True
+                break
+            if not merged:
+                phases.insert(
+                    0,
+                    _normalized_legacy_training_phase(
+                        training_cfg,
+                        name="phase_0",
+                        trainer="NODE",
+                    ),
+                )
+                _rewrite_legacy_training_param_grid(config, 0)
+        else:
+            config["phases"] = [
+                _normalized_legacy_training_phase(training_cfg, name="phase_0", trainer="NODE")
+            ]
+            _rewrite_legacy_training_param_grid(config, 0)
+        del config["training"]
+    else:
+        _rewrite_legacy_training_param_grid(config, _first_optimizer_phase_index(phases))

@@ -72,13 +72,31 @@ def iter_param_grid(param_grid: dict[str, Iterable[Any]]):
 
 def set_by_dotted_key(d: dict[str, Any], dotted_key: str, value: Any):
     """
-    Set d['a']['b']['c'] when dotted_key is 'a.b.c'.
-    Creates intermediate dicts as needed.
+    Set nested dict/list paths for dotted keys such as 'a.b.c' or 'phases.0.n_epochs'.
+    Creates intermediate containers as needed.
     """
     parts = dotted_key.split(".")
     curr = d
-    for p in parts[:-1]:
-        if p not in curr or not isinstance(curr[p], dict):
-            curr[p] = {}
-        curr = curr[p]
-    curr[parts[-1]] = value
+    for index, part in enumerate(parts[:-1]):
+        next_part = parts[index + 1]
+        next_is_index = next_part.isdigit()
+
+        if isinstance(curr, list):
+            list_index = int(part)
+            while len(curr) <= list_index:
+                curr.append([] if next_is_index else {})
+            curr = curr[list_index]
+            continue
+
+        if part not in curr or not isinstance(curr[part], (dict, list)):
+            curr[part] = [] if next_is_index else {}
+        curr = curr[part]
+
+    last = parts[-1]
+    if isinstance(curr, list):
+        list_index = int(last)
+        while len(curr) <= list_index:
+            curr.append(None)
+        curr[list_index] = value
+        return
+    curr[last] = value

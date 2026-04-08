@@ -2,7 +2,9 @@ import copy
 import logging
 import os
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from os import PathLike
+from typing import Any
 
 import numpy as np
 import torch
@@ -20,11 +22,19 @@ from dymad.core.series import RegularSeriesBatch
 from dymad.core.torch_transforms import AutoencoderTransform, ComposeTransform
 from dymad.core.transform_builder import build_transform_module
 from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline
+from dymad.exec.context import ExecutionContext, build_default_context
+from dymad.exec.state import PredictionWorkflowPlan
 from dymad.io.series_adapter import SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManager
 from dymad.utils.misc import load_config
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BoundaryLoadTrace:
+    plan: PredictionWorkflowPlan
+    model_ref: str
 
 
 def _atleast_3d(x):
@@ -227,14 +237,6 @@ def _prediction_defaults_from_config(config: dict | None) -> dict:
     if not isinstance(config, dict):
         return {}
 
-    if isinstance(config.get("training"), dict):
-        training_cfg = config["training"]
-        defaults = {}
-        if "ode_method" in training_cfg:
-            defaults["method"] = training_cfg["ode_method"]
-        defaults.update(copy.deepcopy(training_cfg.get("ode_args", {})))
-        return defaults
-
     phases = config.get("phases")
     if not isinstance(phases, list):
         return {}
@@ -253,7 +255,7 @@ def _prediction_defaults_from_config(config: dict | None) -> dict:
     return {}
 
 
-def _load_model_legacy(model_class, checkpoint_path):
+def _load_model_checkpoint(model_class, checkpoint_path):
     """
     Load a model from a checkpoint file.
 
@@ -546,26 +548,37 @@ def _load_model_legacy(model_class, checkpoint_path):
 
 def load_model(
     model_class,
-    checkpoint_path,
+    checkpoint_path: str | PathLike[str],
     *,
-    context=None,
+    context: ExecutionContext | None = None,
     horizon: int = 1,
     has_control: bool = False,
     has_graph: bool = False,
     return_trace: bool = False,
 ):
-    """Public checkpoint loader routed through the migration boundary."""
-    from dymad.io.load_model_compat import load_model_compat
-
-    return load_model_compat(
-        model_class,
-        checkpoint_path,
-        context=context,
+    """Load a model from a checkpoint and optionally record the boundary plan."""
+    active_context = context or build_default_context()
+    model_module = getattr(model_class, "__module__", type(model_class).__module__)
+    model_name = getattr(model_class, "__name__", type(model_class).__name__)
+    model_ref = f"{model_module}:{model_name}"
+    plan = active_context.executor.plan_checkpoint_prediction(
+        model_ref=model_ref,
+        checkpoint_path=str(checkpoint_path),
         horizon=horizon,
         has_control=has_control,
         has_graph=has_graph,
-        return_trace=return_trace,
     )
+    model, predict_fn = _load_model_checkpoint(model_class, str(checkpoint_path))
+    if return_trace:
+        return (
+            model,
+            predict_fn,
+            BoundaryLoadTrace(
+                plan=plan,
+                model_ref=model_ref,
+            ),
+        )
+    return model, predict_fn
 
 
 def _prepare_visualize_model_input(

@@ -24,6 +24,7 @@ from dymad.training.phases import (
     normalize_phase_specs,
 )
 from dymad.training.trainer_run import TrainerRun
+from dymad.utils import load_config
 
 
 def _build_phase_context():
@@ -229,23 +230,37 @@ def test_validation_analysis_phase_uses_phase_solver_settings(monkeypatch):
     assert result.metrics == {"mse": 0.25}
 
 
-def test_prediction_settings_prefers_legacy_training_alias():
-    config = {
-        "model": {"name": "demo"},
-        "training": {
-            "ode_method": "rk4",
-            "ode_args": {"step_size": 0.2},
-        },
-        "phases": [
-            {
-                "type": "optimizer",
-                "name": "node",
-                "trainer": "NODE",
-                "ode_method": "dopri5",
-                "ode_args": {"rtol": 1e-6},
-            }
-        ],
-    }
+def test_load_config_normalizes_legacy_training_alias(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+training:
+  ode_method: rk4
+  ode_args:
+    step_size: 0.2
+phases:
+  - type: optimizer
+    name: node
+    trainer: NODE
+    ode_method: dopri5
+    ode_args:
+      rtol: 1.0e-6
+cv:
+  param_grid:
+    training.learning_rate: [0.1, 0.2]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(str(config_path))
+
+    assert "training" not in config
+    assert config["phases"][0]["ode_method"] == "rk4"
+    assert config["phases"][0]["ode_args"] == {"step_size": 0.2}
+    assert config["cv"]["param_grid"] == {"phases.0.learning_rate": [0.1, 0.2]}
+
     execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
     phase = build_phase(
         AnalysisPhaseSpec(name="analysis"),
@@ -323,7 +338,7 @@ def test_run_cv_single_uses_trainer_run_with_typed_context(monkeypatch):
         "combo_idx": 5,
         "fold_idx": 2,
         "fold_cfg": {"seed": 0},
-        "combo": {"training.lr": 0.1},
+        "combo": {"phases.0.lr": 0.1},
         "base_name": "base",
         "checkpoint_prefix": "/checkpoints",
         "results_prefix": "/results",
