@@ -22,8 +22,8 @@ from dymad.core.series import RegularSeriesBatch
 from dymad.core.torch_transforms import AutoencoderTransform, ComposeTransform
 from dymad.core.transform_builder import build_transform_module
 from dymad.core.transform_module import FieldTransformModule, SeriesTransformPipeline
-from dymad.exec.context import ExecutionContext, build_default_context
-from dymad.exec.state import PredictionWorkflowPlan
+from dymad.agent.exec.context import ExecutionContext, build_default_context
+from dymad.agent.exec.state import PredictionWorkflowPlan
 from dymad.io.series_adapter import SeriesAdapter
 from dymad.io.trajectory_manager import TrajectoryManager
 from dymad.utils.misc import load_config

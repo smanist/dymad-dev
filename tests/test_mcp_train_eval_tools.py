@@ -9,8 +9,8 @@ import yaml
 
 import dymad.io
 import dymad.training
-from dymad.exec.context import build_default_context
-from dymad.mcp import DemoTools
+from dymad.agent.exec.context import build_default_context
+from dymad.agent.mcp import DemoTools
 
 
 def _write_regular_dataset(path: Path, *, with_control: bool = True) -> None:
@@ -244,7 +244,7 @@ def test_evaluate_model_regular_writes_metrics_and_plot(tmp_path, monkeypatch) -
         path.write_bytes(b"plot")
 
     monkeypatch.setattr(dymad.io, "load_model", fake_load_model)
-    monkeypatch.setattr("dymad.exec.workflow.plot_trajectory", fake_plot_trajectory)
+    monkeypatch.setattr("dymad.agent.exec.workflow.plot_trajectory", fake_plot_trajectory)
 
     tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
     dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]

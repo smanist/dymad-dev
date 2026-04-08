@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from dymad.facade.handles import (
+from dymad.agent.facade.handles import (
     CheckpointHandle,
     DatasetHandle,
     EvaluationHandle,
@@ -13,7 +13,7 @@ from dymad.facade.handles import (
     SpectralSnapshotHandle,
     TrainingRunHandle,
 )
-from dymad.store.object_store import (
+from dymad.agent.store.object_store import (
     CheckpointRecord,
     DatasetRecord,
     EvaluationRecord,

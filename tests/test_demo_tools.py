@@ -3,8 +3,8 @@ from __future__ import annotations
 import sys
 import types
 
-from dymad.exec.context import build_default_context
-from dymad.mcp import DemoTools, build_server
+from dymad.agent.exec.context import build_default_context
+from dymad.agent.mcp import DemoTools, build_server
 
 
 def test_demo_tools_wrap_success_and_errors(tmp_path) -> None:

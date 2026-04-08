@@ -16,20 +16,20 @@ import numpy as np
 import torch
 import yaml
 
-from dymad.exec.state import (
+from dymad.agent.exec.state import (
     DatasetInspection,
     EvaluateModelResult,
     PredictionWorkflowPlan,
     SpectralWorkflowPlan,
     TrainModelResult,
 )
-from dymad.exec.training_profiles import profile_config, resolve_profile_name
-from dymad.facade.operations import FacadeOperations
+from dymad.agent.exec.training_profiles import profile_config, resolve_profile_name
+from dymad.agent.facade.operations import FacadeOperations
 from dymad.utils.misc import _normalize_legacy_training_config
 from dymad.utils.plot import plot_trajectory
 
 if TYPE_CHECKING:
-    from dymad.exec.context import ExecutionContext
+    from dymad.agent.exec.context import ExecutionContext
     from dymad.sako.adapter import SpectralAnalysisAdapter, SpectralEigensystem, SpectralRuntime
     from dymad.sako.snapshot import SpectralSnapshot
 

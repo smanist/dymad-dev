@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dymad.store.object_store import ObjectSummary
+from dymad.agent.store.object_store import ObjectSummary
 
 
 @dataclass(frozen=True)

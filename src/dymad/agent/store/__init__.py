@@ -1,7 +1,7 @@
-"""Store primitives for facade-boundary object management."""
+"""Store primitives for agent-boundary object management."""
 
-from dymad.store.filesystem_artifact_store import FilesystemArtifactStore
-from dymad.store.object_store import (
+from dymad.agent.store.filesystem_artifact_store import FilesystemArtifactStore
+from dymad.agent.store.object_store import (
     CheckpointRecord,
     ObjectNotFoundError,
     ObjectStore,
@@ -19,3 +19,4 @@ __all__ = [
     "PredictionRequestRecord",
     "SpectralSnapshotRecord",
 ]
+

@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from dymad.exec.context import ExecutionContext, build_default_context
-from dymad.store.object_store import ObjectSummary
+from dymad.agent.exec.context import ExecutionContext, build_default_context
+from dymad.agent.store.object_store import ObjectSummary
 
 
 class DemoTools:

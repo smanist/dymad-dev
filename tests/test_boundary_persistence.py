@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import numpy.testing as npt
 
-from dymad.exec.context import build_default_context
+from dymad.agent.exec.context import build_default_context
 from dymad.sako.snapshot import build_spectral_snapshot
 
 

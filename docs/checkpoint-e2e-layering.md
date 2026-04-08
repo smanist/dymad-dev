@@ -8,24 +8,24 @@ Record one verified end-to-end checkpoint path in `dymad_migrate` that follows t
 
 Reference architecture (`mcp_test`) path:
 
-`core -> facade -> exec -> demo_tools -> mcp_server`
+`core -> agent.facade -> agent.exec -> agent.mcp.demo_tools -> agent.mcp.server`
 
 Current verified DyMAD migration path:
 
 1. `core` (legacy compatibility target): `dymad.io.checkpoint.load_model(...)`
-2. `facade`: `dymad.facade.operations.FacadeOperations`
+2. `agent facade`: `dymad.agent.facade.operations.FacadeOperations`
    - `register_checkpoint(...)`
    - `prepare_prediction_request(...)`
    - `get_prediction_request(...)`
    - `get_checkpoint(...)`
-3. `store`: `dymad.store.object_store.ObjectStore`
+3. `agent store`: `dymad.agent.store.object_store.ObjectStore`
    - persists `chk_*` and `pred_*` records
-4. `exec`: `dymad.exec.workflow.CompatibilityExecutor`
+4. `agent exec`: `dymad.agent.exec.workflow.CompatibilityExecutor`
    - `plan_checkpoint_prediction(...)`
    - `materialize_checkpoint_prediction(...)`
-5. `DemoTools`: `dymad.mcp.demo_tools.DemoTools`
+5. `agent DemoTools`: `dymad.agent.mcp.demo_tools.DemoTools`
    - wraps facade/exec workflows in JSON-safe `ok/error` envelopes
-6. `mcp_server`: `dymad.mcp.server.build_server()`
+6. `agent mcp_server`: `dymad.agent.mcp.server.build_server()`
    - publishes `DemoTools` through `FastMCP`
 
 ## Verified Sequence

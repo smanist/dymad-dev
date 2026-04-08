@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from dymad.exec.context import ExecutionContext, build_default_context
-from dymad.mcp.demo_tools import DemoTools
+from dymad.agent.exec.context import ExecutionContext, build_default_context
+from dymad.agent.mcp.demo_tools import DemoTools
 
 
 def build_server(

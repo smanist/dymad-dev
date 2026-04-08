@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from dymad.sako.snapshot import KoopmanWeightSnapshot, SpectralSnapshot
-from dymad.store.object_store import (
+from dymad.agent.store.object_store import (
     CheckpointRecord,
     DatasetRecord,
     EvaluationRecord,

@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
 
-from dymad.exec.workflow import CompatibilityExecutor
-from dymad.facade.operations import FacadeOperations
-from dymad.store.filesystem_artifact_store import FilesystemArtifactStore
-from dymad.store.object_store import ObjectStore
+from dymad.agent.exec.workflow import CompatibilityExecutor
+from dymad.agent.facade.operations import FacadeOperations
+from dymad.agent.store.filesystem_artifact_store import FilesystemArtifactStore
+from dymad.agent.store.object_store import ObjectStore
 
 
 @dataclass(frozen=True)

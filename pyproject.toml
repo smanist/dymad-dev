@@ -109,12 +109,9 @@ ignore = [
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 include = [
+  "src/dymad/agent",
   "src/dymad/core/graph_series.py",
   "src/dymad/core/series.py",
-  "src/dymad/exec",
-  "src/dymad/exec/context.py",
-  "src/dymad/facade",
-  "src/dymad/mcp",
   "src/dymad/io/load_model_compat.py",
   "src/dymad/models/helpers.py",
   "src/dymad/models/prediction.py",
@@ -126,7 +123,6 @@ include = [
   "src/dymad/numerics/time_int.py",
   "src/dymad/numerics/weak.py",
   "src/dymad/sako/snapshot.py",
-  "src/dymad/store",
   "src/dymad/training/batch_adapter.py",
   "src/dymad/training/execution_services.py",
   "src/dymad/training/helper.py",

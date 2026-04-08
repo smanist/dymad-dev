@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from dymad.exec.workflow import CompatibilityExecutor
+from dymad.agent.exec.workflow import CompatibilityExecutor
 from dymad.io import load_model
 from dymad.models import DKBF, KBF
 from dymad.sako import SpectralAnalysis, SpectralAnalysisAdapter, SpectralPlottingAdapter

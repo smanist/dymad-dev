@@ -1,12 +1,12 @@
-"""Facade boundary for typed-handle migration flows."""
+"""Facade boundary for typed-handle agent workflows."""
 
-from dymad.facade.handles import (
+from dymad.agent.facade.handles import (
     CheckpointHandle,
     HandleValidationError,
     PredictionHandle,
     SpectralSnapshotHandle,
 )
-from dymad.facade.operations import FacadeOperations
+from dymad.agent.facade.operations import FacadeOperations
 
 __all__ = [
     "CheckpointHandle",
@@ -15,3 +15,4 @@ __all__ = [
     "PredictionHandle",
     "SpectralSnapshotHandle",
 ]
+

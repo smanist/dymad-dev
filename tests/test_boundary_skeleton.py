@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from dymad.exec.context import build_default_context
-from dymad.facade.handles import (
+from dymad.agent.exec.context import build_default_context
+from dymad.agent.facade.handles import (
     CheckpointHandle,
     DatasetHandle,
     EvaluationHandle,
