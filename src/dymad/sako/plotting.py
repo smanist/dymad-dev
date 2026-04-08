@@ -22,7 +22,20 @@ def per_state_err(prd: np.ndarray, ref: np.ndarray) -> np.ndarray:
     """Compute per-state prediction error between trajectories."""
     norm_diff = np.linalg.norm(prd - ref, axis=1)
     norm_ref = np.sqrt(prd.shape[1]) * (np.max(ref, axis=1) - np.min(ref, axis=1))
+    norm_ref = np.where(norm_ref > 0, norm_ref, 1.0)
     return np.mean(norm_diff / norm_ref, axis=0)
+
+
+def _encode_obs_reference(analysis: Any, ref: np.ndarray) -> np.ndarray:
+    """Encode plotting references into observable trajectories with stable batch/time shapes."""
+    ref = np.asarray(ref)
+    if ref.ndim == 1:
+        return np.asarray(analysis._ctx.encode(ref)).real
+    if ref.ndim == 2:
+        return np.stack([np.asarray(analysis._ctx.encode(step)) for step in ref], axis=0).real
+    if ref.ndim == 3:
+        return np.stack([_encode_obs_reference(analysis, traj) for traj in ref], axis=0)
+    raise ValueError(f"Unsupported observable reference shape: {ref.shape}")
 
 
 class SpectralPlottingAdapter:
@@ -114,7 +127,7 @@ class SpectralPlottingAdapter:
             _refs, _errs = None, None
         else:
             if ifobs:
-                _refs = analysis._ctx.encode(ref).real
+                _refs = _encode_obs_reference(analysis, ref)
             else:
                 _refs = np.array(ref)
             if _refs.ndim == 2:

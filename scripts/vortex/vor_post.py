@@ -1,11 +1,16 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg as spl
+# from pathlib import Path
+# import os
 
 from dymad.models import DKBF, KBF
 from dymad.numerics import complex_plot
 from dymad.sako import SpectralAnalysis
 from dymad.utils import animate, setup_logging
+
+# BASE_DIR = Path(__file__).resolve().parent
+# os.chdir(BASE_DIR)
 
 Nx, Ny = 199, 449
 dat = np.load("data/cylinder.npz")
@@ -40,7 +45,15 @@ ifani = 1
 if ifprd:
     x0s = xs[0]
     for _i in range(Nsa):
-        sas[_i].plot_pred(x0s, t_grid, ref=xs, idx="all", figsize=(6, 8), title=lbs[_i], ifobs=True)
+        sas[_i].plot_pred(
+            x0s,
+            t_grid,
+            ref=xs,
+            idx="all",
+            figsize=(6, 8),
+            title=lbs[_i],
+            ifobs=True,
+        )
 
 if ifeig:
     ## Eigenvalues
@@ -89,7 +102,7 @@ if ifmod:
             _a.set_axis_off()
 
 if ifani:
-    IDX = 2
+    IDX = 3
     eig = "func"
 
     fig, ax = plt.subplots(nrows=3, ncols=5, figsize=(16, 4))
