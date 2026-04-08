@@ -9,7 +9,7 @@ N, M = 201, 20
 tt = np.linspace(0, np.pi, N)
 cc = np.cos(tt)
 ss = np.sin(tt)
-Ms = np.random.rand(2, M)
+Ms = np.random.default_rng(0).random((2, M))
 X = np.vstack([cc, ss]).T @ Ms
 nrm = np.linalg.norm(X)
 
