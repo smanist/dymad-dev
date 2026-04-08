@@ -85,3 +85,8 @@ class FacadeOperations:
 
     def describe_object(self, handle: str) -> ObjectSummary:
         return self._store.summarize(handle)
+
+    def list_objects(self, *, kind: str | None = None) -> list[ObjectSummary]:
+        if kind is not None and kind not in {"checkpoint", "prediction_request", "spectral_snapshot"}:
+            raise ValueError(f"unsupported object kind: {kind}")
+        return self._store.list_summaries(kind=kind)

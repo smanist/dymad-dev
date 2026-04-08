@@ -8,7 +8,7 @@ Record one verified end-to-end checkpoint path in `dymad_migrate` that follows t
 
 Reference architecture (`mcp_test`) path:
 
-`core -> facade -> exec -> mcp_server`
+`core -> facade -> exec -> demo_tools -> mcp_server`
 
 Current verified DyMAD migration path:
 
@@ -23,7 +23,10 @@ Current verified DyMAD migration path:
 4. `exec`: `dymad.exec.workflow.CompatibilityExecutor`
    - `plan_checkpoint_prediction(...)`
    - `materialize_checkpoint_prediction(...)`
-5. `mcp_server`: not implemented yet in `dymad_migrate`; remains an upper layer target exactly as in `mcp_test`
+5. `DemoTools`: `dymad.mcp.demo_tools.DemoTools`
+   - wraps facade/exec workflows in JSON-safe `ok/error` envelopes
+6. `mcp_server`: `dymad.mcp.server.build_server()`
+   - publishes `DemoTools` through `FastMCP`
 
 ## Verified Sequence
 
@@ -43,12 +46,14 @@ Execution sequence:
 4. the compatibility adapter calls `CompatibilityExecutor.materialize_checkpoint_prediction(...)`.
 5. `materialize_checkpoint_prediction(...)` resolves handles through `FacadeOperations`.
 6. The resolved checkpoint path is materialized through legacy checkpoint internals.
+7. The same persisted handles can be surfaced through `DemoTools` and `FastMCP` without bypassing the boundary.
 
 ## Verification
 
 ```bash
 cd modules/dymad_migrate && PYTHONPATH=src pytest tests/test_checkpoint_e2e_layering.py -q
 cd modules/dymad_migrate && PYTHONPATH=src pytest tests/test_public_load_model_boundary.py -q
+cd modules/dymad_migrate && PYTHONPATH=src pytest tests/test_demo_tools.py -q
 ```
 
-The tests validate call order across `exec -> facade -> store` and confirm the default public entrypoint now routes through the compatibility boundary.
+The tests validate call order across `exec -> facade -> store`, confirm rehydration through the persisted artifact root, and verify the MCP-facing server assembly goes through `DemoTools`.

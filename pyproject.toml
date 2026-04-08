@@ -10,6 +10,7 @@ authors         = [{name = "APUS Lab @ PSU"}]
 readme          = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "fastmcp>=3.1.0",
   "imageio>=2.36.0",
   "jax>=0.4.35",
   "numpy>=2.0",
@@ -113,6 +114,7 @@ include = [
   "src/dymad/exec",
   "src/dymad/exec/context.py",
   "src/dymad/facade",
+  "src/dymad/mcp",
   "src/dymad/io/load_model_compat.py",
   "src/dymad/models/helpers.py",
   "src/dymad/models/prediction.py",
