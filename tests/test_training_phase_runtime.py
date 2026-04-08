@@ -1,9 +1,9 @@
 import pytest
 import torch
 
+import dymad.training.phases as phases_module
 from dymad.training import driver
 from dymad.training.execution_services import ExecutionServices
-import dymad.training.phases as phases_module
 from dymad.training.phase_runtime import (
     ArtifactRegistry,
     ModelArtifact,

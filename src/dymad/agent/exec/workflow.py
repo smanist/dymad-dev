@@ -9,7 +9,7 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import numpy as np
@@ -265,9 +265,9 @@ class CompatibilityExecutor:
     """Plans typed-handle flows and executes train/evaluate compatibility workflows."""
 
     facade: FacadeOperations
-    context_provider: Callable[[], "ExecutionContext"] | None = None
+    context_provider: Callable[[], ExecutionContext] | None = None
 
-    def _active_context(self) -> "ExecutionContext":
+    def _active_context(self) -> ExecutionContext:
         if self.context_provider is None:
             raise RuntimeError("CompatibilityExecutor requires an execution context provider")
         return self.context_provider()
@@ -359,7 +359,9 @@ class CompatibilityExecutor:
             artifacts={
                 "checkpoint_path": str(checkpoint_path),
                 "training_summary_path": str(summary_path),
-                "history_plot_path": str(history_plot_path) if history_plot_path.is_file() else None,
+                "history_plot_path": str(history_plot_path)
+                if history_plot_path.is_file()
+                else None,
                 "prediction_plot_path": (
                     str(prediction_plot_path) if prediction_plot_path.is_file() else None
                 ),
@@ -395,10 +397,13 @@ class CompatibilityExecutor:
         manager.prepare_data()
         from dymad.io import TrajectoryManagerGraph, load_model
 
-        _, predict_fn = load_model(
-            model,
-            checkpoint.checkpoint_path,
-            context=self._active_context(),
+        _, predict_fn = cast(
+            tuple[Any, Callable[..., np.ndarray]],
+            load_model(
+                model,
+                checkpoint.checkpoint_path,
+                context=self._active_context(),
+            ),
         )
 
         predictions: list[np.ndarray] = []
@@ -407,17 +412,20 @@ class CompatibilityExecutor:
             payload = _trajectory_payload(manager, index)
             kwargs = dict(predict_kwargs or {})
             kwargs.setdefault("device", "cpu")
-            pred = predict_fn(
-                payload["x"],
-                payload["t"],
-                u=payload["u"],
-                p=payload["p"],
-                **(
-                    {}
-                    if not isinstance(manager, TrajectoryManagerGraph)
-                    else {"ei": payload["ei"], "ew": payload["ew"], "ea": payload["ea"]}
+            pred = cast(
+                np.ndarray,
+                predict_fn(
+                    payload["x"],
+                    payload["t"],
+                    u=payload["u"],
+                    p=payload["p"],
+                    **(
+                        {}
+                        if not isinstance(manager, TrajectoryManagerGraph)
+                        else {"ei": payload["ei"], "ew": payload["ew"], "ea": payload["ea"]}
+                    ),
+                    **kwargs,
                 ),
-                **kwargs,
             )
             predictions.append(pred)
             errors.append(_rmse(pred, payload["x"]))
@@ -440,7 +448,9 @@ class CompatibilityExecutor:
             "aggregate": metrics,
             "per_trajectory_rmse": [float(value) for value in error_array.tolist()],
         }
-        metrics_path.write_text(json.dumps(metrics_payload, indent=2, sort_keys=True), encoding="utf-8")
+        metrics_path.write_text(
+            json.dumps(metrics_payload, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
         plot_paths: list[str] = []
         plot_skipped_reason = None

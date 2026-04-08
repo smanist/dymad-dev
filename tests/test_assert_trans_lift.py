@@ -88,9 +88,7 @@ def test_custom_finv():
         return np.vstack([z[:, 0], np.log(z[:, 1]) / a]).T
 
     xs = np.array([[1.0, 0.4], [1.1, 0.3], [1.2, 0.2], [1.3, 0.1]])
-    xp = np.array(
-        [[1.0, np.exp(0.4)], [1.1, np.exp(0.3)], [1.2, np.exp(0.2)], [1.3, np.exp(0.1)]]
-    )
+    xp = np.array([[1.0, np.exp(0.4)], [1.1, np.exp(0.3)], [1.2, np.exp(0.2)], [1.3, np.exp(0.1)]])
 
     _check_reload({"type": "lift", "fobs": fobs, "finv": finv, "a": 1.0}, [xs, xs], [xp, xp])
 

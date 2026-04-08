@@ -109,9 +109,7 @@ def load_config(config_path: str, config_mod: dict = None) -> dict:
 
 
 def _is_optimizer_phase_entry(entry: object) -> bool:
-    return isinstance(entry, dict) and (
-        entry.get("type") == "optimizer" or "trainer" in entry
-    )
+    return isinstance(entry, dict) and (entry.get("type") == "optimizer" or "trainer" in entry)
 
 
 def _normalized_legacy_training_phase(training_cfg: dict, *, name: str, trainer: str) -> dict:

@@ -61,12 +61,18 @@ def _pack_graph_series_time_varying_topology(series: GraphSeries) -> GraphSeries
             device=ref_weight.device,
         )
         for step_index, step_weight in enumerate(edge_weight):
-            weight = step_weight.squeeze(-1) if step_weight.ndim > 1 and step_weight.shape[-1] == 1 else step_weight
+            weight = (
+                step_weight.squeeze(-1)
+                if step_weight.ndim > 1 and step_weight.shape[-1] == 1
+                else step_weight
+            )
             packed_weight[step_index, : weight.shape[0]] = weight
     elif isinstance(edge_weight, torch.Tensor):
         if edge_weight.ndim == 2 and edge_weight.shape[0] == n_steps:
             packed_weight = edge_weight
-        elif edge_weight.ndim == 3 and edge_weight.shape[0] == n_steps and edge_weight.shape[-1] == 1:
+        elif (
+            edge_weight.ndim == 3 and edge_weight.shape[0] == n_steps and edge_weight.shape[-1] == 1
+        ):
             packed_weight = edge_weight.squeeze(-1)
 
     edge_attr = series.edge_attr
@@ -271,9 +277,15 @@ class TrajectoryManager:
 
     def _init_transforms(self) -> None:
         self._transform_fitted = False
-        self._data_transform_x = build_transform_module(self.metadata["config"].get("transform_x", None))
-        self._data_transform_y = build_transform_module(self.metadata["config"].get("transform_y", None))
-        self._data_transform_p = build_transform_module(self.metadata["config"].get("transform_p", None))
+        self._data_transform_x = build_transform_module(
+            self.metadata["config"].get("transform_x", None)
+        )
+        self._data_transform_y = build_transform_module(
+            self.metadata["config"].get("transform_y", None)
+        )
+        self._data_transform_p = build_transform_module(
+            self.metadata["config"].get("transform_p", None)
+        )
         cfg_transform_u = self.metadata["config"].get("transform_u", None)
         self._data_transform_u = build_transform_module(cfg_transform_u)
         self._refresh_delay_from_modules()
@@ -385,7 +397,9 @@ class TrajectoryManager:
             raise ValueError("Either metadata or trajmgr must be provided, but not both.")
 
         if metadata is not None:
-            self._replace_transform_module("_data_transform_x", "transform_x", metadata["transform_x_state"])
+            self._replace_transform_module(
+                "_data_transform_x", "transform_x", metadata["transform_x_state"]
+            )
             self._replace_transform_module(
                 "_data_transform_y",
                 "transform_y",
@@ -644,7 +658,9 @@ class TrajectoryManager:
         This method applies transformations defined in the configuration for x, y, u, p
         """
         assert self.data_index is not None, "Dataset must be split before applying transformations."
-        raw_batch = RegularSeriesBatch.collate(self._create_raw_regular_series_by_index(self.data_index))
+        raw_batch = RegularSeriesBatch.collate(
+            self._create_raw_regular_series_by_index(self.data_index)
+        )
         pipeline = self._build_regular_transform_pipeline()
         if not self._transform_fitted:
             logger.info("Fitting regular transform pipeline on typed regular series.")
@@ -868,12 +884,16 @@ class TrajectoryManagerGraph(TrajectoryManager):
 
     def _init_transforms(self) -> None:
         super()._init_transforms()
-        self._data_transform_ew = build_transform_module(self.metadata["config"].get("transform_ew", None))
+        self._data_transform_ew = build_transform_module(
+            self.metadata["config"].get("transform_ew", None)
+        )
         if self._data_transform_ew.delay > 0:
             msg = "Edge weight transformations with delay embedding are not supported."
             logger.error(msg)
             raise ValueError(msg)
-        self._data_transform_ea = build_transform_module(self.metadata["config"].get("transform_ea", None))
+        self._data_transform_ea = build_transform_module(
+            self.metadata["config"].get("transform_ea", None)
+        )
         if self._data_transform_ea.delay > 0:
             msg = "Edge attribute transformations with delay embedding are not supported."
             logger.error(msg)
@@ -1037,7 +1057,9 @@ class TrajectoryManagerGraph(TrajectoryManager):
             logger.info("Transformations already fitted. Skipping fitting step.")
 
         logger.info("Applying graph transformations through the typed series pipeline.")
-        transformed = [_pack_graph_series_time_varying_topology(item) for item in pipeline(raw_batch)]
+        transformed = [
+            _pack_graph_series_time_varying_topology(item) for item in pipeline(raw_batch)
+        ]
         self.typed_dataset = transformed
         self.dataset = self.typed_dataset
 

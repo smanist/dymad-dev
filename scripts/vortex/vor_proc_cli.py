@@ -62,7 +62,9 @@ def parse_args():
         default=Path("vor_proc_modes.npz"),
         help="Where to save the computed mode arrays and metrics.",
     )
-    parser.add_argument("--embedding", action="store_true", help="Plot the DM embedding coordinates.")
+    parser.add_argument(
+        "--embedding", action="store_true", help="Plot the DM embedding coordinates."
+    )
     parser.add_argument(
         "--reconstruction",
         action="store_true",
@@ -127,7 +129,9 @@ def ensure_processed_data(root: Path, raw_data_path: Path, split_index: int) -> 
     return generate_data(root, raw_data_path, split_index)
 
 
-def compute_analysis(cylinder_path: Path, test_path: Path, index: int) -> dict[str, np.ndarray | float | int]:
+def compute_analysis(
+    cylinder_path: Path, test_path: Path, index: int
+) -> dict[str, np.ndarray | float | int]:
     train_data = np.load(cylinder_path)
     test_data = np.load(test_path)
     t_train = train_data["t"]
@@ -338,7 +342,9 @@ def main():
     if args.data:
         generate_data(root, args.raw_data.resolve(), args.split_index)
 
-    cylinder_path, test_path = ensure_processed_data(root, args.raw_data.resolve(), args.split_index)
+    cylinder_path, test_path = ensure_processed_data(
+        root, args.raw_data.resolve(), args.split_index
+    )
     analysis = compute_analysis(cylinder_path, test_path, args.index)
     save_analysis(analysis, output_path)
 

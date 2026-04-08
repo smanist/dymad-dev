@@ -49,7 +49,9 @@ def test_checkpoint_e2e_path_routes_facade_store_exec(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(
         context.executor,
         "materialize_checkpoint_prediction",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("executor materializer should not run")),
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("executor materializer should not run")
+        ),
     )
     monkeypatch.setattr(context.facade, "register_checkpoint", traced_register_checkpoint)
     monkeypatch.setattr(

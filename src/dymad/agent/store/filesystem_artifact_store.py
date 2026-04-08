@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
-from dymad.sako.snapshot import KoopmanWeightSnapshot, SpectralSnapshot
 from dymad.agent.store.object_store import (
     CheckpointRecord,
     DatasetRecord,
@@ -19,6 +18,7 @@ from dymad.agent.store.object_store import (
     SpectralSnapshotRecord,
     TrainingRunRecord,
 )
+from dymad.sako.snapshot import KoopmanWeightSnapshot, SpectralSnapshot
 
 
 class FilesystemArtifactStore:
@@ -175,7 +175,8 @@ class FilesystemArtifactStore:
                 name="right_factor",
             )
         self._write_json("spectral_snapshot", record.handle, payload)
-        np.savez_compressed(self._npz_path(record.handle), **arrays)
+        savez_compressed = cast(Any, np.savez_compressed)
+        savez_compressed(str(self._npz_path(record.handle)), **arrays)
 
     def load_spectral_snapshot(self, handle: str) -> SpectralSnapshotRecord:
         payload = self._read_json("spectral_snapshot", handle)
@@ -207,7 +208,9 @@ class FilesystemArtifactStore:
                     metadata=dict(payload.get("metadata", {})),
                 )
         except FileNotFoundError as exc:
-            raise ObjectNotFoundError(f"missing spectral snapshot payload for handle: {handle}") from exc
+            raise ObjectNotFoundError(
+                f"missing spectral snapshot payload for handle: {handle}"
+            ) from exc
         return SpectralSnapshotRecord(
             handle=payload["handle"],
             checkpoint_handle=payload["checkpoint_handle"],

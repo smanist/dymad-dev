@@ -32,8 +32,20 @@ def _write_graph_dataset(path: Path) -> None:
     t = np.linspace(0.0, 1.0, 5)
     x = np.array(
         [
-            [[0.0, 0.0, 0.1, 0.1], [0.1, 0.0, 0.2, 0.1], [0.2, 0.0, 0.3, 0.1], [0.3, 0.0, 0.4, 0.1], [0.4, 0.0, 0.5, 0.1]],
-            [[0.0, 0.0, 0.2, 0.2], [0.2, 0.0, 0.3, 0.2], [0.4, 0.0, 0.4, 0.2], [0.6, 0.0, 0.5, 0.2], [0.8, 0.0, 0.6, 0.2]],
+            [
+                [0.0, 0.0, 0.1, 0.1],
+                [0.1, 0.0, 0.2, 0.1],
+                [0.2, 0.0, 0.3, 0.1],
+                [0.3, 0.0, 0.4, 0.1],
+                [0.4, 0.0, 0.5, 0.1],
+            ],
+            [
+                [0.0, 0.0, 0.2, 0.2],
+                [0.2, 0.0, 0.3, 0.2],
+                [0.4, 0.0, 0.4, 0.2],
+                [0.6, 0.0, 0.5, 0.2],
+                [0.8, 0.0, 0.6, 0.2],
+            ],
         ]
     )
     adj = np.array([[0, 1], [1, 0]])
@@ -247,7 +259,9 @@ def test_evaluate_model_regular_writes_metrics_and_plot(tmp_path, monkeypatch) -
     monkeypatch.setattr("dymad.agent.exec.workflow.plot_trajectory", fake_plot_trajectory)
 
     tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
-    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"][
+        "handle"
+    ]
     checkpoint_summary = tools.register_checkpoint(
         model_ref="dymad.models.collections:KBF",
         checkpoint_path=str(tmp_path / "fake.pt"),
@@ -289,7 +303,9 @@ def test_evaluate_model_passes_active_context_to_loader(tmp_path, monkeypatch) -
     monkeypatch.setattr(dymad.io, "load_model", fake_load_model)
 
     tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
-    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"][
+        "handle"
+    ]
     checkpoint_summary = tools.register_checkpoint(
         model_ref="dymad.models.collections:KBF",
         checkpoint_path=str(tmp_path / "fake.pt"),
@@ -322,7 +338,9 @@ def test_evaluate_model_graph_skips_plot(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(dymad.io, "load_model", fake_load_model)
 
     tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
-    dataset_handle = tools.register_dataset_file(path=str(dataset_path), kind="graph")["data"]["summary"]["handle"]
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path), kind="graph")["data"][
+        "summary"
+    ]["handle"]
     checkpoint_summary = tools.register_checkpoint(
         model_ref="dymad.models.collections:GKBF",
         checkpoint_path=str(tmp_path / "graph_fake.pt"),

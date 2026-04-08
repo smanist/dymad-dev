@@ -11,4 +11,3 @@ __all__ = [
     "SpectralWorkflowPlan",
     "build_default_context",
 ]
-

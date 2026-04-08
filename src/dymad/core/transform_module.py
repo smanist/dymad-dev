@@ -63,7 +63,9 @@ def _restore_like(value: torch.Tensor, *, as_tensor: bool):
     return value.detach().cpu().numpy()
 
 
-def _flatten_jacobian(jacobian: torch.Tensor, out_shape: torch.Size, in_shape: torch.Size) -> torch.Tensor:
+def _flatten_jacobian(
+    jacobian: torch.Tensor, out_shape: torch.Size, in_shape: torch.Size
+) -> torch.Tensor:
     return jacobian.reshape(int(np.prod(out_shape)), int(np.prod(in_shape)))
 
 

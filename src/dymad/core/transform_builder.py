@@ -170,7 +170,9 @@ def export_transform_state(module: TransformModule) -> dict[str, Any]:
         }
 
     if isinstance(module, AutoencoderTransform):
-        raise TypeError("AutoencoderTransform is runtime-only and is not exported to checkpoint state.")
+        raise TypeError(
+            "AutoencoderTransform is runtime-only and is not exported to checkpoint state."
+        )
 
     if isinstance(module, ExternalTransformModule):
         raise TypeError(f"Legacy export is not implemented for {type(module).__name__}")

@@ -468,7 +468,9 @@ class BasePhase:
 
         plot_cfg = copy.deepcopy(self.config.get("plotting", {}))
         if not plot_cfg.get("prediction", True):
-            logger.info("Skipping per-run prediction plot for '%s': plotting.prediction is false.", run_name)
+            logger.info(
+                "Skipping per-run prediction plot for '%s': plotting.prediction is false.", run_name
+            )
             return None
 
         xidx = plot_cfg.get("xidx")
@@ -485,7 +487,11 @@ class BasePhase:
                 max_state_dims,
             )
             return None
-        if uidx is None and raw_control_dims is not None and int(raw_control_dims) > max_control_dims:
+        if (
+            uidx is None
+            and raw_control_dims is not None
+            and int(raw_control_dims) > max_control_dims
+        ):
             logger.info(
                 "Skipping per-run prediction plot for '%s': raw control dimension %d exceeds max_control_dims=%d.",
                 run_name,

@@ -27,7 +27,9 @@ def test_public_load_model_routes_via_boundary(monkeypatch, tmp_path: Path) -> N
     monkeypatch.setattr(
         context.executor,
         "materialize_checkpoint_prediction",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("executor materializer should not run")),
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("executor materializer should not run")
+        ),
     )
 
     import dymad.io.checkpoint as checkpoint_module

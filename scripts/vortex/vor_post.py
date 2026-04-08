@@ -1,16 +1,11 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg as spl
-# from pathlib import Path
-# import os
 
 from dymad.models import DKBF, KBF
 from dymad.numerics import complex_plot
 from dymad.sako import SpectralAnalysis
 from dymad.utils import animate, setup_logging
-
-# BASE_DIR = Path(__file__).resolve().parent
-# os.chdir(BASE_DIR)
 
 Nx, Ny = 199, 449
 dat = np.load("data/cylinder.npz")

@@ -293,7 +293,9 @@ def _stack_time_varying_graph_field(
                 out[idx, steps:, :edge_count] = item[0]
         else:
             edge_count = item.shape[0]
-            out[idx, :, :edge_count] = item.unsqueeze(0).expand(max_steps, edge_count, *feature_shape)
+            out[idx, :, :edge_count] = item.unsqueeze(0).expand(
+                max_steps, edge_count, *feature_shape
+            )
     if out.shape[-1:] == (1,):
         return out.squeeze(-1)
     return out
@@ -1587,7 +1589,10 @@ def to_padded_graph_runtime(batch: GraphSeriesBatch) -> GraphRuntime:
                 max_steps=n_steps,
                 time_ndim=3,
             )
-        elif all(isinstance(item.edge_index, torch.Tensor) and item.edge_index.ndim == 3 for item in items):
+        elif all(
+            isinstance(item.edge_index, torch.Tensor) and item.edge_index.ndim == 3
+            for item in items
+        ):
             edge_index = _stack_time_varying_edge_index(items, max_steps=n_steps)
             edge_weight = _stack_time_varying_graph_field(
                 tuple(item.edge_weight for item in items),
@@ -1644,7 +1649,9 @@ def to_padded_graph_runtime(batch: GraphSeriesBatch) -> GraphRuntime:
             max_steps=max_steps,
             time_ndim=3,
         )
-    elif all(isinstance(item.edge_index, torch.Tensor) and item.edge_index.ndim == 3 for item in items):
+    elif all(
+        isinstance(item.edge_index, torch.Tensor) and item.edge_index.ndim == 3 for item in items
+    ):
         edge_index = _pad_time_varying_edge_index(items, max_steps=max_steps)
         edge_weight = _stack_time_varying_graph_field(
             tuple(item.edge_weight for item in items),

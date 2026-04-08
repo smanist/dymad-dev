@@ -76,7 +76,7 @@ def set_by_dotted_key(d: dict[str, Any], dotted_key: str, value: Any):
     Creates intermediate containers as needed.
     """
     parts = dotted_key.split(".")
-    curr = d
+    curr: dict[str, Any] | list[Any] = d
     for index, part in enumerate(parts[:-1]):
         next_part = parts[index + 1]
         next_is_index = next_part.isdigit()
@@ -88,6 +88,7 @@ def set_by_dotted_key(d: dict[str, Any], dotted_key: str, value: Any):
             curr = curr[list_index]
             continue
 
+        assert isinstance(curr, dict)
         if part not in curr or not isinstance(curr[part], (dict, list)):
             curr[part] = [] if next_is_index else {}
         curr = curr[part]
@@ -99,4 +100,5 @@ def set_by_dotted_key(d: dict[str, Any], dotted_key: str, value: Any):
             curr.append(None)
         curr[list_index] = value
         return
+    assert isinstance(curr, dict)
     curr[last] = value

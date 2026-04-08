@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 if TYPE_CHECKING:
-    from dymad.sako.snapshot import SpectralSnapshot
     from dymad.agent.store.filesystem_artifact_store import FilesystemArtifactStore
+    from dymad.sako.snapshot import SpectralSnapshot
 else:
     SpectralSnapshot = Any
 

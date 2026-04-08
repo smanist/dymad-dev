@@ -9,7 +9,9 @@ from dymad.training.driver import SingleSplitDriver
 logger = logging.getLogger(__name__)
 
 
-def _select_single_stage_phase(base_config: dict[str, Any], *, name: str, trainer: str) -> dict[str, Any]:
+def _select_single_stage_phase(
+    base_config: dict[str, Any], *, name: str, trainer: str
+) -> dict[str, Any]:
     phases = base_config.get("phases")
     if not isinstance(phases, list) or not phases:
         raise ValueError("Config must contain at least one phase after load_config normalization.")

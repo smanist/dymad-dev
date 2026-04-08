@@ -108,7 +108,9 @@ class FacadeOperations:
             model_ref=model_ref.strip(),
             train_dataset_handle=train_dataset.value,
             valid_dataset_handle=None if valid_dataset is None else valid_dataset.value,
-            reference_profile=None if reference_profile is None else reference_profile.strip() or None,
+            reference_profile=None
+            if reference_profile is None
+            else reference_profile.strip() or None,
             checkpoint_handle=checkpoint.value,
             artifact_root=artifact_root.strip(),
             run_name=run_name.strip(),

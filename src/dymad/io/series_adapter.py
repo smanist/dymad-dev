@@ -120,7 +120,9 @@ class SeriesAdapter:
         if tensor.ndim == 3:
             if tensor.shape[1] == 2 or tensor.shape[2] == 2:
                 normalized = torch.stack(
-                    tuple(SeriesAdapter._to_edge_index_tensor(step, device=device) for step in tensor),
+                    tuple(
+                        SeriesAdapter._to_edge_index_tensor(step, device=device) for step in tensor
+                    ),
                     dim=0,
                 )
                 return SeriesAdapter._collapse_constant_graph_tensor(normalized, expected_rank=3)

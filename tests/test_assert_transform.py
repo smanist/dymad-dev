@@ -106,9 +106,7 @@ def test_compose():
     tmp = np.vstack(Xs)
     avr, std = np.mean(tmp, axis=0), np.std(tmp, axis=0)
     tmp = (Xn - avr) / std
-    Xr = np.vstack(
-        [tmp[:2].reshape(1, -1), tmp[1:3].reshape(1, -1), tmp[2:4].reshape(1, -1)]
-    )
+    Xr = np.vstack([tmp[:2].reshape(1, -1), tmp[1:3].reshape(1, -1), tmp[2:4].reshape(1, -1)])
     check_data([Xt], [Xr], label="Compose")
 
     Xi = cmps.inverse_transform([Xt])[0]

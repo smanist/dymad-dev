@@ -55,7 +55,11 @@ class DemoTools:
 
     def inspect_dataset(self, *, dataset_handle: str) -> dict[str, Any]:
         return self._wrap(
-            lambda: {"inspection": asdict(self._context.executor.inspect_dataset(dataset_handle=dataset_handle))}
+            lambda: {
+                "inspection": asdict(
+                    self._context.executor.inspect_dataset(dataset_handle=dataset_handle)
+                )
+            }
         )
 
     def prepare_prediction_request(
@@ -115,20 +119,22 @@ class DemoTools:
         max_workers: int = 1,
     ) -> dict[str, Any]:
         return self._wrap(
-            lambda: {"result": asdict(
-                self._context.executor.train_model(
-                    train_dataset_handle=train_dataset_handle,
-                    valid_dataset_handle=valid_dataset_handle,
-                    model_ref=model_ref,
-                    reference_profile=reference_profile,
-                    config=config,
-                    run_name=run_name,
-                    artifact_root=artifact_root,
-                    seed=seed,
-                    device=device,
-                    max_workers=max_workers,
+            lambda: {
+                "result": asdict(
+                    self._context.executor.train_model(
+                        train_dataset_handle=train_dataset_handle,
+                        valid_dataset_handle=valid_dataset_handle,
+                        model_ref=model_ref,
+                        reference_profile=reference_profile,
+                        config=config,
+                        run_name=run_name,
+                        artifact_root=artifact_root,
+                        seed=seed,
+                        device=device,
+                        max_workers=max_workers,
+                    )
                 )
-            )}
+            }
         )
 
     def evaluate_model(
@@ -143,17 +149,19 @@ class DemoTools:
         predict_kwargs: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self._wrap(
-            lambda: {"result": asdict(
-                self._context.executor.evaluate_model(
-                    checkpoint_handle=checkpoint_handle,
-                    test_dataset_handle=test_dataset_handle,
-                    metric=metric,
-                    artifact_root=artifact_root,
-                    plot_selection=plot_selection,
-                    max_plots=max_plots,
-                    predict_kwargs=predict_kwargs,
+            lambda: {
+                "result": asdict(
+                    self._context.executor.evaluate_model(
+                        checkpoint_handle=checkpoint_handle,
+                        test_dataset_handle=test_dataset_handle,
+                        metric=metric,
+                        artifact_root=artifact_root,
+                        plot_selection=plot_selection,
+                        max_plots=max_plots,
+                        predict_kwargs=predict_kwargs,
+                    )
                 )
-            )}
+            }
         )
 
     def describe_object(self, *, handle: str) -> dict[str, Any]:
