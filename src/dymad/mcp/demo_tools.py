@@ -36,6 +36,28 @@ class DemoTools:
             )
         )
 
+    def register_dataset_file(
+        self,
+        *,
+        path: str,
+        format: str = "npz",
+        kind: str = "regular",
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: self._dataset_data(
+                self._context.facade.register_dataset_file(
+                    path=path,
+                    format=format,
+                    kind=kind,
+                ).handle
+            )
+        )
+
+    def inspect_dataset(self, *, dataset_handle: str) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {"inspection": asdict(self._context.executor.inspect_dataset(dataset_handle=dataset_handle))}
+        )
+
     def prepare_prediction_request(
         self,
         *,
@@ -78,6 +100,62 @@ class DemoTools:
             }
         )
 
+    def train_model(
+        self,
+        *,
+        train_dataset_handle: str,
+        valid_dataset_handle: str | None = None,
+        model_ref: str,
+        reference_profile: str | None = None,
+        config: dict[str, Any] | None = None,
+        run_name: str | None = None,
+        artifact_root: str,
+        seed: int | None = None,
+        device: str = "auto",
+        max_workers: int = 1,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {"result": asdict(
+                self._context.executor.train_model(
+                    train_dataset_handle=train_dataset_handle,
+                    valid_dataset_handle=valid_dataset_handle,
+                    model_ref=model_ref,
+                    reference_profile=reference_profile,
+                    config=config,
+                    run_name=run_name,
+                    artifact_root=artifact_root,
+                    seed=seed,
+                    device=device,
+                    max_workers=max_workers,
+                )
+            )}
+        )
+
+    def evaluate_model(
+        self,
+        *,
+        checkpoint_handle: str,
+        test_dataset_handle: str,
+        metric: str,
+        artifact_root: str,
+        plot_selection: str = "median",
+        max_plots: int = 1,
+        predict_kwargs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {"result": asdict(
+                self._context.executor.evaluate_model(
+                    checkpoint_handle=checkpoint_handle,
+                    test_dataset_handle=test_dataset_handle,
+                    metric=metric,
+                    artifact_root=artifact_root,
+                    plot_selection=plot_selection,
+                    max_plots=max_plots,
+                    predict_kwargs=predict_kwargs,
+                )
+            )}
+        )
+
     def describe_object(self, *, handle: str) -> dict[str, Any]:
         return self._wrap(lambda: self._summary_data(self._context.facade.describe_object(handle)))
 
@@ -108,3 +186,11 @@ class DemoTools:
     @staticmethod
     def _summary_data(summary: ObjectSummary) -> dict[str, Any]:
         return {"summary": asdict(summary)}
+
+    def _dataset_data(self, handle: str) -> dict[str, Any]:
+        summary = self._context.facade.describe_object(handle)
+        dataset = self._context.facade.get_dataset(handle)
+        return {
+            "summary": asdict(summary),
+            "dataset": asdict(dataset),
+        }

@@ -32,6 +32,53 @@ def test_persisted_handles_rehydrate_across_contexts(tmp_path) -> None:
     )
 
 
+def test_persisted_dataset_run_and_evaluation_round_trip(tmp_path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    dataset_path = tmp_path / "train.npz"
+    np.savez_compressed(
+        dataset_path,
+        t=np.linspace(0.0, 1.0, 5),
+        x=np.ones((2, 5, 2)),
+        u=np.zeros((2, 5, 1)),
+    )
+
+    first = build_default_context(artifact_root=artifact_root)
+    dataset = first.facade.register_dataset_file(path=str(dataset_path))
+    checkpoint = first.facade.register_checkpoint(
+        model_ref="dymad.models.collections:KBF",
+        checkpoint_path="checkpoints/kbf.pt",
+    )
+    run = first.facade.register_training_run(
+        model_ref="dymad.models.collections:KBF",
+        train_dataset_handle=dataset.handle,
+        valid_dataset_handle=None,
+        reference_profile="kbf-regular-default",
+        checkpoint_handle=checkpoint.handle,
+        artifact_root=str(tmp_path / "outputs"),
+        run_name="kbf_run",
+    )
+    evaluation = first.facade.register_evaluation(
+        checkpoint_handle=checkpoint.handle,
+        test_dataset_handle=dataset.handle,
+        metric="rollout_rmse",
+        metrics_path=str(tmp_path / "metrics.json"),
+        plot_paths=[str(tmp_path / "plot.png")],
+    )
+
+    second = build_default_context(artifact_root=artifact_root)
+    dataset_record = second.facade.get_dataset(dataset.handle)
+    run_record = second.facade.get_training_run(run.handle)
+    evaluation_record = second.facade.get_evaluation(evaluation.handle)
+    kinds = [summary.kind for summary in second.facade.list_objects()]
+
+    assert dataset_record.path == str(dataset_path.resolve())
+    assert run_record.reference_profile == "kbf-regular-default"
+    assert run_record.checkpoint_handle == checkpoint.handle
+    assert evaluation_record.metric == "rollout_rmse"
+    assert evaluation_record.plot_paths == [str(tmp_path / "plot.png")]
+    assert kinds == ["checkpoint", "dataset", "evaluation", "training_run"]
+
+
 def test_persisted_spectral_snapshots_round_trip(tmp_path) -> None:
     artifact_root = tmp_path / "artifacts"
     first = build_default_context(artifact_root=artifact_root)

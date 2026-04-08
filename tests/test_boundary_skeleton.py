@@ -4,9 +4,12 @@ import pytest
 from dymad.exec.context import build_default_context
 from dymad.facade.handles import (
     CheckpointHandle,
+    DatasetHandle,
+    EvaluationHandle,
     HandleValidationError,
     PredictionHandle,
     SpectralSnapshotHandle,
+    TrainingRunHandle,
 )
 from dymad.sako.adapter import SpectralEigensystem
 from dymad.sako.snapshot import build_spectral_snapshot
@@ -41,6 +44,15 @@ def test_checkpoint_prediction_handle_flow() -> None:
 def test_handles_reject_invalid_shapes() -> None:
     with pytest.raises(HandleValidationError):
         CheckpointHandle.parse("bad")
+
+    with pytest.raises(HandleValidationError):
+        DatasetHandle.parse("not_a_dataset")
+
+    with pytest.raises(HandleValidationError):
+        TrainingRunHandle.parse("not_a_run")
+
+    with pytest.raises(HandleValidationError):
+        EvaluationHandle.parse("not_an_eval")
 
     with pytest.raises(HandleValidationError):
         PredictionHandle.parse("not_a_prediction")

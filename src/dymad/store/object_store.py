@@ -26,6 +26,36 @@ class CheckpointRecord:
 
 
 @dataclass(frozen=True)
+class DatasetRecord:
+    handle: str
+    path: str
+    format: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class TrainingRunRecord:
+    handle: str
+    model_ref: str
+    train_dataset_handle: str
+    valid_dataset_handle: str | None
+    reference_profile: str | None
+    checkpoint_handle: str
+    artifact_root: str
+    run_name: str
+
+
+@dataclass(frozen=True)
+class EvaluationRecord:
+    handle: str
+    checkpoint_handle: str
+    test_dataset_handle: str
+    metric: str
+    metrics_path: str
+    plot_paths: list[str]
+
+
+@dataclass(frozen=True)
 class PredictionRequestRecord:
     handle: str
     checkpoint_handle: str
@@ -55,8 +85,34 @@ class ObjectStore:
     def __init__(self, artifact_store: FilesystemArtifactStore | None = None) -> None:
         self._artifact_store = artifact_store
         self._checkpoints: dict[str, CheckpointRecord] = {}
+        self._datasets: dict[str, DatasetRecord] = {}
+        self._training_runs: dict[str, TrainingRunRecord] = {}
+        self._evaluations: dict[str, EvaluationRecord] = {}
         self._prediction_requests: dict[str, PredictionRequestRecord] = {}
         self._spectral_snapshots: dict[str, SpectralSnapshotRecord] = {}
+
+    def put_dataset(self, *, path: str, format: str, kind: str) -> str:
+        handle = self._new_handle("ds")
+        record = DatasetRecord(
+            handle=handle,
+            path=path,
+            format=format,
+            kind=kind,
+        )
+        self._datasets[handle] = record
+        if self._artifact_store is not None:
+            self._artifact_store.persist_dataset(record)
+        return handle
+
+    def get_dataset(self, handle: str) -> DatasetRecord:
+        try:
+            return self._datasets[handle]
+        except KeyError as exc:
+            if self._artifact_store is None:
+                raise ObjectNotFoundError(f"unknown dataset handle: {handle}") from exc
+            record = self._artifact_store.load_dataset(handle)
+            self._datasets[handle] = record
+            return record
 
     def put_checkpoint(self, *, model_ref: str, checkpoint_path: str, device: str) -> str:
         handle = self._new_handle("chk")
@@ -79,6 +135,82 @@ class ObjectStore:
                 raise ObjectNotFoundError(f"unknown checkpoint handle: {handle}") from exc
             record = self._artifact_store.load_checkpoint(handle)
             self._checkpoints[handle] = record
+            return record
+
+    def put_training_run(
+        self,
+        *,
+        model_ref: str,
+        train_dataset_handle: str,
+        valid_dataset_handle: str | None,
+        reference_profile: str | None,
+        checkpoint_handle: str,
+        artifact_root: str,
+        run_name: str,
+    ) -> str:
+        self.get_dataset(train_dataset_handle)
+        if valid_dataset_handle is not None:
+            self.get_dataset(valid_dataset_handle)
+        self.get_checkpoint(checkpoint_handle)
+        handle = self._new_handle("run")
+        record = TrainingRunRecord(
+            handle=handle,
+            model_ref=model_ref,
+            train_dataset_handle=train_dataset_handle,
+            valid_dataset_handle=valid_dataset_handle,
+            reference_profile=reference_profile,
+            checkpoint_handle=checkpoint_handle,
+            artifact_root=artifact_root,
+            run_name=run_name,
+        )
+        self._training_runs[handle] = record
+        if self._artifact_store is not None:
+            self._artifact_store.persist_training_run(record)
+        return handle
+
+    def get_training_run(self, handle: str) -> TrainingRunRecord:
+        try:
+            return self._training_runs[handle]
+        except KeyError as exc:
+            if self._artifact_store is None:
+                raise ObjectNotFoundError(f"unknown training run handle: {handle}") from exc
+            record = self._artifact_store.load_training_run(handle)
+            self._training_runs[handle] = record
+            return record
+
+    def put_evaluation(
+        self,
+        *,
+        checkpoint_handle: str,
+        test_dataset_handle: str,
+        metric: str,
+        metrics_path: str,
+        plot_paths: list[str],
+    ) -> str:
+        self.get_checkpoint(checkpoint_handle)
+        self.get_dataset(test_dataset_handle)
+        handle = self._new_handle("eval")
+        record = EvaluationRecord(
+            handle=handle,
+            checkpoint_handle=checkpoint_handle,
+            test_dataset_handle=test_dataset_handle,
+            metric=metric,
+            metrics_path=metrics_path,
+            plot_paths=list(plot_paths),
+        )
+        self._evaluations[handle] = record
+        if self._artifact_store is not None:
+            self._artifact_store.persist_evaluation(record)
+        return handle
+
+    def get_evaluation(self, handle: str) -> EvaluationRecord:
+        try:
+            return self._evaluations[handle]
+        except KeyError as exc:
+            if self._artifact_store is None:
+                raise ObjectNotFoundError(f"unknown evaluation handle: {handle}") from exc
+            record = self._artifact_store.load_evaluation(handle)
+            self._evaluations[handle] = record
             return record
 
     def put_prediction_request(
@@ -139,6 +271,14 @@ class ObjectStore:
             return record
 
     def summarize(self, handle: str) -> ObjectSummary:
+        if handle.startswith("ds_"):
+            dataset = self.get_dataset(handle)
+            return ObjectSummary(
+                handle=handle,
+                kind="dataset",
+                derived_from=None,
+                preview=f"{dataset.format} {dataset.kind} @ {dataset.path}",
+            )
         if handle.startswith("chk_"):
             checkpoint = self.get_checkpoint(handle)
             return ObjectSummary(
@@ -146,6 +286,22 @@ class ObjectStore:
                 kind="checkpoint",
                 derived_from=None,
                 preview=f"{checkpoint.model_ref} @ {checkpoint.checkpoint_path}",
+            )
+        if handle.startswith("run_"):
+            run = self.get_training_run(handle)
+            return ObjectSummary(
+                handle=handle,
+                kind="training_run",
+                derived_from=run.checkpoint_handle,
+                preview=f"{run.run_name} ({run.model_ref})",
+            )
+        if handle.startswith("eval_"):
+            evaluation = self.get_evaluation(handle)
+            return ObjectSummary(
+                handle=handle,
+                kind="evaluation",
+                derived_from=evaluation.checkpoint_handle,
+                preview=f"{evaluation.metric} @ {evaluation.metrics_path}",
             )
         if handle.startswith("pred_"):
             request = self.get_prediction_request(handle)
@@ -172,8 +328,17 @@ class ObjectStore:
             for summary in self._artifact_store.list_object_summaries(kind=kind):
                 summaries[summary.handle] = summary
 
+        if kind in (None, "dataset"):
+            for handle in self._datasets:
+                summaries[handle] = self.summarize(handle)
         if kind in (None, "checkpoint"):
             for handle in self._checkpoints:
+                summaries[handle] = self.summarize(handle)
+        if kind in (None, "training_run"):
+            for handle in self._training_runs:
+                summaries[handle] = self.summarize(handle)
+        if kind in (None, "evaluation"):
+            for handle in self._evaluations:
                 summaries[handle] = self.summarize(handle)
         if kind in (None, "prediction_request"):
             for handle in self._prediction_requests:

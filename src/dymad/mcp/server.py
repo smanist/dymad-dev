@@ -26,6 +26,24 @@ def build_server(
     server = FastMCP(name)
 
     @server.tool
+    def register_dataset_file(
+        path: str,
+        format: str = "npz",
+        kind: str = "regular",
+    ) -> dict[str, Any]:
+        """Persist one dataset file reference and return its summary."""
+        return tools.register_dataset_file(
+            path=path,
+            format=format,
+            kind=kind,
+        )
+
+    @server.tool
+    def inspect_dataset(dataset_handle: str) -> dict[str, Any]:
+        """Inspect one persisted dataset and return a lightweight schema summary."""
+        return tools.inspect_dataset(dataset_handle=dataset_handle)
+
+    @server.tool
     def register_checkpoint(
         model_ref: str,
         checkpoint_path: str,
@@ -68,6 +86,54 @@ def build_server(
             horizon=horizon,
             has_control=has_control,
             has_graph=has_graph,
+        )
+
+    @server.tool
+    def train_model(
+        train_dataset_handle: str,
+        artifact_root: str,
+        model_ref: str,
+        valid_dataset_handle: str | None = None,
+        reference_profile: str | None = None,
+        config: dict[str, Any] | None = None,
+        run_name: str | None = None,
+        seed: int | None = None,
+        device: str = "auto",
+        max_workers: int = 1,
+    ) -> dict[str, Any]:
+        """Train one DyMAD model from registered datasets and structured config."""
+        return tools.train_model(
+            train_dataset_handle=train_dataset_handle,
+            valid_dataset_handle=valid_dataset_handle,
+            model_ref=model_ref,
+            reference_profile=reference_profile,
+            config=config,
+            run_name=run_name,
+            artifact_root=artifact_root,
+            seed=seed,
+            device=device,
+            max_workers=max_workers,
+        )
+
+    @server.tool
+    def evaluate_model(
+        checkpoint_handle: str,
+        test_dataset_handle: str,
+        metric: str,
+        artifact_root: str,
+        plot_selection: str = "median",
+        max_plots: int = 1,
+        predict_kwargs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate one registered checkpoint against one registered test dataset."""
+        return tools.evaluate_model(
+            checkpoint_handle=checkpoint_handle,
+            test_dataset_handle=test_dataset_handle,
+            metric=metric,
+            artifact_root=artifact_root,
+            plot_selection=plot_selection,
+            max_plots=max_plots,
+            predict_kwargs=predict_kwargs,
         )
 
     @server.tool

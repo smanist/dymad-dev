@@ -11,10 +11,13 @@ import numpy as np
 from dymad.sako.snapshot import KoopmanWeightSnapshot, SpectralSnapshot
 from dymad.store.object_store import (
     CheckpointRecord,
+    DatasetRecord,
+    EvaluationRecord,
     ObjectNotFoundError,
     ObjectSummary,
     PredictionRequestRecord,
     SpectralSnapshotRecord,
+    TrainingRunRecord,
 )
 
 
@@ -28,10 +31,31 @@ class FilesystemArtifactStore:
             self._kind_dir(directory).mkdir(parents=True, exist_ok=True)
 
     _KIND_DIRS = {
+        "dataset": "datasets",
         "checkpoint": "checkpoints",
+        "training_run": "training_runs",
+        "evaluation": "evaluations",
         "prediction_request": "prediction_requests",
         "spectral_snapshot": "spectral_snapshots",
     }
+
+    def persist_dataset(self, record: DatasetRecord) -> None:
+        payload = {
+            "handle": record.handle,
+            "path": record.path,
+            "format": record.format,
+            "kind": record.kind,
+        }
+        self._write_json("dataset", record.handle, payload)
+
+    def load_dataset(self, handle: str) -> DatasetRecord:
+        payload = self._read_json("dataset", handle)
+        return DatasetRecord(
+            handle=payload["handle"],
+            path=payload["path"],
+            format=payload["format"],
+            kind=payload["kind"],
+        )
 
     def persist_checkpoint(self, record: CheckpointRecord) -> None:
         payload = {
@@ -49,6 +73,54 @@ class FilesystemArtifactStore:
             model_ref=payload["model_ref"],
             checkpoint_path=payload["checkpoint_path"],
             device=payload["device"],
+        )
+
+    def persist_training_run(self, record: TrainingRunRecord) -> None:
+        payload = {
+            "handle": record.handle,
+            "model_ref": record.model_ref,
+            "train_dataset_handle": record.train_dataset_handle,
+            "valid_dataset_handle": record.valid_dataset_handle,
+            "reference_profile": record.reference_profile,
+            "checkpoint_handle": record.checkpoint_handle,
+            "artifact_root": record.artifact_root,
+            "run_name": record.run_name,
+        }
+        self._write_json("training_run", record.handle, payload)
+
+    def load_training_run(self, handle: str) -> TrainingRunRecord:
+        payload = self._read_json("training_run", handle)
+        return TrainingRunRecord(
+            handle=payload["handle"],
+            model_ref=payload["model_ref"],
+            train_dataset_handle=payload["train_dataset_handle"],
+            valid_dataset_handle=payload.get("valid_dataset_handle"),
+            reference_profile=payload.get("reference_profile"),
+            checkpoint_handle=payload["checkpoint_handle"],
+            artifact_root=payload["artifact_root"],
+            run_name=payload["run_name"],
+        )
+
+    def persist_evaluation(self, record: EvaluationRecord) -> None:
+        payload = {
+            "handle": record.handle,
+            "checkpoint_handle": record.checkpoint_handle,
+            "test_dataset_handle": record.test_dataset_handle,
+            "metric": record.metric,
+            "metrics_path": record.metrics_path,
+            "plot_paths": list(record.plot_paths),
+        }
+        self._write_json("evaluation", record.handle, payload)
+
+    def load_evaluation(self, handle: str) -> EvaluationRecord:
+        payload = self._read_json("evaluation", handle)
+        return EvaluationRecord(
+            handle=payload["handle"],
+            checkpoint_handle=payload["checkpoint_handle"],
+            test_dataset_handle=payload["test_dataset_handle"],
+            metric=payload["metric"],
+            metrics_path=payload["metrics_path"],
+            plot_paths=list(payload.get("plot_paths", [])),
         )
 
     def persist_prediction_request(self, record: PredictionRequestRecord) -> None:
@@ -145,12 +217,33 @@ class FilesystemArtifactStore:
     def summarize(self, handle: str) -> ObjectSummary:
         kind = self._kind_for_handle(handle)
         payload = self._read_json(kind, handle)
+        if kind == "dataset":
+            return ObjectSummary(
+                handle=payload["handle"],
+                kind="dataset",
+                derived_from=None,
+                preview=f"{payload['format']} {payload['kind']} @ {payload['path']}",
+            )
         if kind == "checkpoint":
             return ObjectSummary(
                 handle=payload["handle"],
                 kind="checkpoint",
                 derived_from=None,
                 preview=f"{payload['model_ref']} @ {payload['checkpoint_path']}",
+            )
+        if kind == "training_run":
+            return ObjectSummary(
+                handle=payload["handle"],
+                kind="training_run",
+                derived_from=payload["checkpoint_handle"],
+                preview=f"{payload['run_name']} ({payload['model_ref']})",
+            )
+        if kind == "evaluation":
+            return ObjectSummary(
+                handle=payload["handle"],
+                kind="evaluation",
+                derived_from=payload["checkpoint_handle"],
+                preview=f"{payload['metric']} @ {payload['metrics_path']}",
             )
         if kind == "prediction_request":
             return ObjectSummary(
@@ -202,8 +295,14 @@ class FilesystemArtifactStore:
 
     @staticmethod
     def _kind_for_handle(handle: str) -> str:
+        if handle.startswith("ds_"):
+            return "dataset"
         if handle.startswith("chk_"):
             return "checkpoint"
+        if handle.startswith("run_"):
+            return "training_run"
+        if handle.startswith("eval_"):
+            return "evaluation"
         if handle.startswith("pred_"):
             return "prediction_request"
         if handle.startswith("specsnap_"):

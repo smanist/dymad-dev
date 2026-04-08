@@ -29,10 +29,13 @@ def build_default_context(
     artifact_store = FilesystemArtifactStore(root)
     store = ObjectStore(artifact_store=artifact_store)
     facade = FacadeOperations(store)
-    executor = CompatibilityExecutor(facade)
-    return ExecutionContext(
+    context_holder: dict[str, ExecutionContext] = {}
+    executor = CompatibilityExecutor(facade, context_provider=lambda: context_holder["context"])
+    context = ExecutionContext(
         artifact_store=artifact_store,
         store=store,
         facade=facade,
         executor=executor,
     )
+    context_holder["context"] = context
+    return context
