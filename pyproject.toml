@@ -129,7 +129,6 @@ ignore = [
   "src/dymad/io/checkpoint.py",
   "src/dymad/io/series_adapter.py",
   "src/dymad/io/trajectory_manager.py",
-  "src/dymad/losses/losses.py",
   "src/dymad/models/collections.py",
   "src/dymad/models/components.py",
   "src/dymad/models/model_base.py",
@@ -148,20 +147,14 @@ ignore = [
   "src/dymad/numerics/gradients.py",
   "src/dymad/numerics/linalg.py",
   "src/dymad/numerics/manifold.py",
-  "src/dymad/sako/adapter.py",
-  "src/dymad/sako/base.py",
-  "src/dymad/sako/rals.py",
-  "src/dymad/sako/sako.py",
   "src/dymad/training/driver.py",
   "src/dymad/training/ls_update.py",
   "src/dymad/training/phases.py",
   "src/dymad/training/trainer_run.py",
-  "src/dymad/utils/control.py",
   "src/dymad/utils/graph.py",
   "src/dymad/utils/plot.py",
   "src/dymad/utils/sampling.py",
   "src/dymad/utils/scheduler.py",
-  "src/dymad/utils/wrapper.py",
 ]
 extraPaths = ["src"]
 reportMissingImports = "none"

@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import logging
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -70,7 +73,8 @@ def filter_spectrum(sako, eigs, order="full", remove_one=True):
 def encode_runtime_batch(model: torch.nn.Module, batch) -> np.ndarray:
     """Encode one trainer batch via typed-runtime payloads."""
     runtime = batch.runtime if hasattr(batch, "runtime") else batch
-    return model.encoder(runtime).cpu().detach().numpy()
+    encoder = cast(Any, model.encoder)
+    return encoder(runtime).cpu().detach().numpy()
 
 
 class SAInterface(DataInterface):
@@ -111,6 +115,8 @@ class SAInterface(DataInterface):
         self._P1 = np.concatenate(P1, axis=0)
 
         self._Ninp = self._trans_x._inp_dim
+        if self._Ninp is None:
+            raise ValueError("Spectral analysis requires a known transform input dimension.")
         self._Nout = self.model.koopman_dimension
         self._snapshot = build_spectral_snapshot(
             model_class=type(self.model).__name__,
@@ -125,7 +131,7 @@ class SAInterface(DataInterface):
             },
         )
 
-    def get_weights(self) -> tuple[np.ndarray]:
+    def get_weights(self) -> tuple[np.ndarray, ...]:
         """
         Get the linear weights of the dynamics model.
         """
@@ -345,6 +351,7 @@ class SpectralAnalysis:
 
     def _solve_eigs(self):
         weights = self._ctx.get_weights()
+        _w: np.ndarray
 
         if len(weights) == 2:
             _Vr, _B = weights  # A = Vr @ B^T

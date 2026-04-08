@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import numpy as np
 
@@ -116,7 +116,7 @@ class SpectralAnalysisAdapter:
                 _u = (self._vr * _b).dot(_ls).reshape(-1)
                 _u -= _z * _v
             else:
-                _e = self._sako._ps_point(_z, False)
+                _e = cast(float, self._sako._ps_point(_z, False))
 
             if _ifcont:
                 _e *= self._dt

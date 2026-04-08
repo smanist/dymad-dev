@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import logging
+from typing import Literal, overload
 
 import numpy as np
 import scipy.linalg as spl
@@ -44,7 +47,7 @@ class SAKO:
         self,
         P0: np.ndarray,
         P1: np.ndarray,
-        W: np.ndarray = None,
+        W: np.ndarray | None = None,
         reps: float = 1e-10,
         etol: float = 1e-13,
     ):
@@ -186,6 +189,14 @@ class SAKO:
             )
         return np.sqrt(np.abs(_r))
 
+    @overload
+    def _ps_point(
+        self, z: float | complex, return_vec: Literal[True]
+    ) -> tuple[float, np.ndarray]: ...
+
+    @overload
+    def _ps_point(self, z: float | complex, return_vec: Literal[False] = False) -> float: ...
+
     def _ps_point(
         self, z: float | complex, return_vec: bool = False
     ) -> float | tuple[float, np.ndarray]:
@@ -216,9 +227,11 @@ class SAKO:
         else:
             _e = spl.eigh(_G, self._M00, subset_by_index=[0, 0], driver="gvx", eigvals_only=True)
             _v = None
-        if not _e >= 0:
-            logger.info(f"SAKO Warning: Non-positive norm {_e[0]:4.3e} found for {z:4.3e}")
-            _e = np.array([1e-16])
+        eig_min = float(np.asarray(_e).reshape(-1)[0])
+        if eig_min < 0:
+            logger.info(f"SAKO Warning: Non-positive norm {eig_min:4.3e} found for {z:4.3e}")
+            eig_min = 1e-16
         if return_vec:
-            return 1 / np.sqrt(_e), _v.reshape(-1)
-        return 1 / np.sqrt(_e)
+            assert _v is not None
+            return 1.0 / np.sqrt(eig_min), _v.reshape(-1)
+        return 1.0 / np.sqrt(eig_min)

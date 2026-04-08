@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import logging
 from collections.abc import Callable
+from typing import Any, Literal, cast, overload
 
 import numpy as np
 import scipy.linalg as spl
@@ -7,14 +10,36 @@ import scipy.linalg as spl
 logger = logging.getLogger(__name__)
 
 
+@overload
+def resolvent_analysis(
+    z: np.ndarray,
+    return_vec: Literal[True],
+    A: np.ndarray | None = None,
+    B: np.ndarray | None = None,
+    U: np.ndarray | None = None,
+    ord: int = 1,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]: ...
+
+
+@overload
+def resolvent_analysis(
+    z: np.ndarray,
+    return_vec: Literal[False] = False,
+    A: np.ndarray | None = None,
+    B: np.ndarray | None = None,
+    U: np.ndarray | None = None,
+    ord: int = 1,
+) -> np.ndarray: ...
+
+
 def resolvent_analysis(
     z: np.ndarray,
     return_vec: bool = False,
-    A: np.ndarray = None,
-    B: np.ndarray = None,
-    U: np.ndarray = None,
+    A: np.ndarray | None = None,
+    B: np.ndarray | None = None,
+    U: np.ndarray | None = None,
     ord: int = 1,
-):
+) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Standalone, naive implementation of resolvent analysis, mainly for
     sanity check and suitable for small-scale problems.
@@ -31,6 +56,7 @@ def resolvent_analysis(
     """
     if U is None:
         # No constraints on input/output space
+        assert A is not None
         _N = len(A)
         if B is None:
             _B = np.eye(_N)
@@ -47,8 +73,10 @@ def resolvent_analysis(
         _V = _Vh.conj().T
     else:
         # Constraints on both input & output spaces
+        assert A is not None
         _Q, _R = np.linalg.qr(U)
-        _Ar = spl.pinv(U).dot(A).dot(U)
+        _pinv_u = np.asarray(cast(Any, spl.pinv(U)))
+        _Ar = _pinv_u.dot(A).dot(U)
         _Ir = np.diag(
             np.ones(
                 U.shape[1],
@@ -171,7 +199,17 @@ class RALowRank:
         self._Q, self._R = np.linalg.qr(self._U)
         self._Ir = np.eye(self._Nrnk)
 
-    def __call__(self, z: np.ndarray, return_vec: bool, mode: str = "cont"):
+    @overload
+    def __call__(
+        self, z: np.ndarray, return_vec: Literal[True], mode: str = "cont"
+    ) -> tuple[float, np.ndarray, np.ndarray]: ...
+
+    @overload
+    def __call__(self, z: np.ndarray, return_vec: Literal[False], mode: str = "cont") -> float: ...
+
+    def __call__(
+        self, z: np.ndarray, return_vec: bool, mode: str = "cont"
+    ) -> float | tuple[float, np.ndarray, np.ndarray]:
         """
         Compute the resolvent norm at given complex point for pseudospectrum.
         Only the dominant one is returned.
@@ -187,7 +225,7 @@ class RALowRank:
             _M = spl.solve(_tmp, self._R.T).T
         except np.linalg.LinAlgError:
             logger.info("RALowRank: Singular matrix encountered; using PInv")
-            _M = spl.pinv(_tmp).dot(self._R.T).T
+            _M = np.asarray(cast(Any, spl.pinv(_tmp))).dot(self._R.T).T
         # Since Nrnk is expected to be low, we just compute the entire set of SVD
         if return_vec:
             _U, _s, _Vh = np.linalg.svd(_M, full_matrices=False, compute_uv=True)

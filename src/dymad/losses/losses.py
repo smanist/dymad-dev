@@ -1,11 +1,17 @@
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 
 
-def wmse_loss(predictions, targets, alpha=0):
+def wmse_loss(
+    predictions: torch.Tensor | object,
+    targets: torch.Tensor | object,
+    alpha: float = 0.0,
+) -> torch.Tensor:
     _p = torch.as_tensor(predictions)
     _t = torch.as_tensor(targets)
-    n_steps = predictions.shape[-2]
+    n_steps = _p.shape[-2]
     if alpha == 0:
         loss = (_p - _t) ** 2
         return torch.mean(loss) / n_steps
@@ -29,18 +35,22 @@ class WMSELoss(nn.Module):
     Note that alpha can be both positive and negative, favoring early or late steps
     """
 
+    alpha: torch.Tensor
+
     def __init__(self, alpha=0) -> None:
         super().__init__()
         self.register_buffer("alpha", torch.tensor(alpha, dtype=torch.float64))
 
-    def __str__(self):
+    def __str__(self) -> str:
         return super().__str__() + f"(alpha={self.alpha.item()})"
 
-    def forward(self, predictions, targets):
-        return wmse_loss(predictions, targets, alpha=self.alpha.item())
+    def forward(
+        self, predictions: torch.Tensor | object, targets: torch.Tensor | object
+    ) -> torch.Tensor:
+        return wmse_loss(predictions, targets, alpha=float(self.alpha.item()))
 
 
-def _vpt_loss(predictions, targets):
+def _vpt_loss(predictions: torch.Tensor | object, targets: torch.Tensor | object) -> torch.Tensor:
     _p = torch.as_tensor(predictions)
     _t = torch.as_tensor(targets)
 
@@ -53,7 +63,11 @@ def _vpt_loss(predictions, targets):
     return E_k
 
 
-def vpt_loss(predictions, targets, gamma=0.1):
+def vpt_loss(
+    predictions: torch.Tensor | object,
+    targets: torch.Tensor | object,
+    gamma: float = 0.1,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Exact version of VPT loss (not differentiable)"""
     with torch.no_grad():
         E_k = _vpt_loss(predictions, targets)
@@ -81,23 +95,28 @@ class VPTLoss(nn.Module):
     and minimize the loss defined as 1/VPT.
     """
 
+    gamma: torch.Tensor
+    scl: torch.Tensor
+
     def __init__(self, gamma=0.1, scl=10.0) -> None:
         super().__init__()
         self.register_buffer("gamma", torch.tensor(gamma, dtype=torch.float64))
         self.register_buffer("scl", torch.tensor(scl, dtype=torch.float64))
-        assert self.gamma > 0, "VPTLoss gamma must be positive."
-        assert self.scl > 0, "VPTLoss scl must be positive."
+        assert bool(self.gamma.item() > 0), "VPTLoss gamma must be positive."
+        assert bool(self.scl.item() > 0), "VPTLoss scl must be positive."
 
-    def __str__(self):
+    def __str__(self) -> str:
         return super().__str__() + f"(gamma={self.gamma.item()})"
 
-    def forward(self, predictions, targets):
+    def forward(
+        self, predictions: torch.Tensor | object, targets: torch.Tensor | object
+    ) -> torch.Tensor:
         E_k = _vpt_loss(predictions, targets)
         E_k = torch.cat([E_k, torch.full((E_k.shape[0], 1), float("inf"))], dim=-1)
         B, T = E_k.shape
 
         # Soft probability that step k is still valid
-        s = torch.sigmoid(self.scl * 100 * (self.gamma - E_k))  # (B, T), near 1 if valid
+        s = torch.sigmoid(self.scl * 100.0 * (self.gamma - E_k))  # (B, T), near 1 if valid
 
         # Survival up to step k: product_{j<k} s_j
         # Build shifted s with leading 1 so cumprod aligns:
