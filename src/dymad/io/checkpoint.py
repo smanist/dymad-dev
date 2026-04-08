@@ -687,17 +687,22 @@ class DataInterface:
             self.model, self.prd_func = load_model(model_class, checkpoint_path)
 
             def encoder(x):
-                _x_shape = x.shape[:-1]
-                x_tensor = torch.atleast_2d(
-                    torch.as_tensor(x, dtype=self.dtype, device=self.device)
+                x_tensor = torch.as_tensor(x, dtype=self.dtype, device=self.device)
+                _x_shape = x_tensor.shape[:-1]
+                x_tensor = torch.atleast_2d(x_tensor)
+                x_flat = x_tensor.reshape(-1, x_tensor.shape[-1])
+                payload = build_model_context(
+                    RegularSeriesBatch.collate(
+                        SeriesAdapter.from_regular_arrays(
+                            time=np.array([0], dtype=np.int64),
+                            state=sample.unsqueeze(0),
+                            dtype=self.dtype,
+                            device=self.device,
+                        )
+                        for sample in x_flat
+                    )
                 )
-                payload = SeriesAdapter.from_regular_arrays(
-                    time=np.arange(x_tensor.shape[0], dtype=np.int64),
-                    state=x_tensor,
-                    dtype=self.dtype,
-                    device=self.device,
-                )
-                _z = self.model.encoder(build_model_context(payload))
+                _z = self.model.encoder(payload)
                 return _z.reshape(*_x_shape, -1)
 
             def decoder(z):

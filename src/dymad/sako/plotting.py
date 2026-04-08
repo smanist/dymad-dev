@@ -38,6 +38,43 @@ def _encode_obs_reference(analysis: Any, ref: np.ndarray) -> np.ndarray:
     raise ValueError(f"Unsupported observable reference shape: {ref.shape}")
 
 
+def _coerce_point_mode_matrix(
+    values: np.ndarray | list,
+    *,
+    n_points: int,
+    n_modes: int,
+    source: str,
+) -> np.ndarray:
+    """Normalize eigenfunction evaluations into a stable (n_points, n_modes) matrix."""
+    arr = np.asarray(values)
+    if arr.ndim == 1:
+        if n_modes != 1:
+            raise ValueError(
+                f"{source} returned a 1D array with shape {arr.shape} for {n_modes} modes."
+            )
+        arr = arr.reshape(n_points, 1)
+    else:
+        arr = np.squeeze(arr)
+        if arr.ndim == 1:
+            if n_modes != 1:
+                raise ValueError(
+                    f"{source} collapsed to shape {arr.shape} for {n_modes} requested modes."
+                )
+            arr = arr.reshape(n_points, 1)
+    if arr.ndim != 2:
+        raise ValueError(f"{source} must return a 2D array after squeezing; got shape {arr.shape}.")
+    if arr.shape == (n_modes, n_points):
+        arr = arr.T
+    elif arr.shape != (n_points, n_modes):
+        if arr.size != n_points * n_modes:
+            raise ValueError(
+                f"{source} returned shape {arr.shape}, which cannot be reshaped to "
+                f"({n_points}, {n_modes})."
+            )
+        arr = arr.reshape(n_points, n_modes)
+    return arr
+
+
 class SpectralPlottingAdapter:
     """Holds plotting helpers so numerical analysis seams stay presentation-free."""
 
@@ -175,6 +212,12 @@ class SpectralPlottingAdapter:
             _fun = analysis.eval_eigfun_par(_tmp, _idx, func=space)
         else:
             _fun = analysis.eval_eigfun(_tmp, _idx, rng=space)
+        _fun = _coerce_point_mode_matrix(
+            _fun,
+            n_points=_tmp.shape[0],
+            n_modes=len(_idx),
+            source="Eigenfunction evaluation",
+        )
 
         _func = complex_map[mode]
         _Np = len(_idx)
@@ -183,7 +226,7 @@ class SpectralPlottingAdapter:
             f, ax = plt.subplots(nrows=_nr, ncols=ncols, sharex=True, sharey=True, figsize=figsize)
         else:
             f, ax = fig
-        _ax = ax.flatten()
+        _ax = np.atleast_1d(ax).ravel()
         for _i, _j in enumerate(_idx):
             _F = _fun[:, _i].reshape(Ns[1], Ns[0])
             _ax[_i].contourf(X1, X2, _func(_F), levels=20)
