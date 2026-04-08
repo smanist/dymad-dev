@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from typing import Any, cast
 
 import numpy as np
 import sklearn.manifold as skm
@@ -59,14 +60,20 @@ class CallableExternalTransform(ExternalTransformModule):
     def _apply_forward(self, data: np.ndarray) -> np.ndarray:
         if not callable(self.fobs):
             raise ValueError("CallableExternalTransform requires a callable forward observable.")
-        return np.asarray(self.fobs(data.reshape(-1, self.input_dim), **self.kwargs))
+        input_dim = self.input_dim
+        if input_dim is None:
+            raise ValueError("CallableExternalTransform input_dim is not initialized.")
+        return np.asarray(self.fobs(data.reshape(-1, input_dim), **self.kwargs))
 
     def _apply_inverse(self, data: np.ndarray) -> np.ndarray:
+        output_dim = self.output_dim
+        if output_dim is None:
+            raise ValueError("CallableExternalTransform output_dim is not initialized.")
         if callable(self.finv):
-            return np.asarray(self.finv(data.reshape(-1, self.output_dim), **self.kwargs))
+            return np.asarray(self.finv(data.reshape(-1, output_dim), **self.kwargs))
         if self._pseudo_inverse_matrix is None:
             raise ValueError("CallableExternalTransform inverse parameters are not initialized.")
-        return data.reshape(-1, self.output_dim).dot(self._pseudo_inverse_matrix)
+        return data.reshape(-1, output_dim).dot(self._pseudo_inverse_matrix)
 
 
 class _NDRTransformBase(ExternalTransformModule):
@@ -81,23 +88,27 @@ class _NDRTransformBase(ExternalTransformModule):
         self.order = kwargs.pop("order", None)
         self.rcond = kwargs.pop("rcond", None)
 
-        self._ndr = None
+        self._ndr: Any = None
         self._pseudo_inverse_matrix: np.ndarray | None = None
         self._X: np.ndarray | None = None
         self._Z: np.ndarray | None = None
-        self._man_bck = None
-        self._man_for = None
+        self._man_bck: Any = None
+        self._man_for: Any = None
 
     def _fit_external(self, data: list[np.ndarray]) -> None:
         self._make_ndr()
+        if self._ndr is None:
+            raise ValueError(f"{type(self).__name__} failed to initialize its NDR model.")
         self._X = np.vstack(data)
         self.input_dim = int(self._X.shape[-1])
-        self._Z = self._ndr.fit_transform(self._X)
+        self._Z = np.asarray(self._ndr.fit_transform(self._X))
         self.output_dim = int(self._Z.shape[-1])
         self._prepare_inverse()
 
     def _forward_external(self, data: list[np.ndarray]) -> list[np.ndarray]:
-        return [self._ndr.transform(np.atleast_2d(item)) for item in data]
+        if self._ndr is None:
+            raise ValueError(f"{type(self).__name__} must be fitted before transform(...).")
+        return [np.asarray(self._ndr.transform(np.atleast_2d(item))) for item in data]
 
     def _inverse_external(self, data: list[np.ndarray]) -> list[np.ndarray]:
         inverse_mode = str(self.inverse_mode).lower()
@@ -106,7 +117,7 @@ class _NDRTransformBase(ExternalTransformModule):
             return [item.dot(self._pseudo_inverse_matrix) for item in data]
         if inverse_mode == "gmls":
             assert self._man_bck is not None and self._X is not None
-            return [self._man_bck.gmls(item, self._X) for item in data]
+            return [cast(np.ndarray, self._man_bck.gmls(item, self._X)) for item in data]
         raise ValueError(f"Unknown inverse mode {self.inverse_mode}")
 
     def _forward_jacobian_external(self, ref: np.ndarray) -> np.ndarray:
@@ -140,7 +151,7 @@ class _NDRTransformBase(ExternalTransformModule):
                 g=self.kphi,
                 T=self.kphi,
                 tree_data=self._Z,
-                tree_transform=lambda x: self._ndr.transform(np.atleast_2d(x)),
+                tree_transform=lambda x: np.asarray(self._ndr.transform(np.atleast_2d(x))),
             )
             self._pseudo_inverse_matrix = None
             return

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -24,9 +24,9 @@ from dymad.core.series import (
 
 def _stack_optional(items: Iterable[torch.Tensor | None]) -> torch.Tensor | None:
     values = tuple(items)
-    if not values or values[0] is None:
+    if not values or any(value is None for value in values):
         return None
-    return torch.stack(values, dim=0)
+    return torch.stack(cast(tuple[torch.Tensor, ...], values), dim=0)
 
 
 def _pad_optional(
@@ -218,8 +218,14 @@ def _stack_graph_steps(
 
 
 def _stack_fixed_edge_index(series_items: tuple[GraphSeries, ...]) -> torch.Tensor:
+    edge_index_tensors: list[torch.Tensor] = []
+    for item in series_items:
+        edge_index = item.edge_index
+        if not isinstance(edge_index, torch.Tensor):
+            raise TypeError("Fixed-topology graph batches require tensor edge indices.")
+        edge_index_tensors.append(edge_index.transpose(0, 1))
     return torch.stack(
-        [item.edge_index.transpose(0, 1) for item in series_items],
+        edge_index_tensors,
         dim=0,
     )
 
@@ -366,6 +372,22 @@ def _graph_batch_tensor(
     if tensor.ndim == time_ndim and length is not None:
         value = value[:, :length]
     return value
+
+
+def _require_tensor(name: str, tensor: torch.Tensor | None) -> torch.Tensor:
+    if tensor is None:
+        raise ValueError(f"{name} is required for graph runtime construction.")
+    return tensor
+
+
+def _graph_tensor_field(
+    payload: torch.Tensor | tuple[torch.Tensor, ...] | None,
+) -> torch.Tensor | None:
+    if payload is None:
+        return None
+    if isinstance(payload, tuple):
+        raise TypeError("Graph tensor payload must be materialized before runtime construction.")
+    return payload
 
 
 def _graph_truncate_tensor(
@@ -1197,7 +1219,7 @@ class UniformGraphRuntime:
         return UniformGraphRuntime(
             time=time,
             node_state=node_state,
-            edge_index=edge_index,
+            edge_index=_require_tensor("edge_index", edge_index),
             control=control,
             target=target,
             params=params,
@@ -1211,7 +1233,9 @@ class UniformGraphRuntime:
             yield UniformGraphRuntime(
                 time=self.time[idx : idx + 1],
                 node_state=self.node_state[idx : idx + 1],
-                edge_index=_graph_batch_tensor(self.edge_index, index=idx, time_ndim=4),
+                edge_index=_require_tensor(
+                    "edge_index", _graph_batch_tensor(self.edge_index, index=idx, time_ndim=4)
+                ),
                 control=self.control[idx : idx + 1] if self.control is not None else None,
                 target=self.target[idx : idx + 1] if self.target is not None else None,
                 params=self.params[idx : idx + 1] if self.params is not None else None,
@@ -1484,8 +1508,9 @@ class RaggedGraphRuntime:
             yield UniformGraphRuntime(
                 time=self.time[idx : idx + 1, :length],
                 node_state=self.node_state[idx : idx + 1, :length],
-                edge_index=_graph_batch_tensor(
-                    self.edge_index, index=idx, length=length, time_ndim=4
+                edge_index=_require_tensor(
+                    "edge_index",
+                    _graph_batch_tensor(self.edge_index, index=idx, length=length, time_ndim=4),
                 ),
                 control=self.control[idx : idx + 1, :length] if self.control is not None else None,
                 target=self.target[idx : idx + 1, :length] if self.target is not None else None,
@@ -1580,12 +1605,12 @@ def to_padded_graph_runtime(batch: GraphSeriesBatch) -> GraphRuntime:
         if fixed_topology:
             edge_index = _stack_fixed_edge_index(items)
             edge_weight = _stack_fixed_graph_field(
-                tuple(item.edge_weight for item in items),
+                tuple(_graph_tensor_field(item.edge_weight) for item in items),
                 max_steps=n_steps,
                 time_ndim=2,
             )
             edge_attr = _stack_fixed_graph_field(
-                tuple(item.edge_attr for item in items),
+                tuple(_graph_tensor_field(item.edge_attr) for item in items),
                 max_steps=n_steps,
                 time_ndim=3,
             )
@@ -1595,12 +1620,12 @@ def to_padded_graph_runtime(batch: GraphSeriesBatch) -> GraphRuntime:
         ):
             edge_index = _stack_time_varying_edge_index(items, max_steps=n_steps)
             edge_weight = _stack_time_varying_graph_field(
-                tuple(item.edge_weight for item in items),
+                tuple(_graph_tensor_field(item.edge_weight) for item in items),
                 max_steps=n_steps,
                 time_ndim=2,
             )
             edge_attr = _stack_time_varying_graph_field(
-                tuple(item.edge_attr for item in items),
+                tuple(_graph_tensor_field(item.edge_attr) for item in items),
                 max_steps=n_steps,
                 time_ndim=3,
             )
@@ -1640,12 +1665,12 @@ def to_padded_graph_runtime(batch: GraphSeriesBatch) -> GraphRuntime:
     if fixed_topology:
         edge_index = _stack_fixed_edge_index(items)
         edge_weight = _stack_fixed_graph_field(
-            tuple(item.edge_weight for item in items),
+            tuple(_graph_tensor_field(item.edge_weight) for item in items),
             max_steps=max_steps,
             time_ndim=2,
         )
         edge_attr = _stack_fixed_graph_field(
-            tuple(item.edge_attr for item in items),
+            tuple(_graph_tensor_field(item.edge_attr) for item in items),
             max_steps=max_steps,
             time_ndim=3,
         )
@@ -1654,12 +1679,12 @@ def to_padded_graph_runtime(batch: GraphSeriesBatch) -> GraphRuntime:
     ):
         edge_index = _pad_time_varying_edge_index(items, max_steps=max_steps)
         edge_weight = _stack_time_varying_graph_field(
-            tuple(item.edge_weight for item in items),
+            tuple(_graph_tensor_field(item.edge_weight) for item in items),
             max_steps=max_steps,
             time_ndim=2,
         )
         edge_attr = _stack_time_varying_graph_field(
-            tuple(item.edge_attr for item in items),
+            tuple(_graph_tensor_field(item.edge_attr) for item in items),
             max_steps=max_steps,
             time_ndim=3,
         )

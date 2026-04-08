@@ -30,9 +30,9 @@ def _encode_obs_reference(analysis: Any, ref: np.ndarray) -> np.ndarray:
     """Encode plotting references into observable trajectories with stable batch/time shapes."""
     ref = np.asarray(ref)
     if ref.ndim == 1:
-        return np.asarray(analysis._ctx.encode(ref)).real
+        return np.real(np.asarray(analysis._ctx.encode(ref)))
     if ref.ndim == 2:
-        return np.stack([np.asarray(analysis._ctx.encode(step)) for step in ref], axis=0).real
+        return np.real(np.stack([np.asarray(analysis._ctx.encode(step)) for step in ref], axis=0))
     if ref.ndim == 3:
         return np.stack([_encode_obs_reference(analysis, traj) for traj in ref], axis=0)
     raise ValueError(f"Unsupported observable reference shape: {ref.shape}")
@@ -184,6 +184,7 @@ class SpectralPlottingAdapter:
                     (l2,) = ax[_k].plot(ts, _refs[_i][:, _j], "r--")
             ax[_k].set_ylabel(f"{_ylbl} {_j}")
         if _refs is not None:
+            assert _errs is not None
             for _k, _j in enumerate(_idx):
                 ax[_k].set_title(f"{title}, Error {_errs[_j] * 100:3.2f}%")
             ax[0].legend([l1, l2], ["Prediction", "Reference"])

@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 from datetime import datetime
+from typing import Any
 
 import yaml
 
@@ -83,7 +84,7 @@ def config_logger(logger: logging.Logger, mode: str = "info", prefix=".") -> Non
     logging.getLogger().handlers = []
 
 
-def load_config(config_path: str, config_mod: dict = None) -> dict:
+def load_config(config_path: str, config_mod: dict[str, Any] | None = None) -> dict:
     """
     Load a YAML configuration file and optionally merge with a dictionary.
 

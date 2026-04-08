@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import cast
 
 import torch
 
-from dymad.core.transform_module import TransformModule
+from dymad.core.transform_module import GradientSupport, Invertibility, TransformModule
 
 
 class IdentityTransform(TransformModule):
@@ -92,14 +93,17 @@ class LiftTransform(TransformModule):
         )
 
     def _infer_feature_sizes(self) -> list[int]:
+        input_dim = self.input_dim
+        if input_dim is None:
+            raise ValueError("LiftTransform input_dim is not initialized. Call fit(...) first.")
         if self.fobs == "poly":
             ks = list(self.kwargs["Ks"])
-            if len(ks) != self.input_dim:
+            if len(ks) != input_dim:
                 raise ValueError("LiftTransform poly Ks must align with input dimension.")
             return ks
         if self.fobs == "mixed":
             opts = self.kwargs["opts"]
-            sizes = [0 for _ in range(self.input_dim)]
+            sizes = [0 for _ in range(input_dim)]
             for index, kind, order in opts:
                 if kind == "m":
                     sizes[index] = int(order)
@@ -374,6 +378,9 @@ class ComposeTransform(TransformModule):
         self.transforms = torch.nn.ModuleList(list(transforms or []))
         self._refresh_metadata()
 
+    def _typed_transforms(self) -> list[TransformModule]:
+        return [cast(TransformModule, stage) for stage in self.transforms]
+
     @property
     def NT(self) -> int:
         return len(self.transforms)
@@ -384,12 +391,13 @@ class ComposeTransform(TransformModule):
 
     def fit(self, data: Sequence[torch.Tensor]) -> ComposeTransform:
         current = list(data)
-        for stage in self.transforms:
+        for stage in self._typed_transforms():
             stage.fit(current)
             current = stage.transform_batch(current)
-        if self.transforms:
-            self.input_dim = self.transforms[0].input_dim
-            self.output_dim = self.transforms[-1].output_dim
+        typed_transforms = self._typed_transforms()
+        if typed_transforms:
+            self.input_dim = typed_transforms[0].input_dim
+            self.output_dim = typed_transforms[-1].output_dim
         self._refresh_metadata()
         return self
 
@@ -411,43 +419,45 @@ class ComposeTransform(TransformModule):
 
     def forward_range(self, data: torch.Tensor, rng: list[int] | None = None) -> torch.Tensor:
         start, end = self._proc_rng(rng)
-        for stage in self.transforms[start:end]:
+        for stage in self._typed_transforms()[start:end]:
             data = stage(data)
         return data
 
     def inverse_range(self, data: torch.Tensor, rng: list[int] | None = None) -> torch.Tensor:
         start, end = self._proc_rng(rng)
-        for stage in reversed(self.transforms[start:end]):
+        for stage in reversed(self._typed_transforms()[start:end]):
             data = stage.inverse(data)
         return data
 
     def _module_for_range(self, rng: list[int]) -> TransformModule:
         start, end = self._proc_rng(rng)
+        typed_transforms = self._typed_transforms()
         if end - start == 1:
-            return self.transforms[start]
-        return ComposeTransform(list(self.transforms[start:end]))
+            return typed_transforms[start]
+        return ComposeTransform(typed_transforms[start:end])
 
     def _refresh_metadata(self) -> None:
-        delayed = [stage for stage in self.transforms if stage.delay > 0]
+        typed_transforms = self._typed_transforms()
+        delayed = [stage for stage in typed_transforms if stage.delay > 0]
         if len(delayed) > 1:
             raise ValueError("ComposeTransform supports at most one delayed stage.")
         self.delay = delayed[0].delay if delayed else 0
-        if self.transforms:
-            self.input_dim = self.transforms[0].input_dim
-            self.output_dim = self.transforms[-1].output_dim
+        if typed_transforms:
+            self.input_dim = typed_transforms[0].input_dim
+            self.output_dim = typed_transforms[-1].output_dim
         self.invertibility = self._aggregate_invertibility()
         self.supports_gradients = self._aggregate_gradient_support()
 
-    def _aggregate_invertibility(self) -> str:
-        if any(stage.invertibility == "none" for stage in self.transforms):
+    def _aggregate_invertibility(self) -> Invertibility:
+        if any(stage.invertibility == "none" for stage in self._typed_transforms()):
             return "none"
-        if any(stage.invertibility == "approximate" for stage in self.transforms):
+        if any(stage.invertibility == "approximate" for stage in self._typed_transforms()):
             return "approximate"
         return "exact"
 
-    def _aggregate_gradient_support(self) -> str:
-        if any(stage.supports_gradients == "false" for stage in self.transforms):
+    def _aggregate_gradient_support(self) -> GradientSupport:
+        if any(stage.supports_gradients == "false" for stage in self._typed_transforms()):
             return "false"
-        if any(stage.supports_gradients == "approximate" for stage in self.transforms):
+        if any(stage.supports_gradients == "approximate" for stage in self._typed_transforms()):
             return "approximate"
         return "true"

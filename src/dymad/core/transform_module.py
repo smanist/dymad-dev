@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import torch
@@ -145,8 +145,8 @@ class TransformModule(nn.Module, ABC):
         self.delay = int(delay)
         self.input_dim: int | None = None
         self.output_dim: int | None = None
-        self.invertibility = invertibility
-        self.supports_gradients = supports_gradients
+        self.invertibility: Invertibility = invertibility
+        self.supports_gradients: GradientSupport = supports_gradients
 
     @property
     def _inp_dim(self) -> int | None:
@@ -413,9 +413,9 @@ class FieldTransformModule(nn.Module):
         time_varying: bool | None = None,
     ) -> None:
         super().__init__()
-        self.field = field
-        self.transform = transform
-        self.time_varying = (
+        self.field: FieldName = field
+        self.transform: TransformModule = transform
+        self.time_varying: bool = (
             field in _TIME_VARYING_FIELDS if time_varying is None else bool(time_varying)
         )
 
@@ -439,7 +439,7 @@ class FieldTransformModule(nn.Module):
             self.transform.fit(payloads)
         return self
 
-    def apply_to_series(self, series: SeriesItem):
+    def apply_to_series(self, series: SeriesItem) -> SeriesItem:
         payload = getattr(series, self.field)
         if payload is None:
             return series
@@ -505,27 +505,30 @@ class SeriesTransformPipeline(nn.Module):
         super().__init__()
         self.stages = nn.ModuleList(list(stages or []))
 
+    def _typed_stages(self) -> list[FieldTransformModule]:
+        return [cast(FieldTransformModule, stage) for stage in self.stages]
+
     @property
     def delay(self) -> int:
-        delays = [stage.delay for stage in self.stages if stage.time_varying]
+        delays = [stage.delay for stage in self._typed_stages() if stage.time_varying]
         return max(delays) if delays else 0
 
     def fit(self, batch: SeriesBatch) -> SeriesTransformPipeline:
-        for stage in self.stages:
+        for stage in self._typed_stages():
             stage.fit(batch)
         return self
 
     def forward(self, batch: SeriesBatch) -> SeriesBatch:
         items: list[SeriesItem] = [series for series in batch]
-        for stage in self.stages:
+        for stage in self._typed_stages():
             items = [stage.apply_to_series(series) for series in items]
         items = [self._align_series(series) for series in items]
         if isinstance(batch, RegularSeriesBatch):
-            return RegularSeriesBatch.collate(items)
-        return GraphSeriesBatch.collate(items)
+            return RegularSeriesBatch.collate(cast(list[RegularSeries], items))
+        return GraphSeriesBatch.collate(cast(list[GraphSeries], items))
 
     def inverse_field(self, field: FieldName, payload):
-        for stage in reversed(self.stages):
+        for stage in reversed(self._typed_stages()):
             if stage.field != field:
                 continue
             payload = stage.inverse_payload(payload)
@@ -535,22 +538,23 @@ class SeriesTransformPipeline(nn.Module):
         if self.delay <= 0:
             return replace(series, meta=dict(series.meta))
 
-        field_delays = {
+        field_delays: dict[FieldName, int] = {
             stage.field: stage.delay
-            for stage in self.stages
+            for stage in self._typed_stages()
             if stage.time_varying and getattr(series, stage.field) is not None
         }
         if not field_delays:
             return replace(series, meta=dict(series.meta))
 
         aligned_updates = {"time": series.time[self.delay :], "meta": dict(series.meta)}
-        pretrimmed_fields: set[str] = set()
+        pretrimmed_fields: set[FieldName] = set()
         if isinstance(series, GraphSeries):
             if isinstance(series.edge_index, tuple):
                 aligned_updates["edge_index"] = series.edge_index[self.delay :]
             elif series.edge_index.ndim == 3 and series.edge_index.shape[0] == series.time.shape[0]:
                 aligned_updates["edge_index"] = series.edge_index[self.delay :]
-            for graph_field, min_ndim in (("edge_weight", 2), ("edge_attr", 3)):
+            graph_fields: tuple[tuple[FieldName, int], ...] = (("edge_weight", 2), ("edge_attr", 3))
+            for graph_field, min_ndim in graph_fields:
                 payload = getattr(series, graph_field)
                 trim = self.delay - field_delays.get(graph_field, 0)
                 if payload is None or trim <= 0:

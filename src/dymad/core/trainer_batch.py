@@ -9,8 +9,11 @@ import torch
 
 from dymad.core.graph_series import GraphSeries, GraphSeriesBatch
 from dymad.core.runtime import (
+    EmptyRegularRuntime,
     GraphRuntime,
+    RaggedRegularRuntime,
     RegularRuntime,
+    UniformRegularRuntime,
     to_padded_graph_runtime,
     to_padded_regular_runtime,
 )
@@ -82,6 +85,8 @@ class RegularTrainerBatch:
         return RegularTrainerBatch(runtime=runtime, series=series)
 
     def truncate(self, num_steps: int) -> RegularTrainerBatch:
+        if isinstance(self.runtime, EmptyRegularRuntime):
+            return RegularTrainerBatch(runtime=self.runtime, series=self.series)
         runtime = self.runtime.truncate(num_steps)
         series = None
         if self.series is not None:
@@ -91,20 +96,34 @@ class RegularTrainerBatch:
         return RegularTrainerBatch(runtime=runtime, series=series)
 
     def window(self, window: int, stride: int) -> RegularTrainerBatch:
+        if isinstance(self.runtime, EmptyRegularRuntime):
+            return RegularTrainerBatch(runtime=self.runtime, series=self.series)
         runtime = self.runtime.window(window, stride)
+        assert isinstance(
+            runtime, (EmptyRegularRuntime, UniformRegularRuntime, RaggedRegularRuntime)
+        )
         return RegularTrainerBatch.from_runtime(runtime)
 
     def initial_state(self) -> torch.Tensor:
-        return self.runtime.initial_state()
+        state = self.runtime.initial_state()
+        if state is None:
+            raise ValueError("RegularTrainerBatch has no initial state for an empty runtime.")
+        return state
 
     def time_tensor(self) -> torch.Tensor | tuple[torch.Tensor, ...]:
         if self.runtime.is_uniform_length:
-            return self.runtime.t
+            time = self.runtime.t
+            if time is None:
+                raise ValueError("RegularTrainerBatch has no time tensor for an empty runtime.")
+            return time
         return tuple(item.t[0] for item in self.runtime.iter_series())
 
     def state_tensor(self) -> torch.Tensor | tuple[torch.Tensor, ...]:
         if self.runtime.is_uniform_length:
-            return self.runtime.x
+            state = self.runtime.x
+            if state is None:
+                raise ValueError("RegularTrainerBatch has no state tensor for an empty runtime.")
+            return state
         return tuple(item.x[0] for item in self.runtime.iter_series())
 
     def control_tensor(self) -> torch.Tensor | None:

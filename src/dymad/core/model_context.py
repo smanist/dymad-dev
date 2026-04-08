@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -16,6 +16,7 @@ from dymad.core.graph_series import (
 from dymad.core.runtime import (
     EmptyRegularRuntime,
     GraphRuntime,
+    RegularRuntime,
     TypedRuntime,
     UniformGraphRuntime,
     UniformRegularRuntime,
@@ -52,11 +53,13 @@ class RegularModelContext:
 
     def initial_state_tensor(self, *, squeeze_single: bool = False) -> torch.Tensor:
         state = self.to_runtime().initial_state()
+        if state is None:
+            raise ValueError("RegularModelContext has no initial state for an empty batch.")
         if squeeze_single and state.shape[0] == 1:
             return state[0]
         return state
 
-    def to_runtime(self) -> TypedRuntime:
+    def to_runtime(self) -> RegularRuntime:
         return to_padded_regular_runtime(self.batch)
 
 
@@ -219,11 +222,13 @@ def _context_from_runtime(payload: TypedRuntime) -> RegularModelContext | GraphM
     if not items:
         return RegularModelContext.from_batch(RegularSeriesBatch.collate([]))
     if payload.is_graph:
+        graph_items = tuple(cast(UniformGraphRuntime, item) for item in items)
         return GraphModelContext.from_batch(
-            GraphSeriesBatch.collate(_graph_series_from_runtime(item) for item in items)
+            GraphSeriesBatch.collate(_graph_series_from_runtime(item) for item in graph_items)
         )
+    regular_items = tuple(cast(UniformRegularRuntime, item) for item in items)
     return RegularModelContext.from_batch(
-        RegularSeriesBatch.collate(_regular_series_from_runtime(item) for item in items)
+        RegularSeriesBatch.collate(_regular_series_from_runtime(item) for item in regular_items)
     )
 
 

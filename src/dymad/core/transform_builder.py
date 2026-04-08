@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -41,6 +41,7 @@ def build_transform_module(config, state_dict: dict[str, Any] | None = None) -> 
         return module
 
     if _is_compose_state(state_dict):
+        assert isinstance(state_dict, dict)
         child_states = list(state_dict.get("children", []))
     elif len(stages) == 1:
         child_states = [state_dict]
@@ -60,11 +61,12 @@ def build_transform_module(config, state_dict: dict[str, Any] | None = None) -> 
 def export_transform_state(module: TransformModule) -> dict[str, Any]:
     """Export a typed transform module in the legacy-compatible checkpoint format."""
     if isinstance(module, ComposeTransform):
+        children = [cast(TransformModule, child) for child in module.transforms]
         return {
             "type": "Compose",
-            "names": [_legacy_type_name(child) for child in module.transforms],
+            "names": [_legacy_type_name(child) for child in children],
             "delay": module.delay,
-            "children": [export_transform_state(child) for child in module.transforms],
+            "children": [export_transform_state(child) for child in children],
             "inp": module.input_dim,
             "out": module.output_dim,
         }
