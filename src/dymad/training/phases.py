@@ -416,6 +416,13 @@ class BasePhase:
         return copy.deepcopy(model_artifact.model.state_dict())
 
     def _prediction_settings(self) -> tuple[str, dict[str, Any]]:
+        training_cfg = self.config.get("training")
+        if isinstance(training_cfg, dict):
+            return (
+                training_cfg.get("ode_method", "dopri5"),
+                copy.deepcopy(training_cfg.get("ode_args", {})),
+            )
+
         phases = self.config.get("phases", [])
         for phase_cfg in phases:
             if not isinstance(phase_cfg, dict):
@@ -792,13 +799,14 @@ class BaseOptimizerPhase(BasePhase):
         truth: TrainerBatch,
         *,
         method: str,
+        ode_args: dict[str, Any] | None = None,
     ) -> float:
         runtime = batch_to_runtime(truth)
         with torch.no_grad():
             x_truth = runtime.x
             x0 = runtime.x[:, 0, :]
             ts = runtime.t
-            x_pred = model.predict(x0, runtime, ts, method=method)
+            x_pred = model.predict(x0, runtime, ts, method=method, **(ode_args or {}))
             return optimizer_state.criteria[-1](x_pred, x_truth).item()
 
     def _evaluate_prediction_criterion(
@@ -808,6 +816,7 @@ class BaseOptimizerPhase(BasePhase):
         dataset,
         *,
         method: str,
+        ode_args: dict[str, Any] | None = None,
         evaluate_all: bool = False,
     ) -> float:
         if evaluate_all:
@@ -815,7 +824,13 @@ class BaseOptimizerPhase(BasePhase):
         else:
             samples = [random.choice(dataset)]
         values = [
-            self._evaluate_prediction_criterion_single(model, optimizer_state, item, method=method)
+            self._evaluate_prediction_criterion_single(
+                model,
+                optimizer_state,
+                item,
+                method=method,
+                ode_args=ode_args,
+            )
             for item in samples
         ]
         return sum(values) / len(values)
@@ -829,18 +844,21 @@ class BaseOptimizerPhase(BasePhase):
         *,
         epoch: int,
         ode_method: str,
+        ode_args: dict[str, Any],
     ) -> None:
         train_crit = self._evaluate_prediction_criterion(
             model,
             optimizer_state,
             phase_context.train_set,
             method=ode_method,
+            ode_args=ode_args,
         )
         valid_crit = self._evaluate_prediction_criterion(
             model,
             optimizer_state,
             phase_context.valid_set,
             method=ode_method,
+            ode_args=ode_args,
         )
         history.crit.append([epoch, train_crit, valid_crit])
 
@@ -997,6 +1015,7 @@ class BaseOptimizerPhase(BasePhase):
                     history,
                     epoch=trainer_state.epoch - 1,
                     ode_method=ode_method,
+                    ode_args=ode_args,
                 )
                 self._write_progress_plots(
                     model_artifact=model_artifact,
@@ -1369,11 +1388,13 @@ class ValidationAnalysisPhase(BasePhase):
             dtype=self.dtype,
             execution_services=self.execution_services,
         )
+        ode_method, ode_args = evaluator._prediction_settings()
         value = evaluator._evaluate_prediction_criterion(
             model_artifact.model,
             optimizer_state,
             dataset,
-            method=self.config.get("training", {}).get("ode_method", "dopri5"),
+            method=ode_method,
+            ode_args=ode_args,
             evaluate_all=self.spec.evaluate_all,
         )
         evaluation = EvaluationArtifact(

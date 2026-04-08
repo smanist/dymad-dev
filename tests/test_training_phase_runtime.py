@@ -2,8 +2,12 @@ import pytest
 import torch
 
 from dymad.training import driver
+from dymad.training.execution_services import ExecutionServices
+import dymad.training.phases as phases_module
 from dymad.training.phase_runtime import (
     ArtifactRegistry,
+    ModelArtifact,
+    OptimizerStateArtifact,
     PhaseContext,
     PhaseRecord,
     PhaseResult,
@@ -16,6 +20,7 @@ from dymad.training.phases import (
     LinearSolvePhaseSpec,
     OptimizerPhaseSpec,
     PhaseSpecValidationError,
+    build_phase,
     normalize_phase_specs,
 )
 from dymad.training.trainer_run import TrainerRun
@@ -134,6 +139,123 @@ def test_normalize_phase_specs_rejects_legacy_ls_update():
                 ],
             }
         )
+
+
+def test_validation_analysis_phase_uses_phase_solver_settings(monkeypatch):
+    config = {
+        "model": {"name": "demo"},
+        "phases": [
+            {
+                "type": "optimizer",
+                "name": "node",
+                "trainer": "NODE",
+                "ode_method": "rk4",
+                "ode_args": {"step_size": 0.05},
+            }
+        ],
+    }
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        AnalysisPhaseSpec(name="analysis"),
+        config=config,
+        model_class=object,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+
+    class _DummyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+    model = _DummyModel()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        criteria=[torch.nn.MSELoss(), torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+    )
+    artifacts = ArtifactRegistry()
+    artifacts.put(
+        "model",
+        ModelArtifact(
+            model=model,
+            config=config,
+            train_md={},
+            valid_md={},
+            dtype=torch.float32,
+        ),
+    )
+    artifacts.put("optimizer_state", optimizer_state)
+    trainer_state = TrainerState(config=config, device=torch.device("cpu"))
+    phase_context = PhaseContext(train_set=[object()], valid_set=[object()])
+
+    captured: dict[str, object] = {}
+
+    def traced_eval(
+        self,
+        model,
+        optimizer_state,
+        dataset,
+        *,
+        method,
+        ode_args=None,
+        evaluate_all=False,
+    ):
+        captured["method"] = method
+        captured["ode_args"] = ode_args
+        captured["dataset"] = dataset
+        captured["evaluate_all"] = evaluate_all
+        return 0.25
+
+    monkeypatch.setattr(
+        phases_module.NodeOptimizerPhase,
+        "_evaluate_prediction_criterion",
+        traced_eval,
+    )
+
+    result = phase.execute(
+        trainer_state=trainer_state,
+        phase_context=phase_context,
+        artifacts=artifacts,
+        run_name="demo",
+        logger=execution_services.configure_logger("dymad.test.validation_analysis", prefix=""),
+    )
+
+    assert captured["method"] == "rk4"
+    assert captured["ode_args"] == {"step_size": 0.05}
+    assert captured["dataset"] is phase_context.valid_set
+    assert captured["evaluate_all"] is False
+    assert result.metrics == {"mse": 0.25}
+
+
+def test_prediction_settings_prefers_legacy_training_alias():
+    config = {
+        "model": {"name": "demo"},
+        "training": {
+            "ode_method": "rk4",
+            "ode_args": {"step_size": 0.2},
+        },
+        "phases": [
+            {
+                "type": "optimizer",
+                "name": "node",
+                "trainer": "NODE",
+                "ode_method": "dopri5",
+                "ode_args": {"rtol": 1e-6},
+            }
+        ],
+    }
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        AnalysisPhaseSpec(name="analysis"),
+        config=config,
+        model_class=object,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+
+    assert phase._prediction_settings() == ("rk4", {"step_size": 0.2})
 
 
 def test_run_cv_single_uses_trainer_run_with_typed_context(monkeypatch):
