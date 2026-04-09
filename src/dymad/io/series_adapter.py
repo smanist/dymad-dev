@@ -88,12 +88,19 @@ class SeriesAdapter:
             edge_attr, dtype=dtype, device=device
         )
 
-        cls = (
-            FixedGraphSeries
-            if isinstance(edge_index_payload, torch.Tensor) and edge_index_payload.ndim == 2
-            else VariableEdgeGraphSeries
-        )
-        return cls(
+        if isinstance(edge_index_payload, torch.Tensor) and edge_index_payload.ndim == 2:
+            return FixedGraphSeries(
+                time=time_tensor,
+                node_state=node_state_tensor,
+                edge_index=edge_index_payload,
+                control=control_tensor,
+                target=target_tensor,
+                params=params_tensor,
+                edge_weight=edge_weight_payload,
+                edge_attr=edge_attr_payload,
+                meta=dict(meta or {}),
+            )
+        return VariableEdgeGraphSeries(
             time=time_tensor,
             node_state=node_state_tensor,
             edge_index=edge_index_payload,

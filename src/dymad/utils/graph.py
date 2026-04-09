@@ -53,5 +53,7 @@ def adj_to_edge(adj: Batch) -> tuple[Batch, Batch]:
         return ei, ew
 
     adj = torch.tensor(adj)
+    if dense_to_sparse is None:
+        raise ImportError("torch_geometric is required for dense adjacency to sparse conversion.")
     edge_index, edge_weights = dense_to_sparse(adj)
     return edge_index.numpy().T, edge_weights.numpy()

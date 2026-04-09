@@ -1,5 +1,6 @@
 import inspect
 import logging
+from typing import Any, cast
 
 import numpy as np
 import scipy.linalg as spl
@@ -8,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from dymad.numerics.linalg import logm_low_rank, real_lowrank_from_eigpairs, truncated_lstsq
 from dymad.sako import SAKO, filter_spectrum
-from dymad.training.batch_adapter import TrainerBatch, batch_to_runtime
+from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,19 @@ def _dt_target(z: torch.Tensor) -> torch.Tensor:
     return z[..., 1:, :]
 
 
-def _comp_linear_features_dt(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
+def _as_runtime_batch(batch: TrainerBatch | RuntimeBatch) -> RuntimeBatch:
+    if hasattr(batch, "is_uniform_length"):
+        return cast(RuntimeBatch, batch)
+    return batch_to_runtime(cast(TrainerBatch, batch))
+
+
+def _comp_linear_features_dt(
+    model,
+    batch: TrainerBatch | RuntimeBatch,
+    **kwargs,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute linear features for discrete-time models."""
-    runtime = batch_to_runtime(batch)
+    runtime = _as_runtime_batch(batch)
     if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
         A_blocks, z_blocks = zip(
             *[_comp_linear_features_dt(model, item, **kwargs) for item in runtime.iter_series()],
@@ -36,11 +47,15 @@ def _comp_linear_features_dt(model, batch: TrainerBatch, **kwargs) -> torch.Tens
     return _A.reshape(-1, _A.shape[-1]), _z.reshape(-1, _z.shape[-1])
 
 
-def _comp_linear_eval_dt(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
+def _comp_linear_eval_dt(
+    model,
+    batch: TrainerBatch | RuntimeBatch,
+    **kwargs,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute predicted targets for discrete-time models.
     z_dot really means z_next here.
     """
-    runtime = batch_to_runtime(batch)
+    runtime = _as_runtime_batch(batch)
     if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
         z_dots, zs = zip(
             *[_comp_linear_eval_dt(model, item, **kwargs) for item in runtime.iter_series()],
@@ -64,9 +79,13 @@ def _ct_target(z: torch.Tensor, dt, order=2) -> torch.Tensor:
         raise ValueError(f"Unsupported FD order: {order}. Only 1 and 2 are supported.")
 
 
-def _comp_linear_features_ct(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
+def _comp_linear_features_ct(
+    model,
+    batch: TrainerBatch | RuntimeBatch,
+    **kwargs,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute linear features for continuous-time models."""
-    runtime = batch_to_runtime(batch)
+    runtime = _as_runtime_batch(batch)
     if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
         A_blocks, z_blocks = zip(
             *[_comp_linear_features_ct(model, item, **kwargs) for item in runtime.iter_series()],
@@ -78,9 +97,13 @@ def _comp_linear_features_ct(model, batch: TrainerBatch, **kwargs) -> torch.Tens
     return A.reshape(-1, A.shape[-1]), _z.reshape(-1, _z.shape[-1])
 
 
-def _comp_linear_eval_ct(model, batch: TrainerBatch, **kwargs) -> torch.Tensor:
+def _comp_linear_eval_ct(
+    model,
+    batch: TrainerBatch | RuntimeBatch,
+    **kwargs,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute predicted targets for continuous-time models."""
-    runtime = batch_to_runtime(batch)
+    runtime = _as_runtime_batch(batch)
     if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
         z_dots, zs = zip(
             *[_comp_linear_eval_ct(model, item, **kwargs) for item in runtime.iter_series()],
@@ -169,10 +192,10 @@ def _ls_sako(A: np.ndarray, b: np.ndarray, params=None) -> tuple[np.ndarray, np.
     sako = SAKO(A, b, reps=1e-10, etol=1e-13)
     _w, _vl, _vr = sako.solve_eig()
     if isinstance(params, list):
-        order = params[0]
+        order = params[0] if params else "full"
         remove_one = params[1] if len(params) > 1 else True
     else:
-        order = params
+        order = "full" if params is None else params
         remove_one = True
     eigs, _, res = filter_spectrum(sako, (_w, _vl, _vr), order=order, remove_one=remove_one)
     logger.info(
@@ -322,7 +345,7 @@ class LSUpdater:
         linear_loss = criterion(_p, _b)
         return linear_loss
 
-    def update(self, model, dataloader: DataLoader) -> float:
+    def update(self, model, dataloader: DataLoader) -> tuple[float, Any]:
         """Train the model for one epoch."""
         model.train()
 
@@ -334,7 +357,7 @@ class LSUpdater:
                 params, residual = self.solver(
                     dataloader, model, self.dt, self.params, **self.kwargs
                 )
-                avg_epoch_loss = residual.mean().item()
+                avg_epoch_loss = float(np.asarray(residual).mean())
             return avg_epoch_loss, params
 
         with torch.no_grad():

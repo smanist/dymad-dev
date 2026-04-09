@@ -1,4 +1,5 @@
 import copy
+from typing import Any, cast
 
 import torch.nn as nn
 
@@ -34,6 +35,8 @@ NN_MAP = {
     "seq_rnn": VanillaRNN,
 }
 
+ScalarKernel = KernelScRBF | KernelScDM | KernelScExp
+
 
 def make_network(
     nn_type: str,
@@ -41,7 +44,7 @@ def make_network(
     hidden_dim: int,
     output_dim: int,
     n_layers: int,
-    seq_len: int = None,
+    seq_len: int | None = None,
     **kwargs,
 ) -> nn.Module:
     """Factory function to create preset neural network models based on :attr:`~dymad.modules.collections.NN_MAP`.
@@ -68,10 +71,12 @@ def make_network(
             raise ValueError(
                 f"Unknown network type '{nn_type}'. Must be one of {list(NN_MAP.keys())}."
             )
-    net_class = NN_MAP.get(_type, None)
+    net_class = NN_MAP.get(_type)
 
     # Special handling for TakeFirst and TakeFirstGraph
     if _type in ["mlp_1st", "gnn_1st"]:
+        if net_class is None:
+            raise ValueError(f"Unknown network type '{nn_type}'.")
         return net_class(output_dim)
 
     # Prepare common network options
@@ -87,12 +92,18 @@ def make_network(
     if _type[:3] == "seq":
         if _type in NN_MAP:
             # This case always assumes last_only=True
+            if seq_len is None:
+                raise ValueError(f"Sequence network '{nn_type}' requires seq_len.")
+            if net_class is None:
+                raise ValueError(f"Unknown network type '{nn_type}'.")
             net_opts["last_only"] = True
             return net_class(seq_len, **net_opts)
 
         # Extract the base network type (everything after "seq_")
         # This case always assumes last_only=False
         base_type = _type[4:]  # Remove "seq_" prefix
+        if seq_len is None:
+            raise ValueError(f"Sequence network '{nn_type}' requires seq_len.")
         base_net = make_network(
             nn_type=base_type,
             input_dim=input_dim // seq_len,
@@ -104,6 +115,8 @@ def make_network(
         return StepwiseModel(seq_len, net=base_net, last_only=False, **kwargs)
 
     # Standard handling for MLP and GNN variants
+    if net_class is None:
+        raise ValueError(f"Unknown network type '{nn_type}'.")
     return net_class(**net_opts)
 
 
@@ -131,8 +144,8 @@ def make_autoencoder(
     latent_dim: int,
     enc_depth: int,
     dec_depth: int,
-    output_dim: int = None,
-    seq_len: int = None,
+    output_dim: int | None = None,
+    seq_len: int | None = None,
     **kwargs,
 ) -> tuple[nn.Module, nn.Module]:
     """
@@ -175,31 +188,30 @@ def make_autoencoder(
     if output_dim is None:
         output_dim = input_dim
 
-    encoder_args = dict(
+    # Generate the encoder and decoder based on the type
+    encoder = make_network(
+        nn_type=enc_type,
         input_dim=input_dim,
         hidden_dim=hidden_dim,
         output_dim=latent_dim,
         n_layers=enc_depth,
         seq_len=seq_len,
+        **kwargs,
     )
-    encoder_args.update(kwargs)
-    decoder_args = dict(
+    decoder = make_network(
+        nn_type=dec_type,
         input_dim=latent_dim,
         hidden_dim=hidden_dim,
         output_dim=output_dim,
         n_layers=dec_depth,
         seq_len=seq_len,
+        **kwargs,
     )
-    decoder_args.update(kwargs)
-
-    # Generate the encoder and decoder based on the type
-    encoder = make_network(nn_type=enc_type, **encoder_args)
-    decoder = make_network(nn_type=dec_type, **decoder_args)
 
     return encoder, decoder
 
 
-def _make_scalar_kernel(sk_type: str, input_dim: int, dtype=None, **kwargs) -> nn.Module:
+def _make_scalar_kernel(sk_type: str, input_dim: int, dtype=None, **kwargs) -> ScalarKernel:
     if sk_type == "rbf":
         return KernelScRBF(in_dim=input_dim, dtype=dtype, **kwargs)
     elif sk_type == "dm":
@@ -211,7 +223,12 @@ def _make_scalar_kernel(sk_type: str, input_dim: int, dtype=None, **kwargs) -> n
 
 
 def make_kernel(
-    k_type: str, input_dim: int, output_dim: int = None, kopts: list = None, dtype=None, **kwargs
+    k_type: str,
+    input_dim: int,
+    output_dim: int | None = None,
+    kopts: list[dict[str, Any]] | dict[str, Any] | None = None,
+    dtype=None,
+    **kwargs,
 ) -> nn.Module:
     """
     Factory function to create preset kernels. Including:
@@ -250,9 +267,9 @@ def make_kernel(
                     f"Operator-valued kernel of type 'sep' must have at least one scalar kernel option, got {kopts}."
                 )
 
-            kernels = []
+            kernels: list[ScalarKernel] = []
             for _k in kopts:
-                _opt = copy.deepcopy(_k)
+                _opt = copy.deepcopy(cast(dict[str, Any], _k))
                 _k_type = _opt.pop("type").split("_")[-1]
                 _k_input_dim = _opt.pop("input_dim")
                 kernels.append(_make_scalar_kernel(_k_type, _k_input_dim, dtype=dtype, **_opt))
@@ -264,7 +281,7 @@ def make_kernel(
                     f"Operator-valued kernel of type 'tan' must have one and only one scalar kernel, got {kopts}."
                 )
 
-            _opt = copy.deepcopy(kopts)
+            _opt = copy.deepcopy(cast(dict[str, Any], kopts))
             _k_type = _opt.pop("type").split("_")[-1]
             _k_input_dim = _opt.pop("input_dim")
             kernel = _make_scalar_kernel(_k_type, _k_input_dim, dtype=dtype, **_opt)
@@ -277,7 +294,12 @@ def make_kernel(
 
 
 def make_krr(
-    type: str, kernel: dict | list[dict], ridge_init=0, jitter=1e-10, dtype=None, device=None
+    type: str,
+    kernel: dict[str, Any] | list[dict[str, Any]],
+    ridge_init=0,
+    jitter=1e-10,
+    dtype=None,
+    device=None,
 ) -> nn.Module:
     """
     Factory function to create preset Kernel Ridge Regression (KRR) models. Including:
@@ -303,8 +325,10 @@ def make_krr(
             f"Kernel must be a dictionary or a list of dictionaries, got {type(kernel)}."
         )
 
-    k_module = []
+    k_module: list[nn.Module] | nn.Module = []
     for _k in _ker:
+        if not isinstance(k_module, list):
+            raise TypeError("Kernel module accumulator must be a list during construction.")
         k_type = _k["type"]
         k_input_dim = _k["input_dim"]
         k_output_dim = _k.get("output_dim", None)

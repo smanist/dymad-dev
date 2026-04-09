@@ -1,12 +1,13 @@
 import copy
 import os
 import shutil
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader, Dataset
 
 from dymad.io import TrajectoryManager, TrajectoryManagerGraph
 from dymad.training.execution_services import ExecutionServices
@@ -15,19 +16,21 @@ from dymad.training.phase_runtime import PhaseContext, build_initial_trainer_sta
 from dymad.training.trainer_run import TrainerRun
 from dymad.utils import load_config, plot_cv_results
 
+TrajectoryManagerLike = TrajectoryManager | TrajectoryManagerGraph
+
 
 # --------------------
 # Standalone single CV run for multi-processing compatibility
 # --------------------
 def _apply_combo_to_config(
-    combo_idx,
+    combo_idx: int,
     fold_id: int,
     cfg: dict[str, Any],
     combo: dict[str, Any],
-    base_name,
-    checkpoint_prefix,
-    results_prefix,
-) -> dict[str, Any]:
+    base_name: str,
+    checkpoint_prefix: str,
+    results_prefix: str,
+) -> tuple[dict[str, Any], str]:
     """
     Apply dotted-key hyperparameters in combo onto a deep-copied config.
     """
@@ -48,22 +51,32 @@ def _apply_combo_to_config(
     return cfg, model_prefix
 
 
-def _build_phase_context(fold_id: int, cfg: dict[str, Any], train_sets, valid_sets) -> PhaseContext:
+def _build_phase_context(
+    fold_id: int,
+    cfg: dict[str, Any],
+    train_sets: Sequence[TrajectoryManagerLike],
+    valid_sets: Sequence[TrajectoryManagerLike],
+) -> PhaseContext:
     """Setup typed phase context (datasets/loaders/metadata) for one fold."""
-    trainset: TrajectoryManager | TrajectoryManagerGraph = train_sets[fold_id]
+    trainset = train_sets[fold_id]
     trainset.update_config(cfg)
-    train_loader, train_set, train_md = trainset.process_data()
+    train_loader_raw, train_set_raw, train_md = trainset.process_data()
 
-    validset: TrajectoryManager | TrajectoryManagerGraph = valid_sets[fold_id]
+    validset = valid_sets[fold_id]
     validset.update_config(cfg)
-    validset.set_transforms(trajmgr=trainset)
-    valid_loader, valid_set, valid_md = validset.process_data()
+    if isinstance(validset, TrajectoryManagerGraph):
+        if not isinstance(trainset, TrajectoryManagerGraph):
+            raise TypeError("Graph validation manager requires a graph training manager.")
+        validset.set_transforms(trajmgr=trainset)
+    else:
+        validset.set_transforms(trajmgr=cast(TrajectoryManager, trainset))
+    valid_loader_raw, valid_set_raw, valid_md = validset.process_data()
 
     return PhaseContext(
-        train_loader=train_loader,
-        valid_loader=valid_loader,
-        train_set=train_set,
-        valid_set=valid_set,
+        train_loader=cast(DataLoader[Any], train_loader_raw),
+        valid_loader=cast(DataLoader[Any], valid_loader_raw),
+        train_set=cast(Dataset[Any], train_set_raw),
+        valid_set=cast(Dataset[Any], valid_set_raw),
         train_md=train_md,
         valid_md=valid_md,
     )
@@ -137,6 +150,8 @@ class DriverBase:
         device: torch.device | None = None,
         max_workers: int = 1,
     ):
+        self.train_sets: list[TrajectoryManagerLike] = []
+        self.valid_sets: list[TrajectoryManagerLike] = []
         self.base_config = load_config(config_path, config_mod)
         self.model_class = model_class
         self.execution_services = ExecutionServices.from_driver_config(
@@ -300,7 +315,7 @@ class DriverBase:
         self, data_key: str
     ) -> TrajectoryManager | TrajectoryManagerGraph:
         md = {"config": copy.deepcopy(self.base_config)}
-        if self.model_class.GRAPH:
+        if bool(getattr(self.model_class, "GRAPH", False)):
             tm = TrajectoryManagerGraph(md, data_key=data_key, device=self.device)
         else:
             tm = TrajectoryManager(md, data_key=data_key, device=self.device)

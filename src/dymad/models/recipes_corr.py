@@ -12,6 +12,14 @@ def _unused_composer(*args):
     return args[0] if args else None
 
 
+def _align_optional_feature(value: torch.Tensor | None, reference: torch.Tensor) -> torch.Tensor:
+    if value is None:
+        return reference.new_zeros((*reference.shape[:-1], 0))
+    if value.ndim == reference.ndim - 1:
+        return value.unsqueeze(-2).expand(*reference.shape[:-1], value.shape[-1])
+    return value
+
+
 class TemplateCorrAlg(ComposedDynamics):
     """
     Template class for dynamics modeling with algebraic corrections.
@@ -101,19 +109,18 @@ class TemplateCorrAlg(ComposedDynamics):
     def dynamics(self, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
         """Processing without control inputs."""
         view = build_component_input_view(w)
-        runtime = view.runtime
-        if z.ndim == 3:
-            w_p = runtime.p.unsqueeze(-2)
-        else:
-            w_p = runtime.p
+        w_u = _align_optional_feature(view.control, z)
+        w_p = _align_optional_feature(view.runtime.p, z)
         _l = self.processor_net(self.features(z, w))
-        _f = self.base_dynamics(z, view.control, _l, w_p)
+        _f = self.base_dynamics(z, w_u, _l, w_p)
         return _f
 
 
 def enc_corr_dif_ctrl(self, w: ComponentInputPayload) -> torch.Tensor:
     """Encodes states and controls."""
     view = build_component_input_view(w)
+    if view.control is None:
+        raise ValueError("Control input is required for control-aware correction encoders.")
     return torch.cat([view.state, self.net(torch.cat([view.state, view.control], dim=-1))], dim=-1)
 
 
@@ -258,13 +265,10 @@ class TemplateCorrDif(ComposedDynamics):
 
     def dynamics(self, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
         view = build_component_input_view(w)
-        runtime = view.runtime
-        if z.ndim == 3:
-            w_p = runtime.p.unsqueeze(-2)
-        else:
-            w_p = runtime.p
+        w_u = _align_optional_feature(view.control, z)
+        w_p = _align_optional_feature(view.runtime.p, z)
         _x = z[..., : self.n_total_state_features]
         _f = self.processor_net(self.features(z, w))
-        _dx = self.base_dynamics(_x, view.control, _f, w_p)
+        _dx = self.base_dynamics(_x, w_u, _f, w_p)
         _ds = self.latent_net(self.features(z, w))
         return torch.cat([_dx, _ds], dim=-1)

@@ -35,13 +35,27 @@ def complex_plot(grid, sv, levels, fig=None, mode="line", lwid=2, lsty=None):
         f, ax = plt.subplots()
     else:
         f, ax = fig
-    _kw = dict(linewidths=lwid, linestyles=lsty)
+    contour_levels = np.asarray(list(levels) if not isinstance(levels, np.ndarray) else levels)
 
     if mode == "line":
-        cs = ax.tricontour(grid.real, grid.imag, sv, levels=levels, **_kw)
-        ax.clabel(cs, cs.levels, inline=True)
+        cs = ax.tricontour(
+            grid.real,
+            grid.imag,
+            sv,
+            levels=contour_levels,
+            linewidths=lwid,
+            linestyles=lsty,
+        )
+        ax.clabel(cs, np.asarray(cs.levels), inline=True)
     else:
-        cs = ax.tricontourf(grid.real, grid.imag, sv, levels=levels, **_kw)
+        cs = ax.tricontourf(
+            grid.real,
+            grid.imag,
+            sv,
+            levels=contour_levels,
+            linewidths=lwid,
+            linestyles=lsty,
+        )
         plt.colorbar(cs)
 
     return f, ax

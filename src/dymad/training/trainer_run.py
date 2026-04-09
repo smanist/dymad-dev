@@ -117,10 +117,16 @@ class TrainerRun:
             )
             active_artifacts = ArtifactRegistry() if artifacts is None else artifacts
 
+        def checkpoint_callback(
+            trainer_state: TrainerState,
+            artifacts: ArtifactRegistry,
+        ) -> None:
+            self.save_run_checkpoint(trainer_state, artifacts)
+
         return self.pipeline.run(
             initial_context=initial_context,
             initial_state=active_state,
             artifacts=active_artifacts,
             run_name=self.run_name,
-            checkpoint_callback=self.save_run_checkpoint,
+            checkpoint_callback=checkpoint_callback,
         )

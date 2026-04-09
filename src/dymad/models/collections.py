@@ -2,28 +2,35 @@ from dataclasses import dataclass
 
 from dymad.models.helpers import build_model
 from dymad.models.model_spec import (
+    DecoderKind,
     DecoderSpec,
+    DynamicsKind,
     DynamicsSpec,
+    EncoderKind,
     EncoderSpec,
+    FeatureKind,
     FeatureSpec,
+    GraphMode,
     MemorySpec,
     ModelSpec,
+    RecipeKind,
     RecipeSpec,
     RolloutSpec,
+    TimeDomain,
 )
 from dymad.models.recipes import CD_KM, CD_KMM, CD_KMSK, CD_LDM, CD_LFM, CD_SDM
 
 
 def _spec(
     *,
-    recipe_kind: str,
+    recipe_kind: RecipeKind,
     model_cls: object,
-    time_domain: str,
-    graph_mode: str,
-    encoder: str,
-    feature: str,
-    dynamics: str,
-    decoder: str,
+    time_domain: TimeDomain,
+    graph_mode: GraphMode,
+    encoder: EncoderKind,
+    feature: FeatureKind,
+    dynamics: DynamicsKind,
+    decoder: DecoderKind,
     rollout: RolloutSpec,
     memory: MemorySpec | None = None,
     name: str | None = None,
