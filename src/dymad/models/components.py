@@ -1,11 +1,51 @@
 import torch
 import torch.nn as nn
 
-from dymad.models.runtime_view import ComponentInputPayload, build_component_input_view
+from dymad.core.model_context import GraphModelContext
+from dymad.core.runtime import RaggedGraphRuntime, UniformGraphRuntime
+from dymad.models.runtime_view import (
+    ComponentInputPayload,
+    ComponentInputView,
+    build_component_input_view,
+)
 
 # ------------------
 # Encoder functions
 # ------------------
+
+
+def _require_control_from_view(view: ComponentInputView) -> torch.Tensor:
+    control = view.control
+    if control is None:
+        raise ValueError("Control input is required for this component.")
+    return control
+
+
+def _require_control(w: ComponentInputPayload) -> torch.Tensor:
+    return _require_control_from_view(build_component_input_view(w))
+
+
+def _require_graph_control_from_view(view: ComponentInputView) -> torch.Tensor:
+    control = view.graph_control
+    if control is None:
+        raise ValueError("Graph control input is required for this component.")
+    return control
+
+
+def _require_graph_control(w: ComponentInputPayload) -> torch.Tensor:
+    return _require_graph_control_from_view(build_component_input_view(w))
+
+
+def _require_graph_sequence_runtime(
+    w: ComponentInputPayload,
+) -> UniformGraphRuntime | RaggedGraphRuntime:
+    if isinstance(w, GraphModelContext):
+        return w.to_runtime()
+    view = build_component_input_view(w)
+    runtime = view.runtime
+    if isinstance(runtime, (UniformGraphRuntime, RaggedGraphRuntime)):
+        return runtime
+    raise TypeError("Graph sequence runtime is required for graph linear evaluation.")
 
 
 def enc_iden(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
@@ -21,7 +61,7 @@ def enc_smpl_auto(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
 def enc_smpl_ctrl(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Encodes states and controls."""
     view = build_component_input_view(w)
-    return net(torch.cat([view.state, view.control], dim=-1))
+    return net(torch.cat([view.state, _require_control_from_view(view)], dim=-1))
 
 
 def enc_raw_ctrl(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
@@ -46,7 +86,7 @@ def enc_graph_auto(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
 def enc_graph_ctrl(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Using GNN in EncCtrl."""
     view = build_component_input_view(w)
-    xu_cat = torch.cat([view.graph_state, view.graph_control], dim=-1)
+    xu_cat = torch.cat([view.graph_state, _require_graph_control_from_view(view)], dim=-1)
     return view.unflatten_nodes(net(xu_cat, view.edge_index, view.edge_weight, view.edge_attr))
 
 
@@ -59,14 +99,14 @@ def enc_node_auto(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
 def enc_node_ctrl(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Using EncCtrl for each node of graph."""
     view = build_component_input_view(w)
-    xu_cat = torch.cat([view.graph_state, view.graph_control], dim=-1)
+    xu_cat = torch.cat([view.graph_state, _require_graph_control_from_view(view)], dim=-1)
     return view.flatten_nodes(net(xu_cat))
 
 
 def enc_node_raw_ctrl(net: nn.Module, w: ComponentInputPayload) -> torch.Tensor:
     """Using EncCtrl for each node of graph, letting encoder handle the concatenation."""
     view = build_component_input_view(w)
-    return view.flatten_nodes(net(view.graph_state, view.graph_control))
+    return view.flatten_nodes(net(view.graph_state, _require_graph_control_from_view(view)))
 
 
 #: Mapping of encoder names to encoder functions.
@@ -133,38 +173,38 @@ def zu_cat_none(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
 
 def zu_cat_smpl(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Simple concatenation of z and u."""
-    return torch.cat([z, build_component_input_view(w).control], dim=-1)
+    return torch.cat([z, _require_control(w)], dim=-1)
 
 
 def zu_blin_no_const(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Compute bilinear features without constant term."""
-    control = build_component_input_view(w).control
+    control = _require_control(w)
     z_u = (z.unsqueeze(-1) * control.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
     return torch.cat([z, z_u], dim=-1)
 
 
 def zu_blin_with_const(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Compute bilinear features with constant term."""
-    control = build_component_input_view(w).control
+    control = _require_control(w)
     z_u = (z.unsqueeze(-1) * control.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
     return torch.cat([z, z_u, control], dim=-1)
 
 
 def zu_cat_smpl_graph(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Simple concatenation of z and u on graph."""
-    return torch.cat([z, build_component_input_view(w).graph_control], dim=-1)
+    return torch.cat([z, _require_graph_control(w)], dim=-1)
 
 
 def zu_blin_no_const_graph(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Compute bilinear features without constant term for graph data."""
-    u_reshaped = build_component_input_view(w).graph_control
+    u_reshaped = _require_graph_control(w)
     z_u = (z.unsqueeze(-1) * u_reshaped.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
     return torch.cat([z, z_u], dim=-1)
 
 
 def zu_blin_with_const_graph(z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
     """Compute bilinear features with constant term for graph data."""
-    u_reshaped = build_component_input_view(w).graph_control
+    u_reshaped = _require_graph_control(w)
     z_u = (z.unsqueeze(-1) * u_reshaped.unsqueeze(-2)).reshape(*z.shape[:-1], -1)
     return torch.cat([z, z_u, u_reshaped], dim=-1)
 
@@ -244,17 +284,14 @@ def linear_features_smpl(mdl, w: ComponentInputPayload) -> tuple[torch.Tensor, t
 
 def linear_eval_graph(mdl, w: ComponentInputPayload) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute linear evaluation, dz, and states, z, for the model."""
-    if (
-        getattr(w, "is_graph", False)
-        and hasattr(w, "get_step")
-        and hasattr(w, "n_steps")
-        and not (
-            getattr(w, "is_uniform_length", False) and bool(getattr(w, "is_fixed_topology", False))
+    runtime = _require_graph_sequence_runtime(w)
+    if not (runtime.is_uniform_length and runtime.is_fixed_topology):
+        z = torch.stack(
+            [mdl.encoder(runtime.get_step(step)) for step in range(runtime.n_steps)], dim=1
         )
-    ):
-        z = torch.stack([mdl.encoder(w.get_step(step)) for step in range(w.n_steps)], dim=1)
         z_dot = torch.stack(
-            [mdl.dynamics(z[:, step], w.get_step(step)) for step in range(w.n_steps)], dim=1
+            [mdl.dynamics(z[:, step], runtime.get_step(step)) for step in range(runtime.n_steps)],
+            dim=1,
         )
         return z_dot.permute(0, 2, 1, 3), z.permute(0, 2, 1, 3)
     z = mdl.encoder(w)
@@ -264,17 +301,14 @@ def linear_eval_graph(mdl, w: ComponentInputPayload) -> tuple[torch.Tensor, torc
 
 def linear_features_graph(mdl, w: ComponentInputPayload) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute linear features, f, and outputs, dz, for the model."""
-    if (
-        getattr(w, "is_graph", False)
-        and hasattr(w, "get_step")
-        and hasattr(w, "n_steps")
-        and not (
-            getattr(w, "is_uniform_length", False) and bool(getattr(w, "is_fixed_topology", False))
+    runtime = _require_graph_sequence_runtime(w)
+    if not (runtime.is_uniform_length and runtime.is_fixed_topology):
+        z = torch.stack(
+            [mdl.encoder(runtime.get_step(step)) for step in range(runtime.n_steps)], dim=1
         )
-    ):
-        z = torch.stack([mdl.encoder(w.get_step(step)) for step in range(w.n_steps)], dim=1)
         f = torch.stack(
-            [mdl.features(z[:, step], w.get_step(step)) for step in range(w.n_steps)], dim=1
+            [mdl.features(z[:, step], runtime.get_step(step)) for step in range(runtime.n_steps)],
+            dim=1,
         )
         return f.permute(0, 2, 1, 3), z.permute(0, 2, 1, 3)
     z = mdl.encoder(w)

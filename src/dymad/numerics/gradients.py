@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import numpy as np
 import torch
 import torch.func as func
@@ -93,7 +95,7 @@ def torch_jacobian(f, x, v=None, dtype=torch.float64):
         assert v.shape[1] == n, "v should have shape (m,n) where n is the size of x."
         jac = []
         for direction in v:
-            _, jvp = func.jvp(f, (x,), (direction,))
+            _, jvp = cast(tuple[Any, torch.Tensor], func.jvp(f, (x,), (direction,)))
             jac.append(jvp)
         jac = torch.stack(jac, dim=1)  # shape (output_dim, num_directions)
 
