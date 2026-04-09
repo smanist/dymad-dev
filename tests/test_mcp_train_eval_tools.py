@@ -237,6 +237,155 @@ def test_train_model_rejects_run_name_with_path_separators(tmp_path) -> None:
     assert "run_name" in response["error"]["message"]
 
 
+def test_model_family_discovery_lists_all_predefined_models(tmp_path) -> None:
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+
+    response = tools.list_model_families()
+
+    assert response["ok"] is True
+    model_refs = {item["model_ref"] for item in response["data"]["model_families"]}
+    assert "dymad.models.collections:KBF" in model_refs
+    assert "dymad.models.collections:DGKMSK" in model_refs
+    assert len(model_refs) >= 20
+
+
+def test_describe_model_family_returns_typed_metadata(tmp_path) -> None:
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+
+    response = tools.describe_model_family(model_ref="dymad.models.collections:GKBF")
+
+    family = response["data"]["model_family"]
+    assert response["ok"] is True
+    assert family["graph_mode"] == "graph"
+    assert family["expects_graph_data"] is True
+    assert family["default_predictor"] == "continuous"
+
+
+def test_reference_profile_discovery_returns_defaults_and_aliases(tmp_path) -> None:
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+
+    response = tools.list_reference_profiles(dataset_kind="regular")
+    described = tools.describe_reference_profile(profile_name="kbf-regular-default")
+
+    assert response["ok"] is True
+    assert described["ok"] is True
+    described_profile = described["data"]["reference_profile"]
+    assert described_profile["dataset_kind"] == "regular"
+    assert "dymad.models.collections:KBF" in described_profile["model_refs"]
+    assert described_profile["model_defaults"]["koopman_dimension"] == 4
+    assert described_profile["default_phases"][0]["trainer"] == "Weak"
+
+
+def test_validate_dataset_compatibility_reports_mismatch_without_error(tmp_path) -> None:
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"][
+        "handle"
+    ]
+
+    response = tools.validate_dataset_compatibility(
+        dataset_handle=dataset_handle,
+        model_ref="dymad.models.collections:GKBF",
+    )
+
+    compatibility = response["data"]["compatibility"]
+    assert response["ok"] is True
+    assert compatibility["is_compatible"] is False
+    assert compatibility["expected_dataset_kind"] == "graph"
+
+
+def test_validate_training_config_returns_normalized_payload_without_side_effects(tmp_path) -> None:
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    train_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
+
+    response = tools.validate_training_config(
+        train_dataset_handle=train_handle,
+        model_ref="dymad.models.collections:KBF",
+        run_name="validated_case",
+        config={"model": {"koopman_dimension": 8}},
+    )
+
+    validation = response["data"]["validation"]
+    assert response["ok"] is True
+    assert validation["is_valid"] is True
+    assert validation["reference_profile"] == "kbf-regular-default"
+    assert validation["trainer_kind"] == "weak_form"
+    assert validation["normalized_config"]["model"]["name"] == "validated_case"
+    assert not (tmp_path / "validated_case.yaml").exists()
+
+
+def test_validate_training_config_rejects_reserved_runtime_paths_without_error(tmp_path) -> None:
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    train_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
+
+    response = tools.validate_training_config(
+        train_dataset_handle=train_handle,
+        model_ref="dymad.models.collections:KBF",
+        config={"data": {"path": "/tmp/override.npz"}},
+    )
+
+    validation = response["data"]["validation"]
+    assert response["ok"] is True
+    assert validation["is_valid"] is False
+    assert "reserved" in validation["rejection_reason"]
+
+
+def test_materialize_training_config_writes_normalized_config(tmp_path) -> None:
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    train_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
+
+    response = tools.materialize_training_config(
+        train_dataset_handle=train_handle,
+        model_ref="dymad.models.collections:KBF",
+        artifact_root=str(tmp_path / "outputs"),
+        run_name="materialized_case",
+        config={"model": {"koopman_dimension": 6}},
+    )
+
+    result = response["data"]["result"]
+    config_path = Path(result["config_path"])
+    payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert response["ok"] is True
+    assert config_path.is_file()
+    assert result["trainer_kind"] == "weak_form"
+    assert payload["model"]["koopman_dimension"] == 6
+    assert payload["model"]["name"] == "materialized_case"
+
+
+def test_inspect_training_run_and_list_training_artifacts(tmp_path, monkeypatch) -> None:
+    _patch_fake_trainers(monkeypatch)
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    train_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
+
+    trained = tools.train_model(
+        train_dataset_handle=train_handle,
+        model_ref="dymad.models.collections:KBF",
+        artifact_root=str(tmp_path / "outputs"),
+        run_name="artifact_case",
+    )
+    run_handle = trained["data"]["result"]["run_summary"]["handle"]
+
+    inspection = tools.inspect_training_run(run_handle=run_handle)
+    artifacts = tools.list_training_artifacts(run_handle=run_handle)
+
+    assert inspection["ok"] is True
+    assert inspection["data"]["inspection"]["run_record"]["run_name"] == "artifact_case"
+    assert artifacts["ok"] is True
+    assert artifacts["data"]["artifacts"]["exists"]["config_path"] is True
+    assert artifacts["data"]["artifacts"]["exists"]["checkpoint_path"] is True
+    assert artifacts["data"]["artifacts"]["exists"]["training_summary_path"] is True
+
+
 def test_evaluate_model_regular_writes_metrics_and_plot(tmp_path, monkeypatch) -> None:
     dataset_path = tmp_path / "test.npz"
     _write_regular_dataset(dataset_path, with_control=False)

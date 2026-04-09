@@ -1,0 +1,3 @@
+display_name: DyMAD Evaluate Model
+short_description: Register a checkpoint and dataset, validate compatibility, and evaluate rollout error with the Phase 1 MCP surface.
+default_prompt: Use DyMAD MCP tools to register or reuse the checkpoint and test dataset, inspect the dataset, validate checkpoint and dataset compatibility, then call evaluate_model and report the evaluation handle, metrics path, aggregate metrics, and plot path or skip reason. Respect the Phase 1 metric limitations.

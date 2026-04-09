@@ -17,13 +17,26 @@ import torch
 import yaml
 
 from dymad.agent.exec.state import (
+    DatasetCompatibility,
     DatasetInspection,
     EvaluateModelResult,
+    MaterializedTrainingConfigResult,
+    ModelFamilyDescription,
     PredictionWorkflowPlan,
+    ReferenceProfileDescription,
     SpectralWorkflowPlan,
+    TrainingArtifactsListing,
+    TrainingConfigValidationResult,
+    TrainingRunInspection,
     TrainModelResult,
 )
-from dymad.agent.exec.training_profiles import profile_config, resolve_profile_name
+from dymad.agent.exec.training_profiles import (
+    PROFILE_ALIASES,
+    PROFILE_REGISTRY,
+    available_profiles,
+    profile_config,
+    resolve_profile_name,
+)
 from dymad.agent.facade.operations import FacadeOperations
 from dymad.utils.misc import _normalize_legacy_training_config
 from dymad.utils.plot import plot_trajectory
@@ -44,6 +57,117 @@ def _resolve_model_ref(model_ref: str):
     except AttributeError as exc:
         raise ValueError(f"model_ref target not found: {model_ref}") from exc
     return model
+
+
+def _model_display_name(model: Any, *, fallback: str | None = None) -> str:
+    typed_spec = getattr(model, "typed_spec", None)
+    if callable(typed_spec):
+        spec = cast(Any, typed_spec())
+        if getattr(spec, "name", None):
+            return cast(str, spec.name)
+    if fallback is not None:
+        return fallback
+    return type(model).__name__
+
+
+def _model_family_description(
+    *, model_ref: str, model: Any, public_name: str
+) -> ModelFamilyDescription:
+    typed_spec = getattr(model, "typed_spec", None)
+    if not callable(typed_spec):
+        raise ValueError(f"model_ref '{model_ref}' does not expose a typed model family")
+    spec = cast(Any, typed_spec())
+    return ModelFamilyDescription(
+        model_ref=model_ref,
+        name=_model_display_name(model, fallback=public_name),
+        time_domain=spec.time_domain,
+        graph_mode=spec.graph_mode,
+        recipe_kind=spec.recipe.kind,
+        rollout_family=spec.rollout.family,
+        default_predictor=spec.rollout.default_predictor,
+        allowed_predictors=spec.rollout.allowed_predictors,
+        expects_graph_data=bool(getattr(model, "GRAPH", False)),
+    )
+
+
+def _list_model_family_descriptions() -> list[ModelFamilyDescription]:
+    import dymad.models.collections as model_collections
+    from dymad.models.collections import PredefinedModel
+
+    families = []
+    for public_name, candidate in vars(model_collections).items():
+        if public_name.startswith("_") or not isinstance(candidate, PredefinedModel):
+            continue
+        model_ref = f"{model_collections.__name__}:{public_name}"
+        families.append(
+            _model_family_description(
+                model_ref=model_ref,
+                model=candidate,
+                public_name=public_name,
+            )
+        )
+    return sorted(families, key=lambda item: item.model_ref)
+
+
+def _describe_model_family(model_ref: str) -> ModelFamilyDescription:
+    _, _, public_name = model_ref.partition(":")
+    return _model_family_description(
+        model_ref=model_ref,
+        model=_resolve_model_ref(model_ref),
+        public_name=public_name or model_ref,
+    )
+
+
+def _profile_alias_summary(
+    *,
+    profile_name: str,
+) -> tuple[str | None, tuple[str, ...]]:
+    dataset_kinds = sorted(
+        {
+            dataset_kind
+            for (model_ref, dataset_kind), alias in PROFILE_ALIASES.items()
+            if alias == profile_name and model_ref
+        }
+    )
+    dataset_kind = dataset_kinds[0] if len(dataset_kinds) == 1 else None
+    model_refs = tuple(
+        sorted(
+            {
+                model_ref
+                for (model_ref, _dataset_kind), alias in PROFILE_ALIASES.items()
+                if alias == profile_name
+            }
+        )
+    )
+    return dataset_kind, model_refs
+
+
+def _describe_reference_profile(profile_name: str) -> ReferenceProfileDescription:
+    dataset_kind, model_refs = _profile_alias_summary(profile_name=profile_name)
+    config = profile_config(profile_name)
+    return ReferenceProfileDescription(
+        profile_name=profile_name,
+        dataset_kind=dataset_kind,
+        model_refs=model_refs,
+        model_defaults=cast(dict[str, Any], copy.deepcopy(config.get("model", {}))),
+        default_phases=cast(list[dict[str, Any]], copy.deepcopy(config.get("phases", []))),
+    )
+
+
+def _list_reference_profile_descriptions(
+    *,
+    model_ref: str | None = None,
+    dataset_kind: str | None = None,
+) -> list[ReferenceProfileDescription]:
+    descriptions: list[ReferenceProfileDescription] = []
+    for profile_name in available_profiles():
+        description = _describe_reference_profile(profile_name)
+        if model_ref is not None and model_ref not in description.model_refs:
+            continue
+        if dataset_kind is not None and description.dataset_kind != dataset_kind:
+            continue
+        descriptions.append(description)
+    return descriptions
 
 
 def _deep_merge(base: Any, override: Any) -> Any:
@@ -145,6 +269,29 @@ def _inspect_dataset_record(dataset_record) -> DatasetInspection:
     )
 
 
+def _dataset_compatibility(dataset_record, *, model_ref: str) -> DatasetCompatibility:
+    model = _resolve_model_ref(model_ref)
+    expected_graph = bool(getattr(model, "GRAPH", False))
+    expected_dataset_kind = "graph" if expected_graph else "regular"
+    is_compatible = dataset_record.kind == expected_dataset_kind
+    reason = None
+    if not is_compatible:
+        reason = (
+            f"model_ref '{model_ref}' expects graph={expected_graph} "
+            f"but dataset kind is '{dataset_record.kind}'"
+        )
+    return DatasetCompatibility(
+        dataset_handle=dataset_record.handle,
+        dataset_kind=dataset_record.kind,
+        model_ref=model_ref,
+        model_name=_model_display_name(model),
+        expected_graph=expected_graph,
+        expected_dataset_kind=expected_dataset_kind,
+        is_compatible=is_compatible,
+        reason=reason,
+    )
+
+
 def _effective_config(
     *,
     model_ref: str,
@@ -221,6 +368,90 @@ def _load_training_metrics(summary_path: Path) -> dict[str, float | None]:
         }
 
 
+def _training_artifact_paths(*, artifact_root: str, run_name: str) -> dict[str, str]:
+    artifact_root_path = Path(artifact_root).expanduser().resolve()
+    run_root = artifact_root_path / run_name
+    return {
+        "config_path": str(artifact_root_path / f"{run_name}.yaml"),
+        "run_root": str(run_root),
+        "checkpoint_path": str(run_root / f"{run_name}.pt"),
+        "training_summary_path": str(run_root / f"{run_name}_summary.npz"),
+        "history_plot_path": str(run_root / f"{run_name}_history.png"),
+        "prediction_plot_path": str(run_root / f"{run_name}_prediction.png"),
+    }
+
+
+def _validate_training_request(
+    *,
+    facade: FacadeOperations,
+    train_dataset_handle: str,
+    valid_dataset_handle: str | None,
+    model_ref: str,
+    reference_profile: str | None,
+    config: dict[str, Any] | None,
+    run_name: str | None,
+) -> TrainingConfigValidationResult:
+    dataset_record = facade.get_dataset(train_dataset_handle)
+    compatibility = _dataset_compatibility(dataset_record, model_ref=model_ref)
+    valid_record = (
+        None if valid_dataset_handle is None else facade.get_dataset(valid_dataset_handle)
+    )
+
+    if not compatibility.is_compatible:
+        return TrainingConfigValidationResult(
+            is_valid=False,
+            compatibility=compatibility,
+            reference_profile=None,
+            trainer_kind=None,
+            run_name=None,
+            normalized_config=None,
+            rejection_reason=compatibility.reason,
+        )
+
+    if valid_record is not None and valid_record.kind != dataset_record.kind:
+        return TrainingConfigValidationResult(
+            is_valid=False,
+            compatibility=compatibility,
+            reference_profile=None,
+            trainer_kind=None,
+            run_name=None,
+            normalized_config=None,
+            rejection_reason="train and valid datasets must have the same kind",
+        )
+
+    try:
+        active_run_name = _validate_run_name(run_name or _default_run_name(model_ref))
+        profile_name, normalized_config = _effective_config(
+            model_ref=model_ref,
+            dataset_record=dataset_record,
+            valid_dataset_record=valid_record,
+            reference_profile=reference_profile,
+            user_config=config,
+            run_name=active_run_name,
+        )
+        _, trainer_kind = _select_trainer(normalized_config)
+    except Exception as exc:
+        return TrainingConfigValidationResult(
+            is_valid=False,
+            compatibility=compatibility,
+            reference_profile=None,
+            trainer_kind=None,
+            run_name=None,
+            normalized_config=None,
+            rejection_reason=str(exc),
+        )
+
+    return TrainingConfigValidationResult(
+        is_valid=True,
+        compatibility=compatibility,
+        reference_profile=profile_name,
+        trainer_kind=trainer_kind,
+        run_name=active_run_name,
+        normalized_config=normalized_config,
+        rejection_reason=None,
+    )
+
+
 def _trajectory_payload(manager, index: int) -> dict[str, Any]:
     from dymad.io import TrajectoryManagerGraph
 
@@ -275,6 +506,99 @@ class CompatibilityExecutor:
     def inspect_dataset(self, *, dataset_handle: str) -> DatasetInspection:
         return _inspect_dataset_record(self.facade.get_dataset(dataset_handle))
 
+    def validate_dataset_compatibility(
+        self,
+        *,
+        dataset_handle: str,
+        model_ref: str,
+    ) -> DatasetCompatibility:
+        dataset_record = self.facade.get_dataset(dataset_handle)
+        return _dataset_compatibility(dataset_record, model_ref=model_ref)
+
+    def list_model_families(self) -> list[ModelFamilyDescription]:
+        return _list_model_family_descriptions()
+
+    def describe_model_family(self, *, model_ref: str) -> ModelFamilyDescription:
+        return _describe_model_family(model_ref)
+
+    def list_reference_profiles(
+        self,
+        *,
+        model_ref: str | None = None,
+        dataset_kind: str | None = None,
+    ) -> list[ReferenceProfileDescription]:
+        return _list_reference_profile_descriptions(
+            model_ref=model_ref,
+            dataset_kind=dataset_kind,
+        )
+
+    def describe_reference_profile(self, *, profile_name: str) -> ReferenceProfileDescription:
+        if profile_name not in PROFILE_REGISTRY:
+            supported = ", ".join(available_profiles())
+            raise ValueError(f"unknown profile '{profile_name}'. supported profiles: {supported}")
+        return _describe_reference_profile(profile_name)
+
+    def validate_training_config(
+        self,
+        *,
+        train_dataset_handle: str,
+        valid_dataset_handle: str | None = None,
+        model_ref: str,
+        reference_profile: str | None = None,
+        config: dict[str, Any] | None = None,
+        run_name: str | None = None,
+    ) -> TrainingConfigValidationResult:
+        return _validate_training_request(
+            facade=self.facade,
+            train_dataset_handle=train_dataset_handle,
+            valid_dataset_handle=valid_dataset_handle,
+            model_ref=model_ref,
+            reference_profile=reference_profile,
+            config=config,
+            run_name=run_name,
+        )
+
+    def materialize_training_config(
+        self,
+        *,
+        train_dataset_handle: str,
+        artifact_root: str,
+        model_ref: str,
+        valid_dataset_handle: str | None = None,
+        reference_profile: str | None = None,
+        config: dict[str, Any] | None = None,
+        run_name: str | None = None,
+    ) -> MaterializedTrainingConfigResult:
+        validation = self.validate_training_config(
+            train_dataset_handle=train_dataset_handle,
+            valid_dataset_handle=valid_dataset_handle,
+            model_ref=model_ref,
+            reference_profile=reference_profile,
+            config=config,
+            run_name=run_name,
+        )
+        if not validation.is_valid:
+            raise ValueError(validation.rejection_reason or "training config is invalid")
+        assert validation.reference_profile is not None
+        assert validation.trainer_kind is not None
+        assert validation.run_name is not None
+        assert validation.normalized_config is not None
+
+        artifact_root_path = _ensure_dir(artifact_root)
+        config_path = _write_training_config(
+            validation.normalized_config,
+            artifact_root=artifact_root_path,
+            run_name=validation.run_name,
+        )
+        return MaterializedTrainingConfigResult(
+            config_path=str(config_path),
+            compatibility=validation.compatibility,
+            reference_profile=validation.reference_profile,
+            trainer_kind=validation.trainer_kind,
+            run_name=validation.run_name,
+            normalized_config=validation.normalized_config,
+        )
+
     def train_model(
         self,
         *,
@@ -289,37 +613,31 @@ class CompatibilityExecutor:
         device: str = "auto",
         max_workers: int = 1,
     ) -> TrainModelResult:
-        model = _resolve_model_ref(model_ref)
-        dataset_record = self.facade.get_dataset(train_dataset_handle)
-        valid_record = (
-            None if valid_dataset_handle is None else self.facade.get_dataset(valid_dataset_handle)
-        )
-        if bool(getattr(model, "GRAPH", False)) != (dataset_record.kind == "graph"):
-            raise ValueError(
-                f"model_ref '{model_ref}' expects graph={bool(getattr(model, 'GRAPH', False))} "
-                f"but dataset kind is '{dataset_record.kind}'"
-            )
-        if valid_record is not None and valid_record.kind != dataset_record.kind:
-            raise ValueError("train and valid datasets must have the same kind")
-
-        active_run_name = _validate_run_name(run_name or _default_run_name(model_ref))
-        profile_name, effective_config = _effective_config(
+        validation = self.validate_training_config(
+            train_dataset_handle=train_dataset_handle,
+            valid_dataset_handle=valid_dataset_handle,
             model_ref=model_ref,
-            dataset_record=dataset_record,
-            valid_dataset_record=valid_record,
             reference_profile=reference_profile,
-            user_config=config,
-            run_name=active_run_name,
+            config=config,
+            run_name=run_name,
         )
-        trainer_cls, trainer_kind = _select_trainer(effective_config)
+        if not validation.is_valid:
+            raise ValueError(validation.rejection_reason or "training config is invalid")
+        assert validation.reference_profile is not None
+        assert validation.trainer_kind is not None
+        assert validation.run_name is not None
+        assert validation.normalized_config is not None
+
+        model = _resolve_model_ref(model_ref)
         artifact_root_path = _ensure_dir(artifact_root)
         config_path = _write_training_config(
-            effective_config,
+            validation.normalized_config,
             artifact_root=artifact_root_path,
-            run_name=active_run_name,
+            run_name=validation.run_name,
         )
 
         _set_seed(seed)
+        trainer_cls, _ = _select_trainer(validation.normalized_config)
         trainer = trainer_cls(
             str(config_path),
             model,
@@ -328,11 +646,14 @@ class CompatibilityExecutor:
         )
         trainer.train()
 
-        run_root = artifact_root_path / active_run_name
-        checkpoint_path = run_root / f"{active_run_name}.pt"
-        summary_path = run_root / f"{active_run_name}_summary.npz"
-        history_plot_path = run_root / f"{active_run_name}_history.png"
-        prediction_plot_path = run_root / f"{active_run_name}_prediction.png"
+        artifact_paths = _training_artifact_paths(
+            artifact_root=str(artifact_root_path),
+            run_name=validation.run_name,
+        )
+        checkpoint_path = Path(artifact_paths["checkpoint_path"])
+        summary_path = Path(artifact_paths["training_summary_path"])
+        history_plot_path = Path(artifact_paths["history_plot_path"])
+        prediction_plot_path = Path(artifact_paths["prediction_plot_path"])
         if not checkpoint_path.is_file():
             raise FileNotFoundError(f"training did not produce checkpoint: {checkpoint_path}")
         if not summary_path.is_file():
@@ -347,18 +668,19 @@ class CompatibilityExecutor:
             model_ref=model_ref,
             train_dataset_handle=train_dataset_handle,
             valid_dataset_handle=valid_dataset_handle,
-            reference_profile=profile_name,
+            reference_profile=validation.reference_profile,
             checkpoint_handle=checkpoint_summary.handle,
             artifact_root=str(artifact_root_path),
-            run_name=active_run_name,
+            run_name=validation.run_name,
         )
 
         return TrainModelResult(
             run_summary=run_summary,
             checkpoint_summary=checkpoint_summary,
             artifacts={
-                "checkpoint_path": str(checkpoint_path),
-                "training_summary_path": str(summary_path),
+                "config_path": artifact_paths["config_path"],
+                "checkpoint_path": artifact_paths["checkpoint_path"],
+                "training_summary_path": artifact_paths["training_summary_path"],
                 "history_plot_path": str(history_plot_path)
                 if history_plot_path.is_file()
                 else None,
@@ -367,8 +689,30 @@ class CompatibilityExecutor:
                 ),
             },
             metrics=_load_training_metrics(summary_path),
-            reference_profile=profile_name,
-            trainer_kind=trainer_kind,
+            reference_profile=validation.reference_profile,
+            trainer_kind=validation.trainer_kind,
+        )
+
+    def inspect_training_run(self, *, run_handle: str) -> TrainingRunInspection:
+        return TrainingRunInspection(
+            run_summary=self.facade.describe_object(run_handle),
+            run_record=self.facade.get_training_run(run_handle),
+        )
+
+    def list_training_artifacts(self, *, run_handle: str) -> TrainingArtifactsListing:
+        run_record = self.facade.get_training_run(run_handle)
+        paths = _training_artifact_paths(
+            artifact_root=run_record.artifact_root,
+            run_name=run_record.run_name,
+        )
+        return TrainingArtifactsListing(
+            run_summary=self.facade.describe_object(run_handle),
+            run_record=run_record,
+            paths=paths,
+            exists={
+                name: Path(path).is_file() for name, path in paths.items() if name != "run_root"
+            }
+            | {"run_root": Path(paths["run_root"]).is_dir()},
         )
 
     def evaluate_model(
@@ -386,12 +730,10 @@ class CompatibilityExecutor:
             raise ValueError(f"unsupported evaluation metric: {metric}")
         checkpoint = self.facade.get_checkpoint(checkpoint_handle)
         dataset = self.facade.get_dataset(test_dataset_handle)
+        compatibility = _dataset_compatibility(dataset, model_ref=checkpoint.model_ref)
+        if not compatibility.is_compatible:
+            raise ValueError(compatibility.reason or "checkpoint/dataset mismatch")
         model = _resolve_model_ref(checkpoint.model_ref)
-        if bool(getattr(model, "GRAPH", False)) != (dataset.kind == "graph"):
-            raise ValueError(
-                f"checkpoint model '{checkpoint.model_ref}' expects graph="
-                f"{bool(getattr(model, 'GRAPH', False))} but dataset kind is '{dataset.kind}'"
-            )
 
         manager = _build_manager(dataset)
         manager.prepare_data()

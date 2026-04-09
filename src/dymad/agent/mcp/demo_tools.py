@@ -62,6 +62,120 @@ class DemoTools:
             }
         )
 
+    def validate_dataset_compatibility(
+        self,
+        *,
+        dataset_handle: str,
+        model_ref: str,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "compatibility": asdict(
+                    self._context.executor.validate_dataset_compatibility(
+                        dataset_handle=dataset_handle,
+                        model_ref=model_ref,
+                    )
+                )
+            }
+        )
+
+    def list_model_families(self) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "model_families": [
+                    asdict(item) for item in self._context.executor.list_model_families()
+                ]
+            }
+        )
+
+    def describe_model_family(self, *, model_ref: str) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "model_family": asdict(
+                    self._context.executor.describe_model_family(model_ref=model_ref)
+                )
+            }
+        )
+
+    def list_reference_profiles(
+        self,
+        *,
+        model_ref: str | None = None,
+        dataset_kind: str | None = None,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "reference_profiles": [
+                    asdict(item)
+                    for item in self._context.executor.list_reference_profiles(
+                        model_ref=model_ref,
+                        dataset_kind=dataset_kind,
+                    )
+                ]
+            }
+        )
+
+    def describe_reference_profile(self, *, profile_name: str) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "reference_profile": asdict(
+                    self._context.executor.describe_reference_profile(profile_name=profile_name)
+                )
+            }
+        )
+
+    def validate_training_config(
+        self,
+        *,
+        train_dataset_handle: str,
+        model_ref: str,
+        valid_dataset_handle: str | None = None,
+        reference_profile: str | None = None,
+        config: dict[str, Any] | None = None,
+        run_name: str | None = None,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "validation": asdict(
+                    self._context.executor.validate_training_config(
+                        train_dataset_handle=train_dataset_handle,
+                        valid_dataset_handle=valid_dataset_handle,
+                        model_ref=model_ref,
+                        reference_profile=reference_profile,
+                        config=config,
+                        run_name=run_name,
+                    )
+                )
+            }
+        )
+
+    def materialize_training_config(
+        self,
+        *,
+        train_dataset_handle: str,
+        artifact_root: str,
+        model_ref: str,
+        valid_dataset_handle: str | None = None,
+        reference_profile: str | None = None,
+        config: dict[str, Any] | None = None,
+        run_name: str | None = None,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "result": asdict(
+                    self._context.executor.materialize_training_config(
+                        train_dataset_handle=train_dataset_handle,
+                        valid_dataset_handle=valid_dataset_handle,
+                        model_ref=model_ref,
+                        reference_profile=reference_profile,
+                        config=config,
+                        run_name=run_name,
+                        artifact_root=artifact_root,
+                    )
+                )
+            }
+        )
+
     def prepare_prediction_request(
         self,
         *,
@@ -133,6 +247,24 @@ class DemoTools:
                         device=device,
                         max_workers=max_workers,
                     )
+                )
+            }
+        )
+
+    def inspect_training_run(self, *, run_handle: str) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "inspection": asdict(
+                    self._context.executor.inspect_training_run(run_handle=run_handle)
+                )
+            }
+        )
+
+    def list_training_artifacts(self, *, run_handle: str) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "artifacts": asdict(
+                    self._context.executor.list_training_artifacts(run_handle=run_handle)
                 )
             }
         )
