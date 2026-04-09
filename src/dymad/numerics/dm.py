@@ -1,4 +1,5 @@
 import logging
+from typing import Any, cast
 
 import numpy as np
 import scipy.linalg as spl
@@ -27,7 +28,7 @@ def epsOpt(D, F, ret_val=False):
     def _fun(e):
         return -2 * dS(2.0**e, D / _max, F)
 
-    _res = minimize_scalar(_fun, bracket=[-30, 10])
+    _res = cast(Any, minimize_scalar(_fun, bracket=[-30, 10]))
     _eps = 2**_res.x * _max
     if ret_val:
         _dim = -_fun(_res.x)
@@ -83,9 +84,10 @@ class DMF:
         self._epsilon = epsilon
 
     def _kernel(self, x, y=None):
+        eps = self._require_epsilon()
         if y is None:
             d2 = compDist(x, x, self._Knn)
-            W = np.exp(-d2 / (4 * self._epsilon))
+            W = np.exp(-d2 / (4 * eps))
             if self._Knn is not None:
                 W = (W + W.T) / 2
 
@@ -99,7 +101,7 @@ class DMF:
             return W, _qest, _D, _Dinv1
 
         d2 = compDist(y, x, self._Knn)
-        W = np.exp(-d2 / (4 * self._epsilon))
+        W = np.exp(-d2 / (4 * eps))
 
         qest = np.sum(W, axis=1).flatten()
         D = qest ** (-self._alpha)
@@ -130,7 +132,7 @@ class DMF:
         self._lmbd_raw = eigvals[::-1]
         self._psi_raw = eigvecs[:, ::-1]
         psi = self._Dinv1.reshape(-1, 1) * self._psi_raw
-        self._lambda = -np.log(self._lmbd_raw) / self._epsilon
+        self._lambda = -np.log(self._lmbd_raw) / self._require_epsilon()
 
         # Normalize eigenvectors
         peq = self._qest / self._Dinv1**2
@@ -163,7 +165,7 @@ class DMF:
         K = self._kernel(self._x, X)[0]
         return K @ self._beta
 
-    def state_dict(self) -> dict[str, any]:
+    def state_dict(self) -> dict[str, Any]:
         return {
             "x": self._x,
             "Npsi": self._Npsi,
@@ -181,7 +183,7 @@ class DMF:
             "norm_factors": self._norm_factors,
         }
 
-    def load_state_dict(self, d: dict[str, any]) -> None:
+    def load_state_dict(self, d: dict[str, Any]) -> None:
         self._x = d["x"]
         self._Npsi = d["Npsi"]
         self._alpha = d["alpha"]
@@ -196,6 +198,11 @@ class DMF:
         self._psi_raw = d["psi_raw"]
         self._psi = d["psi"]
         self._norm_factors = d["norm_factors"]
+
+    def _require_epsilon(self) -> float:
+        if self._epsilon is None:
+            raise RuntimeError("Epsilon is not initialized.")
+        return float(self._epsilon)
 
 
 class DM:
@@ -237,7 +244,8 @@ class DM:
             logger.info(f"Estimated epsilon: {self._epsilon}")
 
         # Step 2: Construct kernel matrix
-        W = np.exp(-(distances**2) / (4 * self._epsilon))
+        eps = self._require_epsilon()
+        W = np.exp(-(distances**2) / (4 * eps))
         W = genMat(W, indices, self._N, ifsym=True)
 
         # Normalize
@@ -255,7 +263,7 @@ class DM:
         self._lmbd_raw = eigvals[::-1]
         self._psi_raw = eigvecs[:, ::-1]
         psi = self._Dinv1 @ self._psi_raw
-        self._lambda = -np.log(self._lmbd_raw) / self._epsilon
+        self._lambda = -np.log(self._lmbd_raw) / eps
 
         # Normalize eigenvectors
         peq = self._qest * D
@@ -272,7 +280,7 @@ class DM:
         M = len(x)
         distances, indices = self._tree.query(x, k=self._Knn)
 
-        W = np.exp(-(distances**2) / (4 * self._epsilon))
+        W = np.exp(-(distances**2) / (4 * self._require_epsilon()))
         W = genMat(W, indices, self._N, ifsym=ifsym)
 
         qest = np.array(W.sum(axis=1)).flatten()
@@ -289,7 +297,7 @@ class DM:
         self.fit(x)
         return self.transform(x)
 
-    def state_dict(self) -> dict[str, any]:
+    def state_dict(self) -> dict[str, Any]:
         return {
             "Npsi": self._Npsi,
             "Knn": self._Knn,
@@ -308,7 +316,7 @@ class DM:
             "norm_factors": self._norm_factors,
         }
 
-    def load_state_dict(self, d: dict[str, any]) -> None:
+    def load_state_dict(self, d: dict[str, Any]) -> None:
         self._Npsi = d["Npsi"]
         self._Knn = d["Knn"]
         self._alpha = d["alpha"]
@@ -324,6 +332,11 @@ class DM:
         self._psi = d["psi"]
         self._tree = d["tree"]
         self._norm_factors = d["norm_factors"]
+
+    def _require_epsilon(self) -> float:
+        if self._epsilon is None:
+            raise RuntimeError("Epsilon is not initialized.")
+        return float(self._epsilon)
 
 
 class VBDM:
@@ -375,7 +388,7 @@ class VBDM:
         d = d**2 / (self._rho.reshape(-1, 1) * self._rho[inds])
 
         # Tune epsilon for the final kernel
-        self._epsilon = epsOpt(d, 4, ret_val=False)
+        self._epsilon = cast(float, epsOpt(d, 4, ret_val=False))
 
         # ---------------
         # Construct DM matrix and Solve Eigenvalue problem
@@ -386,7 +399,7 @@ class VBDM:
 
         # q^S_epsilon
         # The "real" one from VB kernel, but unnormalized
-        self._qest_raw = np.sum(d, axis=1).A1 / self._rho**self._dim
+        self._qest_raw = np.asarray(d.sum(axis=1)).reshape(-1) / self._rho**self._dim
 
         # K = K^S_{epsilon,alpha}
         Dinv = spdiags(self._qest_raw ** (-self._alpha), 0, self._N, self._N)
@@ -417,7 +430,7 @@ class VBDM:
         # Post-processing
         # ---------------
         # Normalize qest into a density by dividing by m0
-        self._qest_fact = self._N * (4 * np.pi * self._epsilon) ** (self._dim / 2)
+        self._qest_fact = self._N * (4 * np.pi * float(self._epsilon)) ** (self._dim / 2)
         self._qest = self._qest_raw / self._qest_fact
 
         # U^TU = S^{-2} implies that U^TUS^2 = I
@@ -505,7 +518,7 @@ class VBDM:
         dt = d**2 / (self._rho0.reshape(-1, 1) * self._rho0[inds])
 
         # Tune epsilon on the pre-kernel
-        self._rhoeps, self._dim = epsOpt(dt, 2, ret_val=True)
+        self._rhoeps, self._dim = cast(tuple[float, float], epsOpt(dt, 2, ret_val=True))
 
         # Use ad hoc bandwidth function, rho0, to estimate the density
         tmp = np.exp(-dt / (2 * self._rhoeps)) / (2 * np.pi * self._rhoeps) ** (self._dim / 2)
@@ -513,7 +526,7 @@ class VBDM:
 
         # A temporary estimate of sampling density q(x)
         # Operation on dt gives a Matrix object.  Using A1 to get a flattened array.
-        qest = np.sum(dt, axis=1).A1 / (self._N * self._rho0**self._dim)
+        qest = np.asarray(dt.sum(axis=1)).reshape(-1) / (self._N * self._rho0**self._dim)
 
         # Laplace-Beltrami, or Kolmogorov backward operator
         if self._op == "lb":
@@ -557,7 +570,7 @@ class VBDM:
         rho = rho.reshape(-1) / self._rho_fact
         return rho
 
-    def state_dict(self) -> dict[str, any]:
+    def state_dict(self) -> dict[str, Any]:
         return {
             "Knn": self._Knn,  # Transform
             "tree": self._tree,
@@ -580,7 +593,7 @@ class VBDM:
             "rho_fact": self._rho_fact,
         }
 
-    def load_state_dict(self, d: dict[str, any]) -> None:
+    def load_state_dict(self, d: dict[str, Any]) -> None:
         self._Knn = d["Knn"]
         self._tree = d["tree"]
         self._rho = d["rho"]

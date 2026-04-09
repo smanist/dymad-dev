@@ -4,6 +4,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from os import PathLike
+from typing import Any, Literal, cast, overload
 
 import numpy as np
 import torch
@@ -325,18 +326,22 @@ def _load_model_checkpoint(model_class, checkpoint_path):
             return transformed[0]
         return transformed[:, 0, :]
 
-    def _proc_u(us, device):
+    def _proc_u_default(us, device):
+        del us, device
         return None
 
+    _proc_u = _proc_u_default
     if _has_u:
 
-        def _proc_u(us, device):
+        def _proc_u_with_transform(us, device):
             transformed = _stack_batch(
                 _data_transform_u.transform_batch(_to_tensor_batch(us, dtype=dtype, device=device))
             )
             if transformed.ndim == 3:
                 return transformed[0]
             return transformed
+
+        _proc_u = _proc_u_with_transform
 
     def _build_regular_prediction_payload(x0, u, p, device):
         x_batch = _ensure_regular_batch(x0)
@@ -412,12 +417,14 @@ def _load_model_checkpoint(model_class, checkpoint_path):
             )
         return build_model_context(GraphSeriesBatch.collate(items))
 
-    def _proc_ew(ew, device):
+    def _proc_ew_default(ew, device):
+        del device
         return ew
 
+    _proc_ew = _proc_ew_default
     if _has_ew:
 
-        def _proc_ew(ew, device):
+        def _proc_ew_with_transform(ew, device):
             if isinstance(ew, list) and not isinstance(ew[0], list):
                 payloads = [
                     torch.as_tensor(_e.reshape(-1, 1), dtype=dtype, device=device) for _e in ew
@@ -436,12 +443,16 @@ def _load_model_checkpoint(model_class, checkpoint_path):
                 raise ValueError("Edge weights format not recognized.")
             return _ew
 
-    def _proc_ea(ea, device):
+        _proc_ew = _proc_ew_with_transform
+
+    def _proc_ea_default(ea, device):
+        del device
         return ea
 
+    _proc_ea = _proc_ea_default
     if _has_ea:
 
-        def _proc_ea(ea, device):
+        def _proc_ea_with_transform(ea, device):
             if isinstance(ea, list) and not isinstance(ea[0], list):
                 payloads = [torch.as_tensor(_e, dtype=dtype, device=device) for _e in ea]
                 _tmp = _data_transform_ea.transform_batch(payloads)
@@ -455,6 +466,8 @@ def _load_model_checkpoint(model_class, checkpoint_path):
             else:
                 raise ValueError("Edge attributes format not recognized.")
             return _ea
+
+        _proc_ea = _proc_ea_with_transform
 
     def _proc_prd(pred):
         outputs = _data_transform_x.inverse_batch(_to_tensor_batch(pred, dtype=dtype, device="cpu"))
@@ -525,6 +538,8 @@ def _load_model_checkpoint(model_class, checkpoint_path):
                 pred = pred[0]  # Squeeze out the leading dim if exists
             # Now pred is of shape (T', all_nodes*n_features_per_node)
             shp = pred.shape[:-1]
+            if not isinstance(_data, (UniformGraphRuntime, RaggedGraphRuntime)):
+                raise TypeError("Graph prediction requires a graph runtime payload.")
             tmp = pred.reshape(*shp, _data.n_nodes, -1)  # [T', all_nodes, n_features_per_node]
             tmp = np.swapaxes(tmp, -3, -2)  # [all_nodes, T', n_features_per_node]
             shp = tmp.shape[:-2]  # [all_nodes]
@@ -543,6 +558,32 @@ def _load_model_checkpoint(model_class, checkpoint_path):
         return _proc_prd(pred)
 
     return model, predict_fn
+
+
+@overload
+def load_model(
+    model_class,
+    checkpoint_path: str | PathLike[str],
+    *,
+    context: ExecutionContext | None = None,
+    horizon: int = 1,
+    has_control: bool = False,
+    has_graph: bool = False,
+    return_trace: Literal[False] = False,
+): ...
+
+
+@overload
+def load_model(
+    model_class,
+    checkpoint_path: str | PathLike[str],
+    *,
+    context: ExecutionContext | None = None,
+    horizon: int = 1,
+    has_control: bool = False,
+    has_graph: bool = False,
+    return_trace: Literal[True],
+): ...
 
 
 def load_model(
@@ -581,7 +622,7 @@ def load_model(
 
 
 def _prepare_visualize_model_input(
-    input_data: dict[str, torch.Tensor | tuple[torch.Tensor, torch.Tensor] | None],
+    input_data: dict[str, Any],
 ) -> dict:
     prepared = dict(input_data)
 
@@ -601,7 +642,7 @@ def _prepare_visualize_model_input(
 
     for key in ("ei", "ew", "ea"):
         payload = prepared.get(key)
-        if getattr(payload, "is_nested", False):
+        if isinstance(payload, torch.Tensor) and getattr(payload, "is_nested", False):
             prepared[key] = [item for item in payload.unbind()]
 
     return prepared
@@ -633,12 +674,14 @@ def visualize_model(
         assert checkpoint_path is not None, (
             "checkpoint_path must be provided when mdl_class is given."
         )
-        model, prd_func = load_model(mdl_class, checkpoint_path)
+        model, prd_func = cast(tuple[Any, Any], load_model(mdl_class, checkpoint_path))
 
     if isinstance(ref_data, str):
         dat = np.load(ref_data, allow_pickle=True)
     else:
         dat = ref_data  # Assuming dict
+    if dat is None:
+        raise ValueError("ref_data must provide trajectory arrays for visualization.")
     t_data = dat.get("t", None)
     x_data = dat.get("x", None)
     u_data = dat.get("u", None)
@@ -647,8 +690,11 @@ def visualize_model(
     ew_data = dat.get("ew", None)
     ea_data = dat.get("ea", None)
 
-    input_data = prd_func(
-        x_data, t_data, u=u_data, p=p_data, ei=ei_data, ew=ew_data, ea=ea_data, ret_dat=True
+    input_data = cast(
+        dict[str, Any],
+        prd_func(
+            x_data, t_data, u=u_data, p=p_data, ei=ei_data, ew=ew_data, ea=ea_data, ret_dat=True
+        ),
     )
     input_data = _prepare_visualize_model_input(input_data)
 
@@ -696,7 +742,13 @@ class DataInterface:
         self._setup_data(metadata)
 
         if self.has_model:
-            self.model, self.prd_func = load_model(model_class, checkpoint_path)
+            if checkpoint_path is None:
+                raise ValueError(
+                    "checkpoint_path is required when loading a model-backed interface."
+                )
+            self.model, self.prd_func = cast(
+                tuple[Any, Any], load_model(model_class, checkpoint_path)
+            )
 
             def encoder(x):
                 x_tensor = torch.as_tensor(x, dtype=self.dtype, device=self.device)

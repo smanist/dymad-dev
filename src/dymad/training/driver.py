@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
 from dymad.io import TrajectoryManager, TrajectoryManagerGraph
 from dymad.training.execution_services import ExecutionServices
@@ -75,8 +75,8 @@ def _build_phase_context(
     return PhaseContext(
         train_loader=cast(DataLoader[Any], train_loader_raw),
         valid_loader=cast(DataLoader[Any], valid_loader_raw),
-        train_set=cast(Dataset[Any], train_set_raw),
-        valid_set=cast(Dataset[Any], valid_set_raw),
+        train_set=cast(list[Any], train_set_raw),
+        valid_set=cast(list[Any], valid_set_raw),
         train_md=train_md,
         valid_md=valid_md,
     )

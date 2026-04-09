@@ -1,7 +1,7 @@
 import copy
 import logging
 from dataclasses import replace
-from typing import Optional
+from typing import Any, Optional, cast
 
 import numpy as np
 import torch
@@ -22,6 +22,9 @@ from dymad.io.series_adapter import SeriesAdapter
 from dymad.utils.graph import adj_to_edge
 
 logger = logging.getLogger("dymad.cv")
+
+SeriesDataset = list[RegularSeries] | list[GraphSeries]
+Loader = DataLoader[RegularTrainerBatch] | DataLoader[GraphTrainerBatch]
 
 
 def _stack_if_uniform(data):
@@ -269,8 +272,9 @@ class TrajectoryManager:
     ):
         self.metadata = copy.deepcopy(metadata)
         self.device = device
-        self.typed_dataset: list[RegularSeries] | list[GraphSeries] | None = None
-        self.dataset: list[RegularSeries] | list[GraphSeries] | None = None
+        self.typed_dataset: SeriesDataset | None = None
+        self.dataset: SeriesDataset | None = None
+        self.dataloader: Loader | None = None
 
         self._init_transforms()
         self._load_metadata(self.metadata, data_key)
@@ -288,6 +292,8 @@ class TrajectoryManager:
         )
         cfg_transform_u = self.metadata["config"].get("transform_u", None)
         self._data_transform_u = build_transform_module(cfg_transform_u)
+        self._data_transform_ew = None
+        self._data_transform_ea = None
         self._refresh_delay_from_modules()
 
     def _refresh_delay_from_modules(self) -> None:
@@ -348,14 +354,14 @@ class TrajectoryManager:
             )
         self._refresh_delay_from_modules()
 
-    def _load_metadata(self, metadata: dict, data_key: str) -> None:
+    def _load_metadata(self, metadata: dict, data_key: str | None) -> None:
         if "data_key" in metadata:
             self.data_key = metadata["data_key"]
         else:
             if data_key == "train":
                 self.data_key = "data"
             else:
-                self.data_key = "data_" + data_key
+                self.data_key = "data_" + cast(str, data_key)
             self.metadata["data_key"] = self.data_key
         self.data_path = self.metadata["config"][self.data_key]["path"]
         self.dtype = (
@@ -416,6 +422,8 @@ class TrajectoryManager:
                 metadata.get("transform_p_state"),
             )
         else:
+            if trajmgr is None:
+                raise ValueError("trajmgr must be provided when metadata is None.")
             self._replace_transform_module(
                 "_data_transform_x",
                 "transform_x",
@@ -471,8 +479,8 @@ class TrajectoryManager:
         *,
         typed: bool = False,
     ) -> tuple[
-        tuple[DataLoader, DataLoader, DataLoader],
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        Loader,
+        SeriesDataset,
         dict,
     ]:
         """
@@ -482,6 +490,8 @@ class TrajectoryManager:
         self.create_dataloaders()
 
         dataset = self.dataset
+        if dataset is None or self.dataloader is None:
+            raise ValueError("Dataset and dataloader must be available after processing.")
         logger.info(f"Data processing complete. Data size: {len(dataset)}.")
         return self.dataloader, dataset, self.metadata
 
@@ -490,8 +500,8 @@ class TrajectoryManager:
         *,
         typed: bool = False,
     ) -> tuple[
-        tuple[DataLoader, DataLoader, DataLoader],
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        Loader,
+        SeriesDataset,
         dict,
     ]:
         """
@@ -560,46 +570,58 @@ class TrajectoryManager:
                 logger.info(
                     f"Detected x as 3D np.ndarray (n_traj, n_steps, n_features): {x.shape}. Splitting into list of arrays."
                 )
-                self.x = [np.array(_x) for _x in x]
+                self.x = cast(list[np.ndarray], [np.array(_x) for _x in x])
             elif x.ndim == 2:  # single trajectory (n_steps, n_features)
                 logger.info(
                     f"Detected x as 2D np.ndarray, treating it as a single trajectory (n_steps, n_features): {x.shape}. Wrapping as single-element list."
                 )
-                self.x = [np.array(x)]
+                self.x = cast(list[np.ndarray], [np.array(x)])
             else:
                 msg = f"Unsupported x shape: {x.shape}"
                 logger.error(msg)
                 raise ValueError(msg)
         elif isinstance(x, list):
             logger.info("Detected x as list of arrays.")
-            self.x = [np.array(_x) for _x in x]
+            self.x = cast(list[np.ndarray], [np.array(_x) for _x in x])
         else:
             logger.error("x must be a np.ndarray or list of np.ndarrays")
             raise TypeError("x must be a np.ndarray or list of np.ndarrays")
 
         # In the processing below, the raw data is converted to arrays, as they are supposed to be regular.
         # Process t
-        self.t = _process_data(
-            None if vals[0] is None else np.array(vals[0]), self.x, "t", base_dim=0, offset=0
+        self.t = cast(
+            list[np.ndarray],
+            _process_data(
+                None if vals[0] is None else np.array(vals[0]), self.x, "t", base_dim=0, offset=0
+            ),
         )
         if self.t[0].size == 0:
             self.t = [np.arange(_x.shape[0]) for _x in self.x]
         self.dt = [ti[1] - ti[0] for ti in self.t]
 
         # Process y
-        self.y = _process_data(
-            None if vals[2] is None else np.array(vals[2]), self.x, "y", base_dim=1, offset=0
+        self.y = cast(
+            list[np.ndarray],
+            _process_data(
+                None if vals[2] is None else np.array(vals[2]), self.x, "y", base_dim=1, offset=0
+            ),
         )
 
         # Process u
-        self.u = _process_data(
-            None if vals[3] is None else np.array(vals[3]), self.x, "u", base_dim=1, offset=0
+        self.u = cast(
+            list[np.ndarray],
+            _process_data(
+                None if vals[3] is None else np.array(vals[3]), self.x, "u", base_dim=1, offset=0
+            ),
         )
         self._is_autonomous = self.u[0].size == 0
 
         # Process p
-        self.p = _process_data(
-            None if vals[4] is None else np.array(vals[4]), self.x, "p", base_dim=1, offset=1
+        self.p = cast(
+            list[np.ndarray],
+            _process_data(
+                None if vals[4] is None else np.array(vals[4]), self.x, "p", base_dim=1, offset=1
+            ),
         )
 
         return data
@@ -699,7 +721,10 @@ class TrajectoryManager:
                 for position, raw_index in enumerate(self.data_index.tolist())
             }
             if all(int(index) in position_by_index for index in indices.tolist()):
-                return [self.typed_dataset[position_by_index[int(index)]] for index in indices]
+                return cast(
+                    list[RegularSeries],
+                    [self.typed_dataset[position_by_index[int(index)]] for index in indices],
+                )
         return self._transform_regular_series_by_index(indices)
 
     def _create_raw_regular_series_by_index(self, indices: torch.Tensor) -> list[RegularSeries]:
@@ -837,7 +862,7 @@ class TrajectoryManager:
         if self.dataset is None:
             raise ValueError("dataset is not available; apply_data_transformations must run first")
         self.dataloader = DataLoader(
-            self.dataset,
+            cast(Any, self.dataset),
             batch_size=batch_size,
             shuffle=if_shuffle,
             collate_fn=RegularTrainerBatch.collate_series,
@@ -967,12 +992,20 @@ class TrajectoryManagerGraph(TrajectoryManager):
                 )
         else:
             logger.info("Edge index is not in data, generating from adjacency matrix")
+            if self.adj is None:
+                raise ValueError("Graph trajectory data requires either edge_index or adjacency.")
             ei, ew = adj_to_edge(self.adj)
-        self.ei = _process_data(ei, self.x, "ei", base_dim=2, offset=0)
-        self.ew = _process_data(ew, self.x, "ew", base_dim=1, offset=0)
+        self.ei = cast(
+            list[list[np.ndarray]], _process_data(ei, self.x, "ei", base_dim=2, offset=0)
+        )
+        self.ew = cast(
+            list[list[np.ndarray]], _process_data(ew, self.x, "ew", base_dim=1, offset=0)
+        )
 
         # Process ea
-        self.ea = _process_data(ea, self.x, "ea", base_dim=2, offset=0)
+        self.ea = cast(
+            list[list[np.ndarray]], _process_data(ea, self.x, "ea", base_dim=2, offset=0)
+        )
 
         # Count nodes
         _n = []
@@ -1089,7 +1122,10 @@ class TrajectoryManagerGraph(TrajectoryManager):
                 for position, raw_index in enumerate(self.data_index.tolist())
             }
             if all(int(index) in position_by_index for index in indices.tolist()):
-                return [self.typed_dataset[position_by_index[int(index)]] for index in indices]
+                return cast(
+                    list[GraphSeries],
+                    [self.typed_dataset[position_by_index[int(index)]] for index in indices],
+                )
         return self._transform_graph_series_by_index(indices)
 
     def _transform_graph_series_by_index(self, indices: torch.Tensor) -> list[GraphSeries]:
@@ -1223,7 +1259,7 @@ class TrajectoryManagerGraph(TrajectoryManager):
             raise ValueError("dataset is not available; apply_data_transformations must run first")
         logger.info(f"Creating typed graph dataloaders with batch size {batch_size}.")
         self.dataloader = DataLoader(
-            self.dataset,
+            cast(Any, self.dataset),
             batch_size=batch_size,
             shuffle=if_shuffle,
             collate_fn=GraphTrainerBatch.collate_series,

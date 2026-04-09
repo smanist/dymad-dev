@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import textwrap as tw
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol, cast
 
 import numpy as np
 import torch
@@ -21,11 +23,32 @@ Composer = Callable[[nn.Module, torch.Tensor, torch.Tensor, ComponentInputPayloa
 Decoder = Callable[[nn.Module, torch.Tensor, ComponentInputPayload], torch.Tensor]
 """decoder(net, z, w) -> x"""
 
-Predictor = Callable[
-    [torch.Tensor, ComponentInputPayload, np.ndarray | torch.Tensor, Any],
-    tuple[torch.Tensor, torch.Tensor],
+
+class Predictor(Protocol):
+    def __call__(
+        self,
+        model: nn.Module,
+        x0: torch.Tensor,
+        ts: np.ndarray | torch.Tensor,
+        ws: Any = None,
+        /,
+        **kwargs: Any,
+    ) -> torch.Tensor: ...
+
+
+class SupportsSetWeights(Protocol):
+    def set_weights(
+        self,
+        W: torch.Tensor | None = None,
+        b: torch.Tensor | None = None,
+        U: torch.Tensor | None = None,
+        V: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, ...]: ...
+
+
+LinearHelper = Callable[
+    ["ComposedDynamics", ComponentInputPayload], tuple[torch.Tensor, torch.Tensor]
 ]
-r"""predict(x0, w, ts, \*\*kwargs) -> (x_pred, z_pred)"""
 
 
 class ComposedDynamics(nn.Module):
@@ -103,6 +126,10 @@ class ComposedDynamics(nn.Module):
 
         self._encoder = encoder  # Hooked encoder function
         self._decoder = decoder  # Hooked decoder function
+        self.features: Features | None = None
+        self.composer: Composer | None = None
+        self.input_order: str | None = None
+        self._predict: Predictor | None = None
         if dynamics is not None:  # Hooked feature and composer functions
             self.features, self.composer = dynamics
         if predict is not None:  # Hooked prediction function and input order
@@ -118,11 +145,13 @@ class ComposedDynamics(nn.Module):
             self.seq_len = -1
 
         # To be assigned
-        self.encoder_net = None  # Network to be used by self._encoder
-        self.processor_net = None  # Network to be used inside self.dynamics
-        self.decoder_net = None  # Network to be used by self._decoder
-        self._linear_eval = None  # Functions for linear solver, to be hooked
-        self._linear_features = None
+        self.encoder_net: nn.Module | None = None  # Network to be used by self._encoder
+        self.processor_net: nn.Module | None = None  # Network to be used inside self.dynamics
+        self.decoder_net: nn.Module | None = None  # Network to be used by self._decoder
+        self._linear_eval: LinearHelper | None = None  # Functions for linear solver, to be hooked
+        self._linear_features: LinearHelper | None = None
+        self.dtype: torch.dtype | None = None
+        self.device: torch.device | str | None = None
 
     @classmethod
     def resolve_spec(cls, model_spec, model_config, data_meta, dtype, device):
@@ -140,17 +169,23 @@ class ComposedDynamics(nn.Module):
         """
         ind = "          "
 
-        def fin(net):
+        encoder = self._require_encoder()
+        decoder = self._require_decoder()
+        features = self._require_features()
+        composer = self._require_composer()
+        predictor = self._require_predictor()
+
+        def fin(net: nn.Module) -> str:
             return tw.indent(f"{net}", ind)
 
         return (
             f"Model parameters: {sum(p.numel() for p in self.parameters())}\n"
-            + f"Encoder:  {self._encoder.__name__}\n{fin(self.encoder_net)}\n"
-            + f"Dynamics: {self.features.__name__}\n"
-            + f"{fin(self.processor_net)}\n"
-            + f"{ind}{self.composer.__name__}\n"
-            + f"Decoder:  {self._decoder.__name__}\n{fin(self.decoder_net)}\n"
-            + f"Prediction: {self._predict.__name__}\n"
+            + f"Encoder:  {self._callable_name(encoder)}\n{fin(self._require_encoder_net())}\n"
+            + f"Dynamics: {self._callable_name(features)}\n"
+            + f"{fin(self._require_processor_net())}\n"
+            + f"{ind}{self._callable_name(composer)}\n"
+            + f"Decoder:  {self._callable_name(decoder)}\n{fin(self._require_decoder_net())}\n"
+            + f"Prediction: {self._callable_name(predictor)}\n"
             + f"Continuous-time: {self.CONT}, Graph-compatible: {self.GRAPH}, "
             + f"Sequence length: {self.seq_len}\n"
         )
@@ -175,7 +210,7 @@ class ComposedDynamics(nn.Module):
 
     def encoder(self, w: ComponentInputPayload) -> torch.Tensor:
         """Encode the inputs into latent states."""
-        return self._encoder(self.encoder_net, w)
+        return self._require_encoder()(self._require_encoder_net(), w)
 
     def dynamics(self, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
         """
@@ -183,11 +218,14 @@ class ComposedDynamics(nn.Module):
 
         Note this uses three components: features, processor, and composer.
         """
-        return self.composer(self.processor_net, self.features(z, w), z, w)
+        processor = self._require_processor_net()
+        features = self._require_features()
+        composer = self._require_composer()
+        return composer(processor, features(z, w), z, w)
 
     def decoder(self, z: torch.Tensor, w: ComponentInputPayload) -> torch.Tensor:
         """Decode the latent states into outputs."""
-        return self._decoder(self.decoder_net, z, w)
+        return self._require_decoder()(self._require_decoder_net(), z, w)
 
     def linear_eval(self, w: ComponentInputPayload) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute linear evaluation, dz, and states, z, for the model.
@@ -196,7 +234,7 @@ class ComposedDynamics(nn.Module):
 
         z is the encoded state, which will be used to compute the expected output.
         """
-        return self._linear_eval(self, w)
+        return self._require_linear_eval()(self, w)
 
     def linear_features(self, w: ComponentInputPayload) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute linear features, f, and outputs, dz, for the model.
@@ -205,7 +243,7 @@ class ComposedDynamics(nn.Module):
 
         dz is the output of the dynamics, z_dot for cont-time, z_next for disc-time.
         """
-        return self._linear_features(self, w)
+        return self._require_linear_features()(self, w)
 
     def set_linear_weights(
         self,
@@ -215,7 +253,8 @@ class ComposedDynamics(nn.Module):
         V: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Set the weights of the linear dynamics module."""
-        return self.processor_net.set_weights(W, b, U, V)
+        processor = self._require_processor_with_set_weights()
+        return cast(tuple[torch.Tensor, torch.Tensor], processor.set_weights(W=W, b=b, U=U, V=V))
 
     def linear_solve(
         self, inp: torch.Tensor, out: torch.Tensor, **kwargs
@@ -240,4 +279,65 @@ class ComposedDynamics(nn.Module):
 
         This function essentially determines whether the model is continuous-time or discrete-time.
         """
-        return self._predict(self, x0, ts, w, method=method, order=self.input_order, **kwargs)
+        predictor = self._require_predictor()
+        return predictor(self, x0, ts, w, method=method, order=self.input_order, **kwargs)
+
+    @staticmethod
+    def _callable_name(fn: Callable[..., Any]) -> str:
+        return getattr(fn, "__name__", type(fn).__name__)
+
+    def _require_encoder(self) -> Encoder:
+        if self._encoder is None:
+            raise RuntimeError("Encoder hook is not initialized.")
+        return self._encoder
+
+    def _require_decoder(self) -> Decoder:
+        if self._decoder is None:
+            raise RuntimeError("Decoder hook is not initialized.")
+        return self._decoder
+
+    def _require_predictor(self) -> Predictor:
+        if self._predict is None:
+            raise RuntimeError("Predictor hook is not initialized.")
+        return self._predict
+
+    def _require_features(self) -> Features:
+        if self.features is None:
+            raise RuntimeError("Features hook is not initialized.")
+        return self.features
+
+    def _require_composer(self) -> Composer:
+        if self.composer is None:
+            raise RuntimeError("Composer hook is not initialized.")
+        return self.composer
+
+    def _require_encoder_net(self) -> nn.Module:
+        if self.encoder_net is None:
+            return cast(nn.Module, self)
+        return self.encoder_net
+
+    def _require_processor_net(self) -> nn.Module:
+        if self.processor_net is None:
+            return cast(nn.Module, self)
+        return self.processor_net
+
+    def _require_processor_with_set_weights(self) -> SupportsSetWeights:
+        processor = self._require_processor_net()
+        if not hasattr(processor, "set_weights"):
+            raise RuntimeError("Processor does not support linear weight assignment.")
+        return cast(SupportsSetWeights, processor)
+
+    def _require_decoder_net(self) -> nn.Module:
+        if self.decoder_net is None:
+            return cast(nn.Module, self)
+        return self.decoder_net
+
+    def _require_linear_eval(self) -> LinearHelper:
+        if self._linear_eval is None:
+            raise RuntimeError("Linear evaluation hook is not initialized.")
+        return self._linear_eval
+
+    def _require_linear_features(self) -> LinearHelper:
+        if self._linear_features is None:
+            raise RuntimeError("Linear feature hook is not initialized.")
+        return self._linear_features

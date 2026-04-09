@@ -6,9 +6,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
+from dymad.training.batch_adapter import TrainerBatch
 from dymad.training.execution_services import ExecutionServices
+from dymad.training.ls_update import LSUpdater
 
 
 class TrainingCheckpointError(ValueError):
@@ -32,6 +34,11 @@ class OptimizerStateArtifact:
     criteria_weights: list[float] = field(default_factory=list)
     criteria_names: list[str] = field(default_factory=list)
     owner_phase: str = ""
+    _weak_C: torch.Tensor | None = None
+    _weak_D: torch.Tensor | None = None
+    _weak_N: int | None = None
+    _weak_dN: int | None = None
+    _linear_updater: LSUpdater | None = None
 
 
 @dataclass
@@ -161,10 +168,10 @@ class TrainerState:
 class PhaseContext:
     """Live phase context for one run."""
 
-    train_set: Dataset | None = None
-    valid_set: Dataset | None = None
-    train_loader: DataLoader | None = None
-    valid_loader: DataLoader | None = None
+    train_set: list[TrainerBatch] | None = None
+    valid_set: list[TrainerBatch] | None = None
+    train_loader: DataLoader[TrainerBatch] | None = None
+    valid_loader: DataLoader[TrainerBatch] | None = None
     train_md: dict[str, Any] | None = None
     valid_md: dict[str, Any] | None = None
 

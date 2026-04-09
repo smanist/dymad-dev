@@ -1,11 +1,16 @@
+from __future__ import annotations
+
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from typing import Any, cast
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from dymad.modules.helpers import _swap_parameter_storage
 from dymad.numerics import DimensionEstimator
 
 logger = logging.getLogger(__name__)
@@ -31,10 +36,9 @@ def scaled_cdist(
     return dists
 
 
-def inv_softplus(y: float, dtype) -> torch.Tensor:
+def inv_softplus(y: float | np.floating[Any], dtype: torch.dtype) -> torch.Tensor:
     """Inverse of softplus, for initialization."""
     return torch.log(torch.exp(torch.tensor(float(y), dtype=dtype)) - 1)
-
 
 # --------------------
 # Kernels
@@ -51,13 +55,13 @@ class KernelAbstract(nn.Module, ABC):
     Base interface for all kernels (scalar or operator-valued).
     """
 
-    def __init__(self, in_dim: int, dtype=None):
+    def __init__(self, in_dim: int, dtype: torch.dtype | None = None):
         super().__init__()
         self.in_dim = int(in_dim)
-        self.dtype = dtype if dtype is not None else torch.float64
+        self.dtype: torch.dtype = dtype if dtype is not None else torch.float64
 
     @abstractmethod
-    def forward(self, X: torch.Tensor, Z: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, X: torch.Tensor, Z: torch.Tensor | None = None) -> torch.Tensor:
         """
         Compute kernel between X (N,d) and Z (M,d).
 
@@ -87,7 +91,7 @@ class KernelAbstract(nn.Module, ABC):
 
 # Drived Bases
 class KernelScalarValued(KernelAbstract, ABC):
-    def __init__(self, in_dim: int, dtype=None):
+    def __init__(self, in_dim: int, dtype: torch.dtype | None = None):
         super().__init__(in_dim, dtype=dtype)
         self.out_dim = 1
 
@@ -97,7 +101,7 @@ class KernelScalarValued(KernelAbstract, ABC):
 
 
 class KernelOperatorValued(KernelAbstract, ABC):
-    def __init__(self, in_dim: int, out_dim: int, dtype=None):
+    def __init__(self, in_dim: int, out_dim: int, dtype: torch.dtype | None = None):
         super().__init__(in_dim, dtype=dtype)
         self.out_dim = int(out_dim)
 
@@ -112,23 +116,31 @@ class KernelOperatorValuedScalars(KernelOperatorValued):
     Output shape: (..., N, Dy, M, Dy)
     """
 
-    def __init__(self, kernels: KernelScalarValued | list, out_dim: int, dtype=None):
+    def __init__(
+        self,
+        kernels: KernelScalarValued | Sequence[KernelScalarValued] | nn.ModuleList,
+        out_dim: int,
+        dtype: torch.dtype | None = None,
+    ):
         if isinstance(kernels, KernelScalarValued):
-            kernels = nn.ModuleList([kernels])
-        elif isinstance(kernels, list):
-            kernels = nn.ModuleList(kernels)
-        self.n_kernels = len(kernels)
-        self.in_dim = kernels[0].in_dim
-        for k in kernels:
+            module_kernels = nn.ModuleList([kernels])
+        elif isinstance(kernels, Sequence):
+            module_kernels = nn.ModuleList(list(kernels))
+        else:
+            module_kernels = kernels
+        self.n_kernels = len(module_kernels)
+        first_kernel = cast(KernelScalarValued, module_kernels[0])
+        self.in_dim = first_kernel.in_dim
+        for k in module_kernels:
             assert isinstance(k, KernelScalarValued)
             assert k.in_dim == self.in_dim
 
         super().__init__(self.in_dim, out_dim, dtype=dtype)
-        self.scalar_kernels = kernels
+        self.scalar_kernels: nn.ModuleList = module_kernels
 
     def set_reference_data(self, Xref: torch.Tensor) -> None:
         for _k in self.scalar_kernels:
-            _k.set_reference_data(Xref)
+            cast(KernelScalarValued, _k).set_reference_data(Xref)
 
 
 # Actual kernels
@@ -139,10 +151,12 @@ class KernelScRBF(KernelScalarValued):
     Learnable positive lengthscale.
     """
 
-    def __init__(self, in_dim: int, lengthscale_init: float | None = None, dtype=None):
+    def __init__(
+        self, in_dim: int, lengthscale_init: float | None = None, dtype: torch.dtype | None = None
+    ):
         super().__init__(in_dim, dtype=dtype)
         if lengthscale_init is None:
-            self._log_ell = nn.Parameter(torch.empty(0, dtype=self.dtype))
+            self._log_ell: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype))
         else:
             self._log_ell = nn.Parameter(
                 torch.tensor(float(lengthscale_init), dtype=self.dtype).log()
@@ -165,9 +179,7 @@ class KernelScRBF(KernelScalarValued):
                 est()
                 _tmp = np.sqrt(est._ref_l2dist * est._ref_scalar / 2)
                 _tmp = inv_softplus(_tmp, self.dtype)
-                self._log_ell.requires_grad = False
-                self._log_ell.set_(_tmp)
-                self._log_ell.requires_grad = True
+                _swap_parameter_storage(self._log_ell, _tmp, requires_grad=True)
                 logger.info(f"Estimated lengthscale: {self.ell}")
 
     def forward(self, X, Z=None):
@@ -183,9 +195,16 @@ class KernelScExp(KernelScalarValued):
     Learnable positive lengthscale.
     """
 
-    def __init__(self, in_dim: int, lengthscale_init: float | None = None, dtype=None):
+    def __init__(
+        self, in_dim: int, lengthscale_init: float | None = None, dtype: torch.dtype | None = None
+    ):
         super().__init__(in_dim, dtype=dtype)
-        self._log_ell = nn.Parameter(torch.tensor(float(lengthscale_init), dtype=self.dtype).log())
+        if lengthscale_init is None:
+            self._log_ell: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype))
+        else:
+            self._log_ell = nn.Parameter(
+                torch.tensor(float(lengthscale_init), dtype=self.dtype).log()
+            )
 
     def __repr__(self) -> str:
         return f"KernelScExp(in_dim={self.in_dim}, ell={self.ell}, dtype={self.dtype})"
@@ -209,19 +228,29 @@ class KernelScDM(KernelScalarValued):
     Everything keeps autograd for eps and t.
     """
 
-    def __init__(self, in_dim: int, eps_init: float | None = None, t_init: float = 1.0, dtype=None):
+    def __init__(
+        self,
+        in_dim: int,
+        eps_init: float | None = None,
+        t_init: float = 1.0,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__(in_dim, dtype=dtype)
         if eps_init is None:
-            self._log_eps = nn.Parameter(torch.empty(0, dtype=self.dtype))
+            self._log_eps: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype))
         else:
             self._log_eps = nn.Parameter(torch.tensor(float(eps_init), dtype=self.dtype).log())
         _tmp = inv_softplus(t_init, self.dtype)
-        self._log_t = nn.Parameter(_tmp)
+        self._log_t: nn.Parameter = nn.Parameter(_tmp)
 
         # caches
-        self.register_parameter("_Xref", nn.Parameter(torch.empty(0, dtype=self.dtype)))
-        self.register_parameter("_D", nn.Parameter(torch.empty(0, dtype=self.dtype)))
-        self.register_parameter("_Dinv1", nn.Parameter(torch.empty(0, dtype=self.dtype)))
+        self._Xref: nn.Parameter = nn.Parameter(
+            torch.empty(0, dtype=self.dtype), requires_grad=False
+        )
+        self._D: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype), requires_grad=False)
+        self._Dinv1: nn.Parameter = nn.Parameter(
+            torch.empty(0, dtype=self.dtype), requires_grad=False
+        )
 
     def __repr__(self) -> str:
         return f"KernelScDM(in_dim={self.in_dim}, eps={self.eps}, t={self.t}, dtype={self.dtype})"
@@ -241,9 +270,7 @@ class KernelScDM(KernelScalarValued):
         return torch.exp(-sq)
 
     def set_reference_data(self, Xref: torch.Tensor) -> None:
-        self._Xref.requires_grad = False
-        self._Xref.set_(Xref)
-        self._Xref.requires_grad = False
+        _swap_parameter_storage(self._Xref, Xref, requires_grad=False)
 
         with torch.no_grad():
             if self._log_eps.numel() == 0:
@@ -252,20 +279,15 @@ class KernelScDM(KernelScalarValued):
                 )
                 est()
                 _tmp = inv_softplus(est._ref_l2dist * est._ref_scalar / 4, self.dtype)
-                self._log_eps.requires_grad = False
-                self._log_eps.set_(_tmp)
-                self._log_eps.requires_grad = True
+                _swap_parameter_storage(self._log_eps, _tmp, requires_grad=True)
                 logger.info(f"Estimated epsilon: {self.eps}")
 
-        self._D.requires_grad = False
-        self._Dinv1.requires_grad = False
-
         W = self._rbf(Xref, Xref)
-        self._D.set_(W.sum(axis=-1) ** (-self.t))
+        _swap_parameter_storage(self._D, W.sum(dim=-1) ** (-self.t))
         W = self._D[..., None] * W * self._D[..., None, :]
-        self._Dinv1.set_(W.sum(axis=-1) ** (-0.5))
+        _swap_parameter_storage(self._Dinv1, W.sum(dim=-1) ** (-0.5))
 
-    def forward(self, X, Z=None):
+    def forward(self, X: torch.Tensor, Z: torch.Tensor | None = None):
         if Z is None:
             Z = self._Xref
 
@@ -277,9 +299,9 @@ class KernelScDM(KernelScalarValued):
             return W
 
         W = self._rbf(X, Z)
-        D = W.sum(axis=-1) ** (-self.t)
+        D = W.sum(dim=-1) ** (-self.t)
         W = D[..., None] * W * self._D[..., None, :]
-        Dinv1 = W.sum(axis=-1) ** (-0.5)
+        Dinv1 = W.sum(dim=-1) ** (-0.5)
         W = Dinv1[..., None] * W * self._Dinv1[..., None, :]
         return W
 
@@ -294,10 +316,10 @@ class KernelOpSeparable(KernelOperatorValuedScalars):
 
     def __init__(
         self,
-        kernels: KernelScalarValued | list,
+        kernels: KernelScalarValued | Sequence[KernelScalarValued] | nn.ModuleList,
         out_dim: int,
-        Ls: torch.Tensor | list[torch.Tensor] = None,
-        dtype=None,
+        Ls: torch.Tensor | Sequence[torch.Tensor] | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__(kernels, out_dim, dtype=dtype)
 
@@ -307,24 +329,35 @@ class KernelOpSeparable(KernelOperatorValuedScalars):
             )
             self.Ls = nn.Parameter(L0.clone())  # (n_kernels, Dy, Dy)
         else:
-            Ls = torch.atleast_3d(torch.as_tensor(Ls, dtype=self.dtype))
-            assert Ls.ndim == 3
+            if isinstance(Ls, Sequence):
+                Ls_tensor = torch.stack(
+                    [torch.as_tensor(item, dtype=self.dtype) for item in Ls], dim=0
+                )
+            else:
+                Ls_tensor = torch.as_tensor(Ls, dtype=self.dtype)
+            Ls_tensor = torch.atleast_3d(Ls_tensor)
+            assert Ls_tensor.ndim == 3
             assert (
-                Ls.shape[0] == self.n_kernels and Ls.shape[1] == out_dim and Ls.shape[2] == out_dim
+                Ls_tensor.shape[0] == self.n_kernels
+                and Ls_tensor.shape[1] == out_dim
+                and Ls_tensor.shape[2] == out_dim
             )
-            self.Ls = nn.Parameter(Ls.clone())
+            self.Ls = nn.Parameter(Ls_tensor.clone())
 
     def __repr__(self) -> str:
-        _s = [self.scalar_kernels[i].__repr__() for i in range(self.n_kernels)]
+        _s = [
+            cast(KernelScalarValued, self.scalar_kernels[i]).__repr__()
+            for i in range(self.n_kernels)
+        ]
         return (
             f"KernelOpSeparable(in_dim={self.in_dim}, out_dim={self.out_dim}, n_kernels={self.n_kernels}, dtype={self.dtype})\n"
             f"\t\tLs_shapes={[self.Ls.shape]}\n\twith:\n\t\t" + "\n\t\t".join(_s)
         )
 
-    def forward(self, X, Z=None):
+    def forward(self, X: torch.Tensor, Z: torch.Tensor | None = None):
         if Z is None:
             Z = X
-        k = torch.stack([_k(X, Z) for _k in self.scalar_kernels], dim=0)  # (n_kernels, ..., M)
+        k = torch.stack([cast(KernelScalarValued, _k)(X, Z) for _k in self.scalar_kernels], dim=0)
         L = torch.tril(self.Ls)
         B = torch.matmul(L, L.transpose(-1, -2))  # (n_kernels, Dy, Dy)
         # Output: (..., Dy, M, Dy) = sum_i k_i(x,z) * B_i
@@ -351,17 +384,18 @@ class KernelOpTangent(KernelOperatorValued):
     of shapes: (..., d, M, d), (..., d, Dy), (M, d, Dy)
     """
 
-    def __init__(self, kernel: KernelScalarValued, out_dim: int, dtype=None):
+    def __init__(self, kernel: KernelScalarValued, out_dim: int, dtype: torch.dtype | None = None):
         assert isinstance(kernel, KernelScalarValued)
         self.in_dim = kernel.in_dim
 
         super().__init__(self.in_dim, out_dim, dtype=dtype)
-        self.scalar_kernel = kernel
+        self.scalar_kernel: KernelScalarValued = kernel
+        self._manifold: Any | None = None
 
     def set_reference_data(self, Xref: torch.Tensor) -> None:
         self.scalar_kernel.set_reference_data(Xref)
 
-    def set_manifold(self, manifold) -> None:
+    def set_manifold(self, manifold: Any) -> None:
         # Only requires manifold to provide an _estimate_tangent method
         # which can operate in batch, and give tangent bases of shape (...,d,Dy)
         self._manifold = manifold
@@ -373,10 +407,13 @@ class KernelOpTangent(KernelOperatorValued):
         )
 
     def _tangent(self, X: torch.Tensor) -> torch.Tensor:
-        _T = self._manifold._estimate_tangent(X[..., : self.out_dim].detach().cpu().numpy())
+        manifold = self._manifold
+        if manifold is None:
+            raise RuntimeError("Tangent kernel requires manifold data before evaluation.")
+        _T = manifold._estimate_tangent(X[..., : self.out_dim].detach().cpu().numpy())
         return torch.as_tensor(_T, dtype=self.dtype, device=X.device)
 
-    def forward(self, X, Z=None):
+    def forward(self, X: torch.Tensor, Z: torch.Tensor | None = None):
         k = self.scalar_kernel(X, Z)  # (..., M)
 
         if Z is None:

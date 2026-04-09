@@ -1,23 +1,25 @@
 from dataclasses import dataclass
+from typing import Any, cast
 
 import torch
+import torch.nn as nn
 
 from dymad.models.helpers import build_processor, fzu_selector, get_dims
 from dymad.models.model_base import ComposedDynamics
 from dymad.models.model_spec import ModelSpec, ModelSpecValidationError
 from dymad.models.runtime_view import ComponentInputPayload
-from dymad.modules import FlexLinear, make_krr
+from dymad.modules import FlexLinear, KRRBase, KRRTangent, make_krr
 from dymad.numerics import Manifold
 
 
 @dataclass(frozen=True)
 class RecipeResolution:
-    dims: dict
+    dims: dict[str, int]
     encoder_key: str
     feature_key: str
     dynamics_key: str
     decoder_key: str
-    processor_net: object
+    processor_net: nn.Module
     input_order: str | None
 
 
@@ -133,7 +135,7 @@ class CD_LFM(ComposedDynamics):
 
     def __init__(self, encoder, dynamics, decoder, predict=None, model_config=None, dims=None):
         super().__init__(encoder, dynamics, decoder, predict, model_config, dims)
-        self.koopman_dimension = dims["z"]
+        self.koopman_dimension = _require_dims(dims)["z"]
 
     @classmethod
     def resolve_spec(
@@ -249,9 +251,10 @@ class CD_KM(ComposedDynamics):
         """
         Fit the kernel dynamics using input-output pairs.
         """
-        self.processor_net.set_train_data(inp, out)
-        residual = self.processor_net.fit()
-        return self.processor_net._alphas, residual
+        processor = self._require_krr_processor()
+        processor.set_train_data(inp, out)
+        residual = cast(torch.Tensor, processor.fit())
+        return cast(torch.Tensor, processor._alphas), residual
 
     def load_state_dict(self, state_dict, strict: bool = True):
         """
@@ -266,10 +269,16 @@ class CD_KM(ComposedDynamics):
                     if p.shape != saved.shape:
                         # keep the same Parameter object (so it's still registered,
                         # and any optimizer state tied to id(p) can be preserved)
-                        p.set_(torch.empty_like(saved))
+                        p.data = torch.empty_like(saved)
 
         # Then do standard loading and checks
         return super().load_state_dict(state_dict, strict=strict)
+
+    def _require_krr_processor(self) -> KRRBase:
+        processor = self.processor_net
+        if not isinstance(processor, KRRBase):
+            raise RuntimeError("Expected KRR processor.")
+        return processor
 
 
 class CD_KMSK(CD_KM):
@@ -277,14 +286,15 @@ class CD_KMSK(CD_KM):
 
     def __init__(self, encoder, dynamics, decoder, predict=None, model_config=None, dims=None):
         super().__init__(encoder, dynamics, decoder, predict, model_config, dims)
-        self.kernel_dimension = dims["z"]
+        self.kernel_dimension = _require_dims(dims)["z"]
 
     def linear_solve(
         self, inp: torch.Tensor, out: torch.Tensor, **kwargs
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        self.processor_net.set_train_data(inp, out - inp[..., : self.kernel_dimension])
-        residual = self.processor_net.fit()
-        return self.processor_net._alphas, residual
+        processor = self._require_krr_processor()
+        processor.set_train_data(inp, out - inp[..., : self.kernel_dimension])
+        residual = cast(torch.Tensor, processor.fit())
+        return cast(torch.Tensor, processor._alphas), residual
 
 
 M_KEYS = ["data", "d", "K", "g", "T", "iforit", "extT"]
@@ -306,7 +316,9 @@ class CD_KMM(CD_KM):
     def __init__(self, encoder, dynamics, decoder, predict=None, model_config=None, dims=None):
         super().__init__(encoder, dynamics, decoder, predict, model_config, dims)
 
-        self._man_opts = model_config.get("manifold", {})
+        cfg = {} if model_config is None else model_config
+        self._man_opts = cfg.get("manifold", {})
+        self._manifold: Manifold | None = None
 
         # Register buffers for Manifold parameters
         self.register_buffer("_m_data", torch.empty(0, dtype=torch.float64))
@@ -325,24 +337,27 @@ class CD_KMM(CD_KM):
         """
         # Build manifold from input data
         # This is a Numpy object, and we register buffers to reload it later
-        self._manifold = Manifold(inp[:, : self.n_total_state_features], **self._man_opts)
-        self._manifold.precompute()
-        ts = self._manifold.to_tensors()
+        manifold = Manifold(inp[:, : self.n_total_state_features], **self._man_opts)
+        manifold.precompute()
+        self._manifold = manifold
+        ts = manifold.to_tensors()
         for _k, _v in ts.items():
             setattr(self, f"_m_{_k}", _v)
 
         # Fit KRR with the manifold constraint
-        self.processor_net.set_train_data(inp, out)
-        self.processor_net.set_manifold(self._manifold)
-        residual = self.processor_net.fit()
-        return self.processor_net._alphas, residual
+        processor = self._require_tangent_processor()
+        processor.set_train_data(inp, out)
+        processor.set_manifold(manifold)
+        residual = cast(torch.Tensor, processor.fit())
+        return cast(torch.Tensor, processor._alphas), residual
 
     def fenc_step(self, z: torch.Tensor, w: ComponentInputPayload, dt: float) -> torch.Tensor:
         """
         First-order Euler step with Normal Correction.
         """
         dz = self.dynamics(z, w) * dt
-        dn = self._manifold._estimate_normal(z.detach().cpu().numpy(), dz.detach().cpu().numpy())
+        manifold = self._require_manifold()
+        dn = manifold._estimate_normal(z.detach().cpu().numpy(), dz.detach().cpu().numpy())
         return z + dz + torch.as_tensor(dn, dtype=self.dtype, device=z.device)
 
     def load_state_dict(self, state_dict, strict: bool = True):
@@ -360,16 +375,29 @@ class CD_KMM(CD_KM):
                 if name in state_dict:
                     saved = state_dict[name]
                     if p.shape != saved.shape:
-                        p.set_(torch.empty_like(saved))
+                        p.data = torch.empty_like(saved)
 
         res = super().load_state_dict(state_dict, strict=strict)
 
         t = {_k: getattr(self, f"_m_{_k}") for _k in M_KEYS}
-        self._manifold = Manifold.from_tensors(t)
-        self.processor_net._manifold = self._manifold
-        self.processor_net.kernel._manifold = self._manifold
+        manifold = Manifold.from_tensors(t)
+        self._manifold = manifold
+        processor = self._require_tangent_processor()
+        cast(Any, processor)._manifold = manifold
+        cast(Any, processor.kernel)._manifold = manifold
 
         return res
+
+    def _require_manifold(self) -> Manifold:
+        if self._manifold is None:
+            raise RuntimeError("Manifold state is not initialized.")
+        return self._manifold
+
+    def _require_tangent_processor(self) -> KRRTangent:
+        processor = self.processor_net
+        if not isinstance(processor, KRRTangent):
+            raise RuntimeError("Expected tangent-kernel KRR processor.")
+        return processor
 
 
 RECIPE_REGISTRY = {
@@ -389,9 +417,15 @@ def resolve_recipe(
     dtype,
     device,
 ) -> RecipeResolution:
-    recipe_cls = model_spec.model_cls
+    recipe_cls = cast(type[ComposedDynamics], model_spec.model_cls)
     if not hasattr(recipe_cls, "resolve_spec"):
         raise ModelSpecValidationError(
             f"Recipe class {recipe_cls!r} does not implement typed spec resolution."
         )
     return recipe_cls.resolve_spec(model_spec, model_config, data_meta, dtype, device)
+
+
+def _require_dims(dims: dict[str, Any] | None) -> dict[str, Any]:
+    if dims is None:
+        raise ValueError("Recipe initialization requires resolved dims.")
+    return dims

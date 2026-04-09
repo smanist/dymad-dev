@@ -124,20 +124,6 @@ exclude = [
   "src/dymad.egg-info",
   "tests",
 ]
-ignore = [
-  # Temporary rollout debt while migrating pyright from a file whitelist to full src coverage.
-  "src/dymad/io/checkpoint.py",
-  "src/dymad/io/trajectory_manager.py",
-  "src/dymad/models/model_base.py",
-  "src/dymad/models/recipes.py",
-  "src/dymad/modules/kernel.py",
-  "src/dymad/modules/krr.py",
-  "src/dymad/numerics/dm.py",
-  "src/dymad/training/phases.py",
-  "src/dymad/utils/plot.py",
-  "src/dymad/utils/sampling.py",
-  "src/dymad/utils/scheduler.py",
-]
 extraPaths = ["src"]
 reportMissingImports = "none"
 reportMissingTypeStubs = "none"

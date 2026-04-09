@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from dymad.modules.gnn import GNN, IdenCatGNN, ResBlockGNN
 from dymad.modules.kernel import (
+    KernelAbstract,
     KernelOpSeparable,
     KernelOpTangent,
     KernelScDM,
@@ -325,10 +326,8 @@ def make_krr(
             f"Kernel must be a dictionary or a list of dictionaries, got {type(kernel)}."
         )
 
-    k_module: list[nn.Module] | nn.Module = []
+    k_modules: list[KernelAbstract] = []
     for _k in _ker:
-        if not isinstance(k_module, list):
-            raise TypeError("Kernel module accumulator must be a list during construction.")
         k_type = _k["type"]
         k_input_dim = _k["input_dim"]
         k_output_dim = _k.get("output_dim", None)
@@ -336,34 +335,45 @@ def make_krr(
         k_kwargs = {
             k: v for k, v in _k.items() if k not in {"type", "input_dim", "output_dim", "kopts"}
         }
-        k_module.append(
-            make_kernel(
-                k_type,
-                input_dim=k_input_dim,
-                output_dim=k_output_dim,
-                kopts=k_kopts,
-                dtype=dtype,
-                **k_kwargs,
+        k_modules.append(
+            cast(
+                KernelAbstract,
+                make_kernel(
+                    k_type,
+                    input_dim=k_input_dim,
+                    output_dim=k_output_dim,
+                    kopts=k_kopts,
+                    dtype=dtype,
+                    **k_kwargs,
+                ),
             )
         )
-    if isinstance(kernel, dict):
-        # Consistency with input type
-        k_module = k_module[0]
 
     _type = type.lower()
     if _type == "share":
+        if len(k_modules) != 1:
+            raise ValueError("Shared KRR expects exactly one kernel configuration.")
         return KRRMultiOutputShared(
-            kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device
+            kernel=k_modules[0], ridge_init=ridge_init, jitter=jitter, device=device
         )
     elif _type == "indep":
         return KRRMultiOutputIndep(
-            kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device
+            kernel=nn.ModuleList(k_modules), ridge_init=ridge_init, jitter=jitter, device=device
         )
     elif _type == "opval":
+        if len(k_modules) != 1:
+            raise ValueError("Operator-valued KRR expects exactly one kernel configuration.")
         return KRROperatorValued(
-            kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device
+            kernel=k_modules[0], ridge_init=ridge_init, jitter=jitter, device=device
         )
     elif _type == "tangent":
-        return KRRTangent(kernel=k_module, ridge_init=ridge_init, jitter=jitter, device=device)
+        if len(k_modules) != 1:
+            raise ValueError("Tangent KRR expects exactly one kernel configuration.")
+        return KRRTangent(
+            kernel=cast(KernelOpTangent, k_modules[0]),
+            ridge_init=ridge_init,
+            jitter=jitter,
+            device=device,
+        )
     else:
         raise ValueError(f"Unknown KRR type '{type}'.")

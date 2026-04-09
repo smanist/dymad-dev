@@ -1,4 +1,8 @@
+from collections.abc import Callable
+from typing import cast
+
 import torch
+import torch.nn as nn
 
 from dymad.models.components import DEC_MAP, ENC_MAP, FZU_MAP
 from dymad.models.helpers import get_dims
@@ -8,8 +12,10 @@ from dymad.models.runtime_view import ComponentInputPayload, build_component_inp
 from dymad.modules import MLP
 
 
-def _unused_composer(*args):
-    return args[0] if args else None
+def _unused_composer(
+    net: nn.Module, s: torch.Tensor, z: torch.Tensor, w: ComponentInputPayload
+) -> torch.Tensor:
+    return s
 
 
 def _align_optional_feature(value: torch.Tensor | None, reference: torch.Tensor) -> torch.Tensor:
@@ -18,6 +24,16 @@ def _align_optional_feature(value: torch.Tensor | None, reference: torch.Tensor)
     if value.ndim == reference.ndim - 1:
         return value.unsqueeze(-2).expand(*reference.shape[:-1], value.shape[-1])
     return value
+
+
+def _require_callable_attr(obj: object, name: str):
+    attr = getattr(obj, name, None)
+    if attr is None or not callable(attr):
+        raise RuntimeError(f"{type(obj).__name__} requires callable attribute '{name}'.")
+    return attr
+
+
+FeatureFn = Callable[[torch.Tensor, ComponentInputPayload], torch.Tensor]
 
 
 class TemplateCorrAlg(ComposedDynamics):
@@ -111,7 +127,9 @@ class TemplateCorrAlg(ComposedDynamics):
         view = build_component_input_view(w)
         w_u = _align_optional_feature(view.control, z)
         w_p = _align_optional_feature(view.runtime.p, z)
-        _l = self.processor_net(self.features(z, w))
+        processor = cast(nn.Module, _require_callable_attr(self, "processor_net"))
+        features = cast(FeatureFn, _require_callable_attr(self, "features"))
+        _l = processor(features(z, w))
         _f = self.base_dynamics(z, w_u, _l, w_p)
         return _f
 
@@ -268,7 +286,9 @@ class TemplateCorrDif(ComposedDynamics):
         w_u = _align_optional_feature(view.control, z)
         w_p = _align_optional_feature(view.runtime.p, z)
         _x = z[..., : self.n_total_state_features]
-        _f = self.processor_net(self.features(z, w))
+        processor = cast(nn.Module, _require_callable_attr(self, "processor_net"))
+        features = cast(FeatureFn, _require_callable_attr(self, "features"))
+        _f = processor(features(z, w))
         _dx = self.base_dynamics(_x, w_u, _f, w_p)
-        _ds = self.latent_net(self.features(z, w))
+        _ds = self.latent_net(features(z, w))
         return torch.cat([_dx, _ds], dim=-1)

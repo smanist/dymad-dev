@@ -2,6 +2,7 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any, Literal, cast
 
+import torch
 import torch.nn as nn
 
 try:
@@ -13,6 +14,16 @@ except ImportError:
 
 ActivationFactory = Callable[[], nn.Module]
 InitFn = Callable[..., Any]
+
+
+def _swap_parameter_storage(
+    param: nn.Parameter, tensor: torch.Tensor, requires_grad: bool | None = None
+) -> None:
+    if requires_grad is not None and param.is_leaf:
+        param.requires_grad_(False)
+    cast(Any, param).set_(tensor)
+    if requires_grad is not None and param.is_leaf:
+        param.requires_grad_(requires_grad)
 
 
 def _gain_nonlinearity(act_name: str) -> Literal["relu", "tanh", "sigmoid"]:

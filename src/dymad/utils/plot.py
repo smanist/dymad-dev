@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Any, cast
 
 import imageio
 import matplotlib.colors as colors
@@ -86,7 +87,7 @@ def plot_trajectory(
             if labels[i] is not None:
                 if cmp_err:
                     rmse = np.linalg.norm(traj[0] - traj[i]) / (traj[0].shape[0] - 1) ** 0.5
-                    lbl = labels[i] + f" rmse: {rmse:4.3e}"
+                    lbl = cast(str, labels[i]) + f" rmse: {rmse:4.3e}"
             plot_one_trajectory(
                 traj[i],
                 ts,
@@ -140,6 +141,8 @@ def plot_multi_trajs(
         traj = np.array([traj])
 
     Ntrj = len(traj[0])
+    if labels is None:
+        labels = [f"Run {i + 1}" for i in range(len(traj))]
     assert len(traj) == len(labels), "Number of trajectories must match number of labels"
     _us = [None] * Ntrj if us is None else us
 
@@ -295,15 +298,16 @@ def plot_one_trajectory(
             _scale_axes(ax[i], traj[:, idx_x[i]], xscl)
 
     if dim_u > 0:
+        us_arr = cast(np.ndarray, us)
         # Plot only once as this is from data
         offset = dim_x
         for i in range(dim_u):
-            ax[offset + i].plot(ts, us[:, idx_u[i]], "-", color="#3498db", linewidth=2)
+            ax[offset + i].plot(ts, us_arr[:, idx_u[i]], "-", color="#3498db", linewidth=2)
             ax[offset + i].set_xlim([0, ts[-1]])
             ax[offset + i].grid(True, alpha=0.3)
             ax[offset + i].set_ylabel(f"Control {i + 1}", fontsize=10)
 
-            _scale_axes(ax[offset + i], us[:, idx_u[i]], uscl)
+            _scale_axes(ax[offset + i], us_arr[:, idx_u[i]], uscl)
 
     for i in range(n_cols):
         ax[-i - 1].set_xlabel("Time", fontsize=10)
@@ -333,6 +337,7 @@ def plot_summary(npz_files, labels=None, ifscl=True, ifclose=True, prefix=".", o
 
     lbls = labels if labels is not None else [f"Run {i + 1}" for i in range(len(npzs))]
     titl = ", ".join([f"{i}: {l}" for i, l in enumerate(lbls)])
+    assert ax is not None
     ax[0].set_title(ax[0].get_title() + "\n" + titl)
 
     plt.tight_layout()
@@ -523,11 +528,14 @@ def plot_cv_results(cv_file, keys=None, ifclose=True, prefix=".", value_scale="l
     elif mode == "3d":
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection="3d")
-        p = ax.scatter(params[:, 0], params[:, 1], params[:, 2], c=means, s=100, cmap="viridis")
-        ax.scatter(
+        ax3d = cast(Any, ax)
+        p = ax3d.scatter(
+            params[:, 0], params[:, 1], zs=params[:, 2], c=means, s=100, cmap="viridis"
+        )
+        ax3d.scatter(
             params[best_idx, 0],
             params[best_idx, 1],
-            params[best_idx, 2],
+            zs=params[best_idx, 2],
             c="red",
             s=150,
             marker="s",
@@ -535,13 +543,13 @@ def plot_cv_results(cv_file, keys=None, ifclose=True, prefix=".", value_scale="l
         )
         cbar = fig.colorbar(p)
         cbar.set_label(f"Mean {metric_name}")
-        ax.set_xticks(np.unique(params[:, 0]))
-        ax.set_yticks(np.unique(params[:, 1]))
-        ax.set_zticks(np.unique(params[:, 2]))
-        ax.set_xlabel(key_labels[0])
-        ax.set_ylabel(key_labels[1])
-        ax.set_zlabel(key_labels[2])
-        ax.legend()
+        ax3d.set_xticks(np.unique(params[:, 0]))
+        ax3d.set_yticks(np.unique(params[:, 1]))
+        ax3d.set_zticks(np.unique(params[:, 2]))
+        ax3d.set_xlabel(key_labels[0])
+        ax3d.set_ylabel(key_labels[1])
+        ax3d.set_zlabel(key_labels[2])
+        ax3d.legend()
     ax.set_title(f"Cross-Validation Results - Metric: {metric_name}")
     ax.grid(True, alpha=0.3)
 
@@ -731,6 +739,8 @@ def animate(fig_func, filename, fps=10, n_frames=None, writer_args=None, fig_arg
     if writer_args is None:
         writer_args = {}
     writer = imageio.get_writer(filename, fps=fps, **writer_args)
+    if n_frames is None:
+        raise ValueError("n_frames must be provided.")
     for j in range(n_frames):
         logger.info(f"Generating frame {j + 1}/{n_frames} for {filename}")
 

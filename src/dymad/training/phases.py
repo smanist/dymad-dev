@@ -5,8 +5,9 @@ import logging
 import random
 import time
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -132,6 +133,37 @@ class ExportPhaseSpec(BasePhaseSpec):
 PhaseSpec = (
     OptimizerPhaseSpec | LinearSolvePhaseSpec | DataPhaseSpec | AnalysisPhaseSpec | ExportPhaseSpec
 )
+
+
+def _dataset_len(dataset: Sequence[TrainerBatch] | None) -> int:
+    return 0 if dataset is None else len(dataset)
+
+
+def _dataset_first(
+    dataset: Sequence[TrainerBatch] | None,
+) -> tuple[TrainerBatch | None, dict[str, Any] | None]:
+    if dataset is None or len(dataset) == 0:
+        return None, None
+    return dataset[0], None
+
+
+def _require_loader(loader: DataLoader[TrainerBatch] | None) -> DataLoader[TrainerBatch]:
+    if loader is None:
+        raise ValueError("Expected dataloader to be initialized.")
+    return loader
+
+
+def _require_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    if metadata is None:
+        raise ValueError("Expected metadata to be initialized.")
+    return metadata
+
+
+def _require_loss_class(loss_key: str) -> type[torch.nn.Module]:
+    loss_class = LOSS_MAP.get(loss_key)
+    if loss_class is None:
+        raise KeyError(f"Unknown loss '{loss_key}'.")
+    return cast(type[torch.nn.Module], loss_class)
 
 
 def _determine_chop_step(window: int, step: int | float) -> int:
@@ -423,9 +455,9 @@ class BasePhase:
         return "dopri5", {}
 
     def _select_plot_sample(self, phase_context: PhaseContext):
-        if phase_context.valid_set is not None and len(phase_context.valid_set) > 0:
+        if phase_context.valid_set is not None and _dataset_len(phase_context.valid_set) > 0:
             return phase_context.valid_set[0], phase_context.valid_md
-        if phase_context.train_set is not None and len(phase_context.train_set) > 0:
+        if phase_context.train_set is not None and _dataset_len(phase_context.train_set) > 0:
             return phase_context.train_set[0], phase_context.train_md
         return None, None
 
@@ -458,7 +490,7 @@ class BasePhase:
             logger.info("Skipping per-run prediction plot for '%s': no sample available.", run_name)
             return None
 
-        runtime = batch_to_runtime(sample)
+        runtime = cast(Any, batch_to_runtime(sample))
         if getattr(runtime, "x", None) is None or getattr(runtime, "t", None) is None:
             logger.info(
                 "Skipping per-run prediction plot for '%s': sample has no regular trajectory payload.",
@@ -519,7 +551,7 @@ class BasePhase:
             model.load_state_dict(export_state)
             model.eval()
             with torch.no_grad():
-                prediction = model.predict(
+                prediction = cast(Any, model).predict(
                     runtime.initial_state(),
                     runtime,
                     runtime.t,
@@ -550,7 +582,7 @@ class BasePhase:
                 sample_md.get("transform_u_state"),
             )
 
-        time_np = time_tensor.detach().cpu().numpy()
+        time_np = cast(torch.Tensor, time_tensor).detach().cpu().numpy()
         plot_len = min(len(time_np), truth_np.shape[0], pred_np.shape[0])
         if control_np is not None:
             plot_len = min(plot_len, control_np.shape[0])
@@ -656,7 +688,7 @@ class BaseOptimizerPhase(BasePhase):
 
         if "dynamics" in crit_dict:
             crit_cfg = crit_dict["dynamics"]
-            loss_class = LOSS_MAP[crit_cfg.get("type", "mse")]
+            loss_class = _require_loss_class(crit_cfg.get("type", "mse"))
             criteria.append(loss_class(**crit_cfg.get("params", {})))
             weights.append(crit_cfg.get("weight", 1.0))
         else:
@@ -665,7 +697,7 @@ class BaseOptimizerPhase(BasePhase):
 
         if "recon" in crit_dict:
             crit_cfg = crit_dict["recon"]
-            loss_class = LOSS_MAP.get(crit_cfg.get("type", "mse"))
+            loss_class = _require_loss_class(crit_cfg.get("type", "mse"))
             criteria.append(loss_class(**crit_cfg.get("params", {})))
             weights.append(crit_cfg.get("weight", 1.0))
             names.append("recon")
@@ -674,7 +706,7 @@ class BaseOptimizerPhase(BasePhase):
             if key in {"dynamics", "recon"}:
                 continue
             crit_cfg = crit_dict[key]
-            loss_class = LOSS_MAP.get(crit_cfg.get("type", "mse"))
+            loss_class = _require_loss_class(crit_cfg.get("type", "mse"))
             criteria.append(loss_class(**crit_cfg.get("params", {})))
             weights.append(crit_cfg.get("weight", 1.0))
             names.append(key)
@@ -683,7 +715,7 @@ class BaseOptimizerPhase(BasePhase):
         prediction_cfg.update(copy.deepcopy(self.spec.config.get("prediction_criterion", {})))
         if prediction_cfg:
             key = prediction_cfg.get("type", "mse")
-            loss_class = LOSS_MAP.get(key)
+            loss_class = _require_loss_class(key)
             criteria.append(loss_class(**prediction_cfg.get("params", {})))
             names.append(key)
         else:
@@ -694,7 +726,9 @@ class BaseOptimizerPhase(BasePhase):
 
     @staticmethod
     def _aggregate_losses(loss_list: list[torch.Tensor], weights: list[float]) -> torch.Tensor:
-        total: torch.Tensor | float = 0.0
+        if not loss_list:
+            raise ValueError("loss_list must not be empty")
+        total = torch.zeros_like(loss_list[0])
         for loss, weight in zip(loss_list, weights, strict=False):
             total = total + loss * weight
         return total
@@ -704,7 +738,13 @@ class BaseOptimizerPhase(BasePhase):
         if not loss_lists:
             raise ValueError("loss_lists must not be empty")
         n_items = len(loss_lists)
-        return [sum(loss_terms) / n_items for loss_terms in zip(*loss_lists, strict=False)]
+        averaged: list[torch.Tensor] = []
+        for loss_terms in zip(*loss_lists, strict=False):
+            total = torch.zeros_like(loss_terms[0])
+            for loss in loss_terms:
+                total = total + loss
+            averaged.append(total / n_items)
+        return averaged
 
     def _additional_criteria_evaluation(
         self,
@@ -720,10 +760,20 @@ class BaseOptimizerPhase(BasePhase):
         if len(optimizer_state.criteria_weights) < 2:
             return loss_list
 
-        if hasattr(batch, "is_uniform_length") and hasattr(batch, "iter_series"):
-            runtime = batch
+        runtime = cast(Any, batch)
+        if not (hasattr(runtime, "is_uniform_length") and hasattr(runtime, "iter_series")):
+            runtime = cast(Any, batch_to_runtime(cast(TrainerBatch, batch)))
+
+        if runtime is None:
+            raise ValueError("Runtime conversion failed.")
+
+        if getattr(runtime, "is_uniform_length", False) is None:
+            raise ValueError("Runtime length metadata is unavailable.")
+
+        if hasattr(runtime, "is_uniform_length") and hasattr(runtime, "iter_series"):
+            pass
         else:
-            runtime = batch_to_runtime(batch)
+            runtime = cast(Any, batch_to_runtime(cast(TrainerBatch, batch)))
 
         if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
             if x_hat is not None or predictions is not None:
@@ -746,8 +796,8 @@ class BaseOptimizerPhase(BasePhase):
 
         if optimizer_state.criteria_names[1] == "recon":
             if x_hat is None:
-                latent = model.encoder(runtime)
-                x_hat = model.decoder(latent, runtime)
+                latent = cast(Any, model).encoder(runtime)
+                x_hat = cast(Any, model).decoder(latent, runtime)
             recon_loss = optimizer_state.criteria[1](runtime.x, x_hat.view(*runtime.x.shape))
             loss_list.append(recon_loss)
             next_index = 2
@@ -758,7 +808,9 @@ class BaseOptimizerPhase(BasePhase):
         if preds is None and len(optimizer_state.criteria) - 1 > next_index:
             init_states = runtime.x[:, 0, :]
             ts = runtime.t.to(self.device)
-            preds = model.predict(init_states, runtime, ts, method=ode_method, **ode_args)
+            preds = cast(Any, model).predict(
+                init_states, runtime, ts, method=ode_method, **ode_args
+            )
 
         for idx in range(next_index, len(optimizer_state.criteria) - 1):
             loss_list.append(optimizer_state.criteria[idx](preds, runtime.x))
@@ -774,15 +826,16 @@ class BaseOptimizerPhase(BasePhase):
         ode_args: dict[str, Any],
     ) -> tuple[float, list[float]]:
         model.eval()
+        loader = _require_loader(cast(DataLoader[TrainerBatch] | None, dataloader))
         total = 0.0
         items = [0.0 for _ in optimizer_state.criteria_weights]
         with torch.no_grad():
-            for batch in dataloader:
+            for batch in loader:
                 losses = self._compute_losses(model, optimizer_state, batch, ode_method, ode_args)
                 agg = self._aggregate_losses(losses, optimizer_state.criteria_weights)
                 total += agg.item()
                 items = [acc + value.item() for acc, value in zip(items, losses, strict=False)]
-        return total / len(dataloader), [value / len(dataloader) for value in items]
+        return total / len(loader), [value / len(loader) for value in items]
 
     def _evaluate_prediction_criterion_single(
         self,
@@ -795,10 +848,13 @@ class BaseOptimizerPhase(BasePhase):
     ) -> float:
         runtime = batch_to_runtime(truth)
         with torch.no_grad():
-            x_truth = runtime.x
-            x0 = runtime.x[:, 0, :]
-            ts = runtime.t
-            x_pred = model.predict(x0, runtime, ts, method=method, **(ode_args or {}))
+            runtime_any = cast(Any, runtime)
+            x_truth = runtime_any.x
+            x0 = runtime_any.x[:, 0, :]
+            ts = runtime_any.t
+            x_pred = cast(Any, model).predict(
+                x0, runtime_any, ts, method=method, **(ode_args or {})
+            )
             return optimizer_state.criteria[-1](x_pred, x_truth).item()
 
     def _evaluate_prediction_criterion(
@@ -841,14 +897,14 @@ class BaseOptimizerPhase(BasePhase):
         train_crit = self._evaluate_prediction_criterion(
             model,
             optimizer_state,
-            phase_context.train_set,
+            cast(list[TrainerBatch], phase_context.train_set or []),
             method=ode_method,
             ode_args=ode_args,
         )
         valid_crit = self._evaluate_prediction_criterion(
             model,
             optimizer_state,
-            phase_context.valid_set,
+            cast(list[TrainerBatch], phase_context.valid_set or []),
             method=ode_method,
             ode_args=ode_args,
         )
@@ -890,9 +946,10 @@ class BaseOptimizerPhase(BasePhase):
         phase_logger: logging.Logger,
     ) -> tuple[float, list[float], bool]:
         model.train()
+        train_loader = _require_loader(phase_context.train_loader)
         total = 0.0
         items = [0.0 for _ in optimizer_state.criteria_weights]
-        for batch in phase_context.train_loader:
+        for batch in train_loader:
             optimizer_state.optimizer.zero_grad(set_to_none=True)
             losses = self._compute_losses(model, optimizer_state, batch, ode_method, ode_args)
             agg = self._aggregate_losses(losses, optimizer_state.criteria_weights)
@@ -901,8 +958,8 @@ class BaseOptimizerPhase(BasePhase):
             total += agg.item()
             items = [acc + value.item() for acc, value in zip(items, losses, strict=False)]
 
-        avg_total = total / len(phase_context.train_loader)
-        avg_items = [value / len(phase_context.train_loader) for value in items]
+        avg_total = total / len(train_loader)
+        avg_items = [value / len(train_loader) for value in items]
 
         converged = False
         for scheduler in optimizer_state.schedulers:
@@ -959,7 +1016,7 @@ class BaseOptimizerPhase(BasePhase):
             valid_total, valid_items = self._evaluate_loader(
                 model_artifact.model,
                 optimizer_state,
-                phase_context.valid_loader,
+                _require_loader(phase_context.valid_loader),
                 ode_method,
                 ode_args,
             )
@@ -1080,38 +1137,41 @@ class NodeOptimizerPhase(BaseOptimizerPhase):
         ode_method: str,
         ode_args: dict[str, Any],
     ) -> list[torch.Tensor]:
-        if hasattr(batch, "is_ragged") and batch.is_ragged:
+        batch_any = cast(Any, batch)
+        if getattr(batch_any, "is_ragged", False):
             return self._average_loss_lists(
                 [
                     self._compute_losses(model, optimizer_state, sample, ode_method, ode_args)
-                    for sample in batch.iter_single_batches()
+                    for sample in batch_any.iter_single_batches()
                 ]
             )
 
         num_steps = optimizer_state.schedulers[1].get_length()
         if num_steps is None:
-            runtime = batch_to_runtime(batch)
+            runtime = cast(Any, batch_to_runtime(batch))
             num_steps = runtime.x.size(1)
 
         chop_mode = self.spec.config.get("chop_mode", "initial")
         chop_step = self.spec.config.get("chop_step", 1.0)
         if chop_mode == "initial":
-            if hasattr(batch, "truncate"):
-                runtime_batch = batch.truncate(num_steps).to(self.device)
-                runtime = batch_to_runtime(runtime_batch)
+            if hasattr(batch_any, "truncate"):
+                runtime_batch = batch_any.truncate(num_steps).to(self.device)
+                runtime = cast(Any, batch_to_runtime(runtime_batch))
             else:
-                runtime = batch_to_runtime(batch).truncate(num_steps).to(self.device)
+                runtime = cast(Any, batch_to_runtime(batch)).truncate(num_steps).to(self.device)
         else:
             step = _determine_chop_step(num_steps, chop_step)
-            if hasattr(batch, "window"):
-                runtime_batch = batch.window(num_steps, step).to(self.device)
-                runtime = batch_to_runtime(runtime_batch)
+            if hasattr(batch_any, "window"):
+                runtime_batch = batch_any.window(num_steps, step).to(self.device)
+                runtime = cast(Any, batch_to_runtime(runtime_batch))
             else:
-                runtime = batch_to_runtime(batch).unfold(num_steps, step).to(self.device)
+                runtime = cast(Any, batch_to_runtime(batch)).unfold(num_steps, step).to(self.device)
 
         init_states = runtime.x[:, 0, :]
         ts = runtime.t[:, :num_steps].to(self.device)
-        predictions = model.predict(init_states, runtime, ts, method=ode_method, **ode_args)
+        predictions = cast(Any, model).predict(
+            init_states, runtime, ts, method=ode_method, **ode_args
+        )
         losses = [optimizer_state.criteria[0](predictions, runtime.x)]
         losses.extend(
             self._additional_criteria_evaluation(
@@ -1137,8 +1197,9 @@ class WeakFormOptimizerPhase(BaseOptimizerPhase):
     ) -> None:
         params = self.spec.config["weak_form_params"]
         dtype = next(model.parameters()).dtype
+        train_md = _require_metadata(phase_context.train_md)
         C, D = generate_weak_weights(
-            dt=phase_context.train_md["dt_and_n_steps"][0][0],
+            dt=train_md["dt_and_n_steps"][0][0],
             n_integration_points=params["N"],
             poly_order=params["ordpol"],
             int_rule_order=params["ordint"],
@@ -1156,19 +1217,20 @@ class WeakFormOptimizerPhase(BaseOptimizerPhase):
         ode_method: str,
         ode_args: dict[str, Any],
     ) -> list[torch.Tensor]:
-        if hasattr(batch, "is_ragged") and batch.is_ragged:
+        batch_any = cast(Any, batch)
+        if getattr(batch_any, "is_ragged", False):
             return self._average_loss_lists(
                 [
                     self._compute_losses(model, optimizer_state, sample, ode_method, ode_args)
-                    for sample in batch.iter_single_batches()
+                    for sample in batch_any.iter_single_batches()
                 ]
             )
 
-        runtime_batch = batch.to(self.device)
-        runtime = batch_to_runtime(runtime_batch)
-        latent = model.encoder(runtime)
-        latent_dot = model.dynamics(latent, runtime)
-        x_hat = model.decoder(latent, runtime)
+        runtime_batch = batch_any.to(self.device)
+        runtime = cast(Any, batch_to_runtime(runtime_batch))
+        latent = cast(Any, model).encoder(runtime)
+        latent_dot = cast(Any, model).dynamics(latent, runtime)
+        x_hat = cast(Any, model).decoder(latent, runtime)
         z_windows = latent.unfold(1, optimizer_state._weak_N, optimizer_state._weak_dN)
         z_dot_windows = latent_dot.unfold(1, optimizer_state._weak_N, optimizer_state._weak_dN)
         true_weak = z_windows @ optimizer_state._weak_C
@@ -1194,10 +1256,11 @@ class LinearRegressionPhase(BaseOptimizerPhase):
         model: torch.nn.Module,
         phase_context: PhaseContext,
     ) -> LSUpdater:
+        train_md = _require_metadata(phase_context.train_md)
         return LSUpdater(
             method=self.spec.config.get("method", "full"),
             model=model,
-            dt=phase_context.train_md["dt_and_n_steps"][0][0],
+            dt=train_md["dt_and_n_steps"][0][0],
             params=self.spec.config.get("params"),
             **copy.deepcopy(self.spec.config.get("kwargs", {})),
         )
@@ -1210,15 +1273,18 @@ class LinearRegressionPhase(BaseOptimizerPhase):
         ode_method: str,
         ode_args: dict[str, Any],
     ) -> list[torch.Tensor]:
-        if hasattr(batch, "is_ragged") and batch.is_ragged:
+        batch_any = cast(Any, batch)
+        if getattr(batch_any, "is_ragged", False):
             return self._average_loss_lists(
                 [
                     self._compute_losses(model, optimizer_state, sample, ode_method, ode_args)
-                    for sample in batch.iter_single_batches()
+                    for sample in batch_any.iter_single_batches()
                 ]
             )
-        runtime_batch = batch.to(self.device)
+        runtime_batch = batch_any.to(self.device)
         updater = optimizer_state._linear_updater
+        if updater is None:
+            raise ValueError("Linear updater is not initialized.")
         losses = [updater.eval_batch(model, runtime_batch, optimizer_state.criteria[0])]
         losses.extend(
             self._additional_criteria_evaluation(
@@ -1251,7 +1317,10 @@ class LinearRegressionPhase(BaseOptimizerPhase):
         ode_args: dict[str, Any],
         phase_logger: logging.Logger,
     ) -> tuple[float, list[float], bool]:
-        avg_loss, _ = optimizer_state._linear_updater.update(model, phase_context.train_loader)
+        updater = optimizer_state._linear_updater
+        if updater is None:
+            raise ValueError("Linear updater is not initialized.")
+        avg_loss, _ = updater.update(model, _require_loader(phase_context.train_loader))
         items = [float(avg_loss)] + [0.0] * (len(optimizer_state.criteria_weights) - 1)
         return float(avg_loss), items, False
 
@@ -1266,20 +1335,24 @@ class LinearSolvePhase(BasePhase):
         run_name: str,
         logger: logging.Logger,
     ) -> PhaseResult:
+        spec = cast(LinearSolvePhaseSpec, self.spec)
         started_epoch = trainer_state.epoch
         model_artifact = self._ensure_model_artifact(phase_context, artifacts)
         self._ensure_history_artifact(artifacts)
         optimizer_state = artifacts.get("optimizer_state")
+        train_md = _require_metadata(phase_context.train_md)
         updater = LSUpdater(
-            method=self.spec.method,
+            method=spec.method,
             model=model_artifact.model,
-            dt=phase_context.train_md["dt_and_n_steps"][0][0],
-            params=self.spec.params,
-            **self.spec.kwargs,
+            dt=train_md["dt_and_n_steps"][0][0],
+            params=spec.params,
+            **spec.kwargs,
         )
-        loss, params = updater.update(model_artifact.model, phase_context.train_loader)
+        loss, params = updater.update(
+            model_artifact.model, _require_loader(phase_context.train_loader)
+        )
         updated_names: list[str] = []
-        if isinstance(optimizer_state, OptimizerStateArtifact) and self.spec.reset_optimizer:
+        if isinstance(optimizer_state, OptimizerStateArtifact) and spec.reset_optimizer:
             param_to_name = {param: name for name, param in model_artifact.model.named_parameters()}
             for param in params:
                 updated_names.append(param_to_name.get(param, "<unnamed>"))
@@ -1299,12 +1372,13 @@ class LinearSolvePhase(BasePhase):
         metrics = {"linear_solve_loss": float(loss)}
         if isinstance(optimizer_state, OptimizerStateArtifact):
             valid_total = 0.0
+            valid_loader = _require_loader(phase_context.valid_loader)
             with torch.no_grad():
-                for batch in phase_context.valid_loader:
+                for batch in valid_loader:
                     valid_total += updater.eval_batch(
                         model_artifact.model, batch.to(self.device), optimizer_state.criteria[0]
                     ).item()
-            valid_total /= len(phase_context.valid_loader)
+            valid_total /= len(valid_loader)
             metrics["valid_total"] = valid_total
         record = self._build_phase_record(
             trainer_state, metrics, artifacts, started_epoch=started_epoch
@@ -1332,8 +1406,8 @@ class ContextDataPhase(BasePhase):
         logger: logging.Logger,
     ) -> PhaseResult:
         metrics = {
-            "train_size": float(len(phase_context.train_set or [])),
-            "valid_size": float(len(phase_context.valid_set or [])),
+            "train_size": float(_dataset_len(phase_context.train_set)),
+            "valid_size": float(_dataset_len(phase_context.valid_set)),
         }
         record = self._build_phase_record(
             trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch
@@ -1360,21 +1434,22 @@ class ValidationAnalysisPhase(BasePhase):
         run_name: str,
         logger: logging.Logger,
     ) -> PhaseResult:
+        spec = cast(AnalysisPhaseSpec, self.spec)
         model_artifact = artifacts.require("model", ModelArtifact)
         optimizer_state = artifacts.get("optimizer_state")
         if not isinstance(optimizer_state, OptimizerStateArtifact):
-            criteria = [torch.nn.MSELoss()]
+            criteria: list[torch.nn.Module] = [torch.nn.MSELoss(), torch.nn.MSELoss()]
             optimizer_state = OptimizerStateArtifact(
                 optimizer=torch.optim.Adam(model_artifact.model.parameters(), lr=1e-3),
-                criteria=criteria + criteria,
+                criteria=criteria,
                 criteria_weights=[1.0],
                 criteria_names=["dynamics", "mse"],
             )
         history = self._ensure_history_artifact(artifacts)
         metric_name = optimizer_state.criteria_names[-1]
-        dataset = phase_context.valid_set if self.spec.split == "valid" else phase_context.train_set
+        dataset = phase_context.valid_set if spec.split == "valid" else phase_context.train_set
         evaluator = NodeOptimizerPhase(
-            spec=OptimizerPhaseSpec(name=f"{self.spec.name}_eval", trainer="NODE", config={}),
+            spec=OptimizerPhaseSpec(name=f"{spec.name}_eval", trainer="NODE", config={}),
             config=self.config,
             model_class=self.model_class,
             dtype=self.dtype,
@@ -1384,14 +1459,14 @@ class ValidationAnalysisPhase(BasePhase):
         value = evaluator._evaluate_prediction_criterion(
             model_artifact.model,
             optimizer_state,
-            dataset,
+            cast(list[TrainerBatch], dataset or []),
             method=ode_method,
             ode_args=ode_args,
-            evaluate_all=self.spec.evaluate_all,
+            evaluate_all=spec.evaluate_all,
         )
         evaluation = EvaluationArtifact(
             metrics={metric_name: value},
-            split=self.spec.split,
+            split=spec.split,
             criterion_name=metric_name,
         )
         artifacts.put("evaluation", evaluation)
