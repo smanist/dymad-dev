@@ -203,6 +203,25 @@ def test_train_model_replaces_phases_and_selects_stacked(tmp_path, monkeypatch) 
     assert [phase["name"] for phase in materialized["phases"]] == ["Warmup", "Refine"]
 
 
+def test_validate_training_config_accepts_yaml_string(tmp_path) -> None:
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    train_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
+
+    response = tools.validate_training_config(
+        train_dataset_handle=train_handle,
+        model_ref="dymad.models.collections:KBF",
+        config="model:\n  koopman_dimension: 8\n",
+    )
+
+    validation = response["data"]["validation"]
+    assert response["ok"] is True
+    assert validation["is_valid"] is True
+    assert validation["reference_profile"] == "kbf-regular-default"
+    assert validation["normalized_config"]["model"]["koopman_dimension"] == 8
+
+
 def test_train_model_rejects_reserved_runtime_paths(tmp_path) -> None:
     dataset_path = tmp_path / "train.npz"
     _write_regular_dataset(dataset_path)

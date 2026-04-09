@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
+import yaml
+
 from dymad.agent.exec.context import ExecutionContext, build_default_context
 from dymad.agent.store.object_store import ObjectSummary
 
@@ -131,7 +133,7 @@ class DemoTools:
         model_ref: str,
         valid_dataset_handle: str | None = None,
         reference_profile: str | None = None,
-        config: dict[str, Any] | None = None,
+        config: dict[str, Any] | str | None = None,
         run_name: str | None = None,
     ) -> dict[str, Any]:
         return self._wrap(
@@ -142,7 +144,7 @@ class DemoTools:
                         valid_dataset_handle=valid_dataset_handle,
                         model_ref=model_ref,
                         reference_profile=reference_profile,
-                        config=config,
+                        config=self._coerce_mapping(config=config, field_name="config"),
                         run_name=run_name,
                     )
                 )
@@ -157,7 +159,7 @@ class DemoTools:
         model_ref: str,
         valid_dataset_handle: str | None = None,
         reference_profile: str | None = None,
-        config: dict[str, Any] | None = None,
+        config: dict[str, Any] | str | None = None,
         run_name: str | None = None,
     ) -> dict[str, Any]:
         return self._wrap(
@@ -168,7 +170,7 @@ class DemoTools:
                         valid_dataset_handle=valid_dataset_handle,
                         model_ref=model_ref,
                         reference_profile=reference_profile,
-                        config=config,
+                        config=self._coerce_mapping(config=config, field_name="config"),
                         run_name=run_name,
                         artifact_root=artifact_root,
                     )
@@ -225,7 +227,7 @@ class DemoTools:
         valid_dataset_handle: str | None = None,
         model_ref: str,
         reference_profile: str | None = None,
-        config: dict[str, Any] | None = None,
+        config: dict[str, Any] | str | None = None,
         run_name: str | None = None,
         artifact_root: str,
         seed: int | None = None,
@@ -240,7 +242,7 @@ class DemoTools:
                         valid_dataset_handle=valid_dataset_handle,
                         model_ref=model_ref,
                         reference_profile=reference_profile,
-                        config=config,
+                        config=self._coerce_mapping(config=config, field_name="config"),
                         run_name=run_name,
                         artifact_root=artifact_root,
                         seed=seed,
@@ -334,3 +336,18 @@ class DemoTools:
             "summary": asdict(summary),
             "dataset": asdict(dataset),
         }
+
+    @staticmethod
+    def _coerce_mapping(
+        *,
+        config: dict[str, Any] | str | None,
+        field_name: str,
+    ) -> dict[str, Any] | None:
+        if config is None or isinstance(config, dict):
+            return config
+        parsed = yaml.safe_load(config)
+        if parsed is None:
+            return None
+        if not isinstance(parsed, dict):
+            raise TypeError(f"{field_name} must parse to a mapping")
+        return parsed

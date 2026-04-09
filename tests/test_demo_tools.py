@@ -66,6 +66,8 @@ def test_build_server_registers_demo_tools(tmp_path) -> None:
 
     assert isinstance(server, FastMCP)
     assert server.name == "DyMAD Test"
+    assert server.settings.json_response is True
+    assert server.settings.log_level == "ERROR"
     tool_names = set(server._tool_manager._tools)
     assert tool_names == {
         "describe_object",
@@ -89,4 +91,22 @@ def test_build_server_registers_demo_tools(tmp_path) -> None:
         model_ref="dymad.models.collections:LDM",
         checkpoint_path="checkpoints/lti.pt",
     )
+    assert response["ok"] is True
+
+
+def test_build_server_training_tools_accept_yaml_config_strings(tmp_path) -> None:
+    server = build_server(
+        context=build_default_context(artifact_root=tmp_path / "artifacts"),
+        name="DyMAD Test",
+    )
+    dataset_path = tmp_path / "train.npz"
+    dataset_path.write_bytes(b"placeholder")
+    dataset = server._tool_manager.get_tool("register_dataset_file").fn(path=str(dataset_path))
+
+    response = server._tool_manager.get_tool("validate_training_config").fn(
+        train_dataset_handle=dataset["data"]["summary"]["handle"],
+        model_ref="dymad.models.collections:KBF",
+        config="model:\n  koopman_dimension: 8\n",
+    )
+
     assert response["ok"] is True

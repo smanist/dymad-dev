@@ -18,7 +18,7 @@ def build_server(
     """Build one `mcp.server.fastmcp.FastMCP` server around the DemoTools adapter."""
     active_context = context or build_default_context()
     tools = DemoTools(context=active_context)
-    server = FastMCP(name)
+    server = FastMCP(name, json_response=True, log_level="ERROR")
 
     @server.tool()
     def register_dataset_file(
@@ -94,7 +94,7 @@ def build_server(
         model_ref: str,
         valid_dataset_handle: str | None = None,
         reference_profile: str | None = None,
-        config: dict[str, Any] | None = None,
+        config: dict[str, Any] | str | None = None,
         run_name: str | None = None,
     ) -> dict[str, Any]:
         """Validate one structured training request without executing training."""
@@ -114,7 +114,7 @@ def build_server(
         model_ref: str,
         valid_dataset_handle: str | None = None,
         reference_profile: str | None = None,
-        config: dict[str, Any] | None = None,
+        config: dict[str, Any] | str | None = None,
         run_name: str | None = None,
     ) -> dict[str, Any]:
         """Write one normalized training config without executing training."""
@@ -135,7 +135,7 @@ def build_server(
         model_ref: str,
         valid_dataset_handle: str | None = None,
         reference_profile: str | None = None,
-        config: dict[str, Any] | None = None,
+        config: dict[str, Any] | str | None = None,
         run_name: str | None = None,
         seed: int | None = None,
         device: str = "auto",
@@ -200,7 +200,7 @@ def build_server(
 
 
 def main() -> None:
-    build_server().run(transport="stdio")
+    build_server().run()
 
 
 if __name__ == "__main__":
