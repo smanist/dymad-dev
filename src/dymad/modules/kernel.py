@@ -40,6 +40,7 @@ def inv_softplus(y: float | np.floating[Any], dtype: torch.dtype) -> torch.Tenso
     """Inverse of softplus, for initialization."""
     return torch.log(torch.exp(torch.tensor(float(y), dtype=dtype)) - 1)
 
+
 # --------------------
 # Kernels
 #
