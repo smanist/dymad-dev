@@ -1,9 +1,16 @@
 from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.nn as nn
 
-from dymad.modules.helpers import INIT_MAP_B, INIT_MAP_W, _resolve_activation, _resolve_init
+from dymad.modules.helpers import (
+    INIT_MAP_B,
+    INIT_MAP_W,
+    _gain_nonlinearity,
+    _resolve_activation,
+    _resolve_init,
+)
 
 
 class SequentialBase(nn.Module):
@@ -62,8 +69,8 @@ class SequentialBase(nn.Module):
         output_dim: int | None = -1,
         n_layers: int | None = 2,
         activation: str | nn.Module | Callable[[], nn.Module] = nn.ReLU,
-        weight_init: str | Callable[[torch.Tensor, float], None] = nn.init.xavier_uniform_,
-        bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+        weight_init: str | Callable[..., Any] = nn.init.xavier_uniform_,
+        bias_init: Callable[..., Any] = nn.init.zeros_,
         gain: float | None = 1.0,
         dtype=None,
         device=None,
@@ -81,6 +88,8 @@ class SequentialBase(nn.Module):
             return
 
         # Check dimensions
+        assert input_dim is not None and hidden_dim is not None and output_dim is not None
+        assert n_layers is not None
         assert input_dim % seq_len == 0, (
             f"input_dim {input_dim} must be divisible by seq_len {seq_len}."
         )
@@ -103,10 +112,8 @@ class SequentialBase(nn.Module):
 
         # Compute gain
         act_name = _act().__class__.__name__.lower()
-        _g = nn.init.calculate_gain(
-            act_name if act_name not in ["gelu", "prelu", "identity"] else "relu"
-        )
-        self._gain = gain * _g
+        _g = nn.init.calculate_gain(_gain_nonlinearity(act_name))
+        self._gain = (1.0 if gain is None else gain) * _g
 
         # Initialise weights & biases
         self.apply(self._init_linear)

@@ -1,4 +1,6 @@
 import logging
+from collections.abc import Callable
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -73,8 +75,8 @@ class DimensionEstimator:
         self._tol = tol
 
         # cache
-        self._S = None
-        self._dS = None
+        self._S: Callable[[float], float] | None = None
+        self._dS: Callable[[float], float] | None = None
 
     def __call__(self):
         # Normalized squared distances
@@ -103,21 +105,22 @@ class DimensionEstimator:
         def func(e):
             return -2 * dS(2.0**e)
 
-        res = minimize_scalar(func, bracket=self._bracket)
-        est = -func(res.x)
+        res = cast(Any, minimize_scalar(func, bracket=self._bracket))
+        res_x = float(res.x)
+        est = -func(res_x)
         # For fractional dimensions, we do a biased rounding
         if np.ceil(est) - est <= self._tol:
             dim = int(np.ceil(est))
         else:
             dim = int(np.floor(est))
-        tmp = (2**res.x * dmx) ** (1 / est)
+        tmp = (2**res_x * dmx) ** (1 / est)
 
         # Key results
         self._dim = dim
         self._est = est
         self._ref_bandwidth = tmp
         self._ref_l2dist = dmx
-        self._ref_scalar = 2**res.x
+        self._ref_scalar = 2**res_x
 
         # Update cache
         self._S = S
@@ -132,6 +135,7 @@ class DimensionEstimator:
         return dim
 
     def plot(self, N=20, fig=None, sty="b-"):
+        assert self._S is not None and self._dS is not None
         eps = 2.0 ** np.linspace(self._bracket[0], self._bracket[1], N)
 
         val = [self._S(_e) for _e in eps]
@@ -222,6 +226,7 @@ class Manifold:
         self._iforit = iforit
 
         if extT is None:
+            self._T: np.ndarray | None = None
             self._ifprecomp = False  # Not precomputed yet
         else:
             self._ifprecomp = True
@@ -238,11 +243,12 @@ class Manifold:
     def precompute(self):
         logger.info("  Precomputing")
         if self._ifprecomp:
+            assert self._T is not None
             assert self._T.shape == (self._Ndat, self._Nman, self._Ndim)
             logger.info("  Already done, or T supplied externally; skipping")
             return
 
-        self._T = self._estimate_tangent(self._data)
+        self._T = cast(np.ndarray, self._estimate_tangent(self._data))
         if self._iforit:
             logger.info("  Orienting tangent vectors")
             if self._Nman == 1:
@@ -250,8 +256,10 @@ class Manifold:
                 curr = 0
                 while len(rems) > 0:
                     _i = self._tree_query(self._data[curr])
+                    assert self._T is not None
                     _T = self._T[curr]
-                    for _j in _i:
+                    for _j in np.atleast_1d(_i):
+                        _j = int(_j)
                         if _j in rems:
                             _d = self._T[_j].dot(_T.T)
                             if _d < 0:
@@ -327,6 +335,7 @@ class Manifold:
 
     def plot2d(self, N, scl=1):
         assert self._Ndim == 2
+        assert self._T is not None
         _d = self._data
 
         f, ax = plt.subplots(nrows=1, ncols=1)
@@ -339,6 +348,7 @@ class Manifold:
 
     def plot3d(self, N, scl=1):
         assert self._Ndim == 3
+        assert self._T is not None
         _d = self._data
 
         f = plt.figure()
@@ -360,7 +370,7 @@ class Manifold:
             "g": torch.tensor(self._Nlsq, dtype=torch.int64),
             "T": torch.tensor(self._Ntan, dtype=torch.int64),
             "iforit": torch.tensor(self._iforit, dtype=torch.bool),
-            "extT": torch.from_numpy(self._T) if self._ifprecomp else None,
+            "extT": torch.from_numpy(self._T) if self._ifprecomp and self._T is not None else None,
         }
 
     @classmethod
@@ -404,9 +414,10 @@ class ManifoldAltTree(Manifold):
 
         _leaf = max(20, self._Nknn)
         self._tree = sps.KDTree(tree_data, leafsize=_leaf)
-        self._ftree = tree_transform
+        self._ftree: Callable[[Any], Any] | None = tree_transform
 
     def _tree_query(self, x):
+        assert self._ftree is not None
         z = self._ftree(x)
         _, _i = self._tree.query(z, k=self._Nknn)
         return _i
@@ -434,10 +445,10 @@ class ManifoldAnalytical(Manifold):
         self._fpsi = PolynomialFeatures(self._Nlsq, include_bias=True)  # General GMLS
 
         # Function giving tangent space basis
-        self._tangent_func = fT
+        self._tangent_func: Callable[[Any], np.ndarray] | None = fT
 
         # Possible data members
-        self._T = []  # Tangent space basis for every data point
+        self._T: np.ndarray | None = None  # Tangent space basis for every data point
         self._ifprecomp = False  # Not precomputed yet
 
         logger.info(
@@ -446,11 +457,12 @@ class ManifoldAnalytical(Manifold):
 
     def precompute(self):
         logger.info("  Precomputing")
-        self._T = self._estimate_tangent(self._data)
+        self._T = cast(np.ndarray, self._estimate_tangent(self._data))
         self._ifprecomp = True
         logger.info("  Done")
 
     def _estimate_tangent(self, x, ret_V=False):
+        assert self._tangent_func is not None
         _T = self._tangent_func(x)
         if ret_V:
             _, _i = self._tree.query(x, k=self._Nknn)

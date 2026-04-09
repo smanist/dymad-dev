@@ -1,9 +1,16 @@
 from collections.abc import Callable
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
 
-from dymad.modules.helpers import INIT_MAP_B, INIT_MAP_W, _resolve_activation, _resolve_init
+from dymad.modules.helpers import (
+    INIT_MAP_B,
+    INIT_MAP_W,
+    _gain_nonlinearity,
+    _resolve_activation,
+    _resolve_init,
+)
 from dymad.modules.linear import FlexLinear
 from dymad.modules.misc import TakeFirst
 
@@ -58,8 +65,8 @@ class MLP(nn.Module):
         *,
         n_layers: int = 2,
         activation: str | nn.Module | Callable[[], nn.Module] = nn.ReLU,
-        weight_init: str | Callable[[torch.Tensor, float], None] = nn.init.xavier_uniform_,
-        bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+        weight_init: str | Callable[..., Any] = nn.init.xavier_uniform_,
+        bias_init: Callable[..., Any] = nn.init.zeros_,
         gain: float | None = 1.0,
         end_activation: bool = True,
         dtype=None,
@@ -96,10 +103,8 @@ class MLP(nn.Module):
 
         # Compute gain
         act_name = _act().__class__.__name__.lower()
-        _g = nn.init.calculate_gain(
-            act_name if act_name not in ["gelu", "prelu", "identity"] else "relu"
-        )
-        self._gain = gain * _g
+        _g = nn.init.calculate_gain(_gain_nonlinearity(act_name))
+        self._gain = (1.0 if gain is None else gain) * _g
 
         # Initialise weights & biases
         self.apply(self._init_linear)
@@ -116,7 +121,11 @@ class MLP(nn.Module):
             self._weight_init(m.weight, self._gain)
             self._bias_init(m.bias)
         if isinstance(m, FlexLinear):
-            m._init_linear(self._weight_init, self._bias_init, self._gain)
+            m._init_linear(
+                cast(Callable[..., Any], self._weight_init),
+                cast(Callable[..., Any], self._bias_init),
+                self._gain,
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
@@ -136,8 +145,8 @@ class ResBlockMLP(MLP):
         output_dim: int,
         n_layers: int = 2,
         activation: str | nn.Module | Callable[[], nn.Module] = nn.ReLU,
-        weight_init: str | Callable[[torch.Tensor, float], None] = nn.init.xavier_uniform_,
-        bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+        weight_init: str | Callable[..., Any] = nn.init.xavier_uniform_,
+        bias_init: Callable[..., Any] = nn.init.zeros_,
         gain: float | None = 1.0,
         end_activation: bool = True,
         dtype=None,
@@ -190,8 +199,8 @@ class IdenCatMLP(MLP):
         output_dim: int,
         n_layers: int = 2,
         activation: str | nn.Module | Callable[[], nn.Module] = nn.ReLU,
-        weight_init: str | Callable[[torch.Tensor, float], None] = nn.init.xavier_uniform_,
-        bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+        weight_init: str | Callable[..., Any] = nn.init.xavier_uniform_,
+        bias_init: Callable[..., Any] = nn.init.zeros_,
         gain: float | None = 1.0,
         end_activation: bool = True,
         dtype=None,

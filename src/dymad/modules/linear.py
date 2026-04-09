@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -45,10 +46,12 @@ class FlexLinear(nn.Module):
 
     def _init_linear(
         self,
-        weight_init: str | Callable[[torch.Tensor, float], None] = nn.init.xavier_uniform_,
-        bias_init: Callable[[torch.Tensor], None] = nn.init.zeros_,
+        weight_init: str | Callable[..., Any] = nn.init.xavier_uniform_,
+        bias_init: Callable[..., Any] = nn.init.zeros_,
         gain: float = 1.0,
     ) -> None:
+        if isinstance(weight_init, str) or isinstance(bias_init, str):
+            raise TypeError("Resolved init functions must be callables before FlexLinear init.")
         if self.mode == "full":
             weight_init(self.weight, gain)
         else:
@@ -102,12 +105,14 @@ class FlexLinear(nn.Module):
         b: torch.Tensor | None = None,
         U: torch.Tensor | None = None,
         V: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, ...]:
         if W is not None:
             self.set_full(W, b)
-            return self.weight, self.bias
+            return (self.weight,) if self.bias is None else (self.weight, self.bias)
         elif U is not None and V is not None:
             self.set_lora(U, V, b)
+            if self.bias is None:
+                return self.U, self.V
             return self.U, self.V, self.bias
         else:
             raise ValueError("Must provide either full weights (W) or low-rank factors (U, V).")
@@ -168,6 +173,7 @@ class FlexLinear(nn.Module):
 
         # Set the parameters
         if is_lowrank:
+            assert U_ckpt is not None and V_ckpt is not None
             if self.U.shape != U_ckpt.shape or self.V.shape != V_ckpt.shape:
                 # re-register parameters with correct shapes
                 device = self.weight.device
@@ -180,6 +186,7 @@ class FlexLinear(nn.Module):
             self.U.data.copy_(U_ckpt)
             self.V.data.copy_(V_ckpt)
         else:
+            assert W_ckpt is not None
             if self.weight.shape != W_ckpt.shape:
                 # re-register parameters with correct shapes
                 device = self.weight.device

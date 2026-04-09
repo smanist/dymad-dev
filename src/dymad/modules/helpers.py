@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from functools import partial
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import torch.nn as nn
 
@@ -13,6 +13,15 @@ except ImportError:
 
 ActivationFactory = Callable[[], nn.Module]
 InitFn = Callable[..., Any]
+
+
+def _gain_nonlinearity(act_name: str) -> Literal["relu", "tanh", "sigmoid"]:
+    if act_name == "tanh":
+        return "tanh"
+    if act_name == "sigmoid":
+        return "sigmoid"
+    return "relu"
+
 
 #: Mapping of activation names to activation classes.
 ACT_MAP: dict[str, type[nn.Module]] = {

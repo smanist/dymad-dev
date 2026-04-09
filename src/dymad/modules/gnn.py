@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -18,6 +19,7 @@ except ImportError:
 from dymad.modules.helpers import (
     INIT_MAP_B,
     INIT_MAP_W,
+    _gain_nonlinearity,
     _resolve_activation,
     _resolve_gcl,
     _resolve_init,
@@ -56,10 +58,10 @@ class GNN(nn.Module):
         n_layers: int,
         *,
         gcl: str | nn.Module | type = "sage",
-        gcl_opts: dict = None,
+        gcl_opts: dict[str, Any] | None = None,
         activation: str | nn.Module | Callable[[], nn.Module] = "prelu",
-        weight_init: str | Callable[[torch.Tensor, float], None] = "xavier_uniform",
-        bias_init: str | Callable[[torch.Tensor], None] = "zeros",
+        weight_init: str | Callable[..., Any] = "xavier_uniform",
+        bias_init: str | Callable[..., Any] = "zeros",
         gain: float = 1.0,
         end_activation: bool = True,
         dtype=None,
@@ -75,9 +77,7 @@ class GNN(nn.Module):
         self._bias_init = _resolve_init(bias_init, INIT_MAP_B)
 
         act_name = _act().__class__.__name__.lower()
-        _g = nn.init.calculate_gain(
-            act_name if act_name not in ["gelu", "prelu", "identity"] else "relu"
-        )
+        _g = nn.init.calculate_gain(_gain_nonlinearity(act_name))
         self._gain = gain * _g
 
         if n_layers == 0:
@@ -107,11 +107,12 @@ class GNN(nn.Module):
 
     def _init_gcl(self, m: nn.Module) -> None:
         # Only initialize GCL layers with weight/bias
-        if hasattr(m, "weight") and m.weight is not None:
-            if m.weight.ndim >= 2:
-                self._weight_init(m.weight, self._gain)
-        if hasattr(m, "bias") and m.bias is not None:
-            self._bias_init(m.bias)
+        weight = getattr(m, "weight", None)
+        if isinstance(weight, torch.Tensor) and weight.ndim >= 2:
+            self._weight_init(weight, self._gain)
+        bias = getattr(m, "bias", None)
+        if isinstance(bias, torch.Tensor):
+            self._bias_init(bias)
 
     def forward(self, x, edge_index, edge_weights, edge_attr, **kwargs):
         """
@@ -238,7 +239,7 @@ class GNN(nn.Module):
                 x = layer(x, edge_index, edge_weight=edge_weights, **kwargs)
             elif isinstance(layer, GATConv):
                 x = layer(x, edge_index, edge_attr=edge_attr, **kwargs)
-            elif isinstance(layer, MessagePassing):
+            elif MessagePassing is not None and isinstance(layer, MessagePassing):
                 x = layer(x, edge_index, edge_weight=edge_weights, edge_attr=edge_attr, **kwargs)
             else:
                 x = layer(x)
@@ -259,10 +260,10 @@ class ResBlockGNN(GNN):
         output_dim: int,
         n_layers: int,
         gcl: str | nn.Module | type = "sage",
-        gcl_opts: dict = None,
+        gcl_opts: dict[str, Any] | None = None,
         activation: str | nn.Module | Callable[[], nn.Module] = "prelu",
-        weight_init: str | Callable[[torch.Tensor, float], None] = "xavier_uniform",
-        bias_init: Callable[[torch.Tensor], None] = "zeros",
+        weight_init: str | Callable[..., Any] = "xavier_uniform",
+        bias_init: str | Callable[..., Any] = "zeros",
         gain: float = 1.0,
         end_activation: bool = True,
         dtype=None,
@@ -315,10 +316,10 @@ class IdenCatGNN(GNN):
         output_dim: int,
         n_layers: int,
         gcl: str | nn.Module | type = "sage",
-        gcl_opts: dict = None,
+        gcl_opts: dict[str, Any] | None = None,
         activation: str | nn.Module | Callable[[], nn.Module] = "prelu",
-        weight_init: str | Callable[[torch.Tensor, float], None] = "xavier_uniform",
-        bias_init: Callable[[torch.Tensor], None] = "zeros",
+        weight_init: str | Callable[..., Any] = "xavier_uniform",
+        bias_init: str | Callable[..., Any] = "zeros",
         gain: float = 1.0,
         end_activation: bool = True,
         dtype=None,

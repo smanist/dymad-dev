@@ -1,4 +1,5 @@
 import logging
+from typing import cast
 
 import numpy as np
 import scipy.linalg as spl
@@ -211,7 +212,11 @@ def scaled_eig(A, B=None):
     However, if one needs to project quantities to, e.g., U, use pseudo-inverse of U
     instead of V for numerical robustness.
     """
-    _wd, _vl, _vr = spl.eig(A, b=B, left=True, right=True)
+    _eigvals, _left, _right = cast(
+        tuple[np.ndarray, np.ndarray, np.ndarray],
+        spl.eig(A, b=B, left=True, right=True),
+    )
+    _wd, _vl, _vr = _eigvals, _left, _right
     if B is None:
         _scl = np.diag(_vl.conj().T.dot(_vr))
     else:
@@ -413,11 +418,11 @@ def mode_split(
     l_split, U_split = [], []
     for c in comp:
         if c == "r":
-            l_split.append(l.real.reshape(r, 1))
-            U_split.append(U.real.reshape(r, 1, n))
+            l_split.append(np.real(l).reshape(r, 1))
+            U_split.append(np.real(U).reshape(r, 1, n))
         elif c == "i":
-            l_split.append(l.imag.reshape(r, 1))
-            U_split.append(U.imag.reshape(r, 1, n))
+            l_split.append(np.imag(l).reshape(r, 1))
+            U_split.append(np.imag(U).reshape(r, 1, n))
         elif c == "a":
             l_split.append(np.abs(l).reshape(r, 1))
             U_split.append(np.abs(U).reshape(r, 1, n))
@@ -581,7 +586,9 @@ def logm_low_rank(V: np.ndarray, U: np.ndarray, dt: float = 1.0):
     wd, vl, vr = eig_low_rank(V, U)
     wc = disc2cont(wd, dt)
 
-    _msk = (wd.real < 0) & (np.abs(wd.imag) <= 1e-10 * (1.0 + np.abs(wd.real)))
+    wd_real = np.real(wd)
+    wd_imag = np.imag(wd)
+    _msk = (wd_real < 0) & (np.abs(wd_imag) <= 1e-10 * (1.0 + np.abs(wd_real)))
     if np.any(_msk):
         raise Warning(f"logm_low_rank: A has negative real eigenvalues: {wd[_msk]}.")
 
