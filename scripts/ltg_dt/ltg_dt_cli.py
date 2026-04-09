@@ -133,16 +133,34 @@ def generate_data(root: Path):
     (root / "data").mkdir(exist_ok=True)
     sampler = TrajectorySampler(f, g, config=BASE_DIR / "ltg_data.yaml", config_mod=config_chr)
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
+    edge_index = adj_to_edge(adj)[0]
     out_path = root / "data" / "ltg.npz"
     np.savez_compressed(
         out_path,
         t=ts,
         x=np.concatenate([ys, ys, ys], axis=-1),
         u=np.concatenate([us, us, us], axis=-1),
-        adj=adj,
+        ei=edge_index,
     )
     print(f"Generated data: {out_path}")
     return out_path
+
+
+def normalize_legacy_data(data_path: Path) -> bool:
+    if not data_path.exists():
+        return False
+
+    with np.load(data_path, allow_pickle=True) as data:
+        if "ei" in data.files or "adj" not in data.files:
+            return False
+        payload = {key: data[key] for key in data.files if key != "adj"}
+        edge_index = adj_to_edge(data["adj"])[0]
+
+    # Use an explicit edge index to avoid expanding static adjacency weights across time.
+    payload["ei"] = edge_index
+    np.savez_compressed(data_path, **payload)
+    print(f"Normalized legacy graph data: {data_path}")
+    return True
 
 
 def train(selected, root: Path):
@@ -209,6 +227,7 @@ def main():
     data_path = root / "data" / "ltg.npz"
     if args.data or (args.workdir is not None and not data_path.exists()):
         generate_data(root)
+    normalize_legacy_data(data_path)
     if not args.no_train:
         train(selected, root)
     if not args.no_plot:
