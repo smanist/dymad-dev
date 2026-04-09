@@ -10,11 +10,11 @@ authors         = [{name = "APUS Lab @ PSU"}]
 readme          = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "fastmcp>=3.1.0",
   "imageio>=2.36.0",
   "jax>=0.4.35",
   "numpy>=2.0",
   "matplotlib>=3.9",
+  "mcp>=1.26.0",
   "pytest-rerunfailures",
   "pyyaml>=6.0",
   "scikit-learn>=1.5.2",

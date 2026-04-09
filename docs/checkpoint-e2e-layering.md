@@ -26,7 +26,7 @@ Current verified DyMAD migration path:
 5. `agent DemoTools`: `dymad.agent.mcp.demo_tools.DemoTools`
    - wraps facade/exec workflows in JSON-safe `ok/error` envelopes
 6. `agent mcp_server`: `dymad.agent.mcp.server.build_server()`
-   - publishes `DemoTools` through `FastMCP`
+   - publishes `DemoTools` through `mcp.server.fastmcp.FastMCP`
 
 ## Verified Sequence
 
@@ -46,7 +46,7 @@ Execution sequence:
 4. the compatibility adapter calls `CompatibilityExecutor.materialize_checkpoint_prediction(...)`.
 5. `materialize_checkpoint_prediction(...)` resolves handles through `FacadeOperations`.
 6. The resolved checkpoint path is materialized through legacy checkpoint internals.
-7. The same persisted handles can be surfaced through `DemoTools` and `FastMCP` without bypassing the boundary.
+7. The same persisted handles can be surfaced through `DemoTools` and `mcp.server.fastmcp.FastMCP` without bypassing the boundary.
 
 ## Verification
 

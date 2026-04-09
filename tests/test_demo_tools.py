@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import sys
-import types
+from mcp.server.fastmcp import FastMCP
 
 from dymad.agent.exec.context import build_default_context
 from dymad.agent.mcp import DemoTools, build_server
@@ -59,25 +58,16 @@ def test_demo_tools_discovery_and_validation_surfaces_are_json_safe(tmp_path) ->
     assert compatibility["ok"] is True
 
 
-def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
-    class FakeFastMCP:
-        def __init__(self, name: str) -> None:
-            self.name = name
-            self.tools: dict[str, object] = {}
-
-        def tool(self, fn):
-            self.tools[fn.__name__] = fn
-            return fn
-
-    monkeypatch.setitem(sys.modules, "fastmcp", types.SimpleNamespace(FastMCP=FakeFastMCP))
-
+def test_build_server_registers_demo_tools(tmp_path) -> None:
     server = build_server(
         context=build_default_context(artifact_root=tmp_path / "artifacts"),
         name="DyMAD Test",
     )
 
+    assert isinstance(server, FastMCP)
     assert server.name == "DyMAD Test"
-    assert set(server.tools) == {
+    tool_names = set(server._tool_manager._tools)
+    assert tool_names == {
         "describe_object",
         "describe_model_family",
         "describe_reference_profile",
@@ -95,7 +85,7 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
         "validate_dataset_compatibility",
         "validate_training_config",
     }
-    response = server.tools["register_checkpoint"](
+    response = server._tool_manager.get_tool("register_checkpoint").fn(
         model_ref="dymad.models.collections:LDM",
         checkpoint_path="checkpoints/lti.pt",
     )

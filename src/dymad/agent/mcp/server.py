@@ -1,8 +1,10 @@
-"""FastMCP server assembly for the persisted facade/exec boundary."""
+"""`mcp.server.fastmcp` server assembly for the persisted facade/exec boundary."""
 
 from __future__ import annotations
 
 from typing import Any
+
+from mcp.server.fastmcp import FastMCP
 
 from dymad.agent.exec.context import ExecutionContext, build_default_context
 from dymad.agent.mcp.demo_tools import DemoTools
@@ -12,20 +14,13 @@ def build_server(
     *,
     context: ExecutionContext | None = None,
     name: str = "DyMAD Demo",
-) -> Any:
-    """Build one FastMCP server around the DemoTools adapter."""
-    try:
-        from fastmcp import FastMCP
-    except ImportError as exc:
-        raise RuntimeError(
-            "fastmcp is required to build the MCP server. Install the 'fastmcp' package."
-        ) from exc
-
+) -> FastMCP:
+    """Build one `mcp.server.fastmcp.FastMCP` server around the DemoTools adapter."""
     active_context = context or build_default_context()
     tools = DemoTools(context=active_context)
     server = FastMCP(name)
 
-    @server.tool
+    @server.tool()
     def register_dataset_file(
         path: str,
         format: str = "npz",
@@ -38,12 +33,12 @@ def build_server(
             kind=kind,
         )
 
-    @server.tool
+    @server.tool()
     def inspect_dataset(dataset_handle: str) -> dict[str, Any]:
         """Inspect one persisted dataset and return a lightweight schema summary."""
         return tools.inspect_dataset(dataset_handle=dataset_handle)
 
-    @server.tool
+    @server.tool()
     def register_checkpoint(
         model_ref: str,
         checkpoint_path: str,
@@ -56,7 +51,7 @@ def build_server(
             device=device,
         )
 
-    @server.tool
+    @server.tool()
     def validate_dataset_compatibility(
         dataset_handle: str,
         model_ref: str,
@@ -67,17 +62,17 @@ def build_server(
             model_ref=model_ref,
         )
 
-    @server.tool
+    @server.tool()
     def list_model_families() -> dict[str, Any]:
         """List available predefined DyMAD model families."""
         return tools.list_model_families()
 
-    @server.tool
+    @server.tool()
     def describe_model_family(model_ref: str) -> dict[str, Any]:
         """Describe one predefined DyMAD model family."""
         return tools.describe_model_family(model_ref=model_ref)
 
-    @server.tool
+    @server.tool()
     def list_reference_profiles(
         model_ref: str | None = None,
         dataset_kind: str | None = None,
@@ -88,12 +83,12 @@ def build_server(
             dataset_kind=dataset_kind,
         )
 
-    @server.tool
+    @server.tool()
     def describe_reference_profile(profile_name: str) -> dict[str, Any]:
         """Describe one training reference profile."""
         return tools.describe_reference_profile(profile_name=profile_name)
 
-    @server.tool
+    @server.tool()
     def validate_training_config(
         train_dataset_handle: str,
         model_ref: str,
@@ -112,7 +107,7 @@ def build_server(
             run_name=run_name,
         )
 
-    @server.tool
+    @server.tool()
     def materialize_training_config(
         train_dataset_handle: str,
         artifact_root: str,
@@ -133,7 +128,7 @@ def build_server(
             artifact_root=artifact_root,
         )
 
-    @server.tool
+    @server.tool()
     def train_model(
         train_dataset_handle: str,
         artifact_root: str,
@@ -160,17 +155,17 @@ def build_server(
             max_workers=max_workers,
         )
 
-    @server.tool
+    @server.tool()
     def inspect_training_run(run_handle: str) -> dict[str, Any]:
         """Inspect one persisted training run."""
         return tools.inspect_training_run(run_handle=run_handle)
 
-    @server.tool
+    @server.tool()
     def list_training_artifacts(run_handle: str) -> dict[str, Any]:
         """List the standard artifact paths for one persisted training run."""
         return tools.list_training_artifacts(run_handle=run_handle)
 
-    @server.tool
+    @server.tool()
     def evaluate_model(
         checkpoint_handle: str,
         test_dataset_handle: str,
@@ -191,12 +186,12 @@ def build_server(
             predict_kwargs=predict_kwargs,
         )
 
-    @server.tool
+    @server.tool()
     def describe_object(handle: str) -> dict[str, Any]:
         """Return the stored summary for one known handle."""
         return tools.describe_object(handle=handle)
 
-    @server.tool
+    @server.tool()
     def list_objects(kind: str | None = None) -> dict[str, Any]:
         """List persisted object summaries, optionally filtered by kind."""
         return tools.list_objects(kind=kind)
@@ -205,7 +200,7 @@ def build_server(
 
 
 def main() -> None:
-    build_server().run()
+    build_server().run(transport="stdio")
 
 
 if __name__ == "__main__":
