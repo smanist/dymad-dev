@@ -220,6 +220,67 @@ class DemoTools:
             }
         )
 
+    def predict_checkpoint(
+        self,
+        *,
+        checkpoint_handle: str,
+        dataset_handle: str | None = None,
+        prediction_request_handle: str | None = None,
+        predict_kwargs: dict[str, Any] | None = None,
+        selection: int | list[int] | None = None,
+        artifact_root: str | None = None,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "result": asdict(
+                    self._context.executor.predict_checkpoint(
+                        checkpoint_handle=checkpoint_handle,
+                        dataset_handle=dataset_handle,
+                        prediction_request_handle=prediction_request_handle,
+                        predict_kwargs=predict_kwargs,
+                        selection=selection,
+                        artifact_root=artifact_root,
+                    )
+                )
+            }
+        )
+
+    def compute_rollout_metrics(
+        self,
+        *,
+        prediction_handle: str,
+        metric_specs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "result": asdict(
+                    self._context.executor.compute_rollout_metrics(
+                        prediction_handle=prediction_handle,
+                        metric_specs=metric_specs,
+                    )
+                )
+            }
+        )
+
+    def plot_rollouts(
+        self,
+        *,
+        prediction_handle: str,
+        selection: str = "median",
+        max_plots: int = 1,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "result": asdict(
+                    self._context.executor.plot_rollouts(
+                        prediction_handle=prediction_handle,
+                        selection=selection,
+                        max_plots=max_plots,
+                    )
+                )
+            }
+        )
+
     def train_model(
         self,
         *,

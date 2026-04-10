@@ -65,6 +65,17 @@ class PredictionRequestRecord:
 
 
 @dataclass(frozen=True)
+class PredictionResultRecord:
+    handle: str
+    checkpoint_handle: str
+    dataset_handle: str | None
+    prediction_request_handle: str | None
+    artifact_dir: str
+    predictions_path: str
+    dataset_kind: str
+
+
+@dataclass(frozen=True)
 class SpectralSnapshotRecord:
     handle: str
     checkpoint_handle: str
@@ -89,6 +100,7 @@ class ObjectStore:
         self._training_runs: dict[str, TrainingRunRecord] = {}
         self._evaluations: dict[str, EvaluationRecord] = {}
         self._prediction_requests: dict[str, PredictionRequestRecord] = {}
+        self._prediction_results: dict[str, PredictionResultRecord] = {}
         self._spectral_snapshots: dict[str, SpectralSnapshotRecord] = {}
 
     def put_dataset(self, *, path: str, format: str, kind: str) -> str:
@@ -213,6 +225,21 @@ class ObjectStore:
             self._evaluations[handle] = record
             return record
 
+    def update_evaluation_plot_paths(self, handle: str, *, plot_paths: list[str]) -> EvaluationRecord:
+        record = self.get_evaluation(handle)
+        updated = EvaluationRecord(
+            handle=record.handle,
+            checkpoint_handle=record.checkpoint_handle,
+            test_dataset_handle=record.test_dataset_handle,
+            metric=record.metric,
+            metrics_path=record.metrics_path,
+            plot_paths=list(plot_paths),
+        )
+        self._evaluations[handle] = updated
+        if self._artifact_store is not None:
+            self._artifact_store.persist_evaluation(updated)
+        return updated
+
     def put_prediction_request(
         self,
         *,
@@ -244,6 +271,46 @@ class ObjectStore:
                 raise ObjectNotFoundError(f"unknown prediction handle: {handle}") from exc
             record = self._artifact_store.load_prediction_request(handle)
             self._prediction_requests[handle] = record
+            return record
+
+    def put_prediction_result(
+        self,
+        *,
+        checkpoint_handle: str,
+        dataset_handle: str | None,
+        prediction_request_handle: str | None,
+        artifact_dir: str,
+        predictions_path: str,
+        dataset_kind: str,
+    ) -> str:
+        self.get_checkpoint(checkpoint_handle)
+        if dataset_handle is not None:
+            self.get_dataset(dataset_handle)
+        if prediction_request_handle is not None:
+            self.get_prediction_request(prediction_request_handle)
+        handle = self._new_handle("predres")
+        record = PredictionResultRecord(
+            handle=handle,
+            checkpoint_handle=checkpoint_handle,
+            dataset_handle=dataset_handle,
+            prediction_request_handle=prediction_request_handle,
+            artifact_dir=artifact_dir,
+            predictions_path=predictions_path,
+            dataset_kind=dataset_kind,
+        )
+        self._prediction_results[handle] = record
+        if self._artifact_store is not None:
+            self._artifact_store.persist_prediction_result(record)
+        return handle
+
+    def get_prediction_result(self, handle: str) -> PredictionResultRecord:
+        try:
+            return self._prediction_results[handle]
+        except KeyError as exc:
+            if self._artifact_store is None:
+                raise ObjectNotFoundError(f"unknown prediction result handle: {handle}") from exc
+            record = self._artifact_store.load_prediction_result(handle)
+            self._prediction_results[handle] = record
             return record
 
     def put_spectral_snapshot(self, *, checkpoint_handle: str, snapshot: SpectralSnapshot) -> str:
@@ -311,6 +378,14 @@ class ObjectStore:
                 derived_from=request.checkpoint_handle,
                 preview=f"horizon={request.horizon}, control={request.has_control}, graph={request.has_graph}",
             )
+        if handle.startswith("predres_"):
+            result = self.get_prediction_result(handle)
+            return ObjectSummary(
+                handle=handle,
+                kind="prediction_result",
+                derived_from=result.checkpoint_handle,
+                preview=f"{result.dataset_kind} @ {result.predictions_path}",
+            )
         if handle.startswith("specsnap_"):
             snapshot_record = self.get_spectral_snapshot(handle)
             snapshot = snapshot_record.snapshot
@@ -342,6 +417,9 @@ class ObjectStore:
                 summaries[handle] = self.summarize(handle)
         if kind in (None, "prediction_request"):
             for handle in self._prediction_requests:
+                summaries[handle] = self.summarize(handle)
+        if kind in (None, "prediction_result"):
+            for handle in self._prediction_results:
                 summaries[handle] = self.summarize(handle)
         if kind in (None, "spectral_snapshot"):
             for handle in self._spectral_snapshots:

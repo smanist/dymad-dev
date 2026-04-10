@@ -129,6 +129,81 @@ def build_server(
         )
 
     @server.tool()
+    def prepare_prediction_request(
+        checkpoint_handle: str,
+        horizon: int,
+        has_control: bool = False,
+        has_graph: bool = False,
+    ) -> dict[str, Any]:
+        """Persist one prediction request for downstream reuse."""
+        return tools.prepare_prediction_request(
+            checkpoint_handle=checkpoint_handle,
+            horizon=horizon,
+            has_control=has_control,
+            has_graph=has_graph,
+        )
+
+    @server.tool()
+    def plan_checkpoint_prediction(
+        model_ref: str,
+        checkpoint_path: str,
+        horizon: int,
+        has_control: bool = False,
+        has_graph: bool = False,
+    ) -> dict[str, Any]:
+        """Register checkpoint and prediction-request handles without materializing predictions."""
+        return tools.plan_checkpoint_prediction(
+            model_ref=model_ref,
+            checkpoint_path=checkpoint_path,
+            horizon=horizon,
+            has_control=has_control,
+            has_graph=has_graph,
+        )
+
+    @server.tool()
+    def predict_checkpoint(
+        checkpoint_handle: str,
+        dataset_handle: str | None = None,
+        prediction_request_handle: str | None = None,
+        predict_kwargs: dict[str, Any] | None = None,
+        selection: int | list[int] | None = None,
+        artifact_root: str | None = None,
+    ) -> dict[str, Any]:
+        """Materialize rollout predictions and persist a prediction-result handle."""
+        return tools.predict_checkpoint(
+            checkpoint_handle=checkpoint_handle,
+            dataset_handle=dataset_handle,
+            prediction_request_handle=prediction_request_handle,
+            predict_kwargs=predict_kwargs,
+            selection=selection,
+            artifact_root=artifact_root,
+        )
+
+    @server.tool()
+    def compute_rollout_metrics(
+        prediction_handle: str,
+        metric_specs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Compute one or more structured rollout metrics from a prediction result."""
+        return tools.compute_rollout_metrics(
+            prediction_handle=prediction_handle,
+            metric_specs=metric_specs,
+        )
+
+    @server.tool()
+    def plot_rollouts(
+        prediction_handle: str,
+        selection: str = "median",
+        max_plots: int = 1,
+    ) -> dict[str, Any]:
+        """Render representative rollout plots from a prediction result."""
+        return tools.plot_rollouts(
+            prediction_handle=prediction_handle,
+            selection=selection,
+            max_plots=max_plots,
+        )
+
+    @server.tool()
     def train_model(
         train_dataset_handle: str,
         artifact_root: str,

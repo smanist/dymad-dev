@@ -109,8 +109,31 @@ class TrainModelResult:
 @dataclass(frozen=True)
 class EvaluateModelResult:
     evaluation_summary: ObjectSummary
+    prediction_summary: ObjectSummary
     artifacts: dict[str, str | list[str]]
-    metrics: dict[str, float]
+    metrics: dict[str, Any]
+    plot_skipped_reason: str | None
+
+
+@dataclass(frozen=True)
+class PredictCheckpointResult:
+    prediction_summary: ObjectSummary
+    artifacts: dict[str, str]
+    selected_indices: list[int]
+
+
+@dataclass(frozen=True)
+class ComputeRolloutMetricsResult:
+    evaluation_summary: ObjectSummary
+    prediction_summary: ObjectSummary
+    artifacts: dict[str, str]
+    metrics: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class PlotRolloutsResult:
+    prediction_summary: ObjectSummary
+    artifacts: dict[str, list[str]]
     plot_skipped_reason: str | None
 
 

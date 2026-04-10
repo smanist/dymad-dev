@@ -10,6 +10,7 @@ from dymad.agent.facade.handles import (
     DatasetHandle,
     EvaluationHandle,
     PredictionHandle,
+    PredictionResultHandle,
     SpectralSnapshotHandle,
     TrainingRunHandle,
 )
@@ -20,6 +21,7 @@ from dymad.agent.store.object_store import (
     ObjectStore,
     ObjectSummary,
     PredictionRequestRecord,
+    PredictionResultRecord,
     SpectralSnapshotRecord,
     TrainingRunRecord,
 )
@@ -41,6 +43,7 @@ class FacadeOperations:
         "training_run",
         "evaluation",
         "prediction_request",
+        "prediction_result",
         "spectral_snapshot",
     }
 
@@ -164,6 +167,43 @@ class FacadeOperations:
         request = PredictionHandle.parse(handle)
         return self._store.get_prediction_request(request.value)
 
+    def register_prediction_result(
+        self,
+        *,
+        checkpoint_handle: str,
+        dataset_handle: str | None,
+        prediction_request_handle: str | None,
+        artifact_dir: str,
+        predictions_path: str,
+        dataset_kind: str,
+    ) -> ObjectSummary:
+        checkpoint = CheckpointHandle.parse(checkpoint_handle)
+        dataset = None if dataset_handle is None else DatasetHandle.parse(dataset_handle)
+        request = (
+            None
+            if prediction_request_handle is None
+            else PredictionHandle.parse(prediction_request_handle)
+        )
+        if not artifact_dir.strip():
+            raise ValueError("artifact_dir cannot be empty")
+        if not predictions_path.strip():
+            raise ValueError("predictions_path cannot be empty")
+        if not dataset_kind.strip():
+            raise ValueError("dataset_kind cannot be empty")
+        handle = self._store.put_prediction_result(
+            checkpoint_handle=checkpoint.value,
+            dataset_handle=None if dataset is None else dataset.value,
+            prediction_request_handle=None if request is None else request.value,
+            artifact_dir=artifact_dir.strip(),
+            predictions_path=predictions_path.strip(),
+            dataset_kind=dataset_kind.strip(),
+        )
+        return self._store.summarize(handle)
+
+    def get_prediction_result(self, handle: str) -> PredictionResultRecord:
+        result = PredictionResultHandle.parse(handle)
+        return self._store.get_prediction_result(result.value)
+
     def get_dataset(self, handle: str) -> DatasetRecord:
         dataset = DatasetHandle.parse(handle)
         return self._store.get_dataset(dataset.value)
@@ -179,6 +219,18 @@ class FacadeOperations:
     def get_evaluation(self, handle: str) -> EvaluationRecord:
         evaluation = EvaluationHandle.parse(handle)
         return self._store.get_evaluation(evaluation.value)
+
+    def update_evaluation_plot_paths(
+        self,
+        handle: str,
+        *,
+        plot_paths: list[str],
+    ) -> EvaluationRecord:
+        evaluation = EvaluationHandle.parse(handle)
+        return self._store.update_evaluation_plot_paths(
+            evaluation.value,
+            plot_paths=plot_paths,
+        )
 
     def register_spectral_snapshot(
         self,

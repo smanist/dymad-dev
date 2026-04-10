@@ -17,11 +17,14 @@ import torch
 import yaml
 
 from dymad.agent.exec.state import (
+    ComputeRolloutMetricsResult,
     DatasetCompatibility,
     DatasetInspection,
     EvaluateModelResult,
     MaterializedTrainingConfigResult,
     ModelFamilyDescription,
+    PlotRolloutsResult,
+    PredictCheckpointResult,
     PredictionWorkflowPlan,
     ReferenceProfileDescription,
     SpectralWorkflowPlan,
@@ -476,6 +479,10 @@ def _rmse(prediction: np.ndarray, truth: np.ndarray) -> float:
     return float(np.sqrt(np.mean((prediction - truth) ** 2)))
 
 
+def _mae(prediction: np.ndarray, truth: np.ndarray) -> float:
+    return float(np.mean(np.abs(prediction - truth)))
+
+
 def _plot_indices(errors: np.ndarray, *, selection: str, max_plots: int) -> list[int]:
     if max_plots <= 0 or errors.size == 0:
         return []
@@ -489,6 +496,191 @@ def _plot_indices(errors: np.ndarray, *, selection: str, max_plots: int) -> list
     else:
         raise ValueError(f"unsupported plot_selection: {selection}")
     return [int(index) for index in ordered[:max_plots]]
+
+
+def _prediction_indices(
+    *,
+    total: int,
+    selection: int | list[int] | None,
+) -> list[int]:
+    if selection is None:
+        return list(range(total))
+    raw_values = [selection] if isinstance(selection, int) else selection
+    selected = []
+    for raw_index in raw_values:
+        index = int(raw_index)
+        if index < 0 or index >= total:
+            raise IndexError(f"selection index out of range: {index}")
+        selected.append(index)
+    return selected
+
+
+def _artifact_root_from_context(context: ExecutionContext) -> Path:
+    return Path(context.artifact_store.root).resolve()
+
+
+def _prediction_result_dir(*, artifact_root: str | Path | None, context: ExecutionContext) -> Path:
+    base = (
+        _artifact_root_from_context(context)
+        if artifact_root is None
+        else Path(artifact_root).expanduser().resolve()
+    )
+    return _ensure_dir(base / "prediction_results" / uuid4().hex[:12])
+
+
+def _slice_payload_for_horizon(payload: dict[str, Any], *, horizon: int | None) -> dict[str, Any]:
+    if horizon is None:
+        return payload
+    stop = min(int(horizon), len(payload["t"]))
+    sliced = {
+        "x": payload["x"][:stop],
+        "t": payload["t"][:stop],
+        "u": None if payload["u"] is None else payload["u"][:stop],
+        "p": payload["p"],
+    }
+    if "ei" in payload:
+        sliced["ei"] = payload["ei"]
+        sliced["ew"] = payload["ew"]
+        sliced["ea"] = payload["ea"]
+    return sliced
+
+
+def _save_prediction_payload(
+    *,
+    payload_path: Path,
+    payloads: list[dict[str, Any]],
+    predictions: list[np.ndarray],
+    selected_indices: list[int],
+) -> None:
+    arrays: dict[str, np.ndarray] = {
+        "truth": np.array([payload["x"] for payload in payloads], dtype=object),
+        "predictions": np.array(predictions, dtype=object),
+        "times": np.array([payload["t"] for payload in payloads], dtype=object),
+        "controls": np.array([payload.get("u") for payload in payloads], dtype=object),
+        "parameters": np.array([payload.get("p") for payload in payloads], dtype=object),
+        "edge_indices": np.array([payload.get("ei") for payload in payloads], dtype=object),
+        "edge_weights": np.array([payload.get("ew") for payload in payloads], dtype=object),
+        "edge_attrs": np.array([payload.get("ea") for payload in payloads], dtype=object),
+        "selected_indices": np.asarray(selected_indices, dtype=int),
+    }
+    savez_compressed = cast(Any, np.savez_compressed)
+    savez_compressed(str(payload_path), **arrays)
+
+
+def _load_prediction_payload(payload_path: str | Path) -> dict[str, Any]:
+    with np.load(payload_path, allow_pickle=True) as payload:
+        return {
+            "truth": list(payload["truth"].tolist()),
+            "predictions": list(payload["predictions"].tolist()),
+            "times": list(payload["times"].tolist()),
+            "controls": list(payload["controls"].tolist()),
+            "parameters": list(payload["parameters"].tolist()),
+            "edge_indices": list(payload["edge_indices"].tolist()),
+            "edge_weights": list(payload["edge_weights"].tolist()),
+            "edge_attrs": list(payload["edge_attrs"].tolist()),
+            "selected_indices": [int(item) for item in payload["selected_indices"].tolist()],
+        }
+
+
+def _metric_aggregate(values: np.ndarray, *, prefix: str) -> dict[str, float]:
+    return {
+        f"{prefix}_mean": float(np.mean(values)),
+        f"{prefix}_std": float(np.std(values)),
+        f"{prefix}_median": float(np.median(values)),
+        f"{prefix}_min": float(np.min(values)),
+        f"{prefix}_max": float(np.max(values)),
+        "n_test_trajectories": float(len(values)),
+    }
+
+
+def _trajectory_metric_series(
+    truth: list[np.ndarray],
+    predictions: list[np.ndarray],
+    *,
+    reducer: Callable[[np.ndarray, np.ndarray], float],
+) -> np.ndarray:
+    values = [reducer(prediction, expected) for prediction, expected in zip(predictions, truth, strict=True)]
+    return np.asarray(values, dtype=float)
+
+
+def _horizon_metric_series(
+    truth: list[np.ndarray],
+    predictions: list[np.ndarray],
+    *,
+    mode: str,
+) -> list[float]:
+    max_steps = max(len(item) for item in truth)
+    per_step: list[float] = []
+    for step in range(max_steps):
+        errors = []
+        for prediction, expected in zip(predictions, truth, strict=True):
+            if step >= len(expected):
+                continue
+            diff = np.asarray(prediction[step]) - np.asarray(expected[step])
+            if mode == "rmse":
+                errors.append(float(np.mean(diff**2)))
+            elif mode == "mae":
+                errors.append(float(np.mean(np.abs(diff))))
+            else:
+                raise ValueError(f"unsupported horizon metric mode: {mode}")
+        if not errors:
+            continue
+        if mode == "rmse":
+            per_step.append(float(np.sqrt(np.mean(np.asarray(errors, dtype=float)))))
+        else:
+            per_step.append(float(np.mean(np.asarray(errors, dtype=float))))
+    return per_step
+
+
+def _compute_metric_result(
+    *,
+    metric_name: str,
+    truth: list[np.ndarray],
+    predictions: list[np.ndarray],
+) -> dict[str, Any]:
+    if metric_name == "rollout_rmse":
+        values = _trajectory_metric_series(truth, predictions, reducer=_rmse)
+        return {
+            "aggregate": _metric_aggregate(values, prefix="rmse"),
+            "per_trajectory": [float(value) for value in values.tolist()],
+        }
+    if metric_name == "rollout_mae":
+        values = _trajectory_metric_series(truth, predictions, reducer=_mae)
+        return {
+            "aggregate": _metric_aggregate(values, prefix="mae"),
+            "per_trajectory": [float(value) for value in values.tolist()],
+        }
+    if metric_name == "horizon_rmse":
+        per_step = _horizon_metric_series(truth, predictions, mode="rmse")
+        return {
+            "per_step": per_step,
+            "n_trajectories": len(truth),
+            "n_steps": len(per_step),
+        }
+    if metric_name == "horizon_mae":
+        per_step = _horizon_metric_series(truth, predictions, mode="mae")
+        return {
+            "per_step": per_step,
+            "n_trajectories": len(truth),
+            "n_steps": len(per_step),
+        }
+    raise ValueError(f"unsupported evaluation metric: {metric_name}")
+
+
+def _coerce_metric_specs(metric_specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not metric_specs:
+        raise ValueError("metric_specs must contain at least one metric spec")
+    normalized = []
+    for spec in metric_specs:
+        if not isinstance(spec, dict):
+            raise TypeError("metric_specs entries must be mappings")
+        metric_name = spec.get("metric")
+        if not isinstance(metric_name, str) or not metric_name:
+            raise ValueError("metric_specs entries must include a non-empty metric")
+        if metric_name not in {"rollout_rmse", "rollout_mae", "horizon_rmse", "horizon_mae"}:
+            raise ValueError(f"unsupported evaluation metric: {metric_name}")
+        normalized.append({"metric": metric_name})
+    return normalized
 
 
 @dataclass
@@ -715,28 +907,42 @@ class CompatibilityExecutor:
             | {"run_root": Path(paths["run_root"]).is_dir()},
         )
 
-    def evaluate_model(
+    def predict_checkpoint(
         self,
         *,
         checkpoint_handle: str,
-        test_dataset_handle: str,
-        metric: str,
-        artifact_root: str,
-        plot_selection: str = "median",
-        max_plots: int = 1,
+        dataset_handle: str | None = None,
+        prediction_request_handle: str | None = None,
         predict_kwargs: dict[str, Any] | None = None,
-    ) -> EvaluateModelResult:
-        if metric != "rollout_rmse":
-            raise ValueError(f"unsupported evaluation metric: {metric}")
+        selection: int | list[int] | None = None,
+        artifact_root: str | None = None,
+    ) -> PredictCheckpointResult:
+        if dataset_handle is None:
+            raise ValueError("predict_checkpoint currently requires dataset_handle")
+
         checkpoint = self.facade.get_checkpoint(checkpoint_handle)
-        dataset = self.facade.get_dataset(test_dataset_handle)
+        dataset = self.facade.get_dataset(dataset_handle)
         compatibility = _dataset_compatibility(dataset, model_ref=checkpoint.model_ref)
         if not compatibility.is_compatible:
             raise ValueError(compatibility.reason or "checkpoint/dataset mismatch")
-        model = _resolve_model_ref(checkpoint.model_ref)
 
+        inspection = _inspect_dataset_record(dataset)
+        horizon = None
+        if prediction_request_handle is not None:
+            request = self.facade.get_prediction_request(prediction_request_handle)
+            if request.checkpoint_handle != checkpoint_handle:
+                raise ValueError("prediction request checkpoint does not match checkpoint_handle")
+            if request.has_graph != (dataset.kind == "graph"):
+                raise ValueError("prediction request graph flag does not match dataset kind")
+            if request.has_control != (inspection.control_dim > 0):
+                raise ValueError("prediction request control flag does not match dataset controls")
+            horizon = request.horizon
+
+        model = _resolve_model_ref(checkpoint.model_ref)
         manager = _build_manager(dataset)
         manager.prepare_data()
+        selected_indices = _prediction_indices(total=len(manager.x), selection=selection)
+
         from dymad.io import TrajectoryManagerGraph, load_model
 
         _, predict_fn = cast(
@@ -748,13 +954,13 @@ class CompatibilityExecutor:
             ),
         )
 
+        payloads: list[dict[str, Any]] = []
         predictions: list[np.ndarray] = []
-        errors: list[float] = []
-        for index in range(len(manager.x)):
-            payload = _trajectory_payload(manager, index)
+        for index in selected_indices:
+            payload = _slice_payload_for_horizon(_trajectory_payload(manager, index), horizon=horizon)
             kwargs = dict(predict_kwargs or {})
             kwargs.setdefault("device", "cpu")
-            pred = cast(
+            prediction = cast(
                 np.ndarray,
                 predict_fn(
                     payload["x"],
@@ -769,67 +975,185 @@ class CompatibilityExecutor:
                     **kwargs,
                 ),
             )
-            predictions.append(pred)
-            errors.append(_rmse(pred, payload["x"]))
+            payloads.append(payload)
+            predictions.append(np.asarray(prediction))
 
-        error_array = np.asarray(errors, dtype=float)
-        metrics = {
-            "rmse_mean": float(np.mean(error_array)),
-            "rmse_std": float(np.std(error_array)),
-            "rmse_median": float(np.median(error_array)),
-            "rmse_min": float(np.min(error_array)),
-            "rmse_max": float(np.max(error_array)),
-            "n_test_trajectories": float(len(error_array)),
+        result_dir = _prediction_result_dir(
+            artifact_root=artifact_root,
+            context=self._active_context(),
+        )
+        predictions_path = result_dir / "predictions.npz"
+        metadata_path = result_dir / "metadata.json"
+        _save_prediction_payload(
+            payload_path=predictions_path,
+            payloads=payloads,
+            predictions=predictions,
+            selected_indices=selected_indices,
+        )
+        metadata = {
+            "checkpoint_handle": checkpoint_handle,
+            "dataset_handle": dataset_handle,
+            "prediction_request_handle": prediction_request_handle,
+            "dataset_kind": dataset.kind,
+            "selected_indices": selected_indices,
+            "requested_horizon": horizon,
         }
-
-        eval_root = _ensure_dir(Path(artifact_root).expanduser() / "evaluations")
-        eval_token = uuid4().hex[:12]
-        metrics_path = eval_root / f"{eval_token}_metrics.json"
-        metrics_payload = {
-            "metric": metric,
-            "aggregate": metrics,
-            "per_trajectory_rmse": [float(value) for value in error_array.tolist()],
-        }
-        metrics_path.write_text(
-            json.dumps(metrics_payload, indent=2, sort_keys=True), encoding="utf-8"
+        metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+        prediction_summary = self.facade.register_prediction_result(
+            checkpoint_handle=checkpoint_handle,
+            dataset_handle=dataset_handle,
+            prediction_request_handle=prediction_request_handle,
+            artifact_dir=str(result_dir),
+            predictions_path=str(predictions_path),
+            dataset_kind=dataset.kind,
+        )
+        return PredictCheckpointResult(
+            prediction_summary=prediction_summary,
+            artifacts={
+                "artifact_dir": str(result_dir),
+                "predictions_path": str(predictions_path),
+                "metadata_path": str(metadata_path),
+            },
+            selected_indices=selected_indices,
         )
 
-        plot_paths: list[str] = []
-        plot_skipped_reason = None
-        if dataset.kind == "graph":
-            plot_skipped_reason = "graph plotting unsupported in v1"
+    def compute_rollout_metrics(
+        self,
+        *,
+        prediction_handle: str,
+        metric_specs: list[dict[str, Any]],
+    ) -> ComputeRolloutMetricsResult:
+        normalized_specs = _coerce_metric_specs(metric_specs)
+        prediction_record = self.facade.get_prediction_result(prediction_handle)
+        if prediction_record.dataset_handle is None:
+            raise ValueError("prediction result is missing dataset handle")
+
+        payload = _load_prediction_payload(prediction_record.predictions_path)
+        truth = [np.asarray(item) for item in payload["truth"]]
+        predictions = [np.asarray(item) for item in payload["predictions"]]
+        results = {
+            spec["metric"]: _compute_metric_result(
+                metric_name=spec["metric"],
+                truth=truth,
+                predictions=predictions,
+            )
+            for spec in normalized_specs
+        }
+        metric_names = list(results)
+
+        metrics_root = _ensure_dir(Path(prediction_record.artifact_dir) / "metrics")
+        metrics_path = metrics_root / f"{uuid4().hex[:12]}_metrics.json"
+        metrics_payload: dict[str, Any] = {"results": results}
+        if len(metric_names) == 1:
+            metrics_payload["metric"] = metric_names[0]
         else:
-            for rank, index in enumerate(
-                _plot_indices(error_array, selection=plot_selection, max_plots=max_plots)
-            ):
-                payload = _trajectory_payload(manager, index)
-                model_name = f"{eval_token}_{plot_selection}_{rank}"
-                plot_trajectory(
-                    np.array([payload["x"], predictions[index]]),
-                    payload["t"],
-                    model_name=model_name,
-                    us=payload["u"],
-                    labels=["Truth", "Prediction"],
-                    ifclose=True,
-                    prefix=str(eval_root),
-                )
-                plot_paths.append(str(eval_root / f"{model_name}_prediction.png"))
+            metrics_payload["metrics"] = metric_names
+        metrics_path.write_text(
+            json.dumps(metrics_payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
         evaluation_summary = self.facade.register_evaluation(
-            checkpoint_handle=checkpoint_handle,
-            test_dataset_handle=test_dataset_handle,
-            metric=metric,
+            checkpoint_handle=prediction_record.checkpoint_handle,
+            test_dataset_handle=prediction_record.dataset_handle,
+            metric=metric_names[0] if len(metric_names) == 1 else "multi_metric",
             metrics_path=str(metrics_path),
-            plot_paths=plot_paths,
+            plot_paths=[],
         )
-        return EvaluateModelResult(
+        return ComputeRolloutMetricsResult(
             evaluation_summary=evaluation_summary,
+            prediction_summary=self.facade.describe_object(prediction_handle),
+            artifacts={"metrics_path": str(metrics_path)},
+            metrics=metrics_payload,
+        )
+
+    def plot_rollouts(
+        self,
+        *,
+        prediction_handle: str,
+        selection: str = "median",
+        max_plots: int = 1,
+    ) -> PlotRolloutsResult:
+        prediction_record = self.facade.get_prediction_result(prediction_handle)
+        payload = _load_prediction_payload(prediction_record.predictions_path)
+        if prediction_record.dataset_kind == "graph":
+            return PlotRolloutsResult(
+                prediction_summary=self.facade.describe_object(prediction_handle),
+                artifacts={"plot_paths": []},
+                plot_skipped_reason="graph plotting unsupported in v1",
+            )
+
+        truth = [np.asarray(item) for item in payload["truth"]]
+        predictions = [np.asarray(item) for item in payload["predictions"]]
+        times = [np.asarray(item) for item in payload["times"]]
+        controls = payload["controls"]
+        errors = _trajectory_metric_series(truth, predictions, reducer=_rmse)
+
+        plots_root = _ensure_dir(Path(prediction_record.artifact_dir) / "plots")
+        plot_paths: list[str] = []
+        for rank, index in enumerate(
+            _plot_indices(errors, selection=selection, max_plots=max_plots)
+        ):
+            model_name = f"{prediction_handle}_{selection}_{rank}"
+            plot_trajectory(
+                np.array([truth[index], predictions[index]]),
+                times[index],
+                model_name=model_name,
+                us=None if controls[index] is None else np.asarray(controls[index]),
+                labels=["Truth", "Prediction"],
+                ifclose=True,
+                prefix=str(plots_root),
+            )
+            plot_paths.append(str(plots_root / f"{model_name}_prediction.png"))
+
+        return PlotRolloutsResult(
+            prediction_summary=self.facade.describe_object(prediction_handle),
+            artifacts={"plot_paths": plot_paths},
+            plot_skipped_reason=None,
+        )
+
+    def evaluate_model(
+        self,
+        *,
+        checkpoint_handle: str,
+        test_dataset_handle: str,
+        metric: str,
+        artifact_root: str,
+        plot_selection: str = "median",
+        max_plots: int = 1,
+        predict_kwargs: dict[str, Any] | None = None,
+    ) -> EvaluateModelResult:
+        prediction = self.predict_checkpoint(
+            checkpoint_handle=checkpoint_handle,
+            dataset_handle=test_dataset_handle,
+            predict_kwargs=predict_kwargs,
+            artifact_root=artifact_root,
+        )
+        computed = self.compute_rollout_metrics(
+            prediction_handle=prediction.prediction_summary.handle,
+            metric_specs=[{"metric": metric}],
+        )
+        plotted = self.plot_rollouts(
+            prediction_handle=prediction.prediction_summary.handle,
+            selection=plot_selection,
+            max_plots=max_plots,
+        )
+        self.facade.update_evaluation_plot_paths(
+            computed.evaluation_summary.handle,
+            plot_paths=plotted.artifacts["plot_paths"],
+        )
+
+        metric_result = computed.metrics["results"][metric]
+        top_level_metrics = metric_result.get("aggregate", metric_result)
+        return EvaluateModelResult(
+            evaluation_summary=self.facade.describe_object(computed.evaluation_summary.handle),
+            prediction_summary=prediction.prediction_summary,
             artifacts={
-                "metrics_path": str(metrics_path),
-                "plot_paths": plot_paths,
+                "metrics_path": computed.artifacts["metrics_path"],
+                "plot_paths": plotted.artifacts["plot_paths"],
             },
-            metrics=metrics,
-            plot_skipped_reason=plot_skipped_reason,
+            metrics=top_level_metrics,
+            plot_skipped_reason=plotted.plot_skipped_reason,
         )
 
     def plan_checkpoint_prediction(

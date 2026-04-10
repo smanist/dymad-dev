@@ -4,6 +4,7 @@ from dymad.agent.facade.handles import (
     CheckpointHandle,
     HandleValidationError,
     PredictionHandle,
+    PredictionResultHandle,
     SpectralSnapshotHandle,
 )
 from dymad.agent.facade.operations import FacadeOperations
@@ -13,5 +14,6 @@ __all__ = [
     "FacadeOperations",
     "HandleValidationError",
     "PredictionHandle",
+    "PredictionResultHandle",
     "SpectralSnapshotHandle",
 ]

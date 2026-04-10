@@ -70,6 +70,7 @@ def test_build_server_registers_demo_tools(tmp_path) -> None:
     assert server.settings.log_level == "ERROR"
     tool_names = set(server._tool_manager._tools)
     assert tool_names == {
+        "compute_rollout_metrics",
         "describe_object",
         "describe_model_family",
         "describe_reference_profile",
@@ -81,6 +82,10 @@ def test_build_server_registers_demo_tools(tmp_path) -> None:
         "list_reference_profiles",
         "list_training_artifacts",
         "materialize_training_config",
+        "plan_checkpoint_prediction",
+        "plot_rollouts",
+        "predict_checkpoint",
+        "prepare_prediction_request",
         "register_dataset_file",
         "register_checkpoint",
         "train_model",

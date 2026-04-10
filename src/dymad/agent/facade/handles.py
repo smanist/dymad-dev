@@ -15,6 +15,7 @@ _DATASET_RE = re.compile(r"^ds_[a-z0-9]{6,}$")
 _TRAINING_RUN_RE = re.compile(r"^run_[a-z0-9]{6,}$")
 _EVALUATION_RE = re.compile(r"^eval_[a-z0-9]{6,}$")
 _PREDICTION_RE = re.compile(r"^pred_[a-z0-9]{6,}$")
+_PREDICTION_RESULT_RE = re.compile(r"^predres_[a-z0-9]{6,}$")
 _SPECTRAL_SNAPSHOT_RE = re.compile(r"^specsnap_[a-z0-9]{6,}$")
 
 
@@ -92,6 +93,22 @@ class PredictionHandle:
 
     @classmethod
     def parse(cls, raw: str) -> PredictionHandle:
+        return cls(raw)
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True)
+class PredictionResultHandle:
+    value: str
+
+    def __post_init__(self) -> None:
+        if not _PREDICTION_RESULT_RE.match(self.value):
+            raise HandleValidationError(f"invalid prediction result handle: {self.value}")
+
+    @classmethod
+    def parse(cls, raw: str) -> PredictionResultHandle:
         return cls(raw)
 
     def __str__(self) -> str:

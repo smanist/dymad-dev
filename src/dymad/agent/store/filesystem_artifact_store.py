@@ -15,6 +15,7 @@ from dymad.agent.store.object_store import (
     ObjectNotFoundError,
     ObjectSummary,
     PredictionRequestRecord,
+    PredictionResultRecord,
     SpectralSnapshotRecord,
     TrainingRunRecord,
 )
@@ -36,6 +37,7 @@ class FilesystemArtifactStore:
         "training_run": "training_runs",
         "evaluation": "evaluations",
         "prediction_request": "prediction_requests",
+        "prediction_result": "prediction_results",
         "spectral_snapshot": "spectral_snapshots",
     }
 
@@ -141,6 +143,30 @@ class FilesystemArtifactStore:
             horizon=int(payload["horizon"]),
             has_control=bool(payload["has_control"]),
             has_graph=bool(payload["has_graph"]),
+        )
+
+    def persist_prediction_result(self, record: PredictionResultRecord) -> None:
+        payload = {
+            "handle": record.handle,
+            "checkpoint_handle": record.checkpoint_handle,
+            "dataset_handle": record.dataset_handle,
+            "prediction_request_handle": record.prediction_request_handle,
+            "artifact_dir": record.artifact_dir,
+            "predictions_path": record.predictions_path,
+            "dataset_kind": record.dataset_kind,
+        }
+        self._write_json("prediction_result", record.handle, payload)
+
+    def load_prediction_result(self, handle: str) -> PredictionResultRecord:
+        payload = self._read_json("prediction_result", handle)
+        return PredictionResultRecord(
+            handle=payload["handle"],
+            checkpoint_handle=payload["checkpoint_handle"],
+            dataset_handle=payload.get("dataset_handle"),
+            prediction_request_handle=payload.get("prediction_request_handle"),
+            artifact_dir=payload["artifact_dir"],
+            predictions_path=payload["predictions_path"],
+            dataset_kind=payload["dataset_kind"],
         )
 
     def persist_spectral_snapshot(self, record: SpectralSnapshotRecord) -> None:
@@ -258,6 +284,13 @@ class FilesystemArtifactStore:
                     f"control={payload['has_control']}, graph={payload['has_graph']}"
                 ),
             )
+        if kind == "prediction_result":
+            return ObjectSummary(
+                handle=payload["handle"],
+                kind="prediction_result",
+                derived_from=payload["checkpoint_handle"],
+                preview=f"{payload['dataset_kind']} @ {payload['predictions_path']}",
+            )
         return ObjectSummary(
             handle=payload["handle"],
             kind="spectral_snapshot",
@@ -308,6 +341,8 @@ class FilesystemArtifactStore:
             return "evaluation"
         if handle.startswith("pred_"):
             return "prediction_request"
+        if handle.startswith("predres_"):
+            return "prediction_result"
         if handle.startswith("specsnap_"):
             return "spectral_snapshot"
         raise ObjectNotFoundError(f"unknown handle: {handle}")

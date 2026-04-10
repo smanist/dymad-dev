@@ -8,6 +8,7 @@ from dymad.agent.facade.handles import (
     EvaluationHandle,
     HandleValidationError,
     PredictionHandle,
+    PredictionResultHandle,
     SpectralSnapshotHandle,
     TrainingRunHandle,
 )
@@ -56,6 +57,9 @@ def test_handles_reject_invalid_shapes() -> None:
 
     with pytest.raises(HandleValidationError):
         PredictionHandle.parse("not_a_prediction")
+
+    with pytest.raises(HandleValidationError):
+        PredictionResultHandle.parse("not_a_prediction_result")
 
     with pytest.raises(HandleValidationError):
         SpectralSnapshotHandle.parse("not_a_spectral_snapshot")

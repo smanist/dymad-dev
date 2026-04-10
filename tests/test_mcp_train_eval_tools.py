@@ -446,11 +446,228 @@ def test_evaluate_model_regular_writes_metrics_and_plot(tmp_path, monkeypatch) -
 
     result = response["data"]["result"]
     assert response["ok"] is True
+    assert result["prediction_summary"]["kind"] == "prediction_result"
     assert Path(result["artifacts"]["metrics_path"]).is_file()
     assert len(result["artifacts"]["plot_paths"]) == 1
     metrics = json.loads(Path(result["artifacts"]["metrics_path"]).read_text(encoding="utf-8"))
     assert metrics["metric"] == "rollout_rmse"
+    assert "rollout_rmse" in metrics["results"]
     assert result["evaluation_summary"]["kind"] == "evaluation"
+
+
+def test_predict_checkpoint_persists_prediction_result_and_payload(tmp_path, monkeypatch) -> None:
+    dataset_path = tmp_path / "test.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+
+    def fake_load_model(model, checkpoint_path, *, context=None, **kwargs):
+        del model, checkpoint_path, context, kwargs
+
+        def predict_fn(x0, t, u=None, p=None, **predict_kwargs):
+            del t, u, p, predict_kwargs
+            return np.asarray(x0) + 1.0
+
+        return object(), predict_fn
+
+    monkeypatch.setattr(dymad.io, "load_model", fake_load_model)
+
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"][
+        "handle"
+    ]
+    checkpoint_handle = tools.register_checkpoint(
+        model_ref="dymad.models.collections:KBF",
+        checkpoint_path=str(tmp_path / "fake.pt"),
+    )["data"]["summary"]["handle"]
+
+    response = tools.predict_checkpoint(
+        checkpoint_handle=checkpoint_handle,
+        dataset_handle=dataset_handle,
+        artifact_root=str(tmp_path / "predictions"),
+        selection=[0, 2],
+    )
+
+    result = response["data"]["result"]
+    payload = np.load(result["artifacts"]["predictions_path"], allow_pickle=True)
+
+    assert response["ok"] is True
+    assert result["prediction_summary"]["kind"] == "prediction_result"
+    assert result["selected_indices"] == [0, 2]
+    assert Path(result["artifacts"]["metadata_path"]).is_file()
+    assert payload["selected_indices"].tolist() == [0, 2]
+    assert len(payload["predictions"].tolist()) == 2
+    payload.close()
+
+
+def test_predict_checkpoint_rejects_inconsistent_request_flags(tmp_path, monkeypatch) -> None:
+    dataset_path = tmp_path / "test.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+
+    def fake_load_model(model, checkpoint_path, *, context=None, **kwargs):
+        del model, checkpoint_path, context, kwargs
+
+        def predict_fn(x0, t, u=None, p=None, **predict_kwargs):
+            del t, u, p, predict_kwargs
+            return np.asarray(x0)
+
+        return object(), predict_fn
+
+    monkeypatch.setattr(dymad.io, "load_model", fake_load_model)
+
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"][
+        "handle"
+    ]
+    checkpoint_handle = tools.register_checkpoint(
+        model_ref="dymad.models.collections:KBF",
+        checkpoint_path=str(tmp_path / "fake.pt"),
+    )["data"]["summary"]["handle"]
+    request_handle = tools.prepare_prediction_request(
+        checkpoint_handle=checkpoint_handle,
+        horizon=4,
+        has_control=True,
+    )["data"]["summary"]["handle"]
+
+    response = tools.predict_checkpoint(
+        checkpoint_handle=checkpoint_handle,
+        dataset_handle=dataset_handle,
+        prediction_request_handle=request_handle,
+    )
+
+    assert response["ok"] is False
+    assert "control flag" in response["error"]["message"]
+
+
+def test_compute_rollout_metrics_supports_rollout_and_horizon_metrics(tmp_path, monkeypatch) -> None:
+    dataset_path = tmp_path / "test.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+
+    def fake_load_model(model, checkpoint_path, *, context=None, **kwargs):
+        del model, checkpoint_path, context, kwargs
+
+        def predict_fn(x0, t, u=None, p=None, **predict_kwargs):
+            del t, u, p, predict_kwargs
+            return 0.5 * np.asarray(x0)
+
+        return object(), predict_fn
+
+    monkeypatch.setattr(dymad.io, "load_model", fake_load_model)
+
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"][
+        "handle"
+    ]
+    checkpoint_handle = tools.register_checkpoint(
+        model_ref="dymad.models.collections:KBF",
+        checkpoint_path=str(tmp_path / "fake.pt"),
+    )["data"]["summary"]["handle"]
+    prediction = tools.predict_checkpoint(
+        checkpoint_handle=checkpoint_handle,
+        dataset_handle=dataset_handle,
+    )
+
+    response = tools.compute_rollout_metrics(
+        prediction_handle=prediction["data"]["result"]["prediction_summary"]["handle"],
+        metric_specs=[
+            {"metric": "rollout_rmse"},
+            {"metric": "rollout_mae"},
+            {"metric": "horizon_rmse"},
+            {"metric": "horizon_mae"},
+        ],
+    )
+
+    result = response["data"]["result"]
+    metrics = result["metrics"]["results"]
+    assert response["ok"] is True
+    assert result["evaluation_summary"]["kind"] == "evaluation"
+    assert set(metrics) == {"rollout_rmse", "rollout_mae", "horizon_rmse", "horizon_mae"}
+    assert metrics["rollout_rmse"]["aggregate"]["n_test_trajectories"] == 3.0
+    assert len(metrics["rollout_mae"]["per_trajectory"]) == 3
+    assert metrics["horizon_rmse"]["n_steps"] == 6
+    assert len(metrics["horizon_mae"]["per_step"]) == 6
+
+
+def test_compute_rollout_metrics_rejects_unsupported_metric(tmp_path, monkeypatch) -> None:
+    dataset_path = tmp_path / "test.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+
+    def fake_load_model(model, checkpoint_path, *, context=None, **kwargs):
+        del model, checkpoint_path, context, kwargs
+
+        def predict_fn(x0, t, u=None, p=None, **predict_kwargs):
+            del t, u, p, predict_kwargs
+            return np.asarray(x0)
+
+        return object(), predict_fn
+
+    monkeypatch.setattr(dymad.io, "load_model", fake_load_model)
+
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"][
+        "handle"
+    ]
+    checkpoint_handle = tools.register_checkpoint(
+        model_ref="dymad.models.collections:KBF",
+        checkpoint_path=str(tmp_path / "fake.pt"),
+    )["data"]["summary"]["handle"]
+    prediction = tools.predict_checkpoint(
+        checkpoint_handle=checkpoint_handle,
+        dataset_handle=dataset_handle,
+    )
+
+    response = tools.compute_rollout_metrics(
+        prediction_handle=prediction["data"]["result"]["prediction_summary"]["handle"],
+        metric_specs=[{"metric": "vpt"}],
+    )
+
+    assert response["ok"] is False
+    assert "unsupported evaluation metric" in response["error"]["message"]
+
+
+def test_plot_rollouts_supports_best_selection(tmp_path, monkeypatch) -> None:
+    dataset_path = tmp_path / "test.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+
+    def fake_load_model(model, checkpoint_path, *, context=None, **kwargs):
+        del model, checkpoint_path, context, kwargs
+
+        def predict_fn(x0, t, u=None, p=None, **predict_kwargs):
+            del t, u, p, predict_kwargs
+            scales = np.linspace(0.2, 0.8, len(np.asarray(x0)))
+            return np.asarray(x0) * scales[:, None]
+
+        return object(), predict_fn
+
+    def fake_plot_trajectory(traj, ts, model_name=None, prefix=".", **kwargs):
+        del traj, ts, kwargs
+        path = Path(prefix) / f"{model_name}_prediction.png"
+        path.write_bytes(b"plot")
+
+    monkeypatch.setattr(dymad.io, "load_model", fake_load_model)
+    monkeypatch.setattr("dymad.agent.exec.workflow.plot_trajectory", fake_plot_trajectory)
+
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"][
+        "handle"
+    ]
+    checkpoint_handle = tools.register_checkpoint(
+        model_ref="dymad.models.collections:KBF",
+        checkpoint_path=str(tmp_path / "fake.pt"),
+    )["data"]["summary"]["handle"]
+    prediction = tools.predict_checkpoint(
+        checkpoint_handle=checkpoint_handle,
+        dataset_handle=dataset_handle,
+    )
+
+    response = tools.plot_rollouts(
+        prediction_handle=prediction["data"]["result"]["prediction_summary"]["handle"],
+        selection="best",
+        max_plots=2,
+    )
+
+    result = response["data"]["result"]
+    assert response["ok"] is True
+    assert len(result["artifacts"]["plot_paths"]) == 2
+    assert all(Path(path).is_file() for path in result["artifacts"]["plot_paths"])
 
 
 def test_evaluate_model_passes_active_context_to_loader(tmp_path, monkeypatch) -> None:
@@ -523,5 +740,6 @@ def test_evaluate_model_graph_skips_plot(tmp_path, monkeypatch) -> None:
 
     result = response["data"]["result"]
     assert response["ok"] is True
+    assert result["prediction_summary"]["kind"] == "prediction_result"
     assert result["artifacts"]["plot_paths"] == []
     assert result["plot_skipped_reason"] == "graph plotting unsupported in v1"

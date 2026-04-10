@@ -79,6 +79,57 @@ def test_persisted_dataset_run_and_evaluation_round_trip(tmp_path) -> None:
     assert kinds == ["checkpoint", "dataset", "evaluation", "training_run"]
 
 
+def test_persisted_prediction_result_round_trip(tmp_path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    dataset_path = tmp_path / "test.npz"
+    np.savez_compressed(
+        dataset_path,
+        t=np.linspace(0.0, 1.0, 5),
+        x=np.ones((2, 5, 2)),
+    )
+
+    first = build_default_context(artifact_root=artifact_root)
+    dataset = first.facade.register_dataset_file(path=str(dataset_path))
+    checkpoint = first.facade.register_checkpoint(
+        model_ref="dymad.models.collections:KBF",
+        checkpoint_path="checkpoints/kbf.pt",
+    )
+    prediction_dir = tmp_path / "prediction_result"
+    prediction_dir.mkdir()
+    predictions_path = prediction_dir / "predictions.npz"
+    np.savez_compressed(
+        predictions_path,
+        truth=np.array([np.ones((5, 2))], dtype=object),
+        predictions=np.array([np.zeros((5, 2))], dtype=object),
+        times=np.array([np.linspace(0.0, 1.0, 5)], dtype=object),
+        controls=np.array([None], dtype=object),
+        parameters=np.array([None], dtype=object),
+        edge_indices=np.array([None], dtype=object),
+        edge_weights=np.array([None], dtype=object),
+        edge_attrs=np.array([None], dtype=object),
+        selected_indices=np.array([0]),
+    )
+    summary = first.facade.register_prediction_result(
+        checkpoint_handle=checkpoint.handle,
+        dataset_handle=dataset.handle,
+        prediction_request_handle=None,
+        artifact_dir=str(prediction_dir),
+        predictions_path=str(predictions_path),
+        dataset_kind="regular",
+    )
+
+    second = build_default_context(artifact_root=artifact_root)
+    record = second.facade.get_prediction_result(summary.handle)
+    described = second.facade.describe_object(summary.handle)
+
+    assert record.checkpoint_handle == checkpoint.handle
+    assert record.dataset_handle == dataset.handle
+    assert record.dataset_kind == "regular"
+    assert record.predictions_path == str(predictions_path)
+    assert described.kind == "prediction_result"
+    assert described.preview == f"regular @ {predictions_path}"
+
+
 def test_persisted_spectral_snapshots_round_trip(tmp_path) -> None:
     artifact_root = tmp_path / "artifacts"
     first = build_default_context(artifact_root=artifact_root)
