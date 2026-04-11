@@ -16,11 +16,19 @@ def test_phase1_skill_staging_files_exist() -> None:
 
     assert "list_model_families" in train_body
     assert "resolve_training_intent" in train_body
+    assert "intent.accepted_inputs" in train_body
+    assert "suggested_validate_request" in train_body
+    assert (
+        "Do not inspect or modify repo code unless an MCP tool reports that the requested workflow is unsupported."
+        in train_body
+    )
     assert "validate_training_config" in train_body
     assert "materialize_training_config" in train_body
     assert "train_model" in train_body
     assert "free text" in train_body
     assert "DyMAD Train Model" in train_openai_yaml
+    assert "intent.accepted_inputs" in train_openai_yaml
+    assert "suggested_validate_request" in train_openai_yaml
 
     assert "register_checkpoint" in eval_body
     assert "validate_dataset_compatibility" in eval_body

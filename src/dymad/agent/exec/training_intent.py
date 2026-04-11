@@ -133,6 +133,7 @@ class ResolvedTrainingIntent:
     assumptions: tuple[str, ...]
     warnings: tuple[str, ...]
     unresolved_fields: tuple[str, ...]
+    accepted_inputs: dict[str, Any]
     trace: tuple[IntentTraceStep, ...]
     rejection: IntentRejection | None = None
 
@@ -324,6 +325,12 @@ def resolve_training_intent(intent_input: TrainingIntentInput) -> ResolvedTraini
     assumptions: list[str] = []
     warnings: list[str] = []
     unresolved_fields: list[str] = []
+    accepted_inputs = _build_accepted_inputs(
+        normalized_text=normalized_text,
+        model_families=intent_input.model_families,
+        reference_profiles=intent_input.reference_profiles,
+        train_dataset_kind=None,
+    )
 
     candidates = _build_dataset_candidates(intent_input=intent_input)
     override_state = _normalize_override_payload(intent_input.override_payload, traces=traces)
@@ -333,6 +340,7 @@ def resolve_training_intent(intent_input: TrainingIntentInput) -> ResolvedTraini
             assumptions=assumptions,
             warnings=warnings,
             unresolved_fields=unresolved_fields,
+            accepted_inputs=accepted_inputs,
             rejection=override_state.rejection,
         )
 
@@ -352,8 +360,16 @@ def resolve_training_intent(intent_input: TrainingIntentInput) -> ResolvedTraini
             assumptions=assumptions,
             warnings=warnings,
             unresolved_fields=unresolved_fields,
+            accepted_inputs=accepted_inputs,
             rejection=dataset_resolution.rejection,
         )
+
+    accepted_inputs = _build_accepted_inputs(
+        normalized_text=normalized_text,
+        model_families=intent_input.model_families,
+        reference_profiles=intent_input.reference_profiles,
+        train_dataset_kind=dataset_resolution.train.kind,
+    )
 
     model_ref = override_state.runtime.get("model_ref")
     if model_ref is None:
@@ -369,6 +385,7 @@ def resolve_training_intent(intent_input: TrainingIntentInput) -> ResolvedTraini
                 assumptions=assumptions,
                 warnings=warnings,
                 unresolved_fields=unresolved_fields,
+                accepted_inputs=accepted_inputs,
                 rejection=model_resolution.rejection,
             )
         model_ref = model_resolution.model_ref
@@ -459,6 +476,17 @@ def resolve_training_intent(intent_input: TrainingIntentInput) -> ResolvedTraini
         traces=traces,
         assumptions=assumptions,
     )
+    accepted_inputs = _finalize_accepted_inputs(
+        accepted_inputs=accepted_inputs,
+        model_families=intent_input.model_families,
+        reference_profiles=intent_input.reference_profiles,
+        model_ref=model_ref,
+        reference_profile=reference_profile,
+        config_overrides=config_overrides,
+        phase_overrides=phase_overrides,
+        run_name=runtime_values["run_name"],
+        artifact_root=runtime_values["artifact_root"],
+    )
 
     return ResolvedTrainingIntent(
         selected_train_dataset_path=dataset_resolution.train.path,
@@ -481,6 +509,7 @@ def resolve_training_intent(intent_input: TrainingIntentInput) -> ResolvedTraini
         assumptions=tuple(assumptions),
         warnings=tuple(warnings),
         unresolved_fields=tuple(dict.fromkeys(unresolved_fields)),
+        accepted_inputs=accepted_inputs,
         trace=tuple(traces),
         rejection=None if not unresolved_fields else None,
     )
@@ -522,6 +551,7 @@ def _empty_result(
     assumptions: list[str],
     warnings: list[str],
     unresolved_fields: list[str],
+    accepted_inputs: dict[str, Any],
     rejection: IntentRejection,
 ) -> ResolvedTrainingIntent:
     return ResolvedTrainingIntent(
@@ -545,6 +575,7 @@ def _empty_result(
         assumptions=tuple(assumptions),
         warnings=tuple(warnings),
         unresolved_fields=tuple(unresolved_fields),
+        accepted_inputs=accepted_inputs,
         trace=tuple(traces),
         rejection=rejection,
     )
@@ -952,6 +983,189 @@ def _infer_dataset_kind_from_text(normalized_text: str) -> str | None:
     if "regular" in normalized_text or "non-graph" in normalized_text:
         return "regular"
     return None
+
+
+def _build_accepted_inputs(
+    *,
+    normalized_text: str,
+    model_families: tuple[ModelFamilyDescription, ...],
+    reference_profiles: tuple[ReferenceProfileDescription, ...],
+    train_dataset_kind: str | None,
+) -> dict[str, Any]:
+    suggested_model_refs = _filter_model_families_for_hints(
+        normalized_text=normalized_text,
+        model_families=model_families,
+        train_dataset_kind=train_dataset_kind,
+    )
+    if not suggested_model_refs:
+        suggested_model_refs = [item.model_ref for item in model_families]
+    suggested_profile_names = _filter_reference_profiles_for_hints(
+        reference_profiles=reference_profiles,
+        suggested_model_refs=suggested_model_refs,
+        train_dataset_kind=train_dataset_kind,
+    )
+    override_examples = {
+        key: list(spec.examples)
+        for key, spec in TRAINING_INTENT_FIELD_REGISTRY.items()
+        if spec.examples
+    }
+    return {
+        "dataset_formats": ["npz"],
+        "dataset_kinds": ["regular", "graph"],
+        "phase_trainers": ["Linear", "Weak", "NODE"],
+        "phase_examples": [
+            {
+                "type": "optimizer",
+                "name": "Linear",
+                "trainer": "Linear",
+                "n_epochs": 1,
+            },
+            {
+                "type": "optimizer",
+                "name": "NODE",
+                "trainer": "NODE",
+                "n_epochs": 25,
+            },
+        ],
+        "suggested_model_refs": suggested_model_refs,
+        "suggested_reference_profiles": suggested_profile_names,
+        "override_fields": sorted(TRAINING_INTENT_FIELD_REGISTRY),
+        "override_examples": override_examples,
+        "notes": [
+            "dataset.kind accepts only 'regular' or 'graph'",
+            "optimizer trainer values accept only 'Linear', 'Weak', or 'NODE'",
+            "prefer structured overrides for ambiguous fields such as model_ref, reference_profile, and config.phases",
+        ],
+    }
+
+
+def _filter_model_families_for_hints(
+    *,
+    normalized_text: str,
+    model_families: tuple[ModelFamilyDescription, ...],
+    train_dataset_kind: str | None,
+) -> list[str]:
+    family_token = _extract_family_token(normalized_text)
+    time_domain = _extract_time_domain(normalized_text)
+    graph_mode = _extract_graph_mode(normalized_text)
+    candidates = list(model_families)
+    if family_token is not None:
+        candidates = [
+            item for item in candidates if _family_base_token(item.model_ref) == family_token
+        ]
+    if time_domain is not None:
+        narrowed = [item for item in candidates if item.time_domain == time_domain]
+        if narrowed:
+            candidates = narrowed
+    if graph_mode is not None:
+        narrowed = [item for item in candidates if item.graph_mode == graph_mode]
+        if narrowed:
+            candidates = narrowed
+    if train_dataset_kind == "regular":
+        narrowed = [item for item in candidates if not item.expects_graph_data]
+        if narrowed:
+            candidates = narrowed
+    elif train_dataset_kind == "graph":
+        narrowed = [item for item in candidates if item.expects_graph_data]
+        if narrowed:
+            candidates = narrowed
+    return [item.model_ref for item in candidates]
+
+
+def _filter_reference_profiles_for_hints(
+    *,
+    reference_profiles: tuple[ReferenceProfileDescription, ...],
+    suggested_model_refs: list[str],
+    train_dataset_kind: str | None,
+) -> list[str]:
+    candidates = list(reference_profiles)
+    if train_dataset_kind is not None:
+        narrowed = [
+            item
+            for item in candidates
+            if item.dataset_kind is None or item.dataset_kind == train_dataset_kind
+        ]
+        if narrowed:
+            candidates = narrowed
+    if suggested_model_refs:
+        narrowed = [
+            item
+            for item in candidates
+            if any(ref in suggested_model_refs for ref in item.model_refs)
+        ]
+        if narrowed:
+            candidates = narrowed
+    return [item.profile_name for item in candidates]
+
+
+def _finalize_accepted_inputs(
+    *,
+    accepted_inputs: dict[str, Any],
+    model_families: tuple[ModelFamilyDescription, ...],
+    reference_profiles: tuple[ReferenceProfileDescription, ...],
+    model_ref: str | None,
+    reference_profile: str | None,
+    config_overrides: dict[str, Any],
+    phase_overrides: list[dict[str, Any]] | None,
+    run_name: str | None,
+    artifact_root: str | None,
+) -> dict[str, Any]:
+    finalized = copy.deepcopy(accepted_inputs)
+    finalized["config_sections"] = sorted(
+        {
+            field.canonical_path.removeprefix("config.")
+            for field in TRAINING_INTENT_FIELD_REGISTRY.values()
+            if field.canonical_path.startswith("config.")
+        }
+    )
+    finalized["config_strategy"] = {
+        "use_sparse_overrides_only": True,
+        "pass_intent_structured_config_directly_to_validate_training_config": True,
+        "validator_normalizes_defaults": True,
+        "avoid_local_template_mining": True,
+    }
+
+    structured_config = copy.deepcopy(config_overrides)
+    if phase_overrides is not None:
+        structured_config["phases"] = copy.deepcopy(phase_overrides)
+    finalized["suggested_validate_request"] = {
+        "model_ref": model_ref,
+        "reference_profile": reference_profile,
+        "run_name": run_name,
+        "config": structured_config,
+    }
+    finalized["suggested_train_request"] = {
+        "artifact_root": artifact_root,
+        "model_ref": model_ref,
+        "reference_profile": reference_profile,
+        "run_name": run_name,
+        "config": copy.deepcopy(structured_config),
+    }
+
+    if model_ref is not None:
+        family = next((item for item in model_families if item.model_ref == model_ref), None)
+        if family is not None:
+            finalized["selected_model_family"] = {
+                "model_ref": family.model_ref,
+                "name": family.name,
+                "time_domain": family.time_domain,
+                "graph_mode": family.graph_mode,
+                "recipe_kind": family.recipe_kind,
+            }
+    if reference_profile is not None:
+        profile = next(
+            (item for item in reference_profiles if item.profile_name == reference_profile),
+            None,
+        )
+        if profile is not None:
+            finalized["selected_reference_profile_defaults"] = {
+                "profile_name": profile.profile_name,
+                "dataset_kind": profile.dataset_kind,
+                "model_refs": list(profile.model_refs),
+                "model_defaults": copy.deepcopy(profile.model_defaults),
+                "default_phases": copy.deepcopy(profile.default_phases),
+            }
+    return finalized
 
 
 def _resolve_model_family(

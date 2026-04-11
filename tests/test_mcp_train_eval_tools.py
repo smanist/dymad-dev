@@ -149,6 +149,18 @@ def test_inspect_dataset_without_control_inputs(tmp_path) -> None:
     assert inspected["data"]["inspection"]["control_dim"] == 0
 
 
+def test_register_dataset_file_reports_supported_kinds_on_error(tmp_path) -> None:
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+
+    response = tools.register_dataset_file(path=str(dataset_path), kind="train")
+
+    assert response["ok"] is False
+    assert response["error"]["type"] == "ValueError"
+    assert "supported kinds: graph, regular" in response["error"]["message"]
+
+
 def test_train_model_infers_profile_and_persists_run(tmp_path, monkeypatch) -> None:
     _patch_fake_trainers(monkeypatch)
     dataset_path = tmp_path / "train.npz"

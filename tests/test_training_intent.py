@@ -61,6 +61,32 @@ def test_executor_resolves_concise_lti_request_and_validates(tmp_path) -> None:
     assert intent.config_overrides["transform_u"]["type"] == "identity"
     assert intent.phases_override is not None
     assert [phase["trainer"] for phase in intent.phases_override] == ["Linear", "NODE"]
+    assert intent.accepted_inputs["dataset_kinds"] == ["regular", "graph"]
+    assert intent.accepted_inputs["phase_trainers"] == ["Linear", "Weak", "NODE"]
+    assert "dymad.models.collections:DLTI" in intent.accepted_inputs["suggested_model_refs"]
+    assert "lti-regular-default" in intent.accepted_inputs["suggested_reference_profiles"]
+    assert intent.accepted_inputs["override_examples"]["dataset.kind"] == ["regular", "graph"]
+    assert intent.accepted_inputs["config_strategy"]["use_sparse_overrides_only"] is True
+    assert (
+        intent.accepted_inputs["config_strategy"][
+            "pass_intent_structured_config_directly_to_validate_training_config"
+        ]
+        is True
+    )
+    assert intent.accepted_inputs["suggested_validate_request"]["train_dataset_handle"] == (
+        intent.selected_train_dataset_handle
+    )
+    assert intent.accepted_inputs["suggested_validate_request"]["model_ref"] == intent.model_ref
+    assert intent.accepted_inputs["suggested_validate_request"]["reference_profile"] == (
+        intent.reference_profile
+    )
+    assert intent.accepted_inputs["suggested_validate_request"]["config"] == (
+        intent.structured_config()
+    )
+    assert (
+        intent.accepted_inputs["selected_reference_profile_defaults"]["profile_name"]
+        == "lti-regular-default"
+    )
 
     validation = context.executor.validate_training_config(
         train_dataset_handle=intent.selected_train_dataset_handle,

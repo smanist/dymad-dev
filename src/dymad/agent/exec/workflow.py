@@ -827,6 +827,17 @@ class CompatibilityExecutor:
         )
         if not final.is_valid:
             return final
+        accepted_inputs = copy.deepcopy(final.accepted_inputs)
+        suggested_validate = accepted_inputs.get("suggested_validate_request")
+        if isinstance(suggested_validate, dict):
+            suggested_validate["train_dataset_handle"] = selected_train_handle
+            if selected_valid_handle is not None:
+                suggested_validate["valid_dataset_handle"] = selected_valid_handle
+        suggested_train = accepted_inputs.get("suggested_train_request")
+        if isinstance(suggested_train, dict):
+            suggested_train["train_dataset_handle"] = selected_train_handle
+            if selected_valid_handle is not None:
+                suggested_train["valid_dataset_handle"] = selected_valid_handle
         return ResolvedTrainingIntent(
             selected_train_dataset_path=final.selected_train_dataset_path,
             selected_train_dataset_handle=selected_train_handle,
@@ -848,6 +859,7 @@ class CompatibilityExecutor:
             assumptions=final.assumptions,
             warnings=final.warnings,
             unresolved_fields=final.unresolved_fields,
+            accepted_inputs=accepted_inputs,
             trace=final.trace,
             rejection=final.rejection,
         )

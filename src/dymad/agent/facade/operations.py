@@ -63,7 +63,8 @@ class FacadeOperations:
         if format not in self._DATASET_FORMATS:
             raise ValueError(f"unsupported dataset format: {format}")
         if kind not in self._DATASET_KINDS:
-            raise ValueError(f"unsupported dataset kind: {kind}")
+            supported = ", ".join(sorted(self._DATASET_KINDS))
+            raise ValueError(f"unsupported dataset kind: {kind}. supported kinds: {supported}")
         handle = self._store.put_dataset(
             path=normalized_path,
             format=format,
