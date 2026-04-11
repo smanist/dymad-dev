@@ -547,6 +547,54 @@ Finalize the migration by simplifying skill guidance, updating docs/tests, and d
 
 This keeps review scope manageable and allows validation at each architectural seam.
 
+## Execution Rules
+
+Use the following rules when implementing this migration so work proceeds consecutively and does not drift from the plan:
+
+- Treat the migration as 9 delivery increments, not 10, because `T100` and `T110` are intentionally combined into PR 1.
+- Never start a task whose declared dependencies are not already merged and stable.
+- For each increment, treat that task's:
+  - Goal
+  - Scope
+  - Deliverables
+  - Acceptance criteria
+  as the only allowed scope for that PR.
+- Do not pull later-task work forward just because it is convenient during refactoring.
+- Preserve the stated boundary `agent.mcp -> agent.exec -> agent.facade -> store` unless the current task explicitly changes it.
+- Prefer wrapping, extraction, and reuse of current executor/library logic over rewrites.
+- Keep developer/raw tools working until the plan explicitly moves or splits them.
+- Add or update tests for the current task before calling the task complete.
+- For Python edits, run `make check` before finishing the task. Do not mark the task complete unless the required checks pass or a blocking failure is reported explicitly.
+- Do not simplify docs, skills, or deprecate raw user-facing paths early; reserve that cleanup for `T190`.
+
+## Per-Task Execution Loop
+
+Run every migration increment with the same loop:
+
+1. Identify the current PR target from the sequence above and confirm all dependencies are already landed.
+2. Restate the task's acceptance criteria as the implementation contract for the current increment.
+3. Inspect only the repo touch points named for that task and the minimum supporting internals needed to implement it.
+4. Write or update tests that define the intended seam for the current task.
+5. Implement the smallest change set that satisfies the task without introducing surfaces from later tasks.
+6. Run the relevant verification for the edited code.
+7. If verification fails, fix the issue within the same task if it is in-scope; otherwise stop and report the blocker instead of leaking into the next task.
+8. Confirm the current increment against its acceptance criteria before moving on.
+9. Start the next task only from the merged, verified state of the previous increment.
+
+## Anti-Drift Checks
+
+Before finishing any migration PR, verify all of the following are true:
+
+- The change only implements the current task or planned combined increment.
+- No user-mode surface was introduced before `T140`.
+- No compiled-request execution handle was introduced before `T130`.
+- No analysis workflow implementation started before `T150`.
+- `T160` landed before `T170`.
+- The developer/user mode split was not introduced before `T180`.
+- Cleanup, skill simplification, and deprecation messaging were left for `T190`.
+
+If any item fails, reduce scope before continuing.
+
 ## Done Condition for the Full Migration
 
 The migration is complete when all of the following are true:
