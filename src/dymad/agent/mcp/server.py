@@ -137,6 +137,26 @@ def build_server(
         )
 
     @server.tool
+    def list_model_capabilities() -> dict[str, Any]:
+        """List supported model families and implementation variants."""
+        return tools.list_model_capabilities()
+
+    @server.tool
+    def resolve_model_capability(key_or_alias: str) -> dict[str, Any]:
+        """Resolve one model family by canonical key, alias, or current model_ref."""
+        return tools.resolve_model_capability(key_or_alias=key_or_alias)
+
+    @server.tool
+    def list_profile_capabilities() -> dict[str, Any]:
+        """List training profiles and their current model/dataset mappings."""
+        return tools.list_profile_capabilities()
+
+    @server.tool
+    def list_training_capabilities(dataset_handle: str | None = None) -> dict[str, Any]:
+        """List supported training workflows, optionally filtered by one dataset handle."""
+        return tools.list_training_capabilities(dataset_handle=dataset_handle)
+
+    @server.tool
     def describe_object(handle: str) -> dict[str, Any]:
         """Return the stored summary for one known handle."""
         return tools.describe_object(handle=handle)

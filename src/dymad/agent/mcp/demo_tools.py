@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, cast
 
 from dymad.agent.exec.context import ExecutionContext, build_default_context
+from dymad.agent.registry import (
+    DatasetKind,
+    list_model_capabilities,
+    list_profile_capabilities,
+    list_training_capabilities,
+    resolve_model_capability,
+)
 from dymad.agent.store.object_store import ObjectSummary
 
 
@@ -161,6 +168,37 @@ class DemoTools:
                         predict_kwargs=predict_kwargs,
                     )
                 )
+            }
+        )
+
+    def list_model_capabilities(self) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "capabilities": [asdict(capability) for capability in list_model_capabilities()]
+            }
+        )
+
+    def resolve_model_capability(self, *, key_or_alias: str) -> dict[str, Any]:
+        return self._wrap(lambda: {"capability": asdict(resolve_model_capability(key_or_alias))})
+
+    def list_profile_capabilities(self) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "capabilities": [asdict(capability) for capability in list_profile_capabilities()]
+            }
+        )
+
+    def list_training_capabilities(self, *, dataset_handle: str | None = None) -> dict[str, Any]:
+        dataset_kind: DatasetKind | None = None
+        if dataset_handle is not None:
+            dataset_kind = cast(DatasetKind, self._context.facade.get_dataset(dataset_handle).kind)
+        return self._wrap(
+            lambda: {
+                "dataset_kind": dataset_kind,
+                "capabilities": [
+                    asdict(capability)
+                    for capability in list_training_capabilities(dataset_kind=dataset_kind)
+                ],
             }
         )
 
