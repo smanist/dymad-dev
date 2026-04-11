@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dymad.agent.facade.handles import (
     CheckpointHandle,
+    CompiledTrainingRequestHandle,
     DatasetHandle,
     EvaluationHandle,
     PredictionHandle,
@@ -15,6 +17,7 @@ from dymad.agent.facade.handles import (
 )
 from dymad.agent.store.object_store import (
     CheckpointRecord,
+    CompiledTrainingRequestRecord,
     DatasetRecord,
     EvaluationRecord,
     ObjectStore,
@@ -25,8 +28,10 @@ from dymad.agent.store.object_store import (
 )
 
 if TYPE_CHECKING:
+    from dymad.agent.compiler import CompiledTrainingRequest
     from dymad.sako.snapshot import SpectralSnapshot
 else:
+    CompiledTrainingRequest = Any
     SpectralSnapshot = Any
 
 
@@ -39,6 +44,7 @@ class FacadeOperations:
         "dataset",
         "checkpoint",
         "training_run",
+        "compiled_training_request",
         "evaluation",
         "prediction_request",
         "spectral_snapshot",
@@ -117,6 +123,35 @@ class FacadeOperations:
         )
         return self._store.summarize(handle)
 
+    def register_compiled_training_request(
+        self,
+        *,
+        compiled_request: CompiledTrainingRequest,
+    ) -> ObjectSummary:
+        train_dataset = DatasetHandle.parse(compiled_request.request.train_dataset_handle)
+        valid_dataset = (
+            None
+            if compiled_request.request.valid_dataset_handle is None
+            else DatasetHandle.parse(compiled_request.request.valid_dataset_handle)
+        )
+        handle = self._store.put_compiled_training_request(
+            train_dataset_handle=train_dataset.value,
+            valid_dataset_handle=None if valid_dataset is None else valid_dataset.value,
+            model_key=compiled_request.model.key,
+            model_ref=compiled_request.model_ref,
+            reference_profile=compiled_request.profile.key,
+            train_dataset_kind=compiled_request.train_dataset_kind,
+            valid_dataset_kind=compiled_request.valid_dataset_kind,
+            effective_run_name=compiled_request.effective_run_name,
+            effective_config=compiled_request.effective_config,
+            trainer_kind=compiled_request.trainer_kind,
+            seed=compiled_request.request.seed,
+            device=compiled_request.request.device,
+            max_workers=compiled_request.request.max_workers,
+            warnings=[asdict(warning) for warning in compiled_request.warnings],
+        )
+        return self._store.summarize(handle)
+
     def register_evaluation(
         self,
         *,
@@ -175,6 +210,10 @@ class FacadeOperations:
     def get_training_run(self, handle: str) -> TrainingRunRecord:
         run = TrainingRunHandle.parse(handle)
         return self._store.get_training_run(run.value)
+
+    def get_compiled_training_request(self, handle: str) -> CompiledTrainingRequestRecord:
+        request = CompiledTrainingRequestHandle.parse(handle)
+        return self._store.get_compiled_training_request(request.value)
 
     def get_evaluation(self, handle: str) -> EvaluationRecord:
         evaluation = EvaluationHandle.parse(handle)

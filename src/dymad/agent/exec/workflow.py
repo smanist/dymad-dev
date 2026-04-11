@@ -25,6 +25,7 @@ from dymad.agent.exec.state import (
 )
 from dymad.agent.exec.training_profiles import profile_config, resolve_profile_name
 from dymad.agent.facade.operations import FacadeOperations
+from dymad.agent.store.object_store import CompiledTrainingRequestRecord
 from dymad.utils.misc import _normalize_legacy_training_config
 from dymad.utils.plot import plot_trajectory
 
@@ -221,6 +222,80 @@ def _load_training_metrics(summary_path: Path) -> dict[str, float | None]:
         }
 
 
+def _execute_training_run(
+    *,
+    facade: FacadeOperations,
+    model_ref: str,
+    train_dataset_handle: str,
+    valid_dataset_handle: str | None,
+    reference_profile: str,
+    run_name: str,
+    effective_config: dict[str, Any],
+    artifact_root: str,
+    seed: int | None,
+    device: str,
+    max_workers: int,
+) -> TrainModelResult:
+    model = _resolve_model_ref(model_ref)
+    artifact_root_path = _ensure_dir(artifact_root)
+    trainer_cls, trainer_kind = _select_trainer(effective_config)
+    config_path = _write_training_config(
+        effective_config,
+        artifact_root=artifact_root_path,
+        run_name=run_name,
+    )
+
+    _set_seed(seed)
+    trainer = trainer_cls(
+        str(config_path),
+        model,
+        device=_device_from_request(device),
+        max_workers=max_workers,
+    )
+    trainer.train()
+
+    run_root = artifact_root_path / run_name
+    checkpoint_path = run_root / f"{run_name}.pt"
+    summary_path = run_root / f"{run_name}_summary.npz"
+    history_plot_path = run_root / f"{run_name}_history.png"
+    prediction_plot_path = run_root / f"{run_name}_prediction.png"
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"training did not produce checkpoint: {checkpoint_path}")
+    if not summary_path.is_file():
+        raise FileNotFoundError(f"training did not produce summary: {summary_path}")
+
+    checkpoint_summary = facade.register_checkpoint(
+        model_ref=model_ref,
+        checkpoint_path=str(checkpoint_path),
+        device=str(trainer.device),
+    )
+    run_summary = facade.register_training_run(
+        model_ref=model_ref,
+        train_dataset_handle=train_dataset_handle,
+        valid_dataset_handle=valid_dataset_handle,
+        reference_profile=reference_profile,
+        checkpoint_handle=checkpoint_summary.handle,
+        artifact_root=str(artifact_root_path),
+        run_name=run_name,
+    )
+
+    return TrainModelResult(
+        run_summary=run_summary,
+        checkpoint_summary=checkpoint_summary,
+        artifacts={
+            "checkpoint_path": str(checkpoint_path),
+            "training_summary_path": str(summary_path),
+            "history_plot_path": str(history_plot_path) if history_plot_path.is_file() else None,
+            "prediction_plot_path": (
+                str(prediction_plot_path) if prediction_plot_path.is_file() else None
+            ),
+        },
+        metrics=_load_training_metrics(summary_path),
+        reference_profile=reference_profile,
+        trainer_kind=trainer_kind,
+    )
+
+
 def _trajectory_payload(manager, index: int) -> dict[str, Any]:
     from dymad.io import TrajectoryManagerGraph
 
@@ -275,6 +350,18 @@ class CompatibilityExecutor:
     def inspect_dataset(self, *, dataset_handle: str) -> DatasetInspection:
         return _inspect_dataset_record(self.facade.get_dataset(dataset_handle))
 
+    def train_compiled_request(
+        self,
+        *,
+        compiled_request_handle: str,
+        artifact_root: str,
+    ) -> TrainModelResult:
+        compiled_request = self.facade.get_compiled_training_request(compiled_request_handle)
+        return self._train_compiled_request_record(
+            compiled_request=compiled_request,
+            artifact_root=artifact_root,
+        )
+
     def train_model(
         self,
         *,
@@ -311,64 +398,39 @@ class CompatibilityExecutor:
             user_config=config,
             run_name=active_run_name,
         )
-        trainer_cls, trainer_kind = _select_trainer(effective_config)
-        artifact_root_path = _ensure_dir(artifact_root)
-        config_path = _write_training_config(
-            effective_config,
-            artifact_root=artifact_root_path,
-            run_name=active_run_name,
-        )
-
-        _set_seed(seed)
-        trainer = trainer_cls(
-            str(config_path),
-            model,
-            device=_device_from_request(device),
-            max_workers=max_workers,
-        )
-        trainer.train()
-
-        run_root = artifact_root_path / active_run_name
-        checkpoint_path = run_root / f"{active_run_name}.pt"
-        summary_path = run_root / f"{active_run_name}_summary.npz"
-        history_plot_path = run_root / f"{active_run_name}_history.png"
-        prediction_plot_path = run_root / f"{active_run_name}_prediction.png"
-        if not checkpoint_path.is_file():
-            raise FileNotFoundError(f"training did not produce checkpoint: {checkpoint_path}")
-        if not summary_path.is_file():
-            raise FileNotFoundError(f"training did not produce summary: {summary_path}")
-
-        checkpoint_summary = self.facade.register_checkpoint(
-            model_ref=model_ref,
-            checkpoint_path=str(checkpoint_path),
-            device=str(trainer.device),
-        )
-        run_summary = self.facade.register_training_run(
+        del model
+        return _execute_training_run(
+            facade=self.facade,
             model_ref=model_ref,
             train_dataset_handle=train_dataset_handle,
             valid_dataset_handle=valid_dataset_handle,
             reference_profile=profile_name,
-            checkpoint_handle=checkpoint_summary.handle,
-            artifact_root=str(artifact_root_path),
             run_name=active_run_name,
+            effective_config=effective_config,
+            artifact_root=artifact_root,
+            seed=seed,
+            device=device,
+            max_workers=max_workers,
         )
 
-        return TrainModelResult(
-            run_summary=run_summary,
-            checkpoint_summary=checkpoint_summary,
-            artifacts={
-                "checkpoint_path": str(checkpoint_path),
-                "training_summary_path": str(summary_path),
-                "history_plot_path": str(history_plot_path)
-                if history_plot_path.is_file()
-                else None,
-                "prediction_plot_path": (
-                    str(prediction_plot_path) if prediction_plot_path.is_file() else None
-                ),
-            },
-            metrics=_load_training_metrics(summary_path),
-            reference_profile=profile_name,
-            trainer_kind=trainer_kind,
+    def _train_compiled_request_record(
+        self,
+        *,
+        compiled_request: CompiledTrainingRequestRecord,
+        artifact_root: str,
+    ) -> TrainModelResult:
+        return _execute_training_run(
+            facade=self.facade,
+            model_ref=compiled_request.model_ref,
+            train_dataset_handle=compiled_request.train_dataset_handle,
+            valid_dataset_handle=compiled_request.valid_dataset_handle,
+            reference_profile=compiled_request.reference_profile,
+            run_name=compiled_request.effective_run_name,
+            effective_config=compiled_request.effective_config,
+            artifact_root=artifact_root,
+            seed=compiled_request.seed,
+            device=compiled_request.device,
+            max_workers=compiled_request.max_workers,
         )
 
     def evaluate_model(

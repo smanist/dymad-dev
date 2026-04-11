@@ -6,6 +6,7 @@ from typing import Any
 
 from dymad.agent.exec.context import ExecutionContext, build_default_context
 from dymad.agent.mcp.demo_tools import DemoTools
+from dymad.agent.mcp.user_tools import UserTools
 
 
 def build_server(
@@ -23,6 +24,7 @@ def build_server(
 
     active_context = context or build_default_context()
     tools = DemoTools(context=active_context)
+    user_tools = UserTools(context=active_context)
     server = FastMCP(name)
 
     @server.tool
@@ -154,7 +156,64 @@ def build_server(
     @server.tool
     def list_training_capabilities(dataset_handle: str | None = None) -> dict[str, Any]:
         """List supported training workflows, optionally filtered by one dataset handle."""
-        return tools.list_training_capabilities(dataset_handle=dataset_handle)
+        return user_tools.list_training_capabilities(dataset_handle=dataset_handle)
+
+    @server.tool
+    def compile_training_request(
+        train_dataset_handle: str,
+        model_key: str,
+        valid_dataset_handle: str | None = None,
+        reference_profile: str | None = None,
+        overrides: dict[str, Any] | None = None,
+        run_name: str | None = None,
+        seed: int | None = None,
+        device: str = "auto",
+        max_workers: int = 1,
+    ) -> dict[str, Any]:
+        """Compile and persist one user-mode training request."""
+        return user_tools.compile_training_request(
+            train_dataset_handle=train_dataset_handle,
+            model_key=model_key,
+            valid_dataset_handle=valid_dataset_handle,
+            reference_profile=reference_profile,
+            overrides=overrides,
+            run_name=run_name,
+            seed=seed,
+            device=device,
+            max_workers=max_workers,
+        )
+
+    @server.tool
+    def train_compiled_request(
+        compiled_request_handle: str,
+        artifact_root: str,
+    ) -> dict[str, Any]:
+        """Execute one persisted compiled training request."""
+        return user_tools.train_compiled_request(
+            compiled_request_handle=compiled_request_handle,
+            artifact_root=artifact_root,
+        )
+
+    @server.tool
+    def evaluate_checkpoint(
+        checkpoint_handle: str,
+        test_dataset_handle: str,
+        metric: str,
+        artifact_root: str,
+        plot_selection: str = "median",
+        max_plots: int = 1,
+        predict_kwargs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate one registered checkpoint against one registered test dataset."""
+        return user_tools.evaluate_checkpoint(
+            checkpoint_handle=checkpoint_handle,
+            test_dataset_handle=test_dataset_handle,
+            metric=metric,
+            artifact_root=artifact_root,
+            plot_selection=plot_selection,
+            max_plots=max_plots,
+            predict_kwargs=predict_kwargs,
+        )
 
     @server.tool
     def describe_object(handle: str) -> dict[str, Any]:

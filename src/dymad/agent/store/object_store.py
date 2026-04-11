@@ -46,6 +46,25 @@ class TrainingRunRecord:
 
 
 @dataclass(frozen=True)
+class CompiledTrainingRequestRecord:
+    handle: str
+    train_dataset_handle: str
+    valid_dataset_handle: str | None
+    model_key: str
+    model_ref: str
+    reference_profile: str
+    train_dataset_kind: str
+    valid_dataset_kind: str | None
+    effective_run_name: str
+    effective_config: dict[str, Any]
+    trainer_kind: str
+    seed: int | None
+    device: str
+    max_workers: int
+    warnings: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
 class EvaluationRecord:
     handle: str
     checkpoint_handle: str
@@ -87,6 +106,7 @@ class ObjectStore:
         self._checkpoints: dict[str, CheckpointRecord] = {}
         self._datasets: dict[str, DatasetRecord] = {}
         self._training_runs: dict[str, TrainingRunRecord] = {}
+        self._compiled_training_requests: dict[str, CompiledTrainingRequestRecord] = {}
         self._evaluations: dict[str, EvaluationRecord] = {}
         self._prediction_requests: dict[str, PredictionRequestRecord] = {}
         self._spectral_snapshots: dict[str, SpectralSnapshotRecord] = {}
@@ -176,6 +196,62 @@ class ObjectStore:
                 raise ObjectNotFoundError(f"unknown training run handle: {handle}") from exc
             record = self._artifact_store.load_training_run(handle)
             self._training_runs[handle] = record
+            return record
+
+    def put_compiled_training_request(
+        self,
+        *,
+        train_dataset_handle: str,
+        valid_dataset_handle: str | None,
+        model_key: str,
+        model_ref: str,
+        reference_profile: str,
+        train_dataset_kind: str,
+        valid_dataset_kind: str | None,
+        effective_run_name: str,
+        effective_config: dict[str, Any],
+        trainer_kind: str,
+        seed: int | None,
+        device: str,
+        max_workers: int,
+        warnings: list[dict[str, Any]],
+    ) -> str:
+        self.get_dataset(train_dataset_handle)
+        if valid_dataset_handle is not None:
+            self.get_dataset(valid_dataset_handle)
+        handle = self._new_handle("trainreq")
+        record = CompiledTrainingRequestRecord(
+            handle=handle,
+            train_dataset_handle=train_dataset_handle,
+            valid_dataset_handle=valid_dataset_handle,
+            model_key=model_key,
+            model_ref=model_ref,
+            reference_profile=reference_profile,
+            train_dataset_kind=train_dataset_kind,
+            valid_dataset_kind=valid_dataset_kind,
+            effective_run_name=effective_run_name,
+            effective_config=effective_config,
+            trainer_kind=trainer_kind,
+            seed=seed,
+            device=device,
+            max_workers=max_workers,
+            warnings=list(warnings),
+        )
+        self._compiled_training_requests[handle] = record
+        if self._artifact_store is not None:
+            self._artifact_store.persist_compiled_training_request(record)
+        return handle
+
+    def get_compiled_training_request(self, handle: str) -> CompiledTrainingRequestRecord:
+        try:
+            return self._compiled_training_requests[handle]
+        except KeyError as exc:
+            if self._artifact_store is None:
+                raise ObjectNotFoundError(
+                    f"unknown compiled training request handle: {handle}"
+                ) from exc
+            record = self._artifact_store.load_compiled_training_request(handle)
+            self._compiled_training_requests[handle] = record
             return record
 
     def put_evaluation(
@@ -295,6 +371,17 @@ class ObjectStore:
                 derived_from=run.checkpoint_handle,
                 preview=f"{run.run_name} ({run.model_ref})",
             )
+        if handle.startswith("trainreq_"):
+            request = self.get_compiled_training_request(handle)
+            return ObjectSummary(
+                handle=handle,
+                kind="compiled_training_request",
+                derived_from=request.train_dataset_handle,
+                preview=(
+                    f"{request.model_key}/{request.train_dataset_kind} -> "
+                    f"{request.reference_profile} ({request.trainer_kind})"
+                ),
+            )
         if handle.startswith("eval_"):
             evaluation = self.get_evaluation(handle)
             return ObjectSummary(
@@ -336,6 +423,9 @@ class ObjectStore:
                 summaries[handle] = self.summarize(handle)
         if kind in (None, "training_run"):
             for handle in self._training_runs:
+                summaries[handle] = self.summarize(handle)
+        if kind in (None, "compiled_training_request"):
+            for handle in self._compiled_training_requests:
                 summaries[handle] = self.summarize(handle)
         if kind in (None, "evaluation"):
             for handle in self._evaluations:

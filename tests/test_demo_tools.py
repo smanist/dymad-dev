@@ -109,7 +109,9 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
 
     assert server.name == "DyMAD Test"
     assert set(server.tools) == {
+        "compile_training_request",
         "describe_object",
+        "evaluate_checkpoint",
         "evaluate_model",
         "inspect_dataset",
         "list_model_capabilities",
@@ -121,6 +123,7 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
         "register_dataset_file",
         "register_checkpoint",
         "resolve_model_capability",
+        "train_compiled_request",
         "train_model",
     }
     response = server.tools["register_checkpoint"](
