@@ -14,6 +14,7 @@ Required MCP tools:
 - `describe_model_family`
 - `list_reference_profiles`
 - `describe_reference_profile`
+- `resolve_training_intent`
 - `validate_dataset_compatibility`
 - `validate_training_config`
 - `materialize_training_config`
@@ -24,7 +25,7 @@ Workflow:
 2. Inspect the registered datasets with `inspect_dataset`.
 3. Discover candidate model families with `list_model_families` and `describe_model_family`.
 4. Discover compatible reference profiles with `list_reference_profiles` and `describe_reference_profile`.
-5. Translate the user's free text request into structured `model_ref`, optional `reference_profile`, and `config`.
+5. Resolve the user's free text request into sparse structured intent with `resolve_training_intent`.
 6. Validate dataset/model compatibility with `validate_dataset_compatibility`.
 7. Validate the full structured training request with `validate_training_config`.
 8. Materialize the normalized config with `materialize_training_config`.
@@ -32,7 +33,7 @@ Workflow:
 10. Report the run handle, checkpoint handle, config path, summary path, and key metrics.
 
 Rules:
-- Do not pass free text into MCP tools. Natural-language interpretation happens in the skill, not the tool layer.
+- Prefer `resolve_training_intent` to translate free text into sparse structured overrides before validation.
 - Discovery comes first, validation comes second, execution comes last.
 - Require dataset handles for validation and training; never pass raw dataset paths directly into `train_model`.
 - Keep runtime-owned fields out of user config:

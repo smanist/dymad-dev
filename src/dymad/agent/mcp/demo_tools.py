@@ -126,6 +126,31 @@ class DemoTools:
             }
         )
 
+    def resolve_training_intent(
+        self,
+        *,
+        request_text: str,
+        cwd: str | None = None,
+        candidate_dataset_paths: list[str] | None = None,
+        train_dataset_handle: str | None = None,
+        valid_dataset_handle: str | None = None,
+        overrides: dict[str, Any] | str | None = None,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "intent": asdict(
+                    self._context.executor.resolve_training_intent(
+                        request_text=request_text,
+                        cwd=cwd,
+                        candidate_dataset_paths=candidate_dataset_paths,
+                        train_dataset_handle=train_dataset_handle,
+                        valid_dataset_handle=valid_dataset_handle,
+                        overrides=self._coerce_mapping(config=overrides, field_name="overrides"),
+                    )
+                )
+            }
+        )
+
     def validate_training_config(
         self,
         *,

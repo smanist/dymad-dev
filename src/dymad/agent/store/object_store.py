@@ -225,7 +225,9 @@ class ObjectStore:
             self._evaluations[handle] = record
             return record
 
-    def update_evaluation_plot_paths(self, handle: str, *, plot_paths: list[str]) -> EvaluationRecord:
+    def update_evaluation_plot_paths(
+        self, handle: str, *, plot_paths: list[str]
+    ) -> EvaluationRecord:
         record = self.get_evaluation(handle)
         updated = EvaluationRecord(
             handle=record.handle,

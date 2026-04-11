@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 from mcp.server.fastmcp import FastMCP
 
 from dymad.agent.exec.context import build_default_context
@@ -50,17 +51,30 @@ def test_demo_tools_discovery_and_validation_surfaces_are_json_safe(tmp_path) ->
         dataset_handle=dataset["data"]["summary"]["handle"],
         model_ref="dymad.models.collections:LDM",
     )
+    intent_dataset_path = tmp_path / "intent_train.npz"
+    np.savez_compressed(
+        intent_dataset_path,
+        t=np.linspace(0.0, 1.0, 5),
+        x=np.zeros((1, 5, 2)),
+    )
+    intent = tools.resolve_training_intent(
+        request_text="Use intent_train.npz to fit a discrete-time LTI model with 2 states",
+        cwd=str(tmp_path),
+        candidate_dataset_paths=[str(intent_dataset_path)],
+    )
 
     assert families["ok"] is True
     assert family["ok"] is True
     assert profiles["ok"] is True
     assert profile["ok"] is True
     assert compatibility["ok"] is True
+    assert intent["ok"] is True
 
 
 def test_build_server_registers_demo_tools(tmp_path) -> None:
+    artifact_root = tmp_path / "artifacts"
     server = build_server(
-        context=build_default_context(artifact_root=tmp_path / "artifacts"),
+        context=build_default_context(artifact_root=artifact_root),
         name="DyMAD Test",
     )
 
@@ -88,6 +102,7 @@ def test_build_server_registers_demo_tools(tmp_path) -> None:
         "prepare_prediction_request",
         "register_dataset_file",
         "register_checkpoint",
+        "resolve_training_intent",
         "train_model",
         "validate_dataset_compatibility",
         "validate_training_config",
@@ -97,6 +112,24 @@ def test_build_server_registers_demo_tools(tmp_path) -> None:
         checkpoint_path="checkpoints/lti.pt",
     )
     assert response["ok"] is True
+    assert (artifact_root / "mcp_trace.jsonl").is_file()
+    assert (artifact_root / "replay_scripts" / "mcp_trace.py").is_file()
+
+
+def test_build_server_defaults_to_tracing_and_replay_script_dir(tmp_path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    server = build_server(
+        context=build_default_context(artifact_root=artifact_root),
+        name="DyMAD Trace Defaults",
+    )
+
+    server._tool_manager.get_tool("describe_object").fn(handle="bad")
+
+    trace_path = artifact_root / "mcp_trace.jsonl"
+    replay_script_path = artifact_root / "replay_scripts" / "mcp_trace.py"
+    assert trace_path.is_file()
+    assert replay_script_path.is_file()
+    assert "tools.describe_object(**kwargs_1)" in replay_script_path.read_text(encoding="utf-8")
 
 
 def test_build_server_training_tools_accept_yaml_config_strings(tmp_path) -> None:

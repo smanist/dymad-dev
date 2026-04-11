@@ -33,6 +33,14 @@ from dymad.agent.exec.state import (
     TrainingRunInspection,
     TrainModelResult,
 )
+from dymad.agent.exec.training_intent import (
+    ResolvedTrainingIntent,
+    TrainingIntentDatasetCandidate,
+    TrainingIntentInput,
+)
+from dymad.agent.exec.training_intent import (
+    resolve_training_intent as compile_training_intent,
+)
 from dymad.agent.exec.training_profiles import (
     PROFILE_ALIASES,
     PROFILE_REGISTRY,
@@ -599,7 +607,10 @@ def _trajectory_metric_series(
     *,
     reducer: Callable[[np.ndarray, np.ndarray], float],
 ) -> np.ndarray:
-    values = [reducer(prediction, expected) for prediction, expected in zip(predictions, truth, strict=True)]
+    values = [
+        reducer(prediction, expected)
+        for prediction, expected in zip(predictions, truth, strict=True)
+    ]
     return np.asarray(values, dtype=float)
 
 
@@ -729,6 +740,117 @@ class CompatibilityExecutor:
             supported = ", ".join(available_profiles())
             raise ValueError(f"unknown profile '{profile_name}'. supported profiles: {supported}")
         return _describe_reference_profile(profile_name)
+
+    def resolve_training_intent(
+        self,
+        *,
+        request_text: str,
+        cwd: str | None = None,
+        candidate_dataset_paths: list[str] | None = None,
+        train_dataset_handle: str | None = None,
+        valid_dataset_handle: str | None = None,
+        overrides: dict[str, Any] | None = None,
+    ) -> ResolvedTrainingIntent:
+        candidate_paths = candidate_dataset_paths
+        if candidate_paths is None:
+            search_root = Path(cwd) if cwd is not None else Path.cwd()
+            candidate_paths = sorted(str(path) for path in search_root.glob("*.npz"))
+
+        def _candidate_from_handle(handle: str) -> TrainingIntentDatasetCandidate:
+            dataset_record = self.facade.get_dataset(handle)
+            inspection = _inspect_dataset_record(dataset_record)
+            return TrainingIntentDatasetCandidate(
+                path=dataset_record.path,
+                handle=dataset_record.handle,
+                format=dataset_record.format,
+                kind=dataset_record.kind,
+                inspection=inspection,
+            )
+
+        initial_candidates = []
+        if train_dataset_handle is not None:
+            initial_candidates.append(_candidate_from_handle(train_dataset_handle))
+        if valid_dataset_handle is not None and valid_dataset_handle != train_dataset_handle:
+            initial_candidates.append(_candidate_from_handle(valid_dataset_handle))
+
+        compiled = compile_training_intent(
+            TrainingIntentInput(
+                raw_request=request_text,
+                cwd=cwd,
+                candidate_dataset_paths=tuple(candidate_paths),
+                explicit_train_dataset_handle=train_dataset_handle,
+                explicit_valid_dataset_handle=valid_dataset_handle,
+                model_families=tuple(self.list_model_families()),
+                reference_profiles=tuple(self.list_reference_profiles()),
+                override_payload=overrides,
+                candidate_datasets=tuple(initial_candidates),
+            )
+        )
+        if not compiled.is_valid:
+            return compiled
+
+        selected_train_handle = compiled.selected_train_dataset_handle
+        selected_valid_handle = compiled.selected_valid_dataset_handle
+        if selected_train_handle is None and compiled.selected_train_dataset_path is not None:
+            registered = self.facade.register_dataset_file(
+                path=compiled.selected_train_dataset_path,
+                format=compiled.train_dataset_format or "npz",
+                kind=compiled.train_dataset_kind or "regular",
+            )
+            selected_train_handle = registered.handle
+        if selected_valid_handle is None and compiled.selected_valid_dataset_path is not None:
+            registered = self.facade.register_dataset_file(
+                path=compiled.selected_valid_dataset_path,
+                format=compiled.valid_dataset_format or "npz",
+                kind=compiled.valid_dataset_kind or compiled.train_dataset_kind or "regular",
+            )
+            selected_valid_handle = registered.handle
+
+        enriched_candidates: list[TrainingIntentDatasetCandidate] = []
+        if selected_train_handle is not None:
+            enriched_candidates.append(_candidate_from_handle(selected_train_handle))
+        if selected_valid_handle is not None and selected_valid_handle != selected_train_handle:
+            enriched_candidates.append(_candidate_from_handle(selected_valid_handle))
+
+        final = compile_training_intent(
+            TrainingIntentInput(
+                raw_request=request_text,
+                cwd=cwd,
+                candidate_dataset_paths=tuple(candidate_paths),
+                explicit_train_dataset_handle=selected_train_handle,
+                explicit_valid_dataset_handle=selected_valid_handle,
+                model_families=tuple(self.list_model_families()),
+                reference_profiles=tuple(self.list_reference_profiles()),
+                override_payload=overrides,
+                candidate_datasets=tuple(enriched_candidates),
+            )
+        )
+        if not final.is_valid:
+            return final
+        return ResolvedTrainingIntent(
+            selected_train_dataset_path=final.selected_train_dataset_path,
+            selected_train_dataset_handle=selected_train_handle,
+            selected_valid_dataset_path=final.selected_valid_dataset_path,
+            selected_valid_dataset_handle=selected_valid_handle,
+            train_dataset_format=final.train_dataset_format,
+            train_dataset_kind=final.train_dataset_kind,
+            valid_dataset_format=final.valid_dataset_format,
+            valid_dataset_kind=final.valid_dataset_kind,
+            model_ref=final.model_ref,
+            reference_profile=final.reference_profile,
+            config_overrides=final.config_overrides,
+            phases_override=final.phases_override,
+            artifact_root=final.artifact_root,
+            run_name=final.run_name,
+            seed=final.seed,
+            device=final.device,
+            max_workers=final.max_workers,
+            assumptions=final.assumptions,
+            warnings=final.warnings,
+            unresolved_fields=final.unresolved_fields,
+            trace=final.trace,
+            rejection=final.rejection,
+        )
 
     def validate_training_config(
         self,
@@ -957,7 +1079,9 @@ class CompatibilityExecutor:
         payloads: list[dict[str, Any]] = []
         predictions: list[np.ndarray] = []
         for index in selected_indices:
-            payload = _slice_payload_for_horizon(_trajectory_payload(manager, index), horizon=horizon)
+            payload = _slice_payload_for_horizon(
+                _trajectory_payload(manager, index), horizon=horizon
+            )
             kwargs = dict(predict_kwargs or {})
             kwargs.setdefault("device", "cpu")
             prediction = cast(

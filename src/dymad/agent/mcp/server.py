@@ -2,20 +2,30 @@
 
 from __future__ import annotations
 
+from os import PathLike
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from dymad.agent.exec.context import ExecutionContext, build_default_context
 from dymad.agent.mcp.demo_tools import DemoTools
+from dymad.agent.mcp.trace import JSONLTraceRecorder, TraceRecorder
 
 
 def build_server(
     *,
     context: ExecutionContext | None = None,
     name: str = "DyMAD Demo",
+    trace_path: str | PathLike[str] | None = None,
+    replay_script_path: str | PathLike[str] | None = None,
+    trace_recorder: TraceRecorder | None = None,
 ) -> FastMCP:
     """Build one `mcp.server.fastmcp.FastMCP` server around the DemoTools adapter."""
+    if trace_path is not None and trace_recorder is not None:
+        raise ValueError("build_server accepts trace_path or trace_recorder, not both")
+    if replay_script_path is not None and trace_recorder is not None:
+        raise ValueError("build_server accepts replay_script_path only with trace_path")
     active_context = context or build_default_context()
     tools = DemoTools(context=active_context)
     server = FastMCP(name, json_response=True, log_level="ERROR")
@@ -87,6 +97,25 @@ def build_server(
     def describe_reference_profile(profile_name: str) -> dict[str, Any]:
         """Describe one training reference profile."""
         return tools.describe_reference_profile(profile_name=profile_name)
+
+    @server.tool()
+    def resolve_training_intent(
+        request_text: str,
+        cwd: str | None = None,
+        candidate_dataset_paths: list[str] | None = None,
+        train_dataset_handle: str | None = None,
+        valid_dataset_handle: str | None = None,
+        overrides: dict[str, Any] | str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve a concise training request into a sparse structured training intent."""
+        return tools.resolve_training_intent(
+            request_text=request_text,
+            cwd=cwd,
+            candidate_dataset_paths=candidate_dataset_paths,
+            train_dataset_handle=train_dataset_handle,
+            valid_dataset_handle=valid_dataset_handle,
+            overrides=overrides,
+        )
 
     @server.tool()
     def validate_training_config(
@@ -271,7 +300,43 @@ def build_server(
         """List persisted object summaries, optionally filtered by kind."""
         return tools.list_objects(kind=kind)
 
+    recorder = trace_recorder
+    if recorder is None:
+        active_trace_path = (
+            Path(trace_path).expanduser().resolve()
+            if trace_path is not None
+            else _default_trace_path(active_context)
+        )
+        active_replay_script_path = (
+            Path(replay_script_path).expanduser().resolve()
+            if replay_script_path is not None
+            else _default_replay_script_path(active_context, active_trace_path)
+        )
+        recorder = JSONLTraceRecorder(
+            active_trace_path,
+            replay_script_path=active_replay_script_path,
+        )
+    if recorder is not None:
+        _instrument_server(server, recorder)
+
     return server
+
+
+def _instrument_server(server: FastMCP, recorder: TraceRecorder) -> None:
+    for tool_name in server._tool_manager._tools:
+        tool = server._tool_manager.get_tool(tool_name)
+        if tool is None:
+            raise RuntimeError(f"registered MCP tool disappeared during tracing: {tool_name}")
+        tool.fn = recorder.wrap_tool(tool_name, tool.fn)
+
+
+def _default_trace_path(context: ExecutionContext) -> Path:
+    return Path(context.artifact_store.root).resolve() / "mcp_trace.jsonl"
+
+
+def _default_replay_script_path(context: ExecutionContext, trace_path: Path) -> Path:
+    replay_dir = Path(context.artifact_store.root).resolve() / "replay_scripts"
+    return replay_dir / f"{trace_path.stem}.py"
 
 
 def main() -> None:

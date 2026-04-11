@@ -537,7 +537,9 @@ def test_predict_checkpoint_rejects_inconsistent_request_flags(tmp_path, monkeyp
     assert "control flag" in response["error"]["message"]
 
 
-def test_compute_rollout_metrics_supports_rollout_and_horizon_metrics(tmp_path, monkeypatch) -> None:
+def test_compute_rollout_metrics_supports_rollout_and_horizon_metrics(
+    tmp_path, monkeypatch
+) -> None:
     dataset_path = tmp_path / "test.npz"
     _write_regular_dataset(dataset_path, with_control=False)
 

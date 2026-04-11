@@ -15,6 +15,7 @@ def test_phase1_skill_staging_files_exist() -> None:
     eval_openai_yaml = (eval_root / "agents" / "openai.yaml").read_text(encoding="utf-8")
 
     assert "list_model_families" in train_body
+    assert "resolve_training_intent" in train_body
     assert "validate_training_config" in train_body
     assert "materialize_training_config" in train_body
     assert "train_model" in train_body
