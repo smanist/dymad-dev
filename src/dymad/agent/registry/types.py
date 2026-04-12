@@ -9,6 +9,8 @@ from dymad.models.model_spec import GraphMode, TimeDomain
 
 DatasetKind = Literal["regular", "graph"]
 WorkflowKind = Literal["training"]
+AnalysisSupportLevel = Literal["supported", "experimental"]
+AnalysisImplementation = Literal["library", "script_backed"]
 
 
 @dataclass(frozen=True)
@@ -53,3 +55,15 @@ class TrainingWorkflowCapability:
     default_model_ref: str
     default_profile: str | None
     profile_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AnalysisCapability:
+    key: str
+    name: str
+    summary: str
+    support_level: AnalysisSupportLevel
+    implementation: AnalysisImplementation
+    requires_checkpoint: bool
+    dataset_input_keys: tuple[str, ...]
+    parameter_schema: dict[str, Any]

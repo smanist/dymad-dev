@@ -10,33 +10,37 @@ Use this skill when the user provides train/test dataset files and wants a DyMAD
 Required MCP tools:
 - `register_dataset_file`
 - `inspect_dataset`
-- `train_model`
-- `evaluate_model`
+- `list_training_capabilities`
+- `compile_training_request`
+- `train_compiled_request`
+- `evaluate_checkpoint`
 
 Workflow:
 1. Register each provided dataset file with `register_dataset_file`.
 2. Inspect train and test datasets with `inspect_dataset`.
-3. Translate the user's natural-language modeling request into a structured `train_model.config` dict.
-4. Pick `model_ref` and optional `reference_profile` from the requested DyMAD model family.
-5. Call `train_model`.
-6. Call `evaluate_model` on the returned checkpoint handle and the registered test dataset.
+3. Use `list_training_capabilities` if you need to confirm which model families support the dataset kind.
+4. Translate the user's natural-language modeling request into a structured `compile_training_request.overrides` dict.
+5. Pick the stable `model_key` from the requested DyMAD model family.
+6. Call `compile_training_request`.
+7. Call `train_compiled_request`.
+8. Call `evaluate_checkpoint` on the returned checkpoint handle and the registered test dataset.
 7. Report the checkpoint path, training summary path, evaluation metrics, and representative rollout plot path.
 
 Rules:
 - Do not pass free text into MCP tools. Natural-language interpretation happens in the skill, not the tool layer.
-- Require dataset handles for training and evaluation; never pass raw dataset paths directly into `train_model` or `evaluate_model`.
-- Prefer `config.phases` for staged training, such as weak form followed by NODE.
+- Require dataset handles for training and evaluation; never pass raw dataset paths directly into compile/train/evaluate tools.
+- Prefer `overrides.phases` for staged training, such as weak form followed by NODE.
 - If the dataset schema is incompatible with the requested model family, stop and explain the mismatch.
 - If the user asks for unsupported metrics, formats, or model families, say so directly instead of inventing a fallback workflow.
 
 Translation guidance:
 - Map architecture requests into the nested `model` config fields.
 - Map optimizer/training requests into `phases`.
-- Keep runtime-owned fields out of user config:
+- Keep runtime-owned fields out of user overrides:
   - `data.path`
   - `data_valid.path`
   - `path.*`
-- If the user does not specify a `reference_profile`, let `train_model` infer it.
+- If the user does not specify a `reference_profile`, let `compile_training_request` infer it.
 
 Expected final report:
 - checkpoint handle and checkpoint path

@@ -5,9 +5,14 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, cast
 
-from dymad.agent.compiler import TrainingRequest, compile_training_request
+from dymad.agent.compiler import (
+    AnalysisRequest,
+    TrainingRequest,
+    compile_analysis_request,
+    compile_training_request,
+)
 from dymad.agent.exec.context import ExecutionContext, build_default_context
-from dymad.agent.registry import DatasetKind, list_training_capabilities
+from dymad.agent.registry import DatasetKind, list_analysis_capabilities, list_training_capabilities
 
 
 class UserTools:
@@ -27,6 +32,13 @@ class UserTools:
                     asdict(capability)
                     for capability in list_training_capabilities(dataset_kind=dataset_kind)
                 ],
+            }
+        )
+
+    def list_analysis_capabilities(self) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "capabilities": [asdict(capability) for capability in list_analysis_capabilities()]
             }
         )
 
@@ -81,6 +93,46 @@ class UserTools:
             }
         )
 
+    def compile_analysis_request(
+        self,
+        *,
+        workflow_key: str,
+        checkpoint_handle: str | None = None,
+        dataset_handles: dict[str, str] | None = None,
+        parameters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: self._compiled_analysis_request_data(
+                self._context.facade.register_compiled_analysis_request(
+                    compiled_request=compile_analysis_request(
+                        request=AnalysisRequest(
+                            workflow_key=workflow_key,
+                            checkpoint_handle=checkpoint_handle,
+                            dataset_handles={} if dataset_handles is None else dataset_handles,
+                            parameters={} if parameters is None else parameters,
+                        )
+                    )
+                ).handle
+            )
+        )
+
+    def run_analysis_request(
+        self,
+        *,
+        compiled_request_handle: str,
+        artifact_root: str,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "result": asdict(
+                    self._context.executor.run_analysis_request(
+                        compiled_request_handle=compiled_request_handle,
+                        artifact_root=artifact_root,
+                    )
+                )
+            }
+        )
+
     def evaluate_checkpoint(
         self,
         *,
@@ -126,6 +178,14 @@ class UserTools:
     def _compiled_request_data(self, handle: str) -> dict[str, Any]:
         summary = self._context.facade.describe_object(handle)
         compiled_request = self._context.facade.get_compiled_training_request(handle)
+        return {
+            "summary": asdict(summary),
+            "compiled_request": asdict(compiled_request),
+        }
+
+    def _compiled_analysis_request_data(self, handle: str) -> dict[str, Any]:
+        summary = self._context.facade.describe_object(handle)
+        compiled_request = self._context.facade.get_compiled_analysis_request(handle)
         return {
             "summary": asdict(summary),
             "compiled_request": asdict(compiled_request),

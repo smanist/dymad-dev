@@ -3,6 +3,10 @@ from pathlib import Path
 
 import numpy as np
 
+from dymad.agent.exec.vortex_analysis import (
+    compute_vortex_mode_analysis,
+    persist_vortex_mode_analysis,
+)
 from dymad.io import DataInterface
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -132,79 +136,23 @@ def ensure_processed_data(root: Path, raw_data_path: Path, split_index: int) -> 
 def compute_analysis(
     cylinder_path: Path, test_path: Path, index: int
 ) -> dict[str, np.ndarray | float | int]:
-    train_data = np.load(cylinder_path)
-    test_data = np.load(test_path)
-    t_train = train_data["t"]
-    x_train = train_data["x"]
-    x_test = test_data["x"]
-    dt = float(t_train[1] - t_train[0])
-
-    if len(x_test) < 3:
-        raise ValueError("Need at least three test snapshots to estimate finite differences.")
-    if not 0 < index < len(x_test) - 1:
-        raise ValueError(f"index must be between 1 and {len(x_test) - 2}, got {index}")
-
-    di = DataInterface(
+    return compute_vortex_mode_analysis(
         config_path=str(CONFIG_PATH),
-        config_mod={
-            "data": {"path": str(cylinder_path)},
-            "transform_x": [dict(TRN_SVD), dict(TRN_DMF)],
-        },
+        train_dataset_path=str(cylinder_path),
+        test_dataset_path=str(test_path),
+        index=index,
+        nx=NX,
+        ny=NY,
     )
-    z_train = di.encode(x_train)
-    z_svd = di.encode(x_test, rng=[0, 1])
-    z_dmf = di.encode(z_svd, rng=[1, 2])
-    x_svd = di.decode(z_dmf, rng=[1, 2])
-    x_rec = di.decode(x_svd, rng=[0, 1])
-
-    ref = x_test[index].reshape(1, NX, NY)
-    dx_ref = ((x_test[index + 1] - x_test[index - 1]) / (2 * dt)).reshape(1, NX, NY)
-    dz_ref = (z_dmf[index + 1] - z_dmf[index - 1]) / (2 * dt)
-    modes_backward = di.get_backward_modes(ref=z_dmf[index]).reshape(-1, NX, NY)
-    modes_forward = di.get_forward_modes(ref=x_test[index]).reshape(-1, NX, NY)
-
-    dx_est = np.sum(dz_ref[:, None, None] * modes_backward, axis=0, keepdims=True)
-    dz_est = np.sum(dx_ref * modes_forward, axis=(1, 2))
-
-    flat_forward = modes_forward.reshape(modes_forward.shape[0], -1)
-    flat_backward = modes_backward.reshape(modes_backward.shape[0], -1)
-    overlap_fb = flat_forward @ flat_backward.T
-    overlap_ff = flat_forward @ flat_forward.T
-    overlap_bb = flat_backward @ flat_backward.T
-
-    rel_dx_error = float(np.linalg.norm(dx_est - dx_ref) / np.linalg.norm(dx_ref))
-    rel_dz_error = float(np.linalg.norm(dz_est - dz_ref) / np.linalg.norm(dz_ref))
-
-    return {
-        "index": int(index),
-        "dt": dt,
-        "t_train": t_train,
-        "x_train": x_train,
-        "x_test": x_test,
-        "z_train": z_train,
-        "z_svd": z_svd,
-        "z_dmf": z_dmf,
-        "x_svd": x_svd,
-        "x_rec": x_rec,
-        "ref": ref,
-        "dx_ref": dx_ref,
-        "dz_ref": dz_ref,
-        "modes_backward": modes_backward,
-        "modes_forward": modes_forward,
-        "dx_est": dx_est,
-        "dz_est": dz_est,
-        "overlap_fb": overlap_fb,
-        "overlap_ff": overlap_ff,
-        "overlap_bb": overlap_bb,
-        "rel_dx_error": rel_dx_error,
-        "rel_dz_error": rel_dz_error,
-    }
 
 
 def save_analysis(analysis: dict[str, np.ndarray | float | int], output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(output_path, **analysis)
-    print(f"Saved mode outputs: {output_path}")
+    persisted = persist_vortex_mode_analysis(
+        analysis,
+        artifact_root=output_path.parent,
+        stem=output_path.stem,
+    )
+    print(f"Saved mode outputs: {persisted.output_path}")
 
 
 def selected_plot_sections(args) -> set[str]:

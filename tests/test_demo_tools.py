@@ -109,11 +109,13 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
 
     assert server.name == "DyMAD Test"
     assert set(server.tools) == {
+        "compile_analysis_request",
         "compile_training_request",
         "describe_object",
         "evaluate_checkpoint",
         "evaluate_model",
         "inspect_dataset",
+        "list_analysis_capabilities",
         "list_model_capabilities",
         "list_objects",
         "list_profile_capabilities",
@@ -123,6 +125,7 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
         "register_dataset_file",
         "register_checkpoint",
         "resolve_model_capability",
+        "run_analysis_request",
         "train_compiled_request",
         "train_model",
     }

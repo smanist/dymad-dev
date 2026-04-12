@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from dymad.agent.facade.handles import (
     CheckpointHandle,
+    CompiledAnalysisRequestHandle,
     CompiledTrainingRequestHandle,
     DatasetHandle,
     EvaluationHandle,
@@ -17,6 +18,7 @@ from dymad.agent.facade.handles import (
 )
 from dymad.agent.store.object_store import (
     CheckpointRecord,
+    CompiledAnalysisRequestRecord,
     CompiledTrainingRequestRecord,
     DatasetRecord,
     EvaluationRecord,
@@ -28,9 +30,10 @@ from dymad.agent.store.object_store import (
 )
 
 if TYPE_CHECKING:
-    from dymad.agent.compiler import CompiledTrainingRequest
+    from dymad.agent.compiler import CompiledAnalysisRequest, CompiledTrainingRequest
     from dymad.sako.snapshot import SpectralSnapshot
 else:
+    CompiledAnalysisRequest = Any
     CompiledTrainingRequest = Any
     SpectralSnapshot = Any
 
@@ -45,6 +48,7 @@ class FacadeOperations:
         "checkpoint",
         "training_run",
         "compiled_training_request",
+        "compiled_analysis_request",
         "evaluation",
         "prediction_request",
         "spectral_snapshot",
@@ -152,6 +156,29 @@ class FacadeOperations:
         )
         return self._store.summarize(handle)
 
+    def register_compiled_analysis_request(
+        self,
+        *,
+        compiled_request: CompiledAnalysisRequest,
+    ) -> ObjectSummary:
+        checkpoint_handle = (
+            None
+            if compiled_request.checkpoint_handle is None
+            else CheckpointHandle.parse(compiled_request.checkpoint_handle).value
+        )
+        dataset_handles = {
+            key: DatasetHandle.parse(handle).value
+            for key, handle in compiled_request.dataset_handles.items()
+        }
+        handle = self._store.put_compiled_analysis_request(
+            workflow_key=compiled_request.capability.key,
+            checkpoint_handle=checkpoint_handle,
+            dataset_handles=dataset_handles,
+            parameters=compiled_request.parameters,
+            warnings=list(compiled_request.warnings),
+        )
+        return self._store.summarize(handle)
+
     def register_evaluation(
         self,
         *,
@@ -214,6 +241,10 @@ class FacadeOperations:
     def get_compiled_training_request(self, handle: str) -> CompiledTrainingRequestRecord:
         request = CompiledTrainingRequestHandle.parse(handle)
         return self._store.get_compiled_training_request(request.value)
+
+    def get_compiled_analysis_request(self, handle: str) -> CompiledAnalysisRequestRecord:
+        request = CompiledAnalysisRequestHandle.parse(handle)
+        return self._store.get_compiled_analysis_request(request.value)
 
     def get_evaluation(self, handle: str) -> EvaluationRecord:
         evaluation = EvaluationHandle.parse(handle)

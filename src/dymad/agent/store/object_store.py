@@ -65,6 +65,16 @@ class CompiledTrainingRequestRecord:
 
 
 @dataclass(frozen=True)
+class CompiledAnalysisRequestRecord:
+    handle: str
+    workflow_key: str
+    checkpoint_handle: str | None
+    dataset_handles: dict[str, str]
+    parameters: dict[str, Any]
+    warnings: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
 class EvaluationRecord:
     handle: str
     checkpoint_handle: str
@@ -107,6 +117,7 @@ class ObjectStore:
         self._datasets: dict[str, DatasetRecord] = {}
         self._training_runs: dict[str, TrainingRunRecord] = {}
         self._compiled_training_requests: dict[str, CompiledTrainingRequestRecord] = {}
+        self._compiled_analysis_requests: dict[str, CompiledAnalysisRequestRecord] = {}
         self._evaluations: dict[str, EvaluationRecord] = {}
         self._prediction_requests: dict[str, PredictionRequestRecord] = {}
         self._spectral_snapshots: dict[str, SpectralSnapshotRecord] = {}
@@ -254,6 +265,45 @@ class ObjectStore:
             self._compiled_training_requests[handle] = record
             return record
 
+    def put_compiled_analysis_request(
+        self,
+        *,
+        workflow_key: str,
+        checkpoint_handle: str | None,
+        dataset_handles: dict[str, str],
+        parameters: dict[str, Any],
+        warnings: list[dict[str, Any]],
+    ) -> str:
+        if checkpoint_handle is not None:
+            self.get_checkpoint(checkpoint_handle)
+        for handle in dataset_handles.values():
+            self.get_dataset(handle)
+        handle = self._new_handle("analysisreq")
+        record = CompiledAnalysisRequestRecord(
+            handle=handle,
+            workflow_key=workflow_key,
+            checkpoint_handle=checkpoint_handle,
+            dataset_handles=dict(dataset_handles),
+            parameters=dict(parameters),
+            warnings=list(warnings),
+        )
+        self._compiled_analysis_requests[handle] = record
+        if self._artifact_store is not None:
+            self._artifact_store.persist_compiled_analysis_request(record)
+        return handle
+
+    def get_compiled_analysis_request(self, handle: str) -> CompiledAnalysisRequestRecord:
+        try:
+            return self._compiled_analysis_requests[handle]
+        except KeyError as exc:
+            if self._artifact_store is None:
+                raise ObjectNotFoundError(
+                    f"unknown compiled analysis request handle: {handle}"
+                ) from exc
+            record = self._artifact_store.load_compiled_analysis_request(handle)
+            self._compiled_analysis_requests[handle] = record
+            return record
+
     def put_evaluation(
         self,
         *,
@@ -382,6 +432,15 @@ class ObjectStore:
                     f"{request.reference_profile} ({request.trainer_kind})"
                 ),
             )
+        if handle.startswith("analysisreq_"):
+            request = self.get_compiled_analysis_request(handle)
+            return ObjectSummary(
+                handle=handle,
+                kind="compiled_analysis_request",
+                derived_from=request.checkpoint_handle
+                or next(iter(request.dataset_handles.values())),
+                preview=request.workflow_key,
+            )
         if handle.startswith("eval_"):
             evaluation = self.get_evaluation(handle)
             return ObjectSummary(
@@ -426,6 +485,9 @@ class ObjectStore:
                 summaries[handle] = self.summarize(handle)
         if kind in (None, "compiled_training_request"):
             for handle in self._compiled_training_requests:
+                summaries[handle] = self.summarize(handle)
+        if kind in (None, "compiled_analysis_request"):
+            for handle in self._compiled_analysis_requests:
                 summaries[handle] = self.summarize(handle)
         if kind in (None, "evaluation"):
             for handle in self._evaluations:

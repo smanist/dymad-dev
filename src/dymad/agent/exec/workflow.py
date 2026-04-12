@@ -17,6 +17,7 @@ import torch
 import yaml
 
 from dymad.agent.exec.state import (
+    AnalysisRunResult,
     DatasetInspection,
     EvaluateModelResult,
     PredictionWorkflowPlan,
@@ -25,7 +26,10 @@ from dymad.agent.exec.state import (
 )
 from dymad.agent.exec.training_profiles import profile_config, resolve_profile_name
 from dymad.agent.facade.operations import FacadeOperations
-from dymad.agent.store.object_store import CompiledTrainingRequestRecord
+from dymad.agent.store.object_store import (
+    CompiledAnalysisRequestRecord,
+    CompiledTrainingRequestRecord,
+)
 from dymad.utils.misc import _normalize_legacy_training_config
 from dymad.utils.plot import plot_trajectory
 
@@ -350,6 +354,18 @@ class CompatibilityExecutor:
     def inspect_dataset(self, *, dataset_handle: str) -> DatasetInspection:
         return _inspect_dataset_record(self.facade.get_dataset(dataset_handle))
 
+    def run_analysis_request(
+        self,
+        *,
+        compiled_request_handle: str,
+        artifact_root: str,
+    ) -> AnalysisRunResult:
+        compiled_request = self.facade.get_compiled_analysis_request(compiled_request_handle)
+        return self._run_compiled_analysis_request(
+            compiled_request=compiled_request,
+            artifact_root=artifact_root,
+        )
+
     def train_compiled_request(
         self,
         *,
@@ -432,6 +448,90 @@ class CompatibilityExecutor:
             device=compiled_request.device,
             max_workers=compiled_request.max_workers,
         )
+
+    def _run_compiled_analysis_request(
+        self,
+        *,
+        compiled_request: CompiledAnalysisRequestRecord,
+        artifact_root: str,
+    ) -> AnalysisRunResult:
+        if compiled_request.workflow_key == "spectral_koopman":
+            checkpoint = self.facade.get_checkpoint(cast(str, compiled_request.checkpoint_handle))
+            from dymad.sako.base import SpectralAnalysis
+
+            model_class = _resolve_model_ref(checkpoint.model_ref)
+            params = dict(compiled_request.parameters)
+            analysis = SpectralAnalysis(
+                model_class,
+                checkpoint.checkpoint_path,
+                dt=float(params.get("dt", 1.0)),
+                forder=params.get("forder", "full"),
+                reps=float(params.get("reps", 1e-10)),
+                etol=float(params.get("etol", 1e-13)),
+                remove_one=bool(params.get("remove_one", True)),
+                exec_context=self._active_context(),
+            )
+            root = _ensure_dir(Path(artifact_root).expanduser() / "analyses")
+            token = uuid4().hex[:12]
+            summary_path = root / f"{token}_spectral_summary.json"
+            summary_payload = {
+                "workflow_key": "spectral_koopman",
+                "checkpoint_handle": checkpoint.handle,
+                "checkpoint_path": checkpoint.checkpoint_path,
+                "n_eigs": int(len(np.asarray(analysis._wd))),
+                "n_eigs_full": int(len(np.asarray(analysis._wd_full))),
+                "obs_dim": int(analysis._ctx.snapshot.obs_dim),
+                "sample_count": int(analysis._ctx.snapshot.sample_count),
+            }
+            summary_path.write_text(
+                json.dumps(summary_payload, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            return AnalysisRunResult(
+                workflow_key="spectral_koopman",
+                artifacts={"summary_path": str(summary_path)},
+                summary=summary_payload,
+            )
+
+        if compiled_request.workflow_key == "vortex_transform_modes":
+            from dymad.agent.exec.vortex_analysis import (
+                compute_vortex_mode_analysis,
+                persist_vortex_mode_analysis,
+            )
+
+            train_dataset = self.facade.get_dataset(
+                compiled_request.dataset_handles["train_dataset_handle"]
+            )
+            test_dataset = self.facade.get_dataset(
+                compiled_request.dataset_handles["test_dataset_handle"]
+            )
+            params = dict(compiled_request.parameters)
+            analysis = compute_vortex_mode_analysis(
+                config_path=cast(str, params["config_path"]),
+                train_dataset_path=train_dataset.path,
+                test_dataset_path=test_dataset.path,
+                index=int(params.get("index", 5)),
+                nx=int(params.get("nx", 199)),
+                ny=int(params.get("ny", 449)),
+            )
+            persisted = persist_vortex_mode_analysis(analysis, artifact_root=artifact_root)
+            return AnalysisRunResult(
+                workflow_key="vortex_transform_modes",
+                artifacts={
+                    "output_path": persisted.output_path,
+                    "summary_path": persisted.summary_path,
+                },
+                summary={
+                    "workflow_key": "vortex_transform_modes",
+                    "rel_dx_error": persisted.rel_dx_error,
+                    "rel_dz_error": persisted.rel_dz_error,
+                    "index": persisted.index,
+                    "nx": persisted.nx,
+                    "ny": persisted.ny,
+                },
+            )
+
+        raise ValueError(f"unsupported analysis workflow: {compiled_request.workflow_key}")
 
     def evaluate_model(
         self,

@@ -10,6 +10,7 @@ import numpy as np
 
 from dymad.agent.store.object_store import (
     CheckpointRecord,
+    CompiledAnalysisRequestRecord,
     CompiledTrainingRequestRecord,
     DatasetRecord,
     EvaluationRecord,
@@ -36,6 +37,7 @@ class FilesystemArtifactStore:
         "checkpoint": "checkpoints",
         "training_run": "training_runs",
         "compiled_training_request": "compiled_training_requests",
+        "compiled_analysis_request": "compiled_analysis_requests",
         "evaluation": "evaluations",
         "prediction_request": "prediction_requests",
         "spectral_snapshot": "spectral_snapshots",
@@ -140,6 +142,28 @@ class FilesystemArtifactStore:
             seed=payload.get("seed"),
             device=payload.get("device", "auto"),
             max_workers=int(payload.get("max_workers", 1)),
+            warnings=list(payload.get("warnings", [])),
+        )
+
+    def persist_compiled_analysis_request(self, record: CompiledAnalysisRequestRecord) -> None:
+        payload = {
+            "handle": record.handle,
+            "workflow_key": record.workflow_key,
+            "checkpoint_handle": record.checkpoint_handle,
+            "dataset_handles": record.dataset_handles,
+            "parameters": record.parameters,
+            "warnings": list(record.warnings),
+        }
+        self._write_json("compiled_analysis_request", record.handle, payload)
+
+    def load_compiled_analysis_request(self, handle: str) -> CompiledAnalysisRequestRecord:
+        payload = self._read_json("compiled_analysis_request", handle)
+        return CompiledAnalysisRequestRecord(
+            handle=payload["handle"],
+            workflow_key=payload["workflow_key"],
+            checkpoint_handle=payload.get("checkpoint_handle"),
+            dataset_handles=dict(payload.get("dataset_handles", {})),
+            parameters=dict(payload.get("parameters", {})),
             warnings=list(payload.get("warnings", [])),
         )
 
@@ -293,6 +317,17 @@ class FilesystemArtifactStore:
                     f"{payload['reference_profile']} ({payload['trainer_kind']})"
                 ),
             )
+        if kind == "compiled_analysis_request":
+            derived_from = payload.get("checkpoint_handle")
+            if derived_from is None:
+                dataset_handles = payload.get("dataset_handles", {})
+                derived_from = next(iter(dataset_handles.values()), None)
+            return ObjectSummary(
+                handle=payload["handle"],
+                kind="compiled_analysis_request",
+                derived_from=derived_from,
+                preview=payload["workflow_key"],
+            )
         if kind == "evaluation":
             return ObjectSummary(
                 handle=payload["handle"],
@@ -358,6 +393,8 @@ class FilesystemArtifactStore:
             return "training_run"
         if handle.startswith("trainreq_"):
             return "compiled_training_request"
+        if handle.startswith("analysisreq_"):
+            return "compiled_analysis_request"
         if handle.startswith("eval_"):
             return "evaluation"
         if handle.startswith("pred_"):

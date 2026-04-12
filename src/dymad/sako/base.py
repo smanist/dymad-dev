@@ -6,7 +6,7 @@ from typing import Any, cast
 import numpy as np
 import torch
 
-from dymad.agent.exec.context import build_default_context
+from dymad.agent.exec.context import ExecutionContext, build_default_context
 from dymad.io import DataInterface
 from dymad.models.collections import DKBF, KBF
 from dymad.numerics import (
@@ -170,11 +170,12 @@ class SpectralAnalysis:
         reps: float = 1e-10,
         remove_one=True,
         etol: float = 1e-13,
+        exec_context: ExecutionContext | None = None,
     ):
         self._dt = dt
         self._reps = reps
         self._etol = etol
-        self._exec_context = build_default_context()
+        self._exec_context = exec_context or build_default_context()
         self._spectral_plan = None
         self._reset()
 
