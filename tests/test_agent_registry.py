@@ -7,6 +7,7 @@ from dymad.agent.exec.training_profiles import (
     resolve_profile_name,
 )
 from dymad.agent.registry import (
+    describe_training_capability,
     list_model_capabilities,
     list_profile_capabilities,
     list_training_capabilities,
@@ -94,3 +95,32 @@ def test_training_capabilities_cover_current_profiled_families_and_dataset_kinds
     assert capabilities[("ldm", "graph")].default_profile == "ldm-graph-default"
     assert capabilities[("lti", "regular")].default_profile == "lti-regular-default"
     assert capabilities[("sdm", "regular")].default_profile is None
+
+
+def test_describe_training_capability_exposes_phase_schema_and_override_contract() -> None:
+    detail = describe_training_capability(model_key="lti", dataset_kind="regular")
+
+    assert detail.capability.model_key == "lti"
+    assert detail.capability.dataset_kind == "regular"
+    assert detail.allowed_override_top_level_keys == (
+        "criterion",
+        "dataloader",
+        "model",
+        "phases",
+        "plotting",
+        "split",
+        "transform_u",
+        "transform_x",
+    )
+    assert "data.path" in detail.runtime_owned_override_paths
+    assert "model.name" in detail.runtime_owned_override_paths
+    assert {entry.key for entry in detail.phase_entry_schemas} == {
+        "legacy_optimizer",
+        "optimizer",
+        "linear_solve",
+        "data",
+        "analysis",
+        "export",
+        "repeat",
+    }
+    assert "export_summary" in detail.auto_appended_phases

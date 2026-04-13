@@ -62,15 +62,23 @@ def test_demo_tools_expose_json_safe_registry_discovery(tmp_path) -> None:
     resolved = tools.resolve_model_capability(key_or_alias="GKBF")
     profiles = tools.list_profile_capabilities()
     training = tools.list_training_capabilities()
+    training_detail = tools.describe_training_capability(model_key="kbf", dataset_kind="regular")
 
     assert models["ok"] is True
     assert resolved["ok"] is True
     assert profiles["ok"] is True
     assert training["ok"] is True
+    assert training_detail["ok"] is True
     assert resolved["data"]["capability"]["key"] == "kbf"
+    assert training_detail["data"]["detail"]["capability"]["model_key"] == "kbf"
+    assert any(
+        entry["key"] == "repeat"
+        for entry in training_detail["data"]["detail"]["phase_entry_schemas"]
+    )
     json.dumps(models)
     json.dumps(profiles)
     json.dumps(training)
+    json.dumps(training_detail)
 
 
 def test_demo_tools_filter_training_capabilities_by_dataset_handle(tmp_path) -> None:
@@ -111,6 +119,7 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
     assert set(server.tools) == {
         "compile_analysis_request",
         "compile_training_request",
+        "describe_training_capability",
         "describe_object",
         "evaluate_checkpoint",
         "evaluate_model",

@@ -29,6 +29,7 @@ def test_build_server_user_mode_registers_only_high_level_tools(monkeypatch, tmp
 
     assert "compile_training_request" in server.tools
     assert "compile_analysis_request" in server.tools
+    assert "describe_training_capability" in server.tools
     assert "register_checkpoint" not in server.tools
     assert "train_model" not in server.tools
 
@@ -42,6 +43,7 @@ def test_build_server_developer_mode_registers_only_raw_tools(monkeypatch, tmp_p
     )
 
     assert "register_checkpoint" in server.tools
+    assert "describe_training_capability" in server.tools
     assert "train_model" in server.tools
     assert "compile_training_request" not in server.tools
     assert "compile_analysis_request" not in server.tools

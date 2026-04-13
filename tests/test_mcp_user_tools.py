@@ -36,6 +36,10 @@ def test_user_tools_compile_train_and_evaluate_flow(tmp_path, monkeypatch) -> No
     train_dataset_handle = tools._context.facade.register_dataset_file(
         path=str(dataset_path)
     ).handle
+    detail = tools.describe_training_capability(
+        model_key="kbf",
+        dataset_handle=train_dataset_handle,
+    )
 
     compiled = tools.compile_training_request(
         train_dataset_handle=train_dataset_handle,
@@ -60,6 +64,9 @@ def test_user_tools_compile_train_and_evaluate_flow(tmp_path, monkeypatch) -> No
     materialized = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     assert compiled["ok"] is True
+    assert detail["ok"] is True
+    assert detail["data"]["dataset_kind"] == "regular"
+    assert detail["data"]["detail"]["capability"]["model_key"] == "kbf"
     assert compiled["data"]["compiled_request"]["model_key"] == "kbf"
     assert compiled["data"]["compiled_request"]["reference_profile"] == "kbf-regular-default"
     assert trained["ok"] is True

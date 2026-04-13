@@ -13,6 +13,7 @@ configure_headless_matplotlib_backend()
 from dymad.agent.exec.context import ExecutionContext, build_default_context
 from dymad.agent.mcp.developer_tools import DeveloperTools
 from dymad.agent.mcp.user_tools import UserTools
+from dymad.agent.registry import DatasetKind
 
 
 def build_server(
@@ -166,6 +167,19 @@ def build_server(
             """List training profiles and their current model/dataset mappings."""
             return tools.list_profile_capabilities()
 
+        @server.tool
+        def describe_training_capability(
+            model_key: str,
+            dataset_handle: str | None = None,
+            dataset_kind: DatasetKind | None = None,
+        ) -> dict[str, Any]:
+            """Describe one training capability, including accepted override and phase schema."""
+            return tools.describe_training_capability(
+                model_key=model_key,
+                dataset_handle=dataset_handle,
+                dataset_kind=dataset_kind,
+            )
+
     if include_user:
 
         @server.tool
@@ -177,6 +191,19 @@ def build_server(
         def list_analysis_capabilities() -> dict[str, Any]:
             """List supported analysis workflows."""
             return user_tools.list_analysis_capabilities()
+
+        @server.tool
+        def describe_training_capability(
+            model_key: str,
+            dataset_handle: str | None = None,
+            dataset_kind: DatasetKind | None = None,
+        ) -> dict[str, Any]:
+            """Describe one training capability, including accepted override and phase schema."""
+            return user_tools.describe_training_capability(
+                model_key=model_key,
+                dataset_handle=dataset_handle,
+                dataset_kind=dataset_kind,
+            )
 
         @server.tool
         def compile_training_request(

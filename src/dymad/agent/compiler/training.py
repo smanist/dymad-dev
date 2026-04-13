@@ -16,27 +16,12 @@ from dymad.agent.registry import (
     list_profile_capabilities,
     resolve_model_capability,
 )
-
-_ALLOWED_TOP_LEVEL_OVERRIDE_KEYS = {
-    "criterion",
-    "dataloader",
-    "model",
-    "phases",
-    "plotting",
-    "split",
-    "transform_u",
-    "transform_x",
-}
-_RUNTIME_OWNED_TOP_LEVEL_KEYS = {
-    "data_valid",
-    "path",
-}
-_ALLOWED_DATA_OVERRIDE_KEYS = {
-    "double_precision",
-}
-_RUNTIME_OWNED_MODEL_KEYS = {
-    "name",
-}
+from dymad.agent.registry.training_schema import (
+    ALLOWED_DATA_OVERRIDE_KEYS,
+    ALLOWED_TOP_LEVEL_OVERRIDE_KEYS,
+    RUNTIME_OWNED_MODEL_KEYS,
+    RUNTIME_OWNED_OVERRIDE_PATHS,
+)
 
 
 def _raise_invalid(message: str, *, field_path: tuple[str, ...]) -> None:
@@ -53,28 +38,29 @@ def _validate_overrides(config: dict[str, Any] | None, *, prefix: tuple[str, ...
         )
     for key, value in config.items():
         path = prefix + (key,)
+        path_str = ".".join(path)
         if len(path) == 1:
-            if key in _RUNTIME_OWNED_TOP_LEVEL_KEYS:
+            if path_str in RUNTIME_OWNED_OVERRIDE_PATHS:
                 _raise_invalid(
                     f"overrides.{key} is runtime-owned and cannot be set by the caller",
                     field_path=("overrides", key),
                 )
-            if key not in _ALLOWED_TOP_LEVEL_OVERRIDE_KEYS and key != "data":
+            if key not in ALLOWED_TOP_LEVEL_OVERRIDE_KEYS and key != "data":
                 _raise_invalid(
                     f"overrides.{key} is not supported by the user-mode compiler",
                     field_path=("overrides", key),
                 )
-        if path == ("data", "path") or path == ("data_valid", "path"):
+        if path_str in RUNTIME_OWNED_OVERRIDE_PATHS:
             _raise_invalid(
                 f"overrides.{'.'.join(path)} is runtime-owned and cannot be set by the caller",
                 field_path=("overrides",) + path,
             )
-        if path[:1] == ("data",) and len(path) == 2 and path[1] not in _ALLOWED_DATA_OVERRIDE_KEYS:
+        if path[:1] == ("data",) and len(path) == 2 and path[1] not in ALLOWED_DATA_OVERRIDE_KEYS:
             _raise_invalid(
                 f"overrides.data.{path[1]} is not supported by the user-mode compiler",
                 field_path=("overrides",) + path,
             )
-        if path[:1] == ("model",) and len(path) == 2 and path[1] in _RUNTIME_OWNED_MODEL_KEYS:
+        if path[:1] == ("model",) and len(path) == 2 and path[1] in RUNTIME_OWNED_MODEL_KEYS:
             _raise_invalid(
                 f"overrides.model.{path[1]} is runtime-owned and cannot be set by the caller",
                 field_path=("overrides",) + path,

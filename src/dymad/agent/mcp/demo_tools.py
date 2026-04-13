@@ -8,6 +8,7 @@ from typing import Any, cast
 from dymad.agent.exec.context import ExecutionContext, build_default_context
 from dymad.agent.registry import (
     DatasetKind,
+    describe_training_capability,
     list_model_capabilities,
     list_profile_capabilities,
     list_training_capabilities,
@@ -199,6 +200,33 @@ class DemoTools:
                     asdict(capability)
                     for capability in list_training_capabilities(dataset_kind=dataset_kind)
                 ],
+            }
+        )
+
+    def describe_training_capability(
+        self,
+        *,
+        model_key: str,
+        dataset_handle: str | None = None,
+        dataset_kind: DatasetKind | None = None,
+    ) -> dict[str, Any]:
+        if dataset_handle is not None:
+            resolved_dataset_kind = cast(
+                DatasetKind, self._context.facade.get_dataset(dataset_handle).kind
+            )
+        elif dataset_kind is not None:
+            resolved_dataset_kind = dataset_kind
+        else:
+            raise ValueError("describe_training_capability requires dataset_handle or dataset_kind")
+        return self._wrap(
+            lambda: {
+                "dataset_kind": resolved_dataset_kind,
+                "detail": asdict(
+                    describe_training_capability(
+                        model_key=model_key,
+                        dataset_kind=resolved_dataset_kind,
+                    )
+                ),
             }
         )
 

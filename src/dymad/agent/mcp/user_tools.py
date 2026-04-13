@@ -12,7 +12,12 @@ from dymad.agent.compiler import (
     compile_training_request,
 )
 from dymad.agent.exec.context import ExecutionContext, build_default_context
-from dymad.agent.registry import DatasetKind, list_analysis_capabilities, list_training_capabilities
+from dymad.agent.registry import (
+    DatasetKind,
+    describe_training_capability,
+    list_analysis_capabilities,
+    list_training_capabilities,
+)
 
 
 class UserTools:
@@ -39,6 +44,33 @@ class UserTools:
         return self._wrap(
             lambda: {
                 "capabilities": [asdict(capability) for capability in list_analysis_capabilities()]
+            }
+        )
+
+    def describe_training_capability(
+        self,
+        *,
+        model_key: str,
+        dataset_handle: str | None = None,
+        dataset_kind: DatasetKind | None = None,
+    ) -> dict[str, Any]:
+        if dataset_handle is not None:
+            resolved_dataset_kind = cast(
+                DatasetKind, self._context.facade.get_dataset(dataset_handle).kind
+            )
+        elif dataset_kind is not None:
+            resolved_dataset_kind = dataset_kind
+        else:
+            raise ValueError("describe_training_capability requires dataset_handle or dataset_kind")
+        return self._wrap(
+            lambda: {
+                "dataset_kind": resolved_dataset_kind,
+                "detail": asdict(
+                    describe_training_capability(
+                        model_key=model_key,
+                        dataset_kind=resolved_dataset_kind,
+                    )
+                ),
             }
         )
 
