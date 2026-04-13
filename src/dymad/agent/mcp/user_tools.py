@@ -96,7 +96,7 @@ class UserTools:
         model_key: str,
         valid_dataset_handle: str | None = None,
         reference_profile: str | None = None,
-        overrides: dict[str, Any] | None = None,
+        overrides: dict[str, Any] | str | None = None,
         run_name: str | None = None,
         seed: int | None = None,
         device: str = "auto",

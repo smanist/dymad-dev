@@ -79,6 +79,47 @@ def test_user_tools_compile_train_and_evaluate_flow(tmp_path, monkeypatch) -> No
     assert materialized["model"]["koopman_dimension"] == 6
 
 
+def test_user_tools_compile_training_request_accepts_json_string_overrides(tmp_path) -> None:
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+
+    tools = UserTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    train_dataset_handle = tools._context.facade.register_dataset_file(
+        path=str(dataset_path)
+    ).handle
+
+    compiled = tools.compile_training_request(
+        train_dataset_handle=train_dataset_handle,
+        model_key="kbf",
+        overrides='{"model": {"koopman_dimension": 5}}',
+    )
+
+    assert compiled["ok"] is True
+    assert (
+        compiled["data"]["compiled_request"]["effective_config"]["model"]["koopman_dimension"] == 5
+    )
+
+
+def test_user_tools_compile_training_request_surfaces_identity_dimension_mismatch(tmp_path) -> None:
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+
+    tools = UserTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    train_dataset_handle = tools._context.facade.register_dataset_file(
+        path=str(dataset_path)
+    ).handle
+
+    compiled = tools.compile_training_request(
+        train_dataset_handle=train_dataset_handle,
+        model_key="lti",
+        overrides={"model": {"encoder_layers": 0, "decoder_layers": 0}},
+    )
+
+    assert compiled["ok"] is False
+    assert compiled["error"]["type"] == "TrainingCompileValidationError"
+    assert "identity map" in compiled["error"]["message"]
+
+
 def test_build_server_registers_user_tools(monkeypatch, tmp_path) -> None:
     import sys
     import types
@@ -105,3 +146,40 @@ def test_build_server_registers_user_tools(monkeypatch, tmp_path) -> None:
     assert "train_compiled_request" in server.tools
     assert "evaluate_checkpoint" in server.tools
     assert "list_evaluation_capabilities" in server.tools
+
+
+def test_build_server_compile_training_request_accepts_json_string_overrides(
+    monkeypatch, tmp_path
+) -> None:
+    import sys
+    import types
+
+    class FakeFastMCP:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.tools: dict[str, object] = {}
+
+        def tool(self, fn):
+            self.tools[fn.__name__] = fn
+            return fn
+
+    monkeypatch.setitem(sys.modules, "fastmcp", types.SimpleNamespace(FastMCP=FakeFastMCP))
+
+    from dymad.agent.mcp import build_server
+
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    train_dataset_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+    server = build_server(context=context, name="DyMAD User Tools Test")
+
+    compiled = server.tools["compile_training_request"](
+        train_dataset_handle=train_dataset_handle,
+        model_key="kbf",
+        overrides='{"model": {"koopman_dimension": 5}}',
+    )
+
+    assert compiled["ok"] is True
+    assert (
+        compiled["data"]["compiled_request"]["effective_config"]["model"]["koopman_dimension"] == 5
+    )

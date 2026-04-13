@@ -74,6 +74,25 @@ def test_compile_training_request_resolves_regular_model_family_and_profile(tmp_
     assert compiled.effective_config["model"]["koopman_dimension"] == 8
 
 
+def test_compile_training_request_accepts_json_string_overrides(tmp_path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides='{"model": {"koopman_dimension": 8}}',
+        ),
+    )
+
+    assert compiled.request.overrides == {"model": {"koopman_dimension": 8}}
+    assert compiled.effective_config["model"]["koopman_dimension"] == 8
+
+
 def test_compile_training_request_resolves_graph_model_family_and_profile(tmp_path) -> None:
     context = build_default_context(artifact_root=tmp_path / "artifacts")
     dataset_path = tmp_path / "train_graph.npz"
@@ -177,3 +196,23 @@ def test_compile_training_request_infers_stacked_trainer_kind_from_phases(tmp_pa
         "Warmup",
         "Refine",
     ]
+
+
+def test_compile_training_request_rejects_zero_layer_identity_dimension_mismatch(tmp_path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    with pytest.raises(TrainingCompileValidationError) as exc_info:
+        compile_training_request(
+            facade=context.facade,
+            request=TrainingRequest(
+                train_dataset_handle=train_handle,
+                model_key="lti",
+                overrides={"model": {"encoder_layers": 0, "decoder_layers": 0}},
+            ),
+        )
+
+    assert exc_info.value.field_path == ("overrides", "model", "koopman_dimension")
+    assert "identity map" in str(exc_info.value)
