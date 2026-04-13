@@ -357,3 +357,46 @@ def test_evaluate_model_graph_skips_plot(tmp_path, monkeypatch) -> None:
     assert response["ok"] is True
     assert result["artifacts"]["plot_paths"] == []
     assert result["plot_skipped_reason"] == "graph plotting unsupported in v1"
+
+
+def test_evaluate_model_plot_failure_is_nonfatal(tmp_path, monkeypatch) -> None:
+    dataset_path = tmp_path / "test.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+
+    def fake_load_model(model, checkpoint_path, *, context=None, **kwargs):
+        del model, checkpoint_path, context, kwargs
+
+        def predict_fn(x0, t, u=None, p=None, **inner_kwargs):
+            del t, u, p, inner_kwargs
+            return np.asarray(x0)
+
+        return object(), predict_fn
+
+    def failing_plot_trajectory(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("backend unavailable")
+
+    monkeypatch.setattr(dymad.io, "load_model", fake_load_model)
+    monkeypatch.setattr("dymad.agent.exec.workflow.plot_trajectory", failing_plot_trajectory)
+
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"][
+        "handle"
+    ]
+    checkpoint_summary = tools.register_checkpoint(
+        model_ref="dymad.models.collections:KBF",
+        checkpoint_path=str(tmp_path / "fake.pt"),
+    )
+
+    response = tools.evaluate_model(
+        checkpoint_handle=checkpoint_summary["data"]["summary"]["handle"],
+        test_dataset_handle=dataset_handle,
+        metric="rollout_rmse",
+        artifact_root=str(tmp_path / "evals"),
+    )
+
+    result = response["data"]["result"]
+    assert response["ok"] is True
+    assert Path(result["artifacts"]["metrics_path"]).is_file()
+    assert result["artifacts"]["plot_paths"] == []
+    assert result["plot_skipped_reason"] == "plotting failed"

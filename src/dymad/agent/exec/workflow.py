@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib
 import json
+import logging
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -37,6 +38,9 @@ if TYPE_CHECKING:
     from dymad.agent.exec.context import ExecutionContext
     from dymad.sako.adapter import SpectralAnalysisAdapter, SpectralEigensystem, SpectralRuntime
     from dymad.sako.snapshot import SpectralSnapshot
+
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_model_ref(model_ref: str):
@@ -624,15 +628,25 @@ class CompatibilityExecutor:
             ):
                 payload = _trajectory_payload(manager, index)
                 model_name = f"{eval_token}_{plot_selection}_{rank}"
-                plot_trajectory(
-                    np.array([payload["x"], predictions[index]]),
-                    payload["t"],
-                    model_name=model_name,
-                    us=payload["u"],
-                    labels=["Truth", "Prediction"],
-                    ifclose=True,
-                    prefix=str(eval_root),
-                )
+                try:
+                    plot_trajectory(
+                        np.array([payload["x"], predictions[index]]),
+                        payload["t"],
+                        model_name=model_name,
+                        us=payload["u"],
+                        labels=["Truth", "Prediction"],
+                        ifclose=True,
+                        prefix=str(eval_root),
+                    )
+                except Exception:
+                    logger.warning(
+                        "Skipping evaluation plot '%s' due to plotting failure.",
+                        model_name,
+                        exc_info=True,
+                    )
+                    if plot_skipped_reason is None:
+                        plot_skipped_reason = "plotting failed"
+                    continue
                 plot_paths.append(str(eval_root / f"{model_name}_prediction.png"))
 
         evaluation_summary = self.facade.register_evaluation(

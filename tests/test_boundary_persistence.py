@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import numpy.testing as npt
 
+from dymad.agent.compiler import TrainingRequest, compile_training_request
 from dymad.agent.exec.context import build_default_context
 from dymad.sako.snapshot import build_spectral_snapshot
 
@@ -77,6 +78,37 @@ def test_persisted_dataset_run_and_evaluation_round_trip(tmp_path) -> None:
     assert evaluation_record.metric == "rollout_rmse"
     assert evaluation_record.plot_paths == [str(tmp_path / "plot.png")]
     assert kinds == ["checkpoint", "dataset", "evaluation", "training_run"]
+
+
+def test_persistence_recreates_missing_kind_directories_on_write(tmp_path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    dataset_path = tmp_path / "train.npz"
+    np.savez_compressed(
+        dataset_path,
+        t=np.linspace(0.0, 1.0, 5),
+        x=np.ones((2, 5, 2)),
+        u=np.zeros((2, 5, 1)),
+    )
+
+    context = build_default_context(artifact_root=artifact_root)
+    datasets_dir = artifact_root / "datasets"
+    compiled_dir = artifact_root / "compiled_training_requests"
+    datasets_dir.rmdir()
+    compiled_dir.rmdir()
+
+    dataset = context.facade.register_dataset_file(path=str(dataset_path))
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=dataset.handle,
+            model_key="kbf",
+            run_name="recreate_dirs",
+        ),
+    )
+    summary = context.facade.register_compiled_training_request(compiled_request=compiled)
+
+    assert (datasets_dir / f"{dataset.handle}.json").is_file()
+    assert (compiled_dir / f"{summary.handle}.json").is_file()
 
 
 def test_persisted_spectral_snapshots_round_trip(tmp_path) -> None:

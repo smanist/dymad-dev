@@ -1,8 +1,14 @@
+# ruff: noqa: E402
+
 """FastMCP server assembly for the persisted facade/exec boundary."""
 
 from __future__ import annotations
 
 from typing import Any
+
+from dymad.agent.mcp._bootstrap import configure_headless_matplotlib_backend
+
+configure_headless_matplotlib_backend()
 
 from dymad.agent.exec.context import ExecutionContext, build_default_context
 from dymad.agent.mcp.developer_tools import DeveloperTools
