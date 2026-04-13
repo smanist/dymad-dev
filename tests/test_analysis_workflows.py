@@ -7,7 +7,7 @@ import numpy as np
 
 from dymad.agent.compiler import AnalysisRequest, compile_analysis_request
 from dymad.agent.exec.context import build_default_context
-from dymad.agent.registry import list_analysis_capabilities
+from dymad.agent.registry import list_analysis_capabilities, list_evaluation_capabilities
 
 
 def _write_regular_dataset(path: Path) -> None:
@@ -30,6 +30,14 @@ def test_analysis_registry_lists_supported_capabilities() -> None:
         "train_dataset_handle",
         "test_dataset_handle",
     )
+
+
+def test_evaluation_registry_lists_supported_capabilities() -> None:
+    capabilities = {capability.key: capability for capability in list_evaluation_capabilities()}
+
+    assert set(capabilities) == {"checkpoint_rollout"}
+    assert capabilities["checkpoint_rollout"].supported_metrics == ("rollout_rmse",)
+    assert capabilities["checkpoint_rollout"].parameter_schema["metric"]["enum"] == ["rollout_rmse"]
 
 
 def test_compile_and_persist_analysis_request_round_trip(tmp_path) -> None:

@@ -193,6 +193,11 @@ def build_server(
             return user_tools.list_analysis_capabilities()
 
         @server.tool
+        def list_evaluation_capabilities(dataset_handle: str | None = None) -> dict[str, Any]:
+            """List supported evaluation workflows and accepted metric/plot parameters."""
+            return user_tools.list_evaluation_capabilities(dataset_handle=dataset_handle)
+
+        @server.tool
         def describe_training_capability(
             model_key: str,
             dataset_handle: str | None = None,

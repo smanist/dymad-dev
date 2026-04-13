@@ -27,6 +27,7 @@ from dymad.agent.exec.state import (
 )
 from dymad.agent.exec.training_profiles import profile_config, resolve_profile_name
 from dymad.agent.facade.operations import FacadeOperations
+from dymad.agent.registry import SUPPORTED_EVALUATION_METRICS
 from dymad.agent.store.object_store import (
     CompiledAnalysisRequestRecord,
     CompiledTrainingRequestRecord,
@@ -548,7 +549,7 @@ class CompatibilityExecutor:
         max_plots: int = 1,
         predict_kwargs: dict[str, Any] | None = None,
     ) -> EvaluateModelResult:
-        if metric != "rollout_rmse":
+        if metric not in SUPPORTED_EVALUATION_METRICS:
             raise ValueError(f"unsupported evaluation metric: {metric}")
         checkpoint = self.facade.get_checkpoint(checkpoint_handle)
         dataset = self.facade.get_dataset(test_dataset_handle)

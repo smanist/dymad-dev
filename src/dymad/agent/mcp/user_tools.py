@@ -16,6 +16,7 @@ from dymad.agent.registry import (
     DatasetKind,
     describe_training_capability,
     list_analysis_capabilities,
+    list_evaluation_capabilities,
     list_training_capabilities,
 )
 
@@ -44,6 +45,20 @@ class UserTools:
         return self._wrap(
             lambda: {
                 "capabilities": [asdict(capability) for capability in list_analysis_capabilities()]
+            }
+        )
+
+    def list_evaluation_capabilities(self, *, dataset_handle: str | None = None) -> dict[str, Any]:
+        dataset_kind: DatasetKind | None = None
+        if dataset_handle is not None:
+            dataset_kind = cast(DatasetKind, self._context.facade.get_dataset(dataset_handle).kind)
+        return self._wrap(
+            lambda: {
+                "dataset_kind": dataset_kind,
+                "capabilities": [
+                    asdict(capability)
+                    for capability in list_evaluation_capabilities(dataset_kind=dataset_kind)
+                ],
             }
         )
 
@@ -196,7 +211,7 @@ class UserTools:
         try:
             return {
                 "ok": True,
-                "data": fn(),
+                "data": self._json_safe(fn()),
             }
         except Exception as exc:
             return {
@@ -206,6 +221,16 @@ class UserTools:
                     "message": str(exc),
                 },
             }
+
+    @staticmethod
+    def _json_safe(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: UserTools._json_safe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [UserTools._json_safe(item) for item in value]
+        if isinstance(value, tuple):
+            return [UserTools._json_safe(item) for item in value]
+        return value
 
     def _compiled_request_data(self, handle: str) -> dict[str, Any]:
         summary = self._context.facade.describe_object(handle)

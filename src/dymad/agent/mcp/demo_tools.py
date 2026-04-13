@@ -9,6 +9,7 @@ from dymad.agent.exec.context import ExecutionContext, build_default_context
 from dymad.agent.registry import (
     DatasetKind,
     describe_training_capability,
+    list_evaluation_capabilities,
     list_model_capabilities,
     list_profile_capabilities,
     list_training_capabilities,
@@ -203,6 +204,20 @@ class DemoTools:
             }
         )
 
+    def list_evaluation_capabilities(self, *, dataset_handle: str | None = None) -> dict[str, Any]:
+        dataset_kind: DatasetKind | None = None
+        if dataset_handle is not None:
+            dataset_kind = cast(DatasetKind, self._context.facade.get_dataset(dataset_handle).kind)
+        return self._wrap(
+            lambda: {
+                "dataset_kind": dataset_kind,
+                "capabilities": [
+                    asdict(capability)
+                    for capability in list_evaluation_capabilities(dataset_kind=dataset_kind)
+                ],
+            }
+        )
+
     def describe_training_capability(
         self,
         *,
@@ -246,7 +261,7 @@ class DemoTools:
         try:
             return {
                 "ok": True,
-                "data": fn(),
+                "data": self._json_safe(fn()),
             }
         except Exception as exc:
             return {
@@ -256,6 +271,16 @@ class DemoTools:
                     "message": str(exc),
                 },
             }
+
+    @staticmethod
+    def _json_safe(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: DemoTools._json_safe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [DemoTools._json_safe(item) for item in value]
+        if isinstance(value, tuple):
+            return [DemoTools._json_safe(item) for item in value]
+        return value
 
     @staticmethod
     def _summary_data(summary: ObjectSummary) -> dict[str, Any]:

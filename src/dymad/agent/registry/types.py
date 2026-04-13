@@ -92,3 +92,14 @@ class AnalysisCapability:
     requires_checkpoint: bool
     dataset_input_keys: tuple[str, ...]
     parameter_schema: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class EvaluationCapability:
+    key: str
+    name: str
+    summary: str
+    dataset_kinds: tuple[DatasetKind, ...]
+    supported_metrics: tuple[str, ...]
+    parameter_schema: dict[str, Any]
+    notes: tuple[str, ...] = ()

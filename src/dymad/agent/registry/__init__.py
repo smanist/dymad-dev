@@ -1,6 +1,10 @@
 """Agent-facing capability registry accessors."""
 
 from dymad.agent.registry.analyses import list_analysis_capabilities, resolve_analysis_capability
+from dymad.agent.registry.evaluations import (
+    SUPPORTED_EVALUATION_METRICS,
+    list_evaluation_capabilities,
+)
 from dymad.agent.registry.models import list_model_capabilities, resolve_model_capability
 from dymad.agent.registry.training_schema import (
     describe_training_capability,
@@ -11,6 +15,7 @@ from dymad.agent.registry.types import (
     AnalysisImplementation,
     AnalysisSupportLevel,
     DatasetKind,
+    EvaluationCapability,
     ModelCapability,
     ModelVariantCapability,
     ProfileCapability,
@@ -34,6 +39,7 @@ __all__ = [
     "AnalysisImplementation",
     "AnalysisSupportLevel",
     "DatasetKind",
+    "EvaluationCapability",
     "ModelCapability",
     "ModelVariantCapability",
     "TrainingCapabilityDetail",
@@ -44,6 +50,7 @@ __all__ = [
     "available_profiles",
     "describe_training_capability",
     "list_analysis_capabilities",
+    "list_evaluation_capabilities",
     "list_model_capabilities",
     "list_profile_capabilities",
     "list_training_phase_entry_schemas",
@@ -54,4 +61,5 @@ __all__ = [
     "resolve_analysis_capability",
     "resolve_model_capability",
     "resolve_profile_name",
+    "SUPPORTED_EVALUATION_METRICS",
 ]

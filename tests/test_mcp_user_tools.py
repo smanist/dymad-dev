@@ -40,6 +40,7 @@ def test_user_tools_compile_train_and_evaluate_flow(tmp_path, monkeypatch) -> No
         model_key="kbf",
         dataset_handle=train_dataset_handle,
     )
+    evaluation = tools.list_evaluation_capabilities(dataset_handle=train_dataset_handle)
 
     compiled = tools.compile_training_request(
         train_dataset_handle=train_dataset_handle,
@@ -65,8 +66,10 @@ def test_user_tools_compile_train_and_evaluate_flow(tmp_path, monkeypatch) -> No
 
     assert compiled["ok"] is True
     assert detail["ok"] is True
+    assert evaluation["ok"] is True
     assert detail["data"]["dataset_kind"] == "regular"
     assert detail["data"]["detail"]["capability"]["model_key"] == "kbf"
+    assert evaluation["data"]["capabilities"][0]["supported_metrics"] == ["rollout_rmse"]
     assert compiled["data"]["compiled_request"]["model_key"] == "kbf"
     assert compiled["data"]["compiled_request"]["reference_profile"] == "kbf-regular-default"
     assert trained["ok"] is True
@@ -101,3 +104,4 @@ def test_build_server_registers_user_tools(monkeypatch, tmp_path) -> None:
     assert "compile_training_request" in server.tools
     assert "train_compiled_request" in server.tools
     assert "evaluate_checkpoint" in server.tools
+    assert "list_evaluation_capabilities" in server.tools
