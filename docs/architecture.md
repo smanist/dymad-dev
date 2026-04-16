@@ -12,6 +12,12 @@ This document is the current source of truth for:
 
 Use it instead of the old `docs/mcp_*.md` and `docs/checkpoint-e2e-layering.md` design notes.
 
+Maintenance rule:
+
+- If a change alters MCP surfaces, boundary ownership, registry/compiler responsibilities,
+  checkpoint materialization flow, or persisted handle types, update this document in the same
+  change.
+
 ## Package Map
 
 | Area | Owns |
@@ -205,3 +211,5 @@ Use these as the fastest ground truth for the current architecture:
 ## When Adding Features
 
 If you are deciding where a change belongs, use [feature-placement.md](/Users/daninghuang/Repos/dymad-dev/docs/feature-placement.md).
+
+If your change moves the answer, update that file too.

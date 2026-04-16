@@ -7,6 +7,11 @@ This is the shortest possible answer to "where should this feature go?".
 Read [architecture.md](/Users/daninghuang/Repos/dymad-dev/docs/architecture.md) first if the
 boundary between `agent/*` and the legacy runtime is unclear.
 
+Maintenance rule:
+
+- If a change adds a new workflow, capability family, persisted artifact type, or changes the
+  recommended ownership for a feature, update this table in the same change.
+
 ## Decision Table
 
 | You are adding | Primary files/packages | Notes |
