@@ -41,6 +41,8 @@ Explore More
    :maxdepth: 2
 
    getting_started
+   architecture
+   feature-placement
    roadmap
    examples
    theory
