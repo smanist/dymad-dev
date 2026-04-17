@@ -91,6 +91,10 @@ def test_persistence_recreates_missing_kind_directories_on_write(tmp_path) -> No
     )
 
     context = build_default_context(artifact_root=artifact_root)
+    context.facade.register_checkpoint(
+        model_ref="dymad.models.collections:KBF",
+        checkpoint_path="checkpoints/bootstrap.pt",
+    )
     datasets_dir = artifact_root / "datasets"
     compiled_dir = artifact_root / "compiled_training_requests"
     datasets_dir.rmdir()
