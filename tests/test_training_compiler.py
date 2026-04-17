@@ -198,6 +198,65 @@ def test_compile_training_request_infers_stacked_trainer_kind_from_phases(tmp_pa
     ]
 
 
+def test_compile_training_request_accepts_minimal_staged_legacy_optimizer_shorthand(
+    tmp_path,
+) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={
+                "phases": [
+                    {"trainer": "Linear"},
+                    {"trainer": "NODE"},
+                ]
+            },
+        ),
+    )
+
+    assert compiled.trainer_kind == "stacked"
+    assert [phase["trainer"] for phase in compiled.effective_config["phases"]] == [
+        "Linear",
+        "NODE",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("phase_sequence", "expected_trainers"),
+    [
+        ([{"trainer": "Linear"}, {"trainer": "Weak"}], ["Linear", "Weak"]),
+        ([{"trainer": "Weak"}, {"trainer": "NODE"}], ["Weak", "NODE"]),
+    ],
+)
+def test_compile_training_request_accepts_other_supported_legacy_trainer_sequences(
+    tmp_path,
+    phase_sequence,
+    expected_trainers,
+) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={"phases": phase_sequence},
+        ),
+    )
+
+    assert compiled.trainer_kind == "stacked"
+    assert [phase["trainer"] for phase in compiled.effective_config["phases"]] == expected_trainers
+
+
 def test_compile_training_request_rejects_zero_layer_identity_dimension_mismatch(tmp_path) -> None:
     context = build_default_context(artifact_root=tmp_path / "artifacts")
     dataset_path = tmp_path / "train.npz"

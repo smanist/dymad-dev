@@ -17,7 +17,7 @@ Maintenance rule:
 | You are adding | Primary files/packages | Notes |
 | --- | --- | --- |
 | A new MCP tool that exposes an existing workflow | `src/dymad/agent/mcp/user_tools.py` or `src/dymad/agent/mcp/demo_tools.py`, then `src/dymad/agent/mcp/server.py` | Keep business logic out of `server.py`; it should register tools, not implement them |
-| A new user-mode training capability or model family choice | `src/dymad/agent/registry/models.py`, `src/dymad/agent/registry/workflows.py`, `src/dymad/agent/registry/training_schema.py` | Add stable keys, summaries, dataset compatibility, allowed overrides, and examples |
+| A new user-mode training capability or model family choice | `src/dymad/agent/registry/models.py`, `src/dymad/agent/registry/workflows.py`, `src/dymad/agent/registry/training_schema.py` | Add stable keys, summaries, dataset compatibility, allowed overrides, translation guidance, constraint notes, and examples |
 | A new user-mode request field or override validation rule | `src/dymad/agent/compiler/training.py`, `src/dymad/agent/compiler/schemas.py`, maybe `src/dymad/agent/registry/training_schema.py` | Compiler owns validation and normalization of user input |
 | A new analysis workflow | `src/dymad/agent/registry/analyses.py`, `src/dymad/agent/compiler/analysis.py`, `src/dymad/agent/exec/workflow.py` | Registry declares the workflow, compiler validates inputs, executor runs it |
 | A new persisted request/artifact handle | `src/dymad/agent/store/object_store.py`, `src/dymad/agent/store/filesystem_artifact_store.py`, `src/dymad/agent/facade/handles.py`, `src/dymad/agent/facade/operations.py` | Add both record persistence and typed facade accessors |
@@ -32,6 +32,8 @@ Maintenance rule:
 ## Rules of Thumb
 
 - If the change introduces a new stable user-facing key, start in `agent/registry/*`.
+- If the change teaches clients how to translate natural language into a user-mode request, put
+  that guidance in `agent/registry/*`, not in MCP adapters or runtime code.
 - If the change validates or normalizes user input, start in `agent/compiler/*`.
 - If the change coordinates multiple steps, start in `agent/exec/*`.
 - If the change stores something under a handle, start in `agent/store/*` and `agent/facade/*`.

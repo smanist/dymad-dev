@@ -83,6 +83,8 @@ Notes:
 
 - user mode does not require raw `model_ref`
 - user mode compiles `model_key` plus validated overrides into persisted compiled requests
+- `describe_training_capability` is the authoritative contract for allowed overrides, phase-entry
+  schemas, natural-language-to-override translation guidance, and surfaced training constraints
 - user mode currently assumes dataset handles already exist
 
 ### Developer Mode
@@ -126,6 +128,8 @@ Compilation resolves:
 - dataset kind compatibility
 - default or explicit profile
 - allowed user overrides
+- translation guidance and surfaced constraint notes for clients that map natural-language requests
+  into structured overrides
 - effective config
 - trainer kind
 

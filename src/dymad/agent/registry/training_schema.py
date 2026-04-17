@@ -8,6 +8,7 @@ from dymad.agent.registry.models import resolve_model_capability
 from dymad.agent.registry.types import (
     DatasetKind,
     TrainingCapabilityDetail,
+    TrainingCapabilityExample,
     TrainingPhaseEntrySchema,
 )
 from dymad.agent.registry.workflows import list_training_capabilities
@@ -36,6 +37,22 @@ AUTO_APPENDED_PHASES: tuple[str, ...] = (
     "export_best_model",
     "export_run_checkpoint",
     "export_summary",
+)
+TRANSLATION_GUIDANCE: tuple[str, ...] = (
+    "For any ordered trainer names mentioned by the user, emit one overrides.phases "
+    "entry per trainer in the same order.",
+    "Supported optimizer trainer names are Linear, Weak, and NODE.",
+    "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
+    "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters.",
+    "Add phase names only when they improve readability or reflect user-provided "
+    "labels such as initialization or refinement.",
+)
+CONSTRAINT_NOTES: tuple[str, ...] = (
+    "Setting encoder_layers=0 or decoder_layers=0 only yields a true identity map "
+    "when the latent dimension matches the dataset state dimension.",
+    "When the user requests identity encoder/decoder behavior without naming the "
+    "latent dimension, inspect the dataset and set the latent dimension to the "
+    "dataset state dimension.",
 )
 
 
@@ -134,27 +151,61 @@ def _phase_entry_schemas() -> tuple[TrainingPhaseEntrySchema, ...]:
 
 
 @lru_cache(maxsize=1)
-def _examples() -> tuple[dict[str, object], ...]:
+def _examples() -> tuple[TrainingCapabilityExample, ...]:
     return (
-        {
-            "name": "linear_then_node",
-            "overrides": {
+        TrainingCapabilityExample(
+            name="linear_then_node_from_plain_english",
+            user_request=(
+                "Use staged training: first a Linear phase for initialization, then a "
+                "NODE phase for refinement."
+            ),
+            overrides={
                 "phases": [
-                    {"type": "optimizer", "name": "LinearInit", "trainer": "Linear", "n_epochs": 1},
-                    {
-                        "type": "optimizer",
-                        "name": "NODERefine",
-                        "trainer": "NODE",
-                        "n_epochs": 25,
-                        "learning_rate": 5e-3,
-                        "decay_rate": 0.999,
-                    },
+                    {"trainer": "Linear", "name": "initialization"},
+                    {"trainer": "NODE", "name": "refinement"},
                 ]
             },
-        },
-        {
-            "name": "repeat_linear_solve_and_node",
-            "overrides": {
+            notes=(
+                "This uses the minimal legacy optimizer shorthand because the user did "
+                "not specify per-phase hyperparameters.",
+            ),
+        ),
+        TrainingCapabilityExample(
+            name="weak_then_node_from_plain_english",
+            user_request="Use weak form training first, then refine with NODE.",
+            overrides={
+                "phases": [
+                    {"trainer": "Weak"},
+                    {"trainer": "NODE"},
+                ]
+            },
+            notes=(
+                "The same ordered-trainer translation rule applies to any supported "
+                "mix of Linear, Weak, and NODE phases.",
+            ),
+        ),
+        TrainingCapabilityExample(
+            name="identity_encoder_decoder_for_two_state_lti",
+            user_request=(
+                "Use trivial encoder and decoder, i.e. identity maps, for a 2-state "
+                "LTI model."
+            ),
+            overrides={
+                "model": {
+                    "encoder_layers": 0,
+                    "decoder_layers": 0,
+                    "koopman_dimension": 2,
+                }
+            },
+            notes=(
+                "In general, replace 2 with the inspected dataset state dimension "
+                "before compiling the request.",
+            ),
+        ),
+        TrainingCapabilityExample(
+            name="repeat_linear_solve_and_node",
+            user_request="Repeat a linear solve followed by NODE refinement twice.",
+            overrides={
                 "phases": [
                     {
                         "repeat": {
@@ -178,7 +229,11 @@ def _examples() -> tuple[dict[str, object], ...]:
                     }
                 ]
             },
-        },
+            notes=(
+                "Repeat blocks are useful when the user explicitly asks for a cyclic "
+                "schedule rather than a simple ordered list of trainers.",
+            ),
+        ),
     )
 
 
@@ -201,6 +256,8 @@ def describe_training_capability(
                 allowed_data_override_keys=ALLOWED_DATA_OVERRIDE_KEYS,
                 runtime_owned_model_keys=RUNTIME_OWNED_MODEL_KEYS,
                 phase_entry_schemas=_phase_entry_schemas(),
+                translation_guidance=TRANSLATION_GUIDANCE,
+                constraint_notes=CONSTRAINT_NOTES,
                 auto_appended_phases=AUTO_APPENDED_PHASES,
                 examples=_examples(),
             )

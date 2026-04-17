@@ -69,6 +69,48 @@ def test_user_tools_compile_train_and_evaluate_flow(tmp_path, monkeypatch) -> No
     assert evaluation["ok"] is True
     assert detail["data"]["dataset_kind"] == "regular"
     assert detail["data"]["detail"]["capability"]["model_key"] == "kbf"
+    assert detail["data"]["detail"]["translation_guidance"][0] == (
+        "For any ordered trainer names mentioned by the user, emit one "
+        "overrides.phases entry per trainer in the same order."
+    )
+    assert (
+        detail["data"]["detail"]["translation_guidance"][1]
+        == "Supported optimizer trainer names are Linear, Weak, and NODE."
+    )
+    assert (
+        detail["data"]["detail"]["constraint_notes"][0]
+        == "Setting encoder_layers=0 or decoder_layers=0 only yields a true identity map "
+        "when the latent dimension matches the dataset state dimension."
+    )
+    assert detail["data"]["detail"]["examples"][0] == {
+        "name": "linear_then_node_from_plain_english",
+        "user_request": "Use staged training: first a Linear phase for initialization, then a "
+        "NODE phase for refinement.",
+        "overrides": {
+            "phases": [
+                {"trainer": "Linear", "name": "initialization"},
+                {"trainer": "NODE", "name": "refinement"},
+            ]
+        },
+        "notes": [
+            "This uses the minimal legacy optimizer shorthand because the user did not "
+            "specify per-phase hyperparameters."
+        ],
+    }
+    assert detail["data"]["detail"]["examples"][1] == {
+        "name": "weak_then_node_from_plain_english",
+        "user_request": "Use weak form training first, then refine with NODE.",
+        "overrides": {
+            "phases": [
+                {"trainer": "Weak"},
+                {"trainer": "NODE"},
+            ]
+        },
+        "notes": [
+            "The same ordered-trainer translation rule applies to any supported mix of "
+            "Linear, Weak, and NODE phases."
+        ],
+    }
     assert evaluation["data"]["capabilities"][0]["supported_metrics"] == ["rollout_rmse"]
     assert compiled["data"]["compiled_request"]["model_key"] == "kbf"
     assert compiled["data"]["compiled_request"]["reference_profile"] == "kbf-regular-default"

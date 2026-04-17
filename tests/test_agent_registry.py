@@ -123,4 +123,39 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "export",
         "repeat",
     }
+    assert detail.translation_guidance == (
+        "For any ordered trainer names mentioned by the user, emit one overrides.phases "
+        "entry per trainer in the same order.",
+        "Supported optimizer trainer names are Linear, Weak, and NODE.",
+        "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
+        "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters.",
+        "Add phase names only when they improve readability or reflect user-provided "
+        "labels such as initialization or refinement.",
+    )
+    assert detail.constraint_notes == (
+        "Setting encoder_layers=0 or decoder_layers=0 only yields a true identity map "
+        "when the latent dimension matches the dataset state dimension.",
+        "When the user requests identity encoder/decoder behavior without naming the "
+        "latent dimension, inspect the dataset and set the latent dimension to the "
+        "dataset state dimension.",
+    )
     assert "export_summary" in detail.auto_appended_phases
+    assert detail.examples[0].name == "linear_then_node_from_plain_english"
+    assert (
+        detail.examples[0].user_request
+        == "Use staged training: first a Linear phase for initialization, then a "
+        "NODE phase for refinement."
+    )
+    assert detail.examples[0].overrides == {
+        "phases": [
+            {"trainer": "Linear", "name": "initialization"},
+            {"trainer": "NODE", "name": "refinement"},
+        ]
+    }
+    assert detail.examples[1].overrides == {
+        "phases": [
+            {"trainer": "Weak"},
+            {"trainer": "NODE"},
+        ]
+    }
+    assert detail.examples[2].overrides["model"]["koopman_dimension"] == 2

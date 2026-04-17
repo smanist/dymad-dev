@@ -71,6 +71,14 @@ class TrainingPhaseEntrySchema:
 
 
 @dataclass(frozen=True)
+class TrainingCapabilityExample:
+    name: str
+    user_request: str
+    overrides: dict[str, Any]
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class TrainingCapabilityDetail:
     capability: TrainingWorkflowCapability
     allowed_override_top_level_keys: tuple[str, ...]
@@ -78,8 +86,10 @@ class TrainingCapabilityDetail:
     allowed_data_override_keys: tuple[str, ...]
     runtime_owned_model_keys: tuple[str, ...]
     phase_entry_schemas: tuple[TrainingPhaseEntrySchema, ...]
+    translation_guidance: tuple[str, ...]
+    constraint_notes: tuple[str, ...]
     auto_appended_phases: tuple[str, ...]
-    examples: tuple[dict[str, Any], ...]
+    examples: tuple[TrainingCapabilityExample, ...]
 
 
 @dataclass(frozen=True)
