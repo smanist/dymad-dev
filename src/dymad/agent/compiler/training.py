@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from typing import Any, Never, cast
 
 from dymad.agent.compiler.schemas import (
     CompiledTrainingRequest,
@@ -26,7 +26,7 @@ from dymad.agent.registry.training_schema import (
 )
 
 
-def _raise_invalid(message: str, *, field_path: tuple[str, ...]) -> None:
+def _raise_invalid(message: str, *, field_path: tuple[str, ...]) -> Never:
     raise TrainingCompileValidationError(message, field_path=field_path)
 
 
@@ -62,15 +62,61 @@ def _is_non_empty_dotted_key(value: object) -> bool:
     return all(part != "" for part in value.split("."))
 
 
-def _is_valid_param_grid_value(value: object) -> bool:
+def _validate_override_path(path: tuple[str, ...]) -> None:
+    path_str = ".".join(path)
+    if len(path) == 1:
+        key = path[0]
+        if path_str in RUNTIME_OWNED_OVERRIDE_PATHS:
+            _raise_invalid(
+                f"overrides.{key} is runtime-owned and cannot be set by the caller",
+                field_path=("overrides", key),
+            )
+        if key not in ALLOWED_TOP_LEVEL_OVERRIDE_KEYS and key != "data":
+            _raise_invalid(
+                f"overrides.{key} is not supported by the user-mode compiler",
+                field_path=("overrides", key),
+            )
+    if path_str in RUNTIME_OWNED_OVERRIDE_PATHS:
+        _raise_invalid(
+            f"overrides.{'.'.join(path)} is runtime-owned and cannot be set by the caller",
+            field_path=("overrides",) + path,
+        )
+    if path[:1] == ("data",) and len(path) == 2 and path[1] not in ALLOWED_DATA_OVERRIDE_KEYS:
+        _raise_invalid(
+            f"overrides.data.{path[1]} is not supported by the user-mode compiler",
+            field_path=("overrides",) + path,
+        )
+    if path[:1] == ("model",) and len(path) == 2 and path[1] in RUNTIME_OWNED_MODEL_KEYS:
+        _raise_invalid(
+            f"overrides.model.{path[1]} is runtime-owned and cannot be set by the caller",
+            field_path=("overrides",) + path,
+        )
+
+
+def _normalize_param_grid_value(
+    value: object, *, key: str
+) -> list[Any] | tuple[str, tuple[Any, ...]]:
     if isinstance(value, list):
-        return True
-    if not isinstance(value, tuple) or len(value) != 2:
-        return False
-    kind, args = value
-    if kind not in {"linspace", "logspace"}:
-        return False
-    return isinstance(args, (list, tuple))
+        if not value:
+            _raise_invalid(
+                "overrides.cv.param_grid values must be non-empty",
+                field_path=("overrides", "cv", "param_grid", key),
+            )
+        if (
+            len(value) == 2
+            and value[0] in {"linspace", "logspace"}
+            and isinstance(value[1], (list, tuple))
+        ):
+            return cast(str, value[0]), tuple(cast(list[Any] | tuple[Any, ...], value[1]))
+        return value
+    if isinstance(value, tuple) and len(value) == 2:
+        kind, args = value
+        if kind in {"linspace", "logspace"} and isinstance(args, (list, tuple)):
+            return cast(str, kind), tuple(cast(list[Any] | tuple[Any, ...], args))
+    _raise_invalid(
+        "overrides.cv.param_grid values must be non-empty lists or ('linspace'|'logspace', ...)",
+        field_path=("overrides", "cv", "param_grid", key),
+    )
 
 
 def _validate_cv_config(cv_config: object) -> None:
@@ -102,11 +148,8 @@ def _validate_cv_config(cv_config: object) -> None:
                 "overrides.cv.param_grid keys must be non-empty dotted config paths",
                 field_path=("overrides", "cv", "param_grid"),
             )
-        if not _is_valid_param_grid_value(value):
-            _raise_invalid(
-                "overrides.cv.param_grid values must be lists or ('linspace'|'logspace', ...)",
-                field_path=("overrides", "cv", "param_grid", key),
-            )
+        _validate_override_path(tuple(key.split(".")))
+        param_grid_mapping[key] = _normalize_param_grid_value(value, key=key)
 
     metric = cv_mapping.get("metric")
     if metric is not None and not isinstance(metric, str):
@@ -126,33 +169,7 @@ def _validate_overrides(config: dict[str, Any] | None, *, prefix: tuple[str, ...
         )
     for key, value in config.items():
         path = prefix + (key,)
-        path_str = ".".join(path)
-        if len(path) == 1:
-            if path_str in RUNTIME_OWNED_OVERRIDE_PATHS:
-                _raise_invalid(
-                    f"overrides.{key} is runtime-owned and cannot be set by the caller",
-                    field_path=("overrides", key),
-                )
-            if key not in ALLOWED_TOP_LEVEL_OVERRIDE_KEYS and key != "data":
-                _raise_invalid(
-                    f"overrides.{key} is not supported by the user-mode compiler",
-                    field_path=("overrides", key),
-                )
-        if path_str in RUNTIME_OWNED_OVERRIDE_PATHS:
-            _raise_invalid(
-                f"overrides.{'.'.join(path)} is runtime-owned and cannot be set by the caller",
-                field_path=("overrides",) + path,
-            )
-        if path[:1] == ("data",) and len(path) == 2 and path[1] not in ALLOWED_DATA_OVERRIDE_KEYS:
-            _raise_invalid(
-                f"overrides.data.{path[1]} is not supported by the user-mode compiler",
-                field_path=("overrides",) + path,
-            )
-        if path[:1] == ("model",) and len(path) == 2 and path[1] in RUNTIME_OWNED_MODEL_KEYS:
-            _raise_invalid(
-                f"overrides.model.{path[1]} is runtime-owned and cannot be set by the caller",
-                field_path=("overrides",) + path,
-            )
+        _validate_override_path(path)
         if path == ("cv",):
             _validate_cv_config(value)
             continue
