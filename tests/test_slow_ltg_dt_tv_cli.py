@@ -33,6 +33,7 @@ class Case:
     model_name: str
     model_class: type
     run_dir_name: str
+    seed: int = TEST_SEED
     metric_factors: dict[str, float] = field(default_factory=dict)
 
 
@@ -51,7 +52,7 @@ def _run_case(case: Case, workdir: Path) -> None:
             "--workdir",
             str(workdir),
             "--seed",
-            str(TEST_SEED),
+            str(case.seed),
             "--no-plot",
             "--no-predict",
             "--no-show",

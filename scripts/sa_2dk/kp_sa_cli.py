@@ -143,8 +143,8 @@ def prepare_workdir(root: Path):
     stage_workdir(root, BASE_DIR, ["kp_data.yaml", "kp_model.yaml"], data_dir=True)
 
 
-def generate_data(root: Path):
-    sampler = TrajectorySampler(f, config=root / "kp_data.yaml")
+def generate_data(root: Path, seed: int | None = None):
+    sampler = TrajectorySampler(f, config=root / "kp_data.yaml", rng=seed)
     ts, xs, _ = sampler.sample(t_grid, batch=B, save=str(root / "data" / "kp.npz"))
 
     fig = plt.figure(figsize=(8, 6))
@@ -199,9 +199,9 @@ def train(selected: list[int], root: Path):
         trainer.train()
 
 
-def predict(selected: list[int], root: Path):
+def predict(selected: list[int], root: Path, seed: int | None = None):
     _require_checkpoints(selected, root)
-    sampler = TrajectorySampler(f, config=root / "kp_data.yaml")
+    sampler = TrajectorySampler(f, config=root / "kp_data.yaml", rng=seed)
     ts, xs, _ = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -242,13 +242,14 @@ def compute_analysis_diagnostics(
     selected: list[int],
     root: Path,
     *,
+    seed: int | None = None,
     pred_batch: int = 16,
     map_batch: int = 64,
     ps_points: int = 51,
     measure_thetas: int = 501,
 ):
     sas, lbs = _load_analyses(selected, root)
-    sampler = TrajectorySampler(f, config=root / "kp_data.yaml")
+    sampler = TrajectorySampler(f, config=root / "kp_data.yaml", rng=seed)
     ts, xs, _ = sampler.sample(t_grid, batch=pred_batch)
     x0s = xs[:, 0, :].squeeze()
 
@@ -316,6 +317,7 @@ def analyze(
     selected: list[int],
     root: Path,
     *,
+    seed: int | None = None,
     pred_batch: int = 16,
     map_batch: int = 64,
     ps_points: int = 51,
@@ -324,6 +326,7 @@ def analyze(
     diagnostics = compute_analysis_diagnostics(
         selected,
         root,
+        seed=seed,
         pred_batch=pred_batch,
         map_batch=map_batch,
         ps_points=ps_points,
@@ -462,13 +465,13 @@ def main():
     selected = resolve_case_indices(args.case, len(CASES), DEFAULT_CASES)
     data_path = root / "data" / "kp.npz"
     if args.data or (args.train and not data_path.exists()):
-        generate_data(root)
+        generate_data(root, args.seed)
     if args.train:
         train(selected, root)
     if not args.no_predict:
-        predict(selected, root)
+        predict(selected, root, args.seed)
     if not args.no_analysis:
-        analyze(selected, root)
+        analyze(selected, root, seed=args.seed)
     if not args.no_show and (not args.no_predict or not args.no_analysis or args.data):
         plt.show()
     return 0

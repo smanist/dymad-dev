@@ -218,8 +218,14 @@ def prepare_workdir(root: Path):
     shutil.copy2(BASE_DIR / "ker_model.yaml", root / "ker_model.yaml")
 
 
-def generate_data(root: Path):
-    sampler = TrajectorySampler(f, g, config=BASE_DIR / "ker_data.yaml", config_mod=smpl)
+def generate_data(root: Path, seed: int | None = None):
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=BASE_DIR / "ker_data.yaml",
+        rng=seed,
+        config_mod=smpl,
+    )
     sampler.sample(t_grid, batch=B, save=str(root / "data" / "ker.npz"))
     print(f"Generated data: {root / 'data' / 'ker.npz'}")
 
@@ -233,9 +239,9 @@ def train(selected):
         trainer.train()
 
 
-def predict(selected):
+def predict(selected, seed: int | None = None):
     J = 32
-    sampler = TrajectorySampler(f, g, config="ker_data.yaml", config_mod=smpl)
+    sampler = TrajectorySampler(f, g, config="ker_data.yaml", rng=seed, config_mod=smpl)
     ts, xs, ys = sampler.sample(t_grid, batch=J)
     x_data = xs
     t_data = ts[0]
@@ -273,11 +279,11 @@ def main():
     selected = resolve_indices(args.case)
     data_path = root / "data" / "ker.npz"
     if args.data or (args.workdir is not None and not data_path.exists()):
-        generate_data(root)
+        generate_data(root, args.seed)
     if not args.no_train:
         train(selected)
     if not args.no_predict:
-        predict(selected)
+        predict(selected, args.seed)
     if not args.no_show and not args.no_predict:
         plt.show()
     return 0

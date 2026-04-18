@@ -59,6 +59,7 @@ class Case:
     idx: int
     model_name: str
     model_class: type
+    seed: int = TEST_SEED
     metric_factors: dict[str, float] = field(default_factory=dict)
     ode_method: str | None = None
 
@@ -87,7 +88,7 @@ def _run_case(case: Case, workdir: Path) -> None:
             "--workdir",
             str(workdir),
             "--seed",
-            str(TEST_SEED),
+            str(case.seed),
             "--no-plot",
             "--no-predict",
             "--no-show",
@@ -99,9 +100,13 @@ def _run_case(case: Case, workdir: Path) -> None:
 
 
 def _eval_rmse(case: Case, checkpoint_path: Path) -> float:
-    np.random.seed(TEST_SEED)
-    torch.manual_seed(TEST_SEED)
-    sampler = TrajectorySampler(f, g, config=SCRIPT_ROOT / "ltg_data.yaml", config_mod=CONFIG_GAU)
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=SCRIPT_ROOT / "ltg_data.yaml",
+        rng=case.seed,
+        config_mod=CONFIG_GAU,
+    )
     ts, xs, us, ys = sampler.sample(np.linspace(0, 5, 501), batch=1)
     x_data = np.concatenate([ys[0], ys[0], ys[0]], axis=-1)
     t_data = ts[0]
@@ -157,7 +162,7 @@ def test_linear_graph_linear_prediction_regression(tmp_path: Path):
             "--workdir",
             str(tmp_path),
             "--seed",
-            str(TEST_SEED),
+            str(case.seed),
             "--no-train",
             "--no-plot",
             "--no-show",

@@ -141,8 +141,8 @@ def prepare_workdir(root: Path):
     shutil.copy2(BASE_DIR / "kp_model.yaml", root / "kp_model.yaml")
 
 
-def generate_data(root: Path):
-    sampler = TrajectorySampler(f, config=BASE_DIR / "kp_data.yaml")
+def generate_data(root: Path, seed: int | None = None):
+    sampler = TrajectorySampler(f, config=BASE_DIR / "kp_data.yaml", rng=seed)
     sampler.sample(t_grid, batch=B, save=str(root / "data" / "kp.npz"))
     print(f"Generated data: {root / 'data' / 'kp.npz'}")
 
@@ -162,8 +162,8 @@ def plot(selected):
     plot_summary(npz_files, labels=labels, ifclose=False)
 
 
-def predict(selected):
-    sampler = TrajectorySampler(f, config="kp_data.yaml")
+def predict(selected, seed: int | None = None):
+    sampler = TrajectorySampler(f, config="kp_data.yaml", rng=seed)
     ts, xs, ys = sampler.sample(t_grid, batch=3)
     res = [xs]
     for i in selected:
@@ -191,13 +191,13 @@ def main():
     selected = resolve_indices(args.case)
     data_path = root / "data" / "kp.npz"
     if args.data or (args.workdir is not None and not data_path.exists()):
-        generate_data(root)
+        generate_data(root, args.seed)
     if not args.no_train:
         train(selected)
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:
-        predict(selected)
+        predict(selected, args.seed)
     if not args.no_show and (not args.no_plot or not args.no_predict):
         plt.show()
     return 0

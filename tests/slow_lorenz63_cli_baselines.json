@@ -48,11 +48,11 @@
   },
   "ddm_dm_setup0": {
     "metrics": {
-      "best_valid_total": 0.000692064146537675,
-      "crit_train_last": 0.24408666031470827,
-      "crit_valid_last": 0.037752367462570914,
-      "final_valid_loss": 0.000692064146537675,
-      "rmse": 4.87958831858907
+      "best_valid_total": 0.0006798724174401406,
+      "crit_train_last": 0.5176638141729545,
+      "crit_valid_last": 0.22735979243822696,
+      "final_valid_loss": 0.0006798724174401406,
+      "rmse": 4.881797972495396
     },
     "summary_signature": {
       "best_valid_loss_keys": [
@@ -95,11 +95,11 @@
   },
   "ddm_dm_setup1": {
     "metrics": {
-      "best_valid_total": 0.000714581499297601,
-      "crit_train_last": 0.12322151098210772,
-      "crit_valid_last": 0.13079414808834278,
-      "final_valid_loss": 0.000714581499297601,
-      "rmse": 5.760139731076788
+      "best_valid_total": 0.0006361012494360651,
+      "crit_train_last": 0.5435139060766252,
+      "crit_valid_last": 0.23860183538254687,
+      "final_valid_loss": 0.0006361012494360651,
+      "rmse": 5.197458517050682
     },
     "summary_signature": {
       "best_valid_loss_keys": [

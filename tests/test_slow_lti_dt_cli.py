@@ -54,6 +54,7 @@ class Case:
     idx: int
     model_name: str
     model_class: type
+    seed: int = TEST_SEED
     metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -70,9 +71,13 @@ CASES = [
 
 
 def _eval_rmse(case: Case, checkpoint_path: Path) -> float:
-    np.random.seed(TEST_SEED)
-    torch.manual_seed(TEST_SEED)
-    sampler = TrajectorySampler(f, g, config=SCRIPT_ROOT / "lti_data.yaml", config_mod=CONFIG_GAU)
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=SCRIPT_ROOT / "lti_data.yaml",
+        rng=case.seed,
+        config_mod=CONFIG_GAU,
+    )
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -98,7 +103,7 @@ def _run_case(case: Case, workdir: Path) -> None:
             "--workdir",
             str(workdir),
             "--seed",
-            str(TEST_SEED),
+            str(case.seed),
             "--no-plot",
             "--no-predict",
             "--no-show",

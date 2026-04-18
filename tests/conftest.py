@@ -8,6 +8,14 @@ import pytest
 from dymad.utils import TrajectorySampler, adj_to_edge
 
 HERE = Path(__file__).parent
+LTI_DATA_SEED = 12345
+LTI_TEST_SEED = 12346
+KP_DATA_SEED = 12347
+KP_TEST_SEED = 12348
+LTG_DATA_SEED = 12349
+LTG_TEST_SEED = 12350
+LTGA_DATA_SEED = 12351
+LTGA_TEST_SEED = 12352
 SA_LTI_DATA_SEED = 123
 SA_LTI_TEST_SEED = 456
 
@@ -97,7 +105,13 @@ def trj_data():
     N = 21
     t_grid = np.linspace(0, 0.1, N)
 
-    sampler = TrajectorySampler(f, g, config=HERE / "lti_data.yaml", config_mod=config_chr)
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=HERE / "lti_data.yaml",
+        rng=LTI_DATA_SEED,
+        config_mod=config_chr,
+    )
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
     ys = np.hstack([xs[0], xs[1]])  # This will be repeated along batch
     us = us[:, 0, :].reshape(B, 1, -1)  # This will be repeated along time
@@ -125,7 +139,13 @@ def lti_data():
     N = 51
     t_grid = np.linspace(0, 0.5, N)
 
-    sampler = TrajectorySampler(f, g, config=HERE / "lti_data.yaml", config_mod=config_chr)
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=HERE / "lti_data.yaml",
+        rng=LTI_DATA_SEED,
+        config_mod=config_chr,
+    )
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
     np.savez_compressed(HERE / "lti.npz", t=ts, x=ys, u=us)
 
@@ -145,7 +165,13 @@ def lti_gau():
     # ---- runs ONCE before any tests execute ----
     N = 51
     t_grid = np.linspace(0, 0.5, N)
-    sampler = TrajectorySampler(f, g, config=HERE / "lti_data.yaml", config_mod=config_gau)
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=HERE / "lti_data.yaml",
+        rng=LTI_TEST_SEED,
+        config_mod=config_gau,
+    )
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -165,7 +191,7 @@ def kp_data():
     N = 31
     t_grid = np.linspace(0, 0.5, N)
 
-    sampler = TrajectorySampler(f_kp, config=HERE / "kp_data.yaml")
+    sampler = TrajectorySampler(f_kp, config=HERE / "kp_data.yaml", rng=KP_DATA_SEED)
     ts, xs, ys = sampler.sample(t_grid, batch=B)
     np.savez_compressed(HERE / "kp.npz", t=ts, x=ys)
 
@@ -185,7 +211,12 @@ def kp_test():
     # ---- runs ONCE before any tests execute ----
     N = 31
     t_grid = np.linspace(0, 0.5, N)
-    sampler = TrajectorySampler(f_kp, config=HERE / "kp_data.yaml", config_mod=config_gau)
+    sampler = TrajectorySampler(
+        f_kp,
+        config=HERE / "kp_data.yaml",
+        rng=KP_TEST_SEED,
+        config_mod=config_gau,
+    )
     ts, xs, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -204,7 +235,13 @@ def ltg_data():
     N = 51
     t_grid = np.linspace(0, 0.5, N)
 
-    sampler = TrajectorySampler(f, g, config=HERE / "lti_data.yaml", config_mod=config_chr)
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=HERE / "lti_data.yaml",
+        rng=LTG_DATA_SEED,
+        config_mod=config_chr,
+    )
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
 
     # Pretending a 3-node graph
@@ -233,7 +270,13 @@ def ltg_gau():
     # ---- runs ONCE before any tests execute ----
     N = 51
     t_grid = np.linspace(0, 0.5, N)
-    sampler = TrajectorySampler(f, g, config=HERE / "lti_data.yaml", config_mod=config_gau)
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=HERE / "lti_data.yaml",
+        rng=LTG_TEST_SEED,
+        config_mod=config_gau,
+    )
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = np.concatenate([ys[0], ys[0], ys[0]], axis=-1)
     t_data = ts[0]
@@ -253,7 +296,7 @@ def ltga_data():
     N = 51
     t_grid = np.linspace(0, 0.5, N)
 
-    sampler = TrajectorySampler(f_auto, g_auto, config=HERE / "ltga_data.yaml")
+    sampler = TrajectorySampler(f_auto, g_auto, config=HERE / "ltga_data.yaml", rng=LTGA_DATA_SEED)
     ts, xs, ys = sampler.sample(t_grid, batch=B)
 
     # Pretending a 3-node graph
@@ -274,7 +317,7 @@ def ltga_data():
 def ltga_test():
     N = 51
     t_grid = np.linspace(0, 0.5, N)
-    sampler = TrajectorySampler(f_auto, config=HERE / "ltga_data.yaml")
+    sampler = TrajectorySampler(f_auto, config=HERE / "ltga_data.yaml", rng=LTGA_TEST_SEED)
     ts, xs, ys = sampler.sample(t_grid, batch=1)
     x_data = np.concatenate([xs[0], xs[0], xs[0]], axis=-1)
     t_data = ts[0]

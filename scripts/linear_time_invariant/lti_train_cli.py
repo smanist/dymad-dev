@@ -129,9 +129,15 @@ def prepare_workdir(root: Path):
             shutil.copy2(src, dst)
 
 
-def generate_data(root: Path):
+def generate_data(root: Path, seed: int | None = None):
     (root / "data").mkdir(exist_ok=True)
-    sampler = TrajectorySampler(f, g, config=BASE_DIR / "lti_data.yaml", config_mod=config_chr)
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=BASE_DIR / "lti_data.yaml",
+        rng=seed,
+        config_mod=config_chr,
+    )
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
     out_path = root / "data" / "lti.npz"
     np.savez_compressed(out_path, t=ts, x=ys, u=us)
@@ -157,8 +163,8 @@ def plot(selected):
         print(f"Epoch time: {label} - {npz['avg_epoch_time']}")
 
 
-def predict(selected):
-    sampler = TrajectorySampler(f, g, config="lti_data.yaml", config_mod=config_gau)
+def predict(selected, seed: int | None = None):
+    sampler = TrajectorySampler(f, g, config="lti_data.yaml", rng=seed, config_mod=config_gau)
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -201,13 +207,13 @@ def main():
 
     data_path = root / "data" / "lti.npz"
     if args.data or (args.workdir is not None and not data_path.exists()):
-        generate_data(root)
+        generate_data(root, args.seed)
     if not args.no_train:
         train(selected, root)
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:
-        predict(selected)
+        predict(selected, args.seed)
     if not args.no_show and (not args.no_plot or not args.no_predict):
         plt.show()
     return 0

@@ -1,11 +1,11 @@
 {
   "dkbf": {
     "metrics": {
-      "best_valid_total": 1.1574261549185394e-07,
-      "crit_train_last": 0.00010567681601969525,
-      "crit_valid_last": 0.00016533986490685493,
-      "final_valid_loss": 8.724240387891768e-07,
-      "rmse": 0.016813308922111327
+      "best_valid_total": 1.1268030419842034e-07,
+      "crit_train_last": 6.243979441933334e-05,
+      "crit_valid_last": 5.530240377993323e-05,
+      "final_valid_loss": 8.072109380918846e-07,
+      "rmse": 0.018363346298160766
     },
     "summary_signature": {
       "best_valid_loss_keys": [
@@ -48,11 +48,11 @@
   },
   "dkbl": {
     "metrics": {
-      "best_valid_total": 1.7277788799674454e-07,
-      "crit_train_last": 4.0346487367060035e-05,
-      "crit_valid_last": 0.0002241522161057219,
-      "final_valid_loss": 1.7277788799674454e-07,
-      "rmse": 0.02263161257602612
+      "best_valid_total": 1.5615290749337873e-07,
+      "crit_train_last": 3.154923615511507e-05,
+      "crit_valid_last": 3.828798799077049e-05,
+      "final_valid_loss": 1.5615290749337873e-07,
+      "rmse": 0.018993647381140955
     },
     "summary_signature": {
       "best_valid_loss_keys": [
@@ -95,11 +95,11 @@
   },
   "dldm": {
     "metrics": {
-      "best_valid_total": 8.162497806551983e-07,
-      "crit_train_last": 4.354667180450633e-05,
-      "crit_valid_last": 1.839427750383038e-05,
-      "final_valid_loss": 8.162673452716263e-07,
-      "rmse": 0.034872760072188716
+      "best_valid_total": 7.9840117450658e-07,
+      "crit_train_last": 4.6368113544303924e-05,
+      "crit_valid_last": 8.144535968312994e-05,
+      "final_valid_loss": 7.984426702023484e-07,
+      "rmse": 0.018207957274581233
     },
     "summary_signature": {
       "best_valid_loss_keys": [
@@ -142,11 +142,11 @@
   },
   "ltil": {
     "metrics": {
-      "best_valid_total": 1.6511842204636196e-07,
-      "crit_train_last": 9.39060773816891e-05,
-      "crit_valid_last": 4.108238499611616e-05,
-      "final_valid_loss": 1.6511842204636196e-07,
-      "rmse": 0.01898721313129946
+      "best_valid_total": 1.561442672937119e-07,
+      "crit_train_last": 2.994702481373679e-05,
+      "crit_valid_last": 3.279902011854574e-05,
+      "final_valid_loss": 1.561442672937119e-07,
+      "rmse": 0.01751559767302862
     },
     "summary_signature": {
       "best_valid_loss_keys": [

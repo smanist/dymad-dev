@@ -12,12 +12,14 @@ from tests.slow_regression_utils import build_mpl_env, load_summary
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "vortex" / "vor_train_cli.py"
+TEST_SEED = 12345
 
 
 @dataclass(frozen=True)
 class Case:
     idx: int
     model_name: str
+    seed: int = TEST_SEED
 
     @property
     def run_dir_name(self) -> str:
@@ -36,6 +38,8 @@ def _run_case(case: Case, workdir: Path) -> None:
             str(case.idx),
             "--workdir",
             str(workdir),
+            "--seed",
+            str(case.seed),
             "--no-plot",
             "--no-predict",
             "--no-show",

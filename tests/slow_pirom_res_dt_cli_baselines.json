@@ -5,7 +5,7 @@
       "crit_train_last": 0.00015246534797621204,
       "crit_valid_last": 9.872652283935871e-05,
       "final_valid_loss": 1.130706598197903e-05,
-      "rmse": 0.019689064886421078
+      "rmse": 0.012867377966864756
     },
     "summary_signature": {
       "best_valid_loss_keys": [
@@ -48,7 +48,7 @@
       "crit_train_last": 0.000152465536542763,
       "crit_valid_last": 9.872633105416996e-05,
       "final_valid_loss": 1.1307064533018363e-05,
-      "rmse": 0.02044957936656176
+      "rmse": 0.012867314129144835
     },
     "summary_signature": {
       "best_valid_loss_keys": [
