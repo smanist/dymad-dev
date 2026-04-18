@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from mcp.types import ToolAnnotations
+
 from dymad.agent.mcp._bootstrap import configure_headless_matplotlib_backend
 
 configure_headless_matplotlib_backend()
@@ -34,6 +36,18 @@ def build_server(
     tools = DeveloperTools(context=active_context)
     user_tools = UserTools(context=active_context)
     server = FastMCP(name)
+    read_only = ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+    mutating = ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False,
+    )
     include_user = mode in {"user", "both"}
     include_developer = mode in {"developer", "both"}
     if not include_user and not include_developer:
@@ -41,7 +55,7 @@ def build_server(
 
     if include_developer:
 
-        @server.tool
+        @server.tool(annotations=mutating)
         def register_dataset_file(
             path: str,
             format: str = "npz",
@@ -54,12 +68,12 @@ def build_server(
                 kind=kind,
             )
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def inspect_dataset(dataset_handle: str) -> dict[str, Any]:
             """Inspect one persisted dataset and return a lightweight schema summary."""
             return tools.inspect_dataset(dataset_handle=dataset_handle)
 
-        @server.tool
+        @server.tool(annotations=mutating)
         def register_checkpoint(
             model_ref: str,
             checkpoint_path: str,
@@ -72,7 +86,7 @@ def build_server(
                 device=device,
             )
 
-        @server.tool
+        @server.tool(annotations=mutating)
         def prepare_prediction_request(
             checkpoint_handle: str,
             horizon: int,
@@ -87,7 +101,7 @@ def build_server(
                 has_graph=has_graph,
             )
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def plan_checkpoint_prediction(
             model_ref: str,
             checkpoint_path: str,
@@ -104,7 +118,7 @@ def build_server(
                 has_graph=has_graph,
             )
 
-        @server.tool
+        @server.tool(annotations=mutating)
         def train_model(
             train_dataset_handle: str,
             artifact_root: str,
@@ -131,7 +145,7 @@ def build_server(
                 max_workers=max_workers,
             )
 
-        @server.tool
+        @server.tool(annotations=mutating)
         def evaluate_model(
             checkpoint_handle: str,
             test_dataset_handle: str,
@@ -152,22 +166,22 @@ def build_server(
                 predict_kwargs=predict_kwargs,
             )
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def list_model_capabilities() -> dict[str, Any]:
             """List supported model families and implementation variants."""
             return tools.list_model_capabilities()
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def resolve_model_capability(key_or_alias: str) -> dict[str, Any]:
             """Resolve one model family by canonical key, alias, or current model_ref."""
             return tools.resolve_model_capability(key_or_alias=key_or_alias)
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def list_profile_capabilities() -> dict[str, Any]:
             """List training profiles and their current model/dataset mappings."""
             return tools.list_profile_capabilities()
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def describe_training_capability(
             model_key: str,
             dataset_handle: str | None = None,
@@ -182,22 +196,22 @@ def build_server(
 
     if include_user:
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def list_training_capabilities(dataset_handle: str | None = None) -> dict[str, Any]:
             """List supported training workflows, optionally filtered by one dataset handle."""
             return user_tools.list_training_capabilities(dataset_handle=dataset_handle)
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def list_analysis_capabilities() -> dict[str, Any]:
             """List supported analysis workflows."""
             return user_tools.list_analysis_capabilities()
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def list_evaluation_capabilities(dataset_handle: str | None = None) -> dict[str, Any]:
             """List supported evaluation workflows and accepted metric/plot parameters."""
             return user_tools.list_evaluation_capabilities(dataset_handle=dataset_handle)
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def describe_training_capability(
             model_key: str,
             dataset_handle: str | None = None,
@@ -210,7 +224,7 @@ def build_server(
                 dataset_kind=dataset_kind,
             )
 
-        @server.tool
+        @server.tool(annotations=mutating)
         def compile_training_request(
             train_dataset_handle: str,
             model_key: str,
@@ -235,7 +249,7 @@ def build_server(
                 max_workers=max_workers,
             )
 
-        @server.tool
+        @server.tool(annotations=mutating)
         def train_compiled_request(
             compiled_request_handle: str,
             artifact_root: str,
@@ -246,7 +260,7 @@ def build_server(
                 artifact_root=artifact_root,
             )
 
-        @server.tool
+        @server.tool(annotations=mutating)
         def evaluate_checkpoint(
             checkpoint_handle: str,
             test_dataset_handle: str,
@@ -267,7 +281,7 @@ def build_server(
                 predict_kwargs=predict_kwargs,
             )
 
-        @server.tool
+        @server.tool(annotations=mutating)
         def compile_analysis_request(
             workflow_key: str,
             checkpoint_handle: str | None = None,
@@ -282,7 +296,7 @@ def build_server(
                 parameters=parameters,
             )
 
-        @server.tool
+        @server.tool(annotations=mutating)
         def run_analysis_request(
             compiled_request_handle: str,
             artifact_root: str,
@@ -295,12 +309,12 @@ def build_server(
 
     if include_developer:
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def describe_object(handle: str) -> dict[str, Any]:
             """Return the stored summary for one known handle."""
             return tools.describe_object(handle=handle)
 
-        @server.tool
+        @server.tool(annotations=read_only)
         def list_objects(kind: str | None = None) -> dict[str, Any]:
             """List persisted object summaries, optionally filtered by kind."""
             return tools.list_objects(kind=kind)
