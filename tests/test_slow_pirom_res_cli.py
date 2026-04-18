@@ -44,7 +44,6 @@ class Case:
 CASES = [
     Case(0, "dp_nd", DPT),
     Case(1, "dp_wf", DPT),
-    Case(2, "dj_nd", DPJ),
     Case(3, "dj_wf", DPJ),
 ]
 

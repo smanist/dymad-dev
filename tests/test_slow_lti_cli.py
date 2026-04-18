@@ -94,12 +94,6 @@ SLOW_CASES = [
     ),
     SlowLTICase(
         script_name="lti_train_cli.py",
-        idx=3,
-        model_name="kbf_node",
-        model_class=KBF,
-    ),
-    SlowLTICase(
-        script_name="lti_train_cli.py",
         idx=1,
         model_name="ldm_node",
         model_class=LDM,

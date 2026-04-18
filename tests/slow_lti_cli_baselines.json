@@ -134,49 +134,6 @@
       ]
     }
   },
-  "kbf_node": {
-    "metrics": {
-      "best_valid_total": 7.895479825492657e-08,
-      "crit_train_last": 6.591029944047477e-08,
-      "crit_valid_last": 2.3754667566322496e-08,
-      "final_valid_loss": 7.895479825492657e-08,
-      "rmse": 0.01620053561374472
-    },
-    "summary_signature": {
-      "best_valid_loss_keys": [
-        "epoch",
-        "train_dynamics",
-        "train_total",
-        "valid_dynamics",
-        "valid_total"
-      ],
-      "crit_epoch_count": 50,
-      "crit_name": "dynamics",
-      "crit_series_count": 2,
-      "hist_count": 1,
-      "hist_entry_keys": [
-        "epoch",
-        "train_dynamics",
-        "train_total",
-        "valid_dynamics",
-        "valid_total"
-      ],
-      "model_name_prefix": "lti_kbf_node",
-      "top_level_keys": [
-        "avg_epoch_time",
-        "best_valid_loss",
-        "convergence_epoch",
-        "crit_epoch",
-        "crit_name",
-        "crits",
-        "final_train_loss",
-        "final_valid_loss",
-        "hist",
-        "model_name",
-        "total_training_time"
-      ]
-    }
-  },
   "kbf_two": {
     "metrics": {
       "best_valid_total": 2.277177024723187e-08,

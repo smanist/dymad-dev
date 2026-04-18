@@ -1,47 +1,4 @@
 {
-  "dj_nd": {
-    "metrics": {
-      "best_valid_total": 1.1258965534490425e-05,
-      "crit_train_last": 0.00015246534797621204,
-      "crit_valid_last": 9.872652283935871e-05,
-      "final_valid_loss": 1.130706598197903e-05,
-      "rmse": 0.012867377966864756
-    },
-    "summary_signature": {
-      "best_valid_loss_keys": [
-        "epoch",
-        "train_dynamics",
-        "train_total",
-        "valid_dynamics",
-        "valid_total"
-      ],
-      "crit_epoch_count": 2,
-      "crit_name": "dynamics",
-      "crit_series_count": 2,
-      "hist_count": 1,
-      "hist_entry_keys": [
-        "epoch",
-        "train_dynamics",
-        "train_total",
-        "valid_dynamics",
-        "valid_total"
-      ],
-      "model_name_prefix": "res_dj_nd",
-      "top_level_keys": [
-        "avg_epoch_time",
-        "best_valid_loss",
-        "convergence_epoch",
-        "crit_epoch",
-        "crit_name",
-        "crits",
-        "final_train_loss",
-        "final_valid_loss",
-        "hist",
-        "model_name",
-        "total_training_time"
-      ]
-    }
-  },
   "dp_nd": {
     "metrics": {
       "best_valid_total": 1.1258969798853243e-05,

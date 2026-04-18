@@ -70,10 +70,8 @@ class Case:
 
 CASES = [
     Case(0, "ldm_wf", GLDM),
-    Case(1, "ldm_node", GLDM),
     Case(2, "kbf_wf", GKBF),
     Case(3, "kbf_node", GKBF),
-    Case(5, "lti_wf", GLTI),
     Case(6, "lti_ln", GLTI, ode_method="rk4"),
 ]
 

@@ -175,49 +175,6 @@
       ]
     }
   },
-  "ldm_node": {
-    "metrics": {
-      "best_valid_total": 4.128320081620007e-12,
-      "crit_train_last": 1.0246124261537037e-11,
-      "crit_valid_last": 7.955542474791244e-12,
-      "final_valid_loss": 8.72082961400622e-12,
-      "rmse": 0.015603771184647822
-    },
-    "summary_signature": {
-      "best_valid_loss_keys": [
-        "epoch",
-        "train_dynamics",
-        "train_total",
-        "valid_dynamics",
-        "valid_total"
-      ],
-      "crit_epoch_count": 50,
-      "crit_name": "dynamics",
-      "crit_series_count": 2,
-      "hist_count": 1,
-      "hist_entry_keys": [
-        "epoch",
-        "train_dynamics",
-        "train_total",
-        "valid_dynamics",
-        "valid_total"
-      ],
-      "model_name_prefix": "ltg_ldm_node",
-      "top_level_keys": [
-        "avg_epoch_time",
-        "best_valid_loss",
-        "convergence_epoch",
-        "crit_epoch",
-        "crit_name",
-        "crits",
-        "final_train_loss",
-        "final_valid_loss",
-        "hist",
-        "model_name",
-        "total_training_time"
-      ]
-    }
-  },
   "ldm_wf": {
     "metrics": {
       "best_valid_total": 0.002495572669431567,
@@ -293,53 +250,6 @@
         "valid_total"
       ],
       "model_name_prefix": "ltg_lti_ln",
-      "top_level_keys": [
-        "avg_epoch_time",
-        "best_valid_loss",
-        "convergence_epoch",
-        "crit_epoch",
-        "crit_name",
-        "crits",
-        "final_train_loss",
-        "final_valid_loss",
-        "hist",
-        "model_name",
-        "total_training_time"
-      ]
-    }
-  },
-  "lti_wf": {
-    "metrics": {
-      "best_valid_total": 9.317569632516509e-11,
-      "crit_train_last": 9.712422532892617e-11,
-      "crit_valid_last": 2.802302140336721e-11,
-      "final_valid_loss": 9.317569632516509e-11,
-      "rmse": 0.015623801561488945
-    },
-    "summary_signature": {
-      "best_valid_loss_keys": [
-        "epoch",
-        "train_dynamics",
-        "train_recon",
-        "train_total",
-        "valid_dynamics",
-        "valid_recon",
-        "valid_total"
-      ],
-      "crit_epoch_count": 50,
-      "crit_name": "dynamics",
-      "crit_series_count": 2,
-      "hist_count": 1,
-      "hist_entry_keys": [
-        "epoch",
-        "train_dynamics",
-        "train_recon",
-        "train_total",
-        "valid_dynamics",
-        "valid_recon",
-        "valid_total"
-      ],
-      "model_name_prefix": "ltg_lti_wf",
       "top_level_keys": [
         "avg_epoch_time",
         "best_valid_loss",

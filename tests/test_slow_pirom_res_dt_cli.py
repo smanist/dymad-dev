@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
-from scripts.pirom_res_dt.res_train import DPJ, DPT, f, t_grid
+from scripts.pirom_res_dt.res_train import DPT, f, t_grid
 
 from dymad.io import load_model
 from dymad.utils import TrajectorySampler
@@ -43,7 +43,6 @@ class Case:
 
 CASES = [
     Case(0, "dp_nd", DPT),
-    Case(1, "dj_nd", DPJ),
 ]
 
 

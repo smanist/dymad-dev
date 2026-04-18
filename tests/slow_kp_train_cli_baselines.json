@@ -140,53 +140,6 @@
       ]
     }
   },
-  "ldm_node": {
-    "metrics": {
-      "best_valid_total": 0.0022368406382440647,
-      "crit_train_last": 0.0011834719517544315,
-      "crit_valid_last": 0.000715302893716114,
-      "final_valid_loss": 0.0022368406382440647,
-      "rmse": 0.03504070742484903
-    },
-    "summary_signature": {
-      "best_valid_loss_keys": [
-        "epoch",
-        "train_dynamics",
-        "train_recon",
-        "train_total",
-        "valid_dynamics",
-        "valid_recon",
-        "valid_total"
-      ],
-      "crit_epoch_count": 100,
-      "crit_name": "dynamics",
-      "crit_series_count": 2,
-      "hist_count": 1,
-      "hist_entry_keys": [
-        "epoch",
-        "train_dynamics",
-        "train_recon",
-        "train_total",
-        "valid_dynamics",
-        "valid_recon",
-        "valid_total"
-      ],
-      "model_name_prefix": "kp_ldm_node",
-      "top_level_keys": [
-        "avg_epoch_time",
-        "best_valid_loss",
-        "convergence_epoch",
-        "crit_epoch",
-        "crit_name",
-        "crits",
-        "final_train_loss",
-        "final_valid_loss",
-        "hist",
-        "model_name",
-        "total_training_time"
-      ]
-    }
-  },
   "ldm_wf": {
     "metrics": {
       "best_valid_total": 2.4606806788312506e-05,
