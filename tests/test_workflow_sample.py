@@ -131,6 +131,54 @@ def test_sampling(idx, plot=False):
             plt.hist(res[4].flatten(), bins=5)
 
 
+@pytest.mark.parametrize(
+    "noise_cfg",
+    [
+        {"kind": "gaussian", "params": {"mean": 0.0, "std": 0.1}},
+        {"kind": "uniform", "params": {"bounds": [[-0.2, 0.2], [-0.1, 0.1]]}},
+    ],
+)
+def test_observation_noise_sampler_is_reproducible_and_leaves_latent_state_clean(noise_cfg):
+    base_config = {"control": ctrl_sin, "x0": x0_uni}
+    noisy_config = {"control": ctrl_sin, "x0": x0_uni, "noise": noise_cfg}
+
+    clean_sampler = TrajectorySampler(f, g, config=config_path, rng=123, config_mod=base_config)
+    noisy_sampler_a = TrajectorySampler(f, g, config=config_path, rng=123, config_mod=noisy_config)
+    noisy_sampler_b = TrajectorySampler(f, g, config=config_path, rng=123, config_mod=noisy_config)
+
+    ts_clean, xs_clean, us_clean, ys_clean = clean_sampler.sample(t_grid, batch=4)
+    ts_noisy_a, xs_noisy_a, us_noisy_a, ys_noisy_a = noisy_sampler_a.sample(t_grid, batch=4)
+    ts_noisy_b, xs_noisy_b, us_noisy_b, ys_noisy_b = noisy_sampler_b.sample(t_grid, batch=4)
+
+    np.testing.assert_allclose(ts_noisy_a, ts_clean)
+    np.testing.assert_allclose(xs_noisy_a, xs_clean)
+    np.testing.assert_allclose(us_noisy_a, us_clean)
+    np.testing.assert_allclose(xs_noisy_b, xs_noisy_a)
+    np.testing.assert_allclose(us_noisy_b, us_noisy_a)
+    np.testing.assert_allclose(ys_noisy_b, ys_noisy_a)
+    assert not np.allclose(ys_noisy_a, ys_clean)
+
+
+def test_noise_sampler_save_writes_noisy_observations(tmp_path):
+    save_path = tmp_path / "noisy_sample.npz"
+    noise_cfg = {"kind": "gaussian", "params": {"mean": 0.0, "std": 0.1}}
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=config_path,
+        rng=456,
+        config_mod={"control": ctrl_sin, "x0": x0_uni, "noise": noise_cfg},
+    )
+
+    ts, xs, us, ys = sampler.sample(t_grid, batch=3, save=str(save_path))
+
+    with np.load(save_path, allow_pickle=True) as payload:
+        np.testing.assert_allclose(payload["t"], ts)
+        np.testing.assert_allclose(payload["u"], us)
+        np.testing.assert_allclose(payload["x"], ys)
+        assert not np.allclose(payload["x"], xs)
+
+
 if __name__ == "__main__":
     for j in range(len(ctrls)):
         test_sampling(j, plot=True)

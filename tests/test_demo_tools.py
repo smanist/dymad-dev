@@ -78,6 +78,14 @@ def test_demo_tools_expose_json_safe_registry_discovery(tmp_path) -> None:
         entry["key"] == "repeat"
         for entry in training_detail["data"]["detail"]["phase_entry_schemas"]
     )
+    data_schema = next(
+        entry
+        for entry in training_detail["data"]["detail"]["phase_entry_schemas"]
+        if entry["key"] == "data"
+    )
+    assert data_schema["example"]["operation"] == "smooth"
+    assert data_schema["example"]["method"] == "savgol"
+    assert any("operation='smooth'" in note for note in data_schema["notes"])
     json.dumps(models)
     json.dumps(profiles)
     json.dumps(training)
@@ -108,9 +116,14 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
             self.name = name
             self.tools: dict[str, object] = {}
 
-        def tool(self, fn):
-            self.tools[fn.__name__] = fn
-            return fn
+        def tool(self, fn=None, **_kwargs):
+            def _register(inner_fn):
+                self.tools[inner_fn.__name__] = inner_fn
+                return inner_fn
+
+            if fn is None:
+                return _register
+            return _register(fn)
 
     monkeypatch.setitem(sys.modules, "fastmcp", types.SimpleNamespace(FastMCP=FakeFastMCP))
 

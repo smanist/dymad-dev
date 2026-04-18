@@ -101,8 +101,20 @@ def _phase_entry_schemas() -> tuple[TrainingPhaseEntrySchema, ...]:
             required_fields=("type",),
             optional_fields=("name", "operation"),
             allows_additional_keys=True,
-            notes=("Any extra keys are stored in the phase config payload.",),
-            example={"type": "data", "name": "refresh_context", "operation": "context"},
+            notes=(
+                "Use operation='context' for a no-op context checkpoint within a phase schedule.",
+                "Use operation='smooth' with method='savgol' to rewrite selected train/valid trajectories before later phases.",
+                "Smooth-phase extras such as splits, window_length, polyorder, deriv, delta, mode, and cval are stored in the phase config payload.",
+            ),
+            example={
+                "type": "data",
+                "name": "smooth_observations",
+                "operation": "smooth",
+                "method": "savgol",
+                "splits": ["train", "valid"],
+                "window_length": 7,
+                "polyorder": 3,
+            },
         ),
         TrainingPhaseEntrySchema(
             key="analysis",
@@ -187,8 +199,7 @@ def _examples() -> tuple[TrainingCapabilityExample, ...]:
         TrainingCapabilityExample(
             name="identity_encoder_decoder_for_two_state_lti",
             user_request=(
-                "Use trivial encoder and decoder, i.e. identity maps, for a 2-state "
-                "LTI model."
+                "Use trivial encoder and decoder, i.e. identity maps, for a 2-state LTI model."
             ),
             overrides={
                 "model": {

@@ -1,3 +1,4 @@
+import copy
 import logging
 import os
 from collections.abc import Callable
@@ -16,12 +17,25 @@ Rng = np.random.Generator | None
 ConfigLike = str | PathLike[str] | dict[str, Any] | None
 ControlSampler = Callable[[float | Array, int], Array]
 StateSampler = Callable[[int], Array]
+NoiseSampler = Callable[[Array, int], Array]
 SampleWithControl = tuple[Array, Array, Array, Array] | tuple[Array, Array, Array, Array, Array]
 SampleAutonomous = tuple[Array, Array, Array] | tuple[Array, Array, Array, Array]
 
 
 def _require_rng(rng: Rng) -> np.random.Generator:
     return np.random.default_rng() if rng is None else rng
+
+
+def _independent_rng(
+    rng: int | np.random.Generator | None,
+) -> np.random.Generator:
+    if isinstance(rng, np.random.Generator):
+        state_repr = repr(rng.bit_generator.state)
+        seed = sum(ord(ch) for ch in state_repr) % (2**32)
+        return np.random.default_rng(seed)
+    if rng is None:
+        return np.random.default_rng()
+    return np.random.default_rng(int(rng) + 1)
 
 
 logger = logging.getLogger(__name__)
@@ -385,6 +399,51 @@ X0_MAP = {
 
 
 # -----------------------
+# Observation Noise Samplers
+# -----------------------
+def gaussian_noise(
+    *,
+    mean: float | Array,
+    std: float | Array,
+    dim: int,
+    rng: Rng = None,
+) -> NoiseSampler:
+    """Generate additive Gaussian observation noise."""
+    rng = _require_rng(rng)
+    mean = np.broadcast_to(mean, (dim,))
+    std = np.broadcast_to(std, (dim,))
+
+    def _sampler(y_grid: Array, traj_idx: int) -> Array:
+        del traj_idx
+        return rng.normal(mean, std, size=y_grid.shape)
+
+    return _sampler
+
+
+def uniform_noise(
+    *,
+    bounds: float | Array,
+    dim: int,
+    rng: Rng = None,
+) -> NoiseSampler:
+    """Generate additive uniform observation noise."""
+    rng = _require_rng(rng)
+    bounds = np.broadcast_to(bounds, (dim, 2)).T
+
+    def _sampler(y_grid: Array, traj_idx: int) -> Array:
+        del traj_idx
+        return rng.uniform(low=bounds[0], high=bounds[1], size=y_grid.shape)
+
+    return _sampler
+
+
+NOISE_MAP = {
+    "gaussian": gaussian_noise,
+    "uniform": uniform_noise,
+}
+
+
+# -----------------------
 # Trajectory Samplers
 # -----------------------
 class TrajectorySampler:
@@ -442,6 +501,7 @@ class TrajectorySampler:
         self.f: Callable[..., Array] = f
         self.g: Callable[..., Array] = (lambda t, x, u=None: x) if g is None else g
         self.rng = np.random.default_rng(rng)
+        self._noise_rng = _independent_rng(rng)
 
         if isinstance(config, dict):
             self.config = dict(config)
@@ -475,6 +535,7 @@ class TrajectorySampler:
             logger.info(f"Control config: {self.config.get('control', None)}")
         logger.info(f"Init. Cond. config: {self.config.get('x0', None)}")
         logger.info(f"Param. config: {self.config.get('p', None)}")
+        logger.info(f"Noise config: {self.config.get('noise', None)}")
         logger.info(f"Solver config: {self.config.get('solver', None)}")
         logger.info(f"Postprocess config: {self.config.get('postprocess', None)}")
 
@@ -515,7 +576,7 @@ class TrajectorySampler:
             kind = u_spec["kind"].lower()
             if kind not in CTRL_MAP:
                 raise KeyError(f"Unknown control kind '{kind}'. Available: {list(CTRL_MAP)}")
-            params = u_spec.get("params", {})
+            params = copy.deepcopy(u_spec.get("params", {}))
             params.update({"dim": self.dims[1], "rng": self.rng})
             u_func = CTRL_MAP[kind](**params)
 
@@ -548,12 +609,37 @@ class TrajectorySampler:
             kind = x0_spec["kind"].lower()
             if kind not in X0_MAP:
                 raise KeyError(f"Unknown {pref} kind '{kind}'. Available: {list(X0_MAP)}")
-            params = x0_spec.get("params", {})
+            params = copy.deepcopy(x0_spec.get("params", {}))
             params.update({"dim": dims, "rng": self.rng})
             x0_func = X0_MAP[kind](**params)
             return np.asarray([x0_func(_i) for _i in range(traj_num)])
 
         raise TypeError("Unrecognised x0_spec type.")
+
+    def _apply_observation_noise(self, y_grid: Array, traj_idx: int) -> Array:
+        noise_spec = self.config.get("noise", None)
+        if noise_spec is None:
+            return y_grid
+
+        if callable(noise_spec):
+            return y_grid + np.asarray(noise_spec(y_grid, traj_idx))
+
+        if isinstance(noise_spec, Array):
+            noise_arr = np.asarray(noise_spec)
+            if noise_arr.ndim == y_grid.ndim - 1:
+                return y_grid + noise_arr
+            return y_grid + noise_arr[traj_idx]
+
+        if isinstance(noise_spec, dict):
+            kind = noise_spec["kind"].lower()
+            if kind not in NOISE_MAP:
+                raise KeyError(f"Unknown noise kind '{kind}'. Available: {list(NOISE_MAP)}")
+            params = copy.deepcopy(noise_spec.get("params", {}))
+            params.update({"dim": self.dims[2], "rng": self._noise_rng})
+            noise_func = NOISE_MAP[kind](**params)
+            return y_grid + noise_func(y_grid, traj_idx)
+
+        raise TypeError("Unrecognised noise_spec type.")
 
     def _sample_ctrl(
         self, t_samples: Array, batch: int = 1, save: str | None = None
@@ -611,7 +697,7 @@ class TrajectorySampler:
             if not sol.success:
                 raise RuntimeError(f"Integration failed on traj {i}: {sol.message}")
             xx = sol.y.T
-            yy = np.asarray(self.g(tt, xx, uu))
+            yy = self._apply_observation_noise(np.asarray(self.g(tt, xx, uu)), i)
 
             if self._shift_t:
                 ts[i] = tt[self._n_skip :] - tt[self._n_skip]
@@ -681,7 +767,7 @@ class TrajectorySampler:
             if not sol.success:
                 raise RuntimeError(f"Integration failed on traj {i}: {sol.message}")
             xx = sol.y.T
-            yy = np.asarray(self.g(tt, xx))
+            yy = self._apply_observation_noise(np.asarray(self.g(tt, xx)), i)
 
             if self._shift_t:
                 ts[i] = tt[self._n_skip :] - tt[self._n_skip]

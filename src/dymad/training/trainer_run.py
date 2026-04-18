@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 from typing import Any
 
 import torch
@@ -99,6 +100,28 @@ class TrainerRun:
         path = load_checkpoint if isinstance(load_checkpoint, str) else None
         return self.load_run_checkpoint(path=path)
 
+    def _replay_completed_data_phases(
+        self,
+        *,
+        phase_context: PhaseContext,
+        trainer_state: TrainerState,
+        artifacts: ArtifactRegistry,
+    ) -> tuple[PhaseContext, ArtifactRegistry]:
+        logger = logging.getLogger("dymad.resume")
+        active_context = phase_context
+        active_artifacts = artifacts
+        for phase_index in range(min(trainer_state.phase_cursor, len(self.pipeline.phase_specs))):
+            spec = self.pipeline.phase_specs[phase_index]
+            if spec.kind != "data":
+                continue
+            phase = self.pipeline.build_phase(spec)
+            active_context, active_artifacts = phase.replay_context(
+                phase_context=active_context,
+                artifacts=active_artifacts,
+                logger=logger,
+            )
+        return active_context, active_artifacts
+
     def run(
         self,
         *,
@@ -110,12 +133,18 @@ class TrainerRun:
         if resumed_state is not None:
             active_state = resumed_state
             active_artifacts = resumed_artifacts or ArtifactRegistry()
+            active_context, active_artifacts = self._replay_completed_data_phases(
+                phase_context=initial_context,
+                trainer_state=active_state,
+                artifacts=active_artifacts,
+            )
         else:
             active_state = initial_state or build_initial_trainer_state(
                 self.config,
                 execution_services=self.execution_services,
             )
             active_artifacts = ArtifactRegistry() if artifacts is None else artifacts
+            active_context = initial_context
 
         def checkpoint_callback(
             trainer_state: TrainerState,
@@ -124,7 +153,7 @@ class TrainerRun:
             self.save_run_checkpoint(trainer_state, artifacts)
 
         return self.pipeline.run(
-            initial_context=initial_context,
+            initial_context=active_context,
             initial_state=active_state,
             artifacts=active_artifacts,
             run_name=self.run_name,

@@ -6,13 +6,15 @@ import random
 import time
 import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 import numpy as np
 import torch
+from scipy.signal import savgol_filter
 from torch.utils.data import DataLoader
 
+from dymad.core import GraphSeries, GraphTrainerBatch, RegularSeries, RegularTrainerBatch
 from dymad.core.transform_builder import build_transform_module
 from dymad.losses import LOSS_MAP
 from dymad.numerics import generate_weak_weights
@@ -146,6 +148,35 @@ PhaseSpec = (
 
 def _dataset_len(dataset: Sequence[TrainerBatch] | None) -> int:
     return 0 if dataset is None else len(dataset)
+
+
+def _dataset_collate_fn(dataset: Sequence[TrainerBatch]):
+    if not dataset:
+        return RegularTrainerBatch.collate_series
+    first = dataset[0]
+    if isinstance(first, GraphSeries):
+        return GraphTrainerBatch.collate_series
+    if isinstance(first, RegularSeries):
+        return RegularTrainerBatch.collate_series
+    raise TypeError(f"Unsupported dataset item type '{type(first)}' for dataloader collation.")
+
+
+def _build_dataset_loader(
+    dataset: Sequence[TrainerBatch] | None,
+    *,
+    config: dict[str, Any],
+) -> DataLoader[TrainerBatch] | None:
+    if dataset is None:
+        return None
+    dl_cfg = copy.deepcopy(config.get("dataloader", {}))
+    batch_size = int(dl_cfg.get("batch_size", 1))
+    shuffle = bool(dl_cfg.get("shuffle", True))
+    return DataLoader(
+        cast(Any, dataset),
+        batch_size=batch_size,
+        shuffle=shuffle,
+        collate_fn=_dataset_collate_fn(dataset),
+    )
 
 
 def _dataset_first(
@@ -399,6 +430,15 @@ class BasePhase:
         logger: logging.Logger,
     ) -> PhaseResult:
         raise NotImplementedError
+
+    def replay_context(
+        self,
+        *,
+        phase_context: PhaseContext,
+        artifacts: ArtifactRegistry,
+        logger: logging.Logger,
+    ) -> tuple[PhaseContext, ArtifactRegistry]:
+        return phase_context, artifacts
 
     def _ensure_model_artifact(
         self,
@@ -1415,6 +1455,213 @@ class LinearSolvePhase(BasePhase):
 
 
 class ContextDataPhase(BasePhase):
+    def _resolve_smoothing_method(self) -> str:
+        spec = cast(DataPhaseSpec, self.spec)
+        method = str(spec.config.get("method", "savgol")).lower()
+        if method != "savgol":
+            raise PhaseSpecValidationError(
+                f"Unsupported data smoothing method '{method}'. Expected 'savgol'."
+            )
+        return method
+
+    def _resolve_smoothing_splits(self) -> tuple[str, ...]:
+        spec = cast(DataPhaseSpec, self.spec)
+        raw_splits = spec.config.get("splits", ("train", "valid"))
+        if isinstance(raw_splits, str):
+            splits = (raw_splits,)
+        elif isinstance(raw_splits, Sequence):
+            splits = tuple(str(split) for split in raw_splits)
+        else:
+            raise PhaseSpecValidationError(
+                f"Data phase '{self.spec.name}' expects 'splits' to be a string or sequence."
+            )
+        invalid = [split for split in splits if split not in {"train", "valid"}]
+        if invalid:
+            raise PhaseSpecValidationError(
+                f"Data phase '{self.spec.name}' has invalid splits: {', '.join(invalid)}."
+            )
+        return splits
+
+    def _resolve_savgol_config(self) -> dict[str, Any]:
+        cfg = cast(DataPhaseSpec, self.spec).config
+        window_length = int(cfg.get("window_length", 7))
+        polyorder = int(cfg.get("polyorder", 3))
+        deriv = int(cfg.get("deriv", 0))
+        delta = float(cfg.get("delta", 1.0))
+        mode = str(cfg.get("mode", "interp"))
+        cval = float(cfg.get("cval", 0.0))
+        if window_length <= 0 or window_length % 2 == 0:
+            raise PhaseSpecValidationError(
+                f"Data phase '{self.spec.name}' requires an odd, positive window_length."
+            )
+        if polyorder < 0 or polyorder >= window_length:
+            raise PhaseSpecValidationError(
+                f"Data phase '{self.spec.name}' requires polyorder < window_length."
+            )
+        if deriv < 0:
+            raise PhaseSpecValidationError(
+                f"Data phase '{self.spec.name}' requires deriv to be non-negative."
+            )
+        return {
+            "window_length": window_length,
+            "polyorder": polyorder,
+            "deriv": deriv,
+            "delta": delta,
+            "mode": mode,
+            "cval": cval,
+        }
+
+    def _smooth_tensor(self, tensor: torch.Tensor, *, savgol_cfg: dict[str, Any]) -> torch.Tensor:
+        if tensor.shape[0] < savgol_cfg["window_length"]:
+            raise PhaseSpecValidationError(
+                f"Data phase '{self.spec.name}' requires every selected trajectory to have at least "
+                f"{savgol_cfg['window_length']} steps."
+            )
+        smoothed = savgol_filter(
+            tensor.detach().cpu().numpy(),
+            axis=0,
+            **savgol_cfg,
+        )
+        return torch.as_tensor(smoothed, device=tensor.device, dtype=tensor.dtype)
+
+    def _smooth_series(
+        self,
+        series: TrainerBatch,
+        *,
+        savgol_cfg: dict[str, Any],
+    ) -> TrainerBatch:
+        if isinstance(series, RegularSeries):
+            return series.with_state(self._smooth_tensor(series.state, savgol_cfg=savgol_cfg))
+        if isinstance(series, GraphSeries):
+            return replace(
+                series,
+                node_state=self._smooth_tensor(series.node_state, savgol_cfg=savgol_cfg),
+                meta=dict(series.meta),
+            )
+        raise TypeError(f"Unsupported dataset item type '{type(series)}' for smoothing.")
+
+    def _append_phase_history(
+        self,
+        metadata: dict[str, Any] | None,
+        *,
+        method: str,
+        savgol_cfg: dict[str, Any],
+        split: str,
+        dataset: Sequence[TrainerBatch],
+    ) -> dict[str, Any]:
+        updated = {} if metadata is None else copy.deepcopy(metadata)
+        history = list(updated.get("data_phase_history", []))
+        history.append(
+            {
+                "phase": self.spec.name,
+                "operation": "smooth",
+                "method": method,
+                "split": split,
+                "num_trajectories": len(dataset),
+                "window_length": savgol_cfg["window_length"],
+                "polyorder": savgol_cfg["polyorder"],
+                "deriv": savgol_cfg["deriv"],
+            }
+        )
+        updated["data_phase_history"] = history
+        return updated
+
+    def _apply_smoothing(
+        self,
+        *,
+        phase_context: PhaseContext,
+    ) -> PhaseContext:
+        method = self._resolve_smoothing_method()
+        splits = self._resolve_smoothing_splits()
+        savgol_cfg = self._resolve_savgol_config()
+
+        train_set = phase_context.train_set
+        train_md = phase_context.train_md
+        if "train" in splits:
+            if train_set is None:
+                raise PhaseSpecValidationError(
+                    f"Data phase '{self.spec.name}' cannot smooth the train split because it is missing."
+                )
+            smoothed_train = [
+                self._smooth_series(series, savgol_cfg=savgol_cfg) for series in train_set
+            ]
+            train_set = cast(list[TrainerBatch], smoothed_train)
+            train_md = self._append_phase_history(
+                phase_context.train_md,
+                method=method,
+                savgol_cfg=savgol_cfg,
+                split="train",
+                dataset=train_set,
+            )
+
+        valid_set = phase_context.valid_set
+        valid_md = phase_context.valid_md
+        if "valid" in splits:
+            if valid_set is None:
+                raise PhaseSpecValidationError(
+                    f"Data phase '{self.spec.name}' cannot smooth the valid split because it is missing."
+                )
+            smoothed_valid = [
+                self._smooth_series(series, savgol_cfg=savgol_cfg) for series in valid_set
+            ]
+            valid_set = cast(list[TrainerBatch], smoothed_valid)
+            valid_md = self._append_phase_history(
+                phase_context.valid_md,
+                method=method,
+                savgol_cfg=savgol_cfg,
+                split="valid",
+                dataset=valid_set,
+            )
+
+        return PhaseContext(
+            train_set=train_set,
+            valid_set=valid_set,
+            train_loader=(
+                _build_dataset_loader(train_set, config=self.config)
+                if "train" in splits
+                else phase_context.train_loader
+            ),
+            valid_loader=(
+                _build_dataset_loader(valid_set, config=self.config)
+                if "valid" in splits
+                else phase_context.valid_loader
+            ),
+            train_md=train_md,
+            valid_md=valid_md,
+        )
+
+    def _apply_operation(
+        self,
+        *,
+        phase_context: PhaseContext,
+    ) -> tuple[PhaseContext, dict[str, float]]:
+        spec = cast(DataPhaseSpec, self.spec)
+        if spec.operation == "context":
+            metrics = {
+                "train_size": float(_dataset_len(phase_context.train_set)),
+                "valid_size": float(_dataset_len(phase_context.valid_set)),
+            }
+            return phase_context, metrics
+        if spec.operation == "smooth":
+            updated_context = self._apply_smoothing(phase_context=phase_context)
+            metrics = {
+                "train_size": float(_dataset_len(updated_context.train_set)),
+                "valid_size": float(_dataset_len(updated_context.valid_set)),
+            }
+            return updated_context, metrics
+        raise PhaseSpecValidationError(f"Unsupported data phase operation '{spec.operation}'.")
+
+    def replay_context(
+        self,
+        *,
+        phase_context: PhaseContext,
+        artifacts: ArtifactRegistry,
+        logger: logging.Logger,
+    ) -> tuple[PhaseContext, ArtifactRegistry]:
+        updated_context, _ = self._apply_operation(phase_context=phase_context)
+        logger.info("Replayed completed data phase '%s' (%s).", self.spec.name, self.spec.kind)
+        return updated_context, artifacts
+
     def execute(
         self,
         *,
@@ -1424,10 +1671,8 @@ class ContextDataPhase(BasePhase):
         run_name: str,
         logger: logging.Logger,
     ) -> PhaseResult:
-        metrics = {
-            "train_size": float(_dataset_len(phase_context.train_set)),
-            "valid_size": float(_dataset_len(phase_context.valid_set)),
-        }
+        del run_name
+        updated_context, metrics = self._apply_operation(phase_context=phase_context)
         record = self._build_phase_record(
             trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch
         )
@@ -1436,7 +1681,7 @@ class ContextDataPhase(BasePhase):
             name=self.spec.name,
             kind=self.spec.kind,
             trainer_state=trainer_state,
-            phase_context=phase_context,
+            phase_context=updated_context,
             artifacts=artifacts,
             metrics=metrics,
             record=record,
