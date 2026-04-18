@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "linear_graph_auto"
 BASELINE_PATH = Path(__file__).with_name("slow_linear_graph_auto_cli_baselines.json")
 TEST_SEED = 12345
+EVAL_SEED = 12346
 
 A = np.array([[0.0, 1.0], [-1.0, -0.1]])
 ADJ = np.array([[0, 1, 1], [1, 0, 1], [1, 1, 0]])
@@ -41,6 +42,7 @@ class Case:
     idx: int
     model_name: str
     model_class: type
+    seed: int = TEST_SEED
     metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -98,7 +100,7 @@ def _run_case(case: Case, workdir: Path) -> None:
             "--workdir",
             str(workdir),
             "--seed",
-            str(TEST_SEED),
+            str(case.seed),
             "--no-plot",
             "--no-predict",
             "--no-show",
@@ -110,9 +112,7 @@ def _run_case(case: Case, workdir: Path) -> None:
 
 
 def _eval_rmse(case: Case, checkpoint_path: Path) -> float:
-    np.random.seed(TEST_SEED)
-    torch.manual_seed(TEST_SEED)
-    sampler = TrajectorySampler(f, config=SCRIPT_ROOT / "ltga_data.yaml")
+    sampler = TrajectorySampler(f, config=SCRIPT_ROOT / "ltga_data.yaml", rng=EVAL_SEED)
     ts, xs, ys = sampler.sample(np.linspace(0, 5, 501), batch=1)
     x_data = np.concatenate([xs[0], xs[0], xs[0]], axis=-1)
     t_data = ts[0]

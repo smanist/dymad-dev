@@ -34,6 +34,7 @@ class Case:
     model_class: type
     setup_idx: int
     expected_cv_results: int
+    seed: int = TEST_SEED
     metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -64,7 +65,7 @@ def _run_case(case: Case, workdir: Path) -> None:
                 "--workdir",
                 str(workdir),
                 "--seed",
-                str(TEST_SEED),
+                str(case.seed),
                 "--no-plot",
                 "--no-predict",
                 "--no-show",

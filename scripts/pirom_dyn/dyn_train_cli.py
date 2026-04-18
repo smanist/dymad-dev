@@ -67,8 +67,8 @@ def plot(selected: list[int]):
         print(f"Epoch time {label}: {npz['avg_epoch_time']}")
 
 
-def predict(selected: list[int]):
-    sampler = TrajectorySampler(f, g, config="dyn_test.yaml")
+def predict(selected: list[int], seed: int | None = None):
+    sampler = TrajectorySampler(f, g, config="dyn_test.yaml", rng=seed)
     ts, xs, us, ys, ps = sampler.sample(t_grid, batch=5)
     x_data = ys
     u_data = us
@@ -114,7 +114,7 @@ def main():
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:
-        predict(selected)
+        predict(selected, args.seed)
     if not args.no_show and (not args.no_plot or not args.no_predict):
         plt.show()
     return 0

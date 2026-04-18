@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import types
 
@@ -52,6 +53,55 @@ def test_plan_checkpoint_prediction_returns_json_safe_plan(tmp_path) -> None:
     assert response["data"]["plan"]["notes"]
 
 
+def test_demo_tools_expose_json_safe_registry_discovery(tmp_path) -> None:
+    dataset_path = tmp_path / "train.npz"
+    dataset_path.write_bytes(b"placeholder")
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+
+    models = tools.list_model_capabilities()
+    resolved = tools.resolve_model_capability(key_or_alias="GKBF")
+    profiles = tools.list_profile_capabilities()
+    training = tools.list_training_capabilities()
+    evaluation = tools.list_evaluation_capabilities()
+    training_detail = tools.describe_training_capability(model_key="kbf", dataset_kind="regular")
+
+    assert models["ok"] is True
+    assert resolved["ok"] is True
+    assert profiles["ok"] is True
+    assert training["ok"] is True
+    assert evaluation["ok"] is True
+    assert training_detail["ok"] is True
+    assert resolved["data"]["capability"]["key"] == "kbf"
+    assert evaluation["data"]["capabilities"][0]["supported_metrics"] == ["rollout_rmse"]
+    assert training_detail["data"]["detail"]["capability"]["model_key"] == "kbf"
+    assert any(
+        entry["key"] == "repeat"
+        for entry in training_detail["data"]["detail"]["phase_entry_schemas"]
+    )
+    json.dumps(models)
+    json.dumps(profiles)
+    json.dumps(training)
+    json.dumps(evaluation)
+    json.dumps(training_detail)
+
+
+def test_demo_tools_filter_training_capabilities_by_dataset_handle(tmp_path) -> None:
+    dataset_path = tmp_path / "train.npz"
+    dataset_path.write_bytes(b"placeholder")
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path), kind="graph")["data"][
+        "summary"
+    ]["handle"]
+
+    response = tools.list_training_capabilities(dataset_handle=dataset_handle)
+
+    assert response["ok"] is True
+    assert response["data"]["dataset_kind"] == "graph"
+    assert {capability["dataset_kind"] for capability in response["data"]["capabilities"]} == {
+        "graph"
+    }
+
+
 def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
     class FakeFastMCP:
         def __init__(self, name: str) -> None:
@@ -71,14 +121,26 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
 
     assert server.name == "DyMAD Test"
     assert set(server.tools) == {
+        "compile_analysis_request",
+        "compile_training_request",
+        "describe_training_capability",
         "describe_object",
+        "evaluate_checkpoint",
         "evaluate_model",
         "inspect_dataset",
+        "list_analysis_capabilities",
+        "list_evaluation_capabilities",
+        "list_model_capabilities",
         "list_objects",
+        "list_profile_capabilities",
+        "list_training_capabilities",
         "plan_checkpoint_prediction",
         "prepare_prediction_request",
         "register_dataset_file",
         "register_checkpoint",
+        "resolve_model_capability",
+        "run_analysis_request",
+        "train_compiled_request",
         "train_model",
     }
     response = server.tools["register_checkpoint"](

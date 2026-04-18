@@ -56,3 +56,10 @@ class EvaluateModelResult:
     artifacts: dict[str, str | list[str]]
     metrics: dict[str, float]
     plot_skipped_reason: str | None
+
+
+@dataclass(frozen=True)
+class AnalysisRunResult:
+    workflow_key: str
+    artifacts: dict[str, str]
+    summary: dict[str, float | int | str | bool | None]

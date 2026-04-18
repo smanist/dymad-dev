@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import torch
 
@@ -54,6 +56,18 @@ def test_phase_result_get_metric_reads_typed_trainer_state():
     )
 
     assert result.get_metric("total") == 0.456
+
+
+def test_safe_plot_returns_false_when_plotting_fails(caplog):
+    with caplog.at_level(logging.WARNING):
+        wrote_plot = phases_module._safe_plot(
+            logging.getLogger("test.plot"),
+            label="history plot 'demo'",
+            fn=lambda: (_ for _ in ()).throw(RuntimeError("backend unavailable")),
+        )
+
+    assert wrote_plot is False
+    assert "Skipping history plot 'demo' due to plotting failure." in caplog.text
 
 
 def test_normalize_phase_specs_expands_repeat_schedule():

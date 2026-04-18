@@ -21,6 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "sa_2dk" / "kp_sa_cli.py"
 SCRIPT_ROOT = SCRIPT_PATH.parent
 TEST_SEED = 12345
+EVAL_SEED = 12346
 
 N = 21
 t_grid = np.linspace(0, 10, N)
@@ -43,6 +44,7 @@ def f(t, x):
 class Case:
     idx: int
     model_name: str
+    seed: int = TEST_SEED
 
     @property
     def run_dir_name(self) -> str:
@@ -88,7 +90,7 @@ def _run_case(case: Case, workdir: Path) -> None:
             "--workdir",
             str(workdir),
             "--seed",
-            str(TEST_SEED),
+            str(case.seed),
             "--train",
             "--no-show",
         ],
@@ -98,10 +100,8 @@ def _run_case(case: Case, workdir: Path) -> None:
     )
 
 
-def _eval_rmse(checkpoint_path: Path) -> float:
-    np.random.seed(TEST_SEED)
-    torch.manual_seed(TEST_SEED)
-    sampler = TrajectorySampler(f, config=SCRIPT_ROOT / "kp_data.yaml")
+def _eval_rmse(case: Case, checkpoint_path: Path) -> float:
+    sampler = TrajectorySampler(f, config=SCRIPT_ROOT / "kp_data.yaml", rng=EVAL_SEED)
     ts, xs, _ = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -134,7 +134,7 @@ def test_kp_sa_cli(case: Case, tmp_path: Path):
     assert math.isfinite(float(best_valid["train_total"]))
     assert math.isfinite(float(best_valid["valid_total"]))
 
-    rmse = _eval_rmse(checkpoint)
+    rmse = _eval_rmse(case, checkpoint)
     assert math.isfinite(rmse)
     assert rmse >= 0.0
 
@@ -144,12 +144,13 @@ def test_kp_sa_cli_analyze_returns_spectral_and_conjugacy_diagnostics(tmp_path: 
     module = _load_kp_sa_cli_module()
     module.set_seed(TEST_SEED)
     module.prepare_workdir(tmp_path)
-    module.generate_data(tmp_path)
+    module.generate_data(tmp_path, seed=TEST_SEED)
     module.train([0, 1, 2], tmp_path)
 
     diagnostics = module.analyze(
         [0, 1, 2],
         tmp_path,
+        seed=TEST_SEED,
         pred_batch=4,
         map_batch=4,
         ps_points=9,

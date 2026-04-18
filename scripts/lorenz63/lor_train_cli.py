@@ -175,8 +175,8 @@ def prepare_workdir(root: Path):
     stage_workdir(root, BASE_DIR, ["lor_model.yaml", "lor_data.yaml"])
 
 
-def generate_data(root: Path):
-    sampler = TrajectorySampler(f, config=BASE_DIR / "lor_data.yaml")
+def generate_data(root: Path, seed: int | None = None):
+    sampler = TrajectorySampler(f, config=BASE_DIR / "lor_data.yaml", rng=seed)
     ts, xs, _ = sampler.sample(t_grid, batch=1)
 
     np.savez_compressed(root / "data" / "l63_train.npz", t=ts[0][:M], x=xs[0][:M])
@@ -258,7 +258,7 @@ def main():
     setup_idx = resolve_setup_index(args.setup)
     required = [root / "data" / name for name in ("l63_train.npz", "l63_valid.npz", "l63_test.npz")]
     if args.data or (args.workdir is not None and not all(path.exists() for path in required)):
-        generate_data(root)
+        generate_data(root, args.seed)
     if not args.no_train:
         train(selected, setup_idx=setup_idx, resume_override=args.resume)
     if not args.no_plot:

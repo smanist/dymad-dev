@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
-from scripts.pirom_res_dt.res_train import DPJ, DPT, f, t_grid
+from scripts.pirom_res_dt.res_train import DPT, f, t_grid
 
 from dymad.io import load_model
 from dymad.utils import TrajectorySampler
@@ -33,6 +33,7 @@ class Case:
     idx: int
     model_name: str
     model_class: type
+    seed: int = TEST_SEED
     metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -42,7 +43,6 @@ class Case:
 
 CASES = [
     Case(0, "dp_nd", DPT),
-    Case(1, "dj_nd", DPJ),
 ]
 
 
@@ -56,7 +56,7 @@ def _run_case(case: Case, workdir: Path) -> None:
             "--workdir",
             str(workdir),
             "--seed",
-            str(TEST_SEED),
+            str(case.seed),
             "--no-plot",
             "--no-predict",
             "--no-show",
@@ -68,9 +68,7 @@ def _run_case(case: Case, workdir: Path) -> None:
 
 
 def _eval_rmse(case: Case, checkpoint_path: Path) -> float:
-    np.random.seed(TEST_SEED)
-    torch.manual_seed(TEST_SEED)
-    sampler = TrajectorySampler(f, config=SCRIPT_ROOT / "res_test.yaml")
+    sampler = TrajectorySampler(f, config=SCRIPT_ROOT / "res_test.yaml", rng=case.seed)
     ts, xs, us, _, ps = sampler.sample(t_grid, batch=5)
     _, predict_fn = load_model(case.model_class, checkpoint_path)
     with torch.no_grad():

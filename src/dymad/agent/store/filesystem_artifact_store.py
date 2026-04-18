@@ -10,6 +10,8 @@ import numpy as np
 
 from dymad.agent.store.object_store import (
     CheckpointRecord,
+    CompiledAnalysisRequestRecord,
+    CompiledTrainingRequestRecord,
     DatasetRecord,
     EvaluationRecord,
     ObjectNotFoundError,
@@ -34,6 +36,8 @@ class FilesystemArtifactStore:
         "dataset": "datasets",
         "checkpoint": "checkpoints",
         "training_run": "training_runs",
+        "compiled_training_request": "compiled_training_requests",
+        "compiled_analysis_request": "compiled_analysis_requests",
         "evaluation": "evaluations",
         "prediction_request": "prediction_requests",
         "spectral_snapshot": "spectral_snapshots",
@@ -99,6 +103,68 @@ class FilesystemArtifactStore:
             checkpoint_handle=payload["checkpoint_handle"],
             artifact_root=payload["artifact_root"],
             run_name=payload["run_name"],
+        )
+
+    def persist_compiled_training_request(self, record: CompiledTrainingRequestRecord) -> None:
+        payload = {
+            "handle": record.handle,
+            "train_dataset_handle": record.train_dataset_handle,
+            "valid_dataset_handle": record.valid_dataset_handle,
+            "model_key": record.model_key,
+            "model_ref": record.model_ref,
+            "reference_profile": record.reference_profile,
+            "train_dataset_kind": record.train_dataset_kind,
+            "valid_dataset_kind": record.valid_dataset_kind,
+            "effective_run_name": record.effective_run_name,
+            "effective_config": record.effective_config,
+            "trainer_kind": record.trainer_kind,
+            "seed": record.seed,
+            "device": record.device,
+            "max_workers": record.max_workers,
+            "warnings": list(record.warnings),
+        }
+        self._write_json("compiled_training_request", record.handle, payload)
+
+    def load_compiled_training_request(self, handle: str) -> CompiledTrainingRequestRecord:
+        payload = self._read_json("compiled_training_request", handle)
+        return CompiledTrainingRequestRecord(
+            handle=payload["handle"],
+            train_dataset_handle=payload["train_dataset_handle"],
+            valid_dataset_handle=payload.get("valid_dataset_handle"),
+            model_key=payload["model_key"],
+            model_ref=payload["model_ref"],
+            reference_profile=payload["reference_profile"],
+            train_dataset_kind=payload["train_dataset_kind"],
+            valid_dataset_kind=payload.get("valid_dataset_kind"),
+            effective_run_name=payload["effective_run_name"],
+            effective_config=dict(payload["effective_config"]),
+            trainer_kind=payload["trainer_kind"],
+            seed=payload.get("seed"),
+            device=payload.get("device", "auto"),
+            max_workers=int(payload.get("max_workers", 1)),
+            warnings=list(payload.get("warnings", [])),
+        )
+
+    def persist_compiled_analysis_request(self, record: CompiledAnalysisRequestRecord) -> None:
+        payload = {
+            "handle": record.handle,
+            "workflow_key": record.workflow_key,
+            "checkpoint_handle": record.checkpoint_handle,
+            "dataset_handles": record.dataset_handles,
+            "parameters": record.parameters,
+            "warnings": list(record.warnings),
+        }
+        self._write_json("compiled_analysis_request", record.handle, payload)
+
+    def load_compiled_analysis_request(self, handle: str) -> CompiledAnalysisRequestRecord:
+        payload = self._read_json("compiled_analysis_request", handle)
+        return CompiledAnalysisRequestRecord(
+            handle=payload["handle"],
+            workflow_key=payload["workflow_key"],
+            checkpoint_handle=payload.get("checkpoint_handle"),
+            dataset_handles=dict(payload.get("dataset_handles", {})),
+            parameters=dict(payload.get("parameters", {})),
+            warnings=list(payload.get("warnings", [])),
         )
 
     def persist_evaluation(self, record: EvaluationRecord) -> None:
@@ -241,6 +307,27 @@ class FilesystemArtifactStore:
                 derived_from=payload["checkpoint_handle"],
                 preview=f"{payload['run_name']} ({payload['model_ref']})",
             )
+        if kind == "compiled_training_request":
+            return ObjectSummary(
+                handle=payload["handle"],
+                kind="compiled_training_request",
+                derived_from=payload["train_dataset_handle"],
+                preview=(
+                    f"{payload['model_key']}/{payload['train_dataset_kind']} -> "
+                    f"{payload['reference_profile']} ({payload['trainer_kind']})"
+                ),
+            )
+        if kind == "compiled_analysis_request":
+            derived_from = payload.get("checkpoint_handle")
+            if derived_from is None:
+                dataset_handles = payload.get("dataset_handles", {})
+                derived_from = next(iter(dataset_handles.values()), None)
+            return ObjectSummary(
+                handle=payload["handle"],
+                kind="compiled_analysis_request",
+                derived_from=derived_from,
+                preview=payload["workflow_key"],
+            )
         if kind == "evaluation":
             return ObjectSummary(
                 handle=payload["handle"],
@@ -277,6 +364,7 @@ class FilesystemArtifactStore:
 
     def _write_json(self, kind: str, handle: str, payload: dict[str, Any]) -> None:
         path = self._json_path(kind, handle)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def _read_json(self, kind: str, handle: str) -> dict[str, Any]:
@@ -304,6 +392,10 @@ class FilesystemArtifactStore:
             return "checkpoint"
         if handle.startswith("run_"):
             return "training_run"
+        if handle.startswith("trainreq_"):
+            return "compiled_training_request"
+        if handle.startswith("analysisreq_"):
+            return "compiled_analysis_request"
         if handle.startswith("eval_"):
             return "evaluation"
         if handle.startswith("pred_"):

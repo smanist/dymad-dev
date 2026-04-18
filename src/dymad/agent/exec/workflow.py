@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib
 import json
+import logging
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ import torch
 import yaml
 
 from dymad.agent.exec.state import (
+    AnalysisRunResult,
     DatasetInspection,
     EvaluateModelResult,
     PredictionWorkflowPlan,
@@ -25,6 +27,11 @@ from dymad.agent.exec.state import (
 )
 from dymad.agent.exec.training_profiles import profile_config, resolve_profile_name
 from dymad.agent.facade.operations import FacadeOperations
+from dymad.agent.registry import SUPPORTED_EVALUATION_METRICS
+from dymad.agent.store.object_store import (
+    CompiledAnalysisRequestRecord,
+    CompiledTrainingRequestRecord,
+)
 from dymad.utils.misc import _normalize_legacy_training_config
 from dymad.utils.plot import plot_trajectory
 
@@ -32,6 +39,9 @@ if TYPE_CHECKING:
     from dymad.agent.exec.context import ExecutionContext
     from dymad.sako.adapter import SpectralAnalysisAdapter, SpectralEigensystem, SpectralRuntime
     from dymad.sako.snapshot import SpectralSnapshot
+
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_model_ref(model_ref: str):
@@ -221,6 +231,80 @@ def _load_training_metrics(summary_path: Path) -> dict[str, float | None]:
         }
 
 
+def _execute_training_run(
+    *,
+    facade: FacadeOperations,
+    model_ref: str,
+    train_dataset_handle: str,
+    valid_dataset_handle: str | None,
+    reference_profile: str,
+    run_name: str,
+    effective_config: dict[str, Any],
+    artifact_root: str,
+    seed: int | None,
+    device: str,
+    max_workers: int,
+) -> TrainModelResult:
+    model = _resolve_model_ref(model_ref)
+    artifact_root_path = _ensure_dir(artifact_root)
+    trainer_cls, trainer_kind = _select_trainer(effective_config)
+    config_path = _write_training_config(
+        effective_config,
+        artifact_root=artifact_root_path,
+        run_name=run_name,
+    )
+
+    _set_seed(seed)
+    trainer = trainer_cls(
+        str(config_path),
+        model,
+        device=_device_from_request(device),
+        max_workers=max_workers,
+    )
+    trainer.train()
+
+    run_root = artifact_root_path / run_name
+    checkpoint_path = run_root / f"{run_name}.pt"
+    summary_path = run_root / f"{run_name}_summary.npz"
+    history_plot_path = run_root / f"{run_name}_history.png"
+    prediction_plot_path = run_root / f"{run_name}_prediction.png"
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"training did not produce checkpoint: {checkpoint_path}")
+    if not summary_path.is_file():
+        raise FileNotFoundError(f"training did not produce summary: {summary_path}")
+
+    checkpoint_summary = facade.register_checkpoint(
+        model_ref=model_ref,
+        checkpoint_path=str(checkpoint_path),
+        device=str(trainer.device),
+    )
+    run_summary = facade.register_training_run(
+        model_ref=model_ref,
+        train_dataset_handle=train_dataset_handle,
+        valid_dataset_handle=valid_dataset_handle,
+        reference_profile=reference_profile,
+        checkpoint_handle=checkpoint_summary.handle,
+        artifact_root=str(artifact_root_path),
+        run_name=run_name,
+    )
+
+    return TrainModelResult(
+        run_summary=run_summary,
+        checkpoint_summary=checkpoint_summary,
+        artifacts={
+            "checkpoint_path": str(checkpoint_path),
+            "training_summary_path": str(summary_path),
+            "history_plot_path": str(history_plot_path) if history_plot_path.is_file() else None,
+            "prediction_plot_path": (
+                str(prediction_plot_path) if prediction_plot_path.is_file() else None
+            ),
+        },
+        metrics=_load_training_metrics(summary_path),
+        reference_profile=reference_profile,
+        trainer_kind=trainer_kind,
+    )
+
+
 def _trajectory_payload(manager, index: int) -> dict[str, Any]:
     from dymad.io import TrajectoryManagerGraph
 
@@ -275,6 +359,30 @@ class CompatibilityExecutor:
     def inspect_dataset(self, *, dataset_handle: str) -> DatasetInspection:
         return _inspect_dataset_record(self.facade.get_dataset(dataset_handle))
 
+    def run_analysis_request(
+        self,
+        *,
+        compiled_request_handle: str,
+        artifact_root: str,
+    ) -> AnalysisRunResult:
+        compiled_request = self.facade.get_compiled_analysis_request(compiled_request_handle)
+        return self._run_compiled_analysis_request(
+            compiled_request=compiled_request,
+            artifact_root=artifact_root,
+        )
+
+    def train_compiled_request(
+        self,
+        *,
+        compiled_request_handle: str,
+        artifact_root: str,
+    ) -> TrainModelResult:
+        compiled_request = self.facade.get_compiled_training_request(compiled_request_handle)
+        return self._train_compiled_request_record(
+            compiled_request=compiled_request,
+            artifact_root=artifact_root,
+        )
+
     def train_model(
         self,
         *,
@@ -311,65 +419,124 @@ class CompatibilityExecutor:
             user_config=config,
             run_name=active_run_name,
         )
-        trainer_cls, trainer_kind = _select_trainer(effective_config)
-        artifact_root_path = _ensure_dir(artifact_root)
-        config_path = _write_training_config(
-            effective_config,
-            artifact_root=artifact_root_path,
-            run_name=active_run_name,
-        )
-
-        _set_seed(seed)
-        trainer = trainer_cls(
-            str(config_path),
-            model,
-            device=_device_from_request(device),
-            max_workers=max_workers,
-        )
-        trainer.train()
-
-        run_root = artifact_root_path / active_run_name
-        checkpoint_path = run_root / f"{active_run_name}.pt"
-        summary_path = run_root / f"{active_run_name}_summary.npz"
-        history_plot_path = run_root / f"{active_run_name}_history.png"
-        prediction_plot_path = run_root / f"{active_run_name}_prediction.png"
-        if not checkpoint_path.is_file():
-            raise FileNotFoundError(f"training did not produce checkpoint: {checkpoint_path}")
-        if not summary_path.is_file():
-            raise FileNotFoundError(f"training did not produce summary: {summary_path}")
-
-        checkpoint_summary = self.facade.register_checkpoint(
-            model_ref=model_ref,
-            checkpoint_path=str(checkpoint_path),
-            device=str(trainer.device),
-        )
-        run_summary = self.facade.register_training_run(
+        del model
+        return _execute_training_run(
+            facade=self.facade,
             model_ref=model_ref,
             train_dataset_handle=train_dataset_handle,
             valid_dataset_handle=valid_dataset_handle,
             reference_profile=profile_name,
-            checkpoint_handle=checkpoint_summary.handle,
-            artifact_root=str(artifact_root_path),
             run_name=active_run_name,
+            effective_config=effective_config,
+            artifact_root=artifact_root,
+            seed=seed,
+            device=device,
+            max_workers=max_workers,
         )
 
-        return TrainModelResult(
-            run_summary=run_summary,
-            checkpoint_summary=checkpoint_summary,
-            artifacts={
-                "checkpoint_path": str(checkpoint_path),
-                "training_summary_path": str(summary_path),
-                "history_plot_path": str(history_plot_path)
-                if history_plot_path.is_file()
-                else None,
-                "prediction_plot_path": (
-                    str(prediction_plot_path) if prediction_plot_path.is_file() else None
-                ),
-            },
-            metrics=_load_training_metrics(summary_path),
-            reference_profile=profile_name,
-            trainer_kind=trainer_kind,
+    def _train_compiled_request_record(
+        self,
+        *,
+        compiled_request: CompiledTrainingRequestRecord,
+        artifact_root: str,
+    ) -> TrainModelResult:
+        return _execute_training_run(
+            facade=self.facade,
+            model_ref=compiled_request.model_ref,
+            train_dataset_handle=compiled_request.train_dataset_handle,
+            valid_dataset_handle=compiled_request.valid_dataset_handle,
+            reference_profile=compiled_request.reference_profile,
+            run_name=compiled_request.effective_run_name,
+            effective_config=compiled_request.effective_config,
+            artifact_root=artifact_root,
+            seed=compiled_request.seed,
+            device=compiled_request.device,
+            max_workers=compiled_request.max_workers,
         )
+
+    def _run_compiled_analysis_request(
+        self,
+        *,
+        compiled_request: CompiledAnalysisRequestRecord,
+        artifact_root: str,
+    ) -> AnalysisRunResult:
+        if compiled_request.workflow_key == "spectral_koopman":
+            checkpoint = self.facade.get_checkpoint(cast(str, compiled_request.checkpoint_handle))
+            from dymad.sako.base import SpectralAnalysis
+
+            model_class = _resolve_model_ref(checkpoint.model_ref)
+            params = dict(compiled_request.parameters)
+            analysis = SpectralAnalysis(
+                model_class,
+                checkpoint.checkpoint_path,
+                dt=float(params.get("dt", 1.0)),
+                forder=params.get("forder", "full"),
+                reps=float(params.get("reps", 1e-10)),
+                etol=float(params.get("etol", 1e-13)),
+                remove_one=bool(params.get("remove_one", True)),
+                exec_context=self._active_context(),
+            )
+            root = _ensure_dir(Path(artifact_root).expanduser() / "analyses")
+            token = uuid4().hex[:12]
+            summary_path = root / f"{token}_spectral_summary.json"
+            summary_payload = {
+                "workflow_key": "spectral_koopman",
+                "checkpoint_handle": checkpoint.handle,
+                "checkpoint_path": checkpoint.checkpoint_path,
+                "n_eigs": int(len(np.asarray(analysis._wd))),
+                "n_eigs_full": int(len(np.asarray(analysis._wd_full))),
+                "obs_dim": int(analysis._ctx.snapshot.obs_dim),
+                "sample_count": int(analysis._ctx.snapshot.sample_count),
+            }
+            summary_path.write_text(
+                json.dumps(summary_payload, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            return AnalysisRunResult(
+                workflow_key="spectral_koopman",
+                artifacts={"summary_path": str(summary_path)},
+                summary=summary_payload,
+            )
+
+        if compiled_request.workflow_key == "vortex_transform_modes":
+            from dymad.agent.exec.vortex_analysis import (
+                compute_vortex_mode_analysis,
+                persist_vortex_mode_analysis,
+            )
+
+            train_dataset = self.facade.get_dataset(
+                compiled_request.dataset_handles["train_dataset_handle"]
+            )
+            test_dataset = self.facade.get_dataset(
+                compiled_request.dataset_handles["test_dataset_handle"]
+            )
+            params = dict(compiled_request.parameters)
+            analysis = compute_vortex_mode_analysis(
+                config_path=cast(str, params["config_path"]),
+                train_dataset_path=train_dataset.path,
+                test_dataset_path=test_dataset.path,
+                index=int(params.get("index", 5)),
+                nx=int(params.get("nx", 199)),
+                ny=int(params.get("ny", 449)),
+            )
+            persisted = persist_vortex_mode_analysis(analysis, artifact_root=artifact_root)
+            return AnalysisRunResult(
+                workflow_key="vortex_transform_modes",
+                artifacts={
+                    "output_path": persisted.output_path,
+                    "summary_path": persisted.summary_path,
+                },
+                summary={
+                    "workflow_key": "vortex_transform_modes",
+                    "rel_dx_error": persisted.rel_dx_error,
+                    "rel_dz_error": persisted.rel_dz_error,
+                    "index": persisted.index,
+                    "nx": persisted.nx,
+                    "ny": persisted.ny,
+                },
+            )
+
+        raise ValueError(f"unsupported analysis workflow: {compiled_request.workflow_key}")
 
     def evaluate_model(
         self,
@@ -382,7 +549,7 @@ class CompatibilityExecutor:
         max_plots: int = 1,
         predict_kwargs: dict[str, Any] | None = None,
     ) -> EvaluateModelResult:
-        if metric != "rollout_rmse":
+        if metric not in SUPPORTED_EVALUATION_METRICS:
             raise ValueError(f"unsupported evaluation metric: {metric}")
         checkpoint = self.facade.get_checkpoint(checkpoint_handle)
         dataset = self.facade.get_dataset(test_dataset_handle)
@@ -462,15 +629,25 @@ class CompatibilityExecutor:
             ):
                 payload = _trajectory_payload(manager, index)
                 model_name = f"{eval_token}_{plot_selection}_{rank}"
-                plot_trajectory(
-                    np.array([payload["x"], predictions[index]]),
-                    payload["t"],
-                    model_name=model_name,
-                    us=payload["u"],
-                    labels=["Truth", "Prediction"],
-                    ifclose=True,
-                    prefix=str(eval_root),
-                )
+                try:
+                    plot_trajectory(
+                        np.array([payload["x"], predictions[index]]),
+                        payload["t"],
+                        model_name=model_name,
+                        us=payload["u"],
+                        labels=["Truth", "Prediction"],
+                        ifclose=True,
+                        prefix=str(eval_root),
+                    )
+                except Exception:
+                    logger.warning(
+                        "Skipping evaluation plot '%s' due to plotting failure.",
+                        model_name,
+                        exc_info=True,
+                    )
+                    if plot_skipped_reason is None:
+                        plot_skipped_reason = "plotting failed"
+                    continue
                 plot_paths.append(str(eval_root / f"{model_name}_prediction.png"))
 
         evaluation_summary = self.facade.register_evaluation(

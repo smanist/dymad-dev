@@ -102,8 +102,14 @@ def prepare_workdir(root: Path):
     stage_workdir(root, BASE_DIR, ["ltg_data.yaml"] + [case["config"] for case in cases])
 
 
-def generate_data(root: Path):
-    sampler = TrajectorySampler(f, g, config=BASE_DIR / "ltg_data.yaml", config_mod=config_chr)
+def generate_data(root: Path, seed: int | None = None):
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=BASE_DIR / "ltg_data.yaml",
+        rng=seed,
+        config_mod=config_chr,
+    )
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
     out_path = root / "data" / "ltg.npz"
     np.savez_compressed(
@@ -131,8 +137,8 @@ def plot(selected: list[int]):
         print(f"Epoch time: {label} - {npz['avg_epoch_time']}")
 
 
-def predict(selected: list[int]):
-    sampler = TrajectorySampler(f, g, config="ltg_data.yaml", config_mod=config_gau)
+def predict(selected: list[int], seed: int | None = None):
+    sampler = TrajectorySampler(f, g, config="ltg_data.yaml", rng=seed, config_mod=config_gau)
     edge_index = adj_to_edge(adj)[0]
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = np.concatenate([ys[0], ys[0], ys[0]], axis=-1)
@@ -173,13 +179,13 @@ def main():
     selected = resolve_case_indices(args.case, len(cases), DEFAULT_CASES)
     data_path = root / "data" / "ltg.npz"
     if args.data or (args.workdir is not None and not data_path.exists()):
-        generate_data(root)
+        generate_data(root, args.seed)
     if not args.no_train:
         train(selected, root)
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:
-        predict(selected)
+        predict(selected, args.seed)
     if not args.no_show and (not args.no_plot or not args.no_predict):
         plt.show()
     return 0

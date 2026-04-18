@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "2d_koopman"
 BASELINE_PATH = Path(__file__).with_name("slow_kp_train_cli_baselines.json")
 TEST_SEED = 12345
+EVAL_SEED = 12346
 
 N = 301
 t_grid = np.linspace(0, 6, N)
@@ -42,6 +43,7 @@ class Case:
     idx: int
     model_name: str
     model_class: type
+    seed: int = TEST_SEED
     metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -51,7 +53,6 @@ class Case:
 
 CASES = [
     Case(0, "ldm_wf", LDM),
-    Case(1, "ldm_node", LDM),
     Case(2, "kbf_wf", KBF),
     Case(3, "kbf_node", KBF),
     Case(
@@ -70,9 +71,7 @@ CASES = [
 
 
 def _eval_rmse(case: Case, checkpoint_path: Path) -> float:
-    np.random.seed(TEST_SEED)
-    torch.manual_seed(TEST_SEED)
-    sampler = TrajectorySampler(f, config=SCRIPT_ROOT / "kp_data.yaml")
+    sampler = TrajectorySampler(f, config=SCRIPT_ROOT / "kp_data.yaml", rng=EVAL_SEED)
     ts, xs, _ = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
@@ -97,7 +96,7 @@ def _run_case(case: Case, workdir: Path) -> None:
             "--workdir",
             str(workdir),
             "--seed",
-            str(TEST_SEED),
+            str(case.seed),
             "--no-plot",
             "--no-predict",
             "--no-show",

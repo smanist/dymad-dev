@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from dymad.agent.exec.context import build_default_context
+from dymad.agent.exec.context import build_default_context, resolve_artifact_root
 from dymad.agent.facade.handles import (
     CheckpointHandle,
     DatasetHandle,
@@ -160,3 +160,40 @@ def test_spectral_exec_flow_resolves_snapshot_handle() -> None:
         "facade.register_spectral_snapshot",
         "facade.get_spectral_snapshot",
     ]
+
+
+def test_build_default_context_does_not_create_default_artifact_dir_until_needed(
+    monkeypatch, tmp_path
+) -> None:
+    repo_root = tmp_path / "workspace"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.setenv("PWD", str(repo_root))
+    monkeypatch.chdir("/")
+
+    expected_root = repo_root / ".dymad" / "artifacts"
+    context = build_default_context()
+
+    assert context.artifact_store is None
+    assert not expected_root.exists()
+
+    context.facade.register_checkpoint(
+        model_ref="dymad.models.collections:LDM",
+        checkpoint_path=str(repo_root / "checkpoints" / "lti.pt"),
+    )
+
+    assert expected_root.is_dir()
+    assert (expected_root / "checkpoints").is_dir()
+
+
+def test_resolve_artifact_root_prefers_repo_root_for_anchor_path(tmp_path) -> None:
+    repo_root = tmp_path / "mcp_run"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    nested = repo_root / "data"
+    nested.mkdir()
+    dataset_path = nested / "train.npz"
+
+    resolved = resolve_artifact_root(anchor_path=dataset_path)
+
+    assert resolved == repo_root / ".dymad" / "artifacts"

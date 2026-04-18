@@ -38,6 +38,15 @@ from dymad.utils import make_scheduler, plot_hist, plot_trajectory
 logger = logging.getLogger(__name__)
 
 
+def _safe_plot(logger: logging.Logger, *, label: str, fn) -> bool:
+    try:
+        fn()
+    except Exception:
+        logger.warning("Skipping %s due to plotting failure.", label, exc_info=True)
+        return False
+    return True
+
+
 class PhaseSpecValidationError(ValueError):
     """Raised when a phase spec or normalized legacy config is invalid."""
 
@@ -587,17 +596,23 @@ class BasePhase:
         if control_np is not None:
             plot_len = min(plot_len, control_np.shape[0])
 
-        plot_trajectory(
-            np.array([truth_np[:plot_len], pred_np[:plot_len]]),
-            time_np[:plot_len],
-            model_name=run_name,
-            us=None if control_np is None else control_np[:plot_len],
-            labels=["Truth", "Prediction"],
-            ifclose=True,
-            prefix=self.execution_services.checkpoint_prefix,
-            xidx=xidx,
-            uidx=uidx,
+        wrote_plot = _safe_plot(
+            logger,
+            label=f"prediction plot '{run_name}'",
+            fn=lambda: plot_trajectory(
+                np.array([truth_np[:plot_len], pred_np[:plot_len]]),
+                time_np[:plot_len],
+                model_name=run_name,
+                us=None if control_np is None else control_np[:plot_len],
+                labels=["Truth", "Prediction"],
+                ifclose=True,
+                prefix=self.execution_services.checkpoint_prefix,
+                xidx=xidx,
+                uidx=uidx,
+            ),
         )
+        if not wrote_plot:
+            return None
         return self.execution_services.checkpoint_file(f"{run_name}_prediction.png")
 
     def _write_progress_plots(
@@ -612,13 +627,17 @@ class BasePhase:
         crit_name: str | None,
         state_dict: dict[str, Any] | None = None,
     ) -> None:
-        plot_hist(
-            copy.deepcopy(hist_entries),
-            copy.deepcopy(history.crit),
-            crit_name,
-            run_name,
-            ifclose=True,
-            prefix=self.execution_services.checkpoint_prefix,
+        _safe_plot(
+            logger,
+            label=f"history plot '{run_name}'",
+            fn=lambda: plot_hist(
+                copy.deepcopy(hist_entries),
+                copy.deepcopy(history.crit),
+                crit_name,
+                run_name,
+                ifclose=True,
+                prefix=self.execution_services.checkpoint_prefix,
+            ),
         )
         self._export_prediction_plot(
             model_artifact=model_artifact,
@@ -1610,17 +1629,21 @@ class SummaryExportPhase(BasePhase):
         np.savez_compressed(output_path, **results)
         exports = self._ensure_export_artifact(artifacts)
         exports.outputs["summary"] = output_path
-        plot_hist(
-            copy.deepcopy(history.hist),
-            copy.deepcopy(history.crit),
-            None if evaluation is None else evaluation.criterion_name,
-            run_name,
-            ifclose=True,
-            prefix=self.execution_services.checkpoint_prefix,
-        )
-        exports.outputs["history_plot"] = self.execution_services.checkpoint_file(
-            f"{run_name}_history.png"
-        )
+        if _safe_plot(
+            logger,
+            label=f"history plot '{run_name}'",
+            fn=lambda: plot_hist(
+                copy.deepcopy(history.hist),
+                copy.deepcopy(history.crit),
+                None if evaluation is None else evaluation.criterion_name,
+                run_name,
+                ifclose=True,
+                prefix=self.execution_services.checkpoint_prefix,
+            ),
+        ):
+            exports.outputs["history_plot"] = self.execution_services.checkpoint_file(
+                f"{run_name}_history.png"
+            )
         prediction_path = self._export_prediction_plot(
             model_artifact=artifacts.require("model", ModelArtifact),
             history=history,

@@ -73,6 +73,7 @@ class SlowLTGDTCase:
     idx: int
     model_name: str
     model_class: type
+    seed: int = TEST_SEED
     metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -102,13 +103,12 @@ CASES = [
 ]
 
 
-def _gaussian_eval_sample():
-    np.random.seed(TEST_SEED)
-    torch.manual_seed(TEST_SEED)
+def _gaussian_eval_sample(seed: int):
     sampler = TrajectorySampler(
         f,
         g,
         config=SCRIPT_ROOT / "ltg_data.yaml",
+        rng=seed,
         config_mod=CONFIG_GAU,
     )
     t_grid = np.linspace(0, 5, 501)
@@ -120,7 +120,7 @@ def _gaussian_eval_sample():
 
 
 def _rollout_rmse(case: SlowLTGDTCase, checkpoint_path: Path) -> float:
-    x_data, t_data, u_data = _gaussian_eval_sample()
+    x_data, t_data, u_data = _gaussian_eval_sample(case.seed)
     _, predict_fn = load_model(case.model_class, checkpoint_path)
     with torch.no_grad():
         pred = predict_fn(x_data, t_data, u=u_data, ei=EDGE_INDEX)
@@ -143,7 +143,7 @@ def _run_case(case: SlowLTGDTCase, workdir: Path) -> None:
             "--workdir",
             str(workdir),
             "--seed",
-            str(TEST_SEED),
+            str(case.seed),
             "--no-plot",
             "--no-predict",
             "--no-show",

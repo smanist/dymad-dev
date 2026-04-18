@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, cast
 
 from dymad.agent.exec.context import ExecutionContext, build_default_context
+from dymad.agent.registry import (
+    DatasetKind,
+    describe_training_capability,
+    list_evaluation_capabilities,
+    list_model_capabilities,
+    list_profile_capabilities,
+    list_training_capabilities,
+    resolve_model_capability,
+)
 from dymad.agent.store.object_store import ObjectSummary
 
 
@@ -164,6 +173,78 @@ class DemoTools:
             }
         )
 
+    def list_model_capabilities(self) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "capabilities": [asdict(capability) for capability in list_model_capabilities()]
+            }
+        )
+
+    def resolve_model_capability(self, *, key_or_alias: str) -> dict[str, Any]:
+        return self._wrap(lambda: {"capability": asdict(resolve_model_capability(key_or_alias))})
+
+    def list_profile_capabilities(self) -> dict[str, Any]:
+        return self._wrap(
+            lambda: {
+                "capabilities": [asdict(capability) for capability in list_profile_capabilities()]
+            }
+        )
+
+    def list_training_capabilities(self, *, dataset_handle: str | None = None) -> dict[str, Any]:
+        dataset_kind: DatasetKind | None = None
+        if dataset_handle is not None:
+            dataset_kind = cast(DatasetKind, self._context.facade.get_dataset(dataset_handle).kind)
+        return self._wrap(
+            lambda: {
+                "dataset_kind": dataset_kind,
+                "capabilities": [
+                    asdict(capability)
+                    for capability in list_training_capabilities(dataset_kind=dataset_kind)
+                ],
+            }
+        )
+
+    def list_evaluation_capabilities(self, *, dataset_handle: str | None = None) -> dict[str, Any]:
+        dataset_kind: DatasetKind | None = None
+        if dataset_handle is not None:
+            dataset_kind = cast(DatasetKind, self._context.facade.get_dataset(dataset_handle).kind)
+        return self._wrap(
+            lambda: {
+                "dataset_kind": dataset_kind,
+                "capabilities": [
+                    asdict(capability)
+                    for capability in list_evaluation_capabilities(dataset_kind=dataset_kind)
+                ],
+            }
+        )
+
+    def describe_training_capability(
+        self,
+        *,
+        model_key: str,
+        dataset_handle: str | None = None,
+        dataset_kind: DatasetKind | None = None,
+    ) -> dict[str, Any]:
+        if dataset_handle is not None:
+            resolved_dataset_kind = cast(
+                DatasetKind, self._context.facade.get_dataset(dataset_handle).kind
+            )
+        elif dataset_kind is not None:
+            resolved_dataset_kind = dataset_kind
+        else:
+            raise ValueError("describe_training_capability requires dataset_handle or dataset_kind")
+        return self._wrap(
+            lambda: {
+                "dataset_kind": resolved_dataset_kind,
+                "detail": asdict(
+                    describe_training_capability(
+                        model_key=model_key,
+                        dataset_kind=resolved_dataset_kind,
+                    )
+                ),
+            }
+        )
+
     def describe_object(self, *, handle: str) -> dict[str, Any]:
         return self._wrap(lambda: self._summary_data(self._context.facade.describe_object(handle)))
 
@@ -180,7 +261,7 @@ class DemoTools:
         try:
             return {
                 "ok": True,
-                "data": fn(),
+                "data": self._json_safe(fn()),
             }
         except Exception as exc:
             return {
@@ -190,6 +271,16 @@ class DemoTools:
                     "message": str(exc),
                 },
             }
+
+    @staticmethod
+    def _json_safe(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: DemoTools._json_safe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [DemoTools._json_safe(item) for item in value]
+        if isinstance(value, tuple):
+            return [DemoTools._json_safe(item) for item in value]
+        return value
 
     @staticmethod
     def _summary_data(summary: ObjectSummary) -> dict[str, Any]:

@@ -13,6 +13,8 @@ class HandleValidationError(ValueError):
 _CHECKPOINT_RE = re.compile(r"^chk_[a-z0-9]{6,}$")
 _DATASET_RE = re.compile(r"^ds_[a-z0-9]{6,}$")
 _TRAINING_RUN_RE = re.compile(r"^run_[a-z0-9]{6,}$")
+_COMPILED_TRAINING_REQUEST_RE = re.compile(r"^trainreq_[a-z0-9]{6,}$")
+_COMPILED_ANALYSIS_REQUEST_RE = re.compile(r"^analysisreq_[a-z0-9]{6,}$")
 _EVALUATION_RE = re.compile(r"^eval_[a-z0-9]{6,}$")
 _PREDICTION_RE = re.compile(r"^pred_[a-z0-9]{6,}$")
 _SPECTRAL_SNAPSHOT_RE = re.compile(r"^specsnap_[a-z0-9]{6,}$")
@@ -60,6 +62,38 @@ class TrainingRunHandle:
 
     @classmethod
     def parse(cls, raw: str) -> TrainingRunHandle:
+        return cls(raw)
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True)
+class CompiledTrainingRequestHandle:
+    value: str
+
+    def __post_init__(self) -> None:
+        if not _COMPILED_TRAINING_REQUEST_RE.match(self.value):
+            raise HandleValidationError(f"invalid compiled training request handle: {self.value}")
+
+    @classmethod
+    def parse(cls, raw: str) -> CompiledTrainingRequestHandle:
+        return cls(raw)
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True)
+class CompiledAnalysisRequestHandle:
+    value: str
+
+    def __post_init__(self) -> None:
+        if not _COMPILED_ANALYSIS_REQUEST_RE.match(self.value):
+            raise HandleValidationError(f"invalid compiled analysis request handle: {self.value}")
+
+    @classmethod
+    def parse(cls, raw: str) -> CompiledAnalysisRequestHandle:
         return cls(raw)
 
     def __str__(self) -> str:
