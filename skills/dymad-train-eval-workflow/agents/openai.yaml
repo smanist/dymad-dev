@@ -1,3 +1,3 @@
 display_name: DyMAD Train/Eval Workflow
 short_description: Register datasets, inspect schema, train a DyMAD model, and evaluate rollout error.
-default_prompt: Use DyMAD MCP tools to register the train and test datasets, inspect them, translate the user's modeling request into structured config, call train_model, then call evaluate_model and report checkpoint, summary, metrics, and plot paths.
+default_prompt: Use DyMAD MCP tools to register the train and test datasets, inspect them, call describe_training_capability, translate the user's modeling request into structured overrides including overrides.cv for sweep requests when needed, call compile_training_request, then call train_compiled_request and evaluate_checkpoint and report checkpoint, summary, CV artifact, metrics, and plot paths.

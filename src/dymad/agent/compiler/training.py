@@ -20,6 +20,7 @@ from dymad.agent.registry import (
 from dymad.agent.registry.training_schema import (
     ALLOWED_DATA_OVERRIDE_KEYS,
     ALLOWED_TOP_LEVEL_OVERRIDE_KEYS,
+    CV_ALLOWED_KEYS,
     RUNTIME_OWNED_MODEL_KEYS,
     RUNTIME_OWNED_OVERRIDE_PATHS,
 )
@@ -53,6 +54,66 @@ def _coerce_optional_mapping(
             field_path=field_path,
         )
     return cast(dict[str, Any], decoded)
+
+
+def _is_non_empty_dotted_key(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    return all(part != "" for part in value.split("."))
+
+
+def _is_valid_param_grid_value(value: object) -> bool:
+    if isinstance(value, list):
+        return True
+    if not isinstance(value, tuple) or len(value) != 2:
+        return False
+    kind, args = value
+    if kind not in {"linspace", "logspace"}:
+        return False
+    return isinstance(args, (list, tuple))
+
+
+def _validate_cv_config(cv_config: object) -> None:
+    if not isinstance(cv_config, dict):
+        _raise_invalid(
+            "overrides.cv must be a mapping",
+            field_path=("overrides", "cv"),
+        )
+    cv_mapping = cast(dict[str, Any], cv_config)
+
+    unknown_keys = sorted(key for key in cv_mapping if key not in CV_ALLOWED_KEYS)
+    if unknown_keys:
+        invalid_key = unknown_keys[0]
+        _raise_invalid(
+            f"overrides.cv.{invalid_key} is not supported by the user-mode compiler",
+            field_path=("overrides", "cv", invalid_key),
+        )
+
+    param_grid = cv_mapping.get("param_grid")
+    if not isinstance(param_grid, dict) or not param_grid:
+        _raise_invalid(
+            "overrides.cv.param_grid must be a non-empty mapping",
+            field_path=("overrides", "cv", "param_grid"),
+        )
+    param_grid_mapping = cast(dict[str, Any], param_grid)
+    for key, value in param_grid_mapping.items():
+        if not _is_non_empty_dotted_key(key):
+            _raise_invalid(
+                "overrides.cv.param_grid keys must be non-empty dotted config paths",
+                field_path=("overrides", "cv", "param_grid"),
+            )
+        if not _is_valid_param_grid_value(value):
+            _raise_invalid(
+                "overrides.cv.param_grid values must be lists or ('linspace'|'logspace', ...)",
+                field_path=("overrides", "cv", "param_grid", key),
+            )
+
+    metric = cv_mapping.get("metric")
+    if metric is not None and not isinstance(metric, str):
+        _raise_invalid(
+            "overrides.cv.metric must be a string",
+            field_path=("overrides", "cv", "metric"),
+        )
 
 
 def _validate_overrides(config: dict[str, Any] | None, *, prefix: tuple[str, ...] = ()) -> None:
@@ -92,6 +153,9 @@ def _validate_overrides(config: dict[str, Any] | None, *, prefix: tuple[str, ...
                 f"overrides.model.{path[1]} is runtime-owned and cannot be set by the caller",
                 field_path=("overrides",) + path,
             )
+        if path == ("cv",):
+            _validate_cv_config(value)
+            continue
         if isinstance(value, dict):
             _validate_overrides(value, prefix=path)
 

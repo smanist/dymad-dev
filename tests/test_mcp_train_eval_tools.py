@@ -111,6 +111,14 @@ class _FakeTrainer:
         (run_root / f"{run_name}_history.png").write_bytes(b"history")
         if config.get("plotting", {}).get("prediction", True):
             (run_root / f"{run_name}_prediction.png").write_bytes(b"prediction")
+        if isinstance(config.get("cv"), dict):
+            np.savez_compressed(
+                run_root / f"{run_name}_cv.npz",
+                all_results=np.array([], dtype=object),
+                metric_name=config["cv"].get("metric", "total"),
+                best_idx=0,
+            )
+            (run_root / "cv_results.png").write_bytes(b"cv")
 
 
 def _patch_fake_trainers(monkeypatch) -> None:

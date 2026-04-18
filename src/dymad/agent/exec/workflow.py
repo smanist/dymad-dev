@@ -268,6 +268,8 @@ def _execute_training_run(
     summary_path = run_root / f"{run_name}_summary.npz"
     history_plot_path = run_root / f"{run_name}_history.png"
     prediction_plot_path = run_root / f"{run_name}_prediction.png"
+    cv_results_path = run_root / f"{run_name}_cv.npz"
+    cv_plot_path = run_root / "cv_results.png"
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"training did not produce checkpoint: {checkpoint_path}")
     if not summary_path.is_file():
@@ -298,6 +300,8 @@ def _execute_training_run(
             "prediction_plot_path": (
                 str(prediction_plot_path) if prediction_plot_path.is_file() else None
             ),
+            "cv_results_path": str(cv_results_path) if cv_results_path.is_file() else None,
+            "cv_plot_path": str(cv_plot_path) if cv_plot_path.is_file() else None,
         },
         metrics=_load_training_metrics(summary_path),
         reference_profile=reference_profile,

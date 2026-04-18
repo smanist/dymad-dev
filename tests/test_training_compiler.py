@@ -93,6 +93,43 @@ def test_compile_training_request_accepts_json_string_overrides(tmp_path) -> Non
     assert compiled.effective_config["model"]["koopman_dimension"] == 8
 
 
+def test_compile_training_request_accepts_cv_sweep_overrides(tmp_path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}}},
+        ),
+    )
+
+    assert compiled.request.overrides == {"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}}}
+    assert compiled.effective_config["cv"] == {"param_grid": {"model.koopman_dimension": [4, 6]}}
+
+
+def test_compile_training_request_accepts_json_string_cv_overrides(tmp_path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides='{"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}}}',
+        ),
+    )
+
+    assert compiled.request.overrides == {"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}}}
+
+
 def test_compile_training_request_resolves_graph_model_family_and_profile(tmp_path) -> None:
     context = build_default_context(artifact_root=tmp_path / "artifacts")
     dataset_path = tmp_path / "train_graph.npz"
@@ -149,6 +186,72 @@ def test_compile_training_request_rejects_unsupported_override_paths(tmp_path) -
         )
 
     assert exc_info.value.field_path == ("overrides", "runtime")
+
+
+def test_compile_training_request_rewrites_legacy_training_param_grid_paths(tmp_path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={"cv": {"param_grid": {"training.learning_rate": [0.1, 0.2]}}},
+        ),
+    )
+
+    assert compiled.effective_config["cv"]["param_grid"] == {"phases.0.learning_rate": [0.1, 0.2]}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_field_path"),
+    [
+        ({"cv": []}, ("overrides", "cv")),
+        ({"cv": {"metric": "total"}}, ("overrides", "cv", "param_grid")),
+        ({"cv": {"param_grid": {}}}, ("overrides", "cv", "param_grid")),
+        (
+            {"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}, "metric": 1}},
+            ("overrides", "cv", "metric"),
+        ),
+        ({"cv": {"param_grid": {"": [4, 6]}}}, ("overrides", "cv", "param_grid")),
+        (
+            {"cv": {"param_grid": {"model.koopman_dimension": "bad"}}},
+            ("overrides", "cv", "param_grid", "model.koopman_dimension"),
+        ),
+        (
+            {"cv": {"param_grid": {"model.koopman_dimension": ("geomspace", [1, 2, 3])}}},
+            ("overrides", "cv", "param_grid", "model.koopman_dimension"),
+        ),
+        (
+            {"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}, "mode": "sweep"}},
+            ("overrides", "cv", "mode"),
+        ),
+    ],
+)
+def test_compile_training_request_rejects_invalid_cv_overrides(
+    tmp_path,
+    overrides,
+    expected_field_path,
+) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    with pytest.raises(TrainingCompileValidationError) as exc_info:
+        compile_training_request(
+            facade=context.facade,
+            request=TrainingRequest(
+                train_dataset_handle=train_handle,
+                model_key="kbf",
+                overrides=overrides,
+            ),
+        )
+
+    assert exc_info.value.field_path == expected_field_path
 
 
 def test_compile_training_request_rejects_incompatible_explicit_profile(tmp_path) -> None:

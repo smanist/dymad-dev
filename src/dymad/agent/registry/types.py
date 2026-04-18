@@ -79,6 +79,16 @@ class TrainingCapabilityExample:
 
 
 @dataclass(frozen=True)
+class TrainingCVSchema:
+    supported: bool
+    workflow_kind: str
+    allowed_keys: tuple[str, ...]
+    default_metric: str
+    param_grid_value_forms: tuple[str, ...]
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class TrainingCapabilityDetail:
     capability: TrainingWorkflowCapability
     allowed_override_top_level_keys: tuple[str, ...]
@@ -86,6 +96,7 @@ class TrainingCapabilityDetail:
     allowed_data_override_keys: tuple[str, ...]
     runtime_owned_model_keys: tuple[str, ...]
     phase_entry_schemas: tuple[TrainingPhaseEntrySchema, ...]
+    cv_schema: TrainingCVSchema
     translation_guidance: tuple[str, ...]
     constraint_notes: tuple[str, ...]
     auto_appended_phases: tuple[str, ...]
