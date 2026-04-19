@@ -104,6 +104,7 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
     assert detail.capability.dataset_kind == "regular"
     assert detail.allowed_override_top_level_keys == (
         "criterion",
+        "cv",
         "dataloader",
         "model",
         "phases",
@@ -123,12 +124,27 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "export",
         "repeat",
     }
+    assert detail.cv_schema.supported is True
+    assert detail.cv_schema.workflow_kind == "single_split_param_sweep"
+    assert detail.cv_schema.allowed_keys == ("param_grid", "metric")
+    assert detail.cv_schema.default_metric == "total"
+    assert detail.cv_schema.param_grid_value_forms == ("list", "linspace_tuple", "logspace_tuple")
+    assert detail.cv_schema.notes == (
+        "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
+        "true k-fold cross-validation.",
+        "The best parameter combination is selected by the lowest aggregated metric value.",
+        "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
+        "shorthand, which is normalized onto the first optimizer phase.",
+    )
     assert detail.translation_guidance == (
         "For any ordered trainer names mentioned by the user, emit one overrides.phases "
         "entry per trainer in the same order.",
+        "Encode hyperparameter sweep requests as overrides.cv.param_grid, with optional "
+        "overrides.cv.metric to choose the optimization metric.",
         "Supported optimizer trainer names are Linear, Weak, and NODE.",
         "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
-        "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters.",
+        "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters; "
+        "matching trainer defaults from the selected profile are preserved unless overridden.",
         "Add phase names only when they improve readability or reflect user-provided "
         "labels such as initialization or refinement.",
     )
@@ -158,4 +174,10 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
             {"trainer": "NODE"},
         ]
     }
-    assert detail.examples[2].overrides["model"]["koopman_dimension"] == 2
+    assert detail.examples[2].overrides == {
+        "cv": {
+            "param_grid": {"model.koopman_dimension": [4, 6]},
+            "metric": "total",
+        }
+    }
+    assert detail.examples[3].overrides["model"]["koopman_dimension"] == 2

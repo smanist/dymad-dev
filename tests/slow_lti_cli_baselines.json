@@ -1,11 +1,11 @@
 {
   "kbf_cv": {
     "metrics": {
-      "best_valid_total": 5.326279506334686e-08,
-      "crit_train_last": 0.0003245673724450171,
-      "crit_valid_last": 1.3843586202710867e-05,
-      "final_valid_loss": 5.326279506334686e-08,
-      "rmse": 0.03484461141469451
+      "best_valid_total": 1.0237207748176047e-09,
+      "crit_train_last": 2.9610228011733852e-06,
+      "crit_valid_last": 3.0215635433705756e-06,
+      "final_valid_loss": 1.0237207748176047e-09,
+      "rmse": 0.015699256853272475
     },
     "summary_signature": {
       "best_valid_loss_keys": [

@@ -74,7 +74,9 @@ User mode is registry/compiler-backed. It currently exposes:
 - `list_evaluation_capabilities`
 - `describe_training_capability`
 - `compile_training_request`
-- `train_compiled_request`
+- `start_training_run`
+- `describe_training_run`
+- `read_training_run_log`
 - `evaluate_checkpoint`
 - `compile_analysis_request`
 - `run_analysis_request`
@@ -84,7 +86,8 @@ Notes:
 - user mode does not require raw `model_ref`
 - user mode compiles `model_key` plus validated overrides into persisted compiled requests
 - `describe_training_capability` is the authoritative contract for allowed overrides, phase-entry
-  schemas, natural-language-to-override translation guidance, and surfaced training constraints
+  schemas, CV sweep support metadata, natural-language-to-override translation guidance, and
+  surfaced training constraints
 - user mode currently assumes dataset handles already exist
 
 ### Developer Mode
@@ -96,7 +99,9 @@ Developer mode keeps the raw and compatibility-oriented path available:
 - `register_checkpoint`
 - `prepare_prediction_request`
 - `plan_checkpoint_prediction`
-- `train_model`
+- `start_model_training`
+- `describe_training_run`
+- `read_training_run_log`
 - `evaluate_model`
 - `list_model_capabilities`
 - `resolve_model_capability`
@@ -118,7 +123,8 @@ High-level path:
 register_dataset_file
   -> describe_training_capability / list_training_capabilities
   -> compile_training_request
-  -> train_compiled_request
+  -> start_training_run
+  -> describe_training_run / read_training_run_log
   -> evaluate_checkpoint
 ```
 
@@ -128,12 +134,24 @@ Compilation resolves:
 - dataset kind compatibility
 - default or explicit profile
 - allowed user overrides
+- optional single-split CV sweep settings under `overrides.cv`
+- phase overrides normalized against matching profile defaults so trainer-specific phase config is
+  preserved unless explicitly overridden
 - translation guidance and surfaced constraint notes for clients that map natural-language requests
-  into structured overrides
+  into structured overrides, including CV sweep requests
 - effective config
 - trainer kind
 
-Execution still routes through the current training runtime in `src/dymad/training/*`.
+Execution is now submit-and-poll:
+
+- `compile_training_request` still persists the validated compiled request
+- `start_training_run` / `start_model_training` persist a `training_run` record immediately and
+  spawn `dymad.agent.exec.training_worker`
+- the worker reloads the persisted context, marks the run `RUNNING`, executes the private
+  synchronous `_execute_training_run(...)` helper, then persists `SUCCEEDED` or `FAILED`
+- `describe_training_run` is the polling surface and reconciles stale `RUNNING` jobs whose worker
+  pid has disappeared without a terminal write
+- `read_training_run_log` returns incremental log chunks from the persisted worker log
 
 ### Analysis
 

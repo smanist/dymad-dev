@@ -5,7 +5,7 @@
       "crit_train_last": 4.7526846968988403e-08,
       "crit_valid_last": 0.06966057335968016,
       "final_valid_loss": 0.06308524501061276,
-      "rmse": 0.262651658609402
+      "rmse": 0.32082776484523007
     },
     "summary_signature": {
       "best_valid_loss_keys": [
@@ -48,7 +48,7 @@
       "crit_train_last": 4.745183240063343e-08,
       "crit_valid_last": 0.07557508141152872,
       "final_valid_loss": 0.06308542059280946,
-      "rmse": 0.2612757214057675
+      "rmse": 0.31531914612207324
     },
     "summary_signature": {
       "best_valid_loss_keys": [
@@ -91,7 +91,7 @@
       "crit_train_last": 3.4827365261479642e-06,
       "crit_valid_last": 0.00021851718010380898,
       "final_valid_loss": 0.39097983811114095,
-      "rmse": 0.27071895819581127
+      "rmse": 1.229758037793377
     },
     "summary_signature": {
       "best_valid_loss_keys": [

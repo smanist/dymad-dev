@@ -119,7 +119,7 @@ def build_server(
             )
 
         @server.tool(annotations=mutating)
-        def train_model(
+        def start_model_training(
             train_dataset_handle: str,
             artifact_root: str,
             model_ref: str,
@@ -132,7 +132,7 @@ def build_server(
             max_workers: int = 1,
         ) -> dict[str, Any]:
             """Train one DyMAD model from registered datasets and structured config."""
-            return tools.train_model(
+            return tools.start_model_training(
                 train_dataset_handle=train_dataset_handle,
                 valid_dataset_handle=valid_dataset_handle,
                 model_ref=model_ref,
@@ -143,6 +143,24 @@ def build_server(
                 seed=seed,
                 device=device,
                 max_workers=max_workers,
+            )
+
+        @server.tool(annotations=read_only)
+        def describe_training_run(training_run_handle: str) -> dict[str, Any]:
+            """Describe one persisted training job for polling."""
+            return tools.describe_training_run(training_run_handle=training_run_handle)
+
+        @server.tool(annotations=read_only)
+        def read_training_run_log(
+            training_run_handle: str,
+            offset: int = 0,
+            max_bytes: int = 65536,
+        ) -> dict[str, Any]:
+            """Read an incremental chunk from one persisted training job log."""
+            return tools.read_training_run_log(
+                training_run_handle=training_run_handle,
+                offset=offset,
+                max_bytes=max_bytes,
             )
 
         @server.tool(annotations=mutating)
@@ -250,14 +268,32 @@ def build_server(
             )
 
         @server.tool(annotations=mutating)
-        def train_compiled_request(
+        def start_training_run(
             compiled_request_handle: str,
             artifact_root: str,
         ) -> dict[str, Any]:
-            """Execute one persisted compiled training request."""
-            return user_tools.train_compiled_request(
+            """Launch one persisted compiled training request as an async training job."""
+            return user_tools.start_training_run(
                 compiled_request_handle=compiled_request_handle,
                 artifact_root=artifact_root,
+            )
+
+        @server.tool(annotations=read_only)
+        def describe_training_run(training_run_handle: str) -> dict[str, Any]:
+            """Describe one persisted training job for polling."""
+            return user_tools.describe_training_run(training_run_handle=training_run_handle)
+
+        @server.tool(annotations=read_only)
+        def read_training_run_log(
+            training_run_handle: str,
+            offset: int = 0,
+            max_bytes: int = 65536,
+        ) -> dict[str, Any]:
+            """Read an incremental chunk from one persisted training job log."""
+            return user_tools.read_training_run_log(
+                training_run_handle=training_run_handle,
+                offset=offset,
+                max_bytes=max_bytes,
             )
 
         @server.tool(annotations=mutating)

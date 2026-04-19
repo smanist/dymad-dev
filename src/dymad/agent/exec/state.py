@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dymad.agent.store.object_store import ObjectSummary
+from dymad.agent.store.object_store import ObjectSummary, TrainingRunRecord
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,32 @@ class TrainModelResult:
     metrics: dict[str, float | None]
     reference_profile: str
     trainer_kind: str
+
+
+@dataclass(frozen=True)
+class StartTrainingRunResult:
+    summary: ObjectSummary
+    training_run: TrainingRunRecord
+
+
+@dataclass(frozen=True)
+class StartModelTrainingResult:
+    summary: ObjectSummary
+    training_run: TrainingRunRecord
+    compiled_request_summary: ObjectSummary
+
+
+@dataclass(frozen=True)
+class DescribeTrainingRunResult:
+    summary: ObjectSummary
+    training_run: TrainingRunRecord
+
+
+@dataclass(frozen=True)
+class ReadTrainingRunLogResult:
+    text: str
+    next_offset: int
+    eof: bool
 
 
 @dataclass(frozen=True)

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import numpy as np
-import torch
 import yaml
 
-import dymad.training
 from dymad.agent.compiler import TrainingRequest, compile_training_request
 from dymad.agent.exec.context import build_default_context
+from tests.test_mcp_train_eval_tools import _configure_worker_bootstrap
 
 
 def _write_regular_dataset(path: Path) -> None:
@@ -22,74 +22,6 @@ def _write_regular_dataset(path: Path) -> None:
     )
     payload = {"t": t, "x": x, "u": np.ones((3, 6, 1)) * 0.1}
     np.savez_compressed(path, **payload)
-
-
-class _FakeTrainer:
-    def __init__(self, config_path, model_class, config_mod=None, device=None, max_workers=1):
-        del model_class, config_mod, max_workers
-        self.config_path = Path(config_path)
-        self.device = torch.device("cpu") if device is None else device
-
-    def train(self):
-        config = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
-        run_name = config["model"]["name"]
-        run_root = self.config_path.parent / run_name
-        run_root.mkdir(parents=True, exist_ok=True)
-        checkpoint_path = run_root / f"{run_name}.pt"
-        torch.save(
-            {
-                "config": config,
-                "train_md": {
-                    "n_state_features": 2,
-                    "n_aux_features": 0,
-                    "n_control_features": 1,
-                    "n_parameters": 0,
-                    "transform_x_state": None,
-                    "transform_u_state": None,
-                },
-                "valid_md": {
-                    "n_state_features": 2,
-                    "n_aux_features": 0,
-                    "n_control_features": 1,
-                    "n_parameters": 0,
-                    "transform_x_state": None,
-                    "transform_u_state": None,
-                },
-                "model_state_dict": {},
-                "best_loss": {"valid_total": 0.1},
-                "hist": [{"train_total": [0.2], "valid_total": [0.1]}],
-                "crit": [],
-                "epoch_times": [0.5],
-                "converged": False,
-                "device": "cpu",
-                "epoch": 1,
-            },
-            checkpoint_path,
-        )
-        np.savez_compressed(
-            run_root / f"{run_name}_summary.npz",
-            model_name=run_name,
-            total_training_time=1.0,
-            avg_epoch_time=0.5,
-            final_train_loss=0.2,
-            final_valid_loss=0.1,
-            best_valid_loss=np.array({"valid_total": 0.1}, dtype=object),
-            convergence_epoch=1,
-            hist=np.array([{"train_total": [0.2], "valid_total": [0.1]}], dtype=object),
-            crit_name=None,
-            crit_epoch=np.array([]),
-            crits=np.array([]),
-        )
-        (run_root / f"{run_name}_history.png").write_bytes(b"history")
-        if config.get("plotting", {}).get("prediction", True):
-            (run_root / f"{run_name}_prediction.png").write_bytes(b"prediction")
-
-
-def _patch_fake_trainers(monkeypatch) -> None:
-    monkeypatch.setattr(dymad.training, "WeakFormTrainer", _FakeTrainer)
-    monkeypatch.setattr(dymad.training, "NODETrainer", _FakeTrainer)
-    monkeypatch.setattr(dymad.training, "LinearTrainer", _FakeTrainer)
-    monkeypatch.setattr(dymad.training, "StackedTrainer", _FakeTrainer)
 
 
 def test_compiled_training_request_persists_and_rehydrates(tmp_path) -> None:
@@ -132,8 +64,8 @@ def test_compiled_training_request_persists_and_rehydrates(tmp_path) -> None:
     assert [item.handle for item in listed] == [summary.handle]
 
 
-def test_executor_trains_from_compiled_request_handle(tmp_path, monkeypatch) -> None:
-    _patch_fake_trainers(monkeypatch)
+def test_executor_starts_training_run_from_compiled_request_handle(tmp_path, monkeypatch) -> None:
+    _configure_worker_bootstrap(monkeypatch)
     artifact_root = tmp_path / "artifacts"
     outputs_root = tmp_path / "outputs"
     dataset_path = tmp_path / "train.npz"
@@ -154,18 +86,27 @@ def test_executor_trains_from_compiled_request_handle(tmp_path, monkeypatch) -> 
     compiled_summary = first.facade.register_compiled_training_request(compiled_request=compiled)
 
     second = build_default_context(artifact_root=artifact_root)
-    result = second.executor.train_compiled_request(
+    result = second.executor.start_training_run(
         compiled_request_handle=compiled_summary.handle,
         artifact_root=str(outputs_root),
     )
+    assert result.summary.kind == "training_run"
+    assert result.training_run.reference_profile == "kbf-regular-default"
+
+    for _ in range(100):
+        described = second.executor.describe_training_run(training_run_handle=result.summary.handle)
+        if described.training_run.status.value == "SUCCEEDED":
+            break
+        if described.training_run.status.value == "FAILED":
+            raise AssertionError(described.training_run)
+        time.sleep(0.05)
+    else:
+        raise AssertionError("training run did not finish")
 
     config_path = outputs_root / "compiled_run.yaml"
     materialized = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
-    assert result.reference_profile == "kbf-regular-default"
-    assert result.trainer_kind == "weak_form"
-    assert result.run_summary.kind == "training_run"
-    assert result.checkpoint_summary.kind == "checkpoint"
-    assert Path(result.artifacts["checkpoint_path"]).is_file()
+    assert described.training_run.checkpoint_handle is not None
+    assert Path(described.training_run.artifacts["checkpoint_path"]).is_file()
     assert materialized["model"]["name"] == "compiled_run"
     assert materialized["model"]["koopman_dimension"] == 7

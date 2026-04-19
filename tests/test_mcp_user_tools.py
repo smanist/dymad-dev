@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import yaml
@@ -7,11 +8,14 @@ import yaml
 import dymad.io
 from dymad.agent.exec.context import build_default_context
 from dymad.agent.mcp import UserTools
-from tests.test_mcp_train_eval_tools import _patch_fake_trainers, _write_regular_dataset
+from tests.test_mcp_train_eval_tools import (
+    _configure_worker_bootstrap,
+    _write_regular_dataset,
+)
 
 
-def test_user_tools_compile_train_and_evaluate_flow(tmp_path, monkeypatch) -> None:
-    _patch_fake_trainers(monkeypatch)
+def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) -> None:
+    _configure_worker_bootstrap(monkeypatch)
     dataset_path = tmp_path / "train.npz"
     _write_regular_dataset(dataset_path, with_control=False)
 
@@ -49,11 +53,22 @@ def test_user_tools_compile_train_and_evaluate_flow(tmp_path, monkeypatch) -> No
         overrides={"model": {"koopman_dimension": 6}},
     )
     compiled_handle = compiled["data"]["summary"]["handle"]
-    trained = tools.train_compiled_request(
+    started = tools.start_training_run(
         compiled_request_handle=compiled_handle,
         artifact_root=str(tmp_path / "outputs"),
     )
-    checkpoint_handle = trained["data"]["result"]["checkpoint_summary"]["handle"]
+    training_run_handle = started["data"]["summary"]["handle"]
+    for _ in range(100):
+        polled = tools.describe_training_run(training_run_handle=training_run_handle)
+        assert polled["ok"] is True
+        if polled["data"]["training_run"]["status"] == "SUCCEEDED":
+            break
+        if polled["data"]["training_run"]["status"] == "FAILED":
+            raise AssertionError(polled["data"]["training_run"])
+        time.sleep(0.05)
+    else:
+        raise AssertionError("training run did not finish")
+    checkpoint_handle = polled["data"]["training_run"]["checkpoint_handle"]
     evaluated = tools.evaluate_checkpoint(
         checkpoint_handle=checkpoint_handle,
         test_dataset_handle=train_dataset_handle,
@@ -75,8 +90,27 @@ def test_user_tools_compile_train_and_evaluate_flow(tmp_path, monkeypatch) -> No
     )
     assert (
         detail["data"]["detail"]["translation_guidance"][1]
+        == "Encode hyperparameter sweep requests as overrides.cv.param_grid, with optional "
+        "overrides.cv.metric to choose the optimization metric."
+    )
+    assert (
+        detail["data"]["detail"]["translation_guidance"][2]
         == "Supported optimizer trainer names are Linear, Weak, and NODE."
     )
+    assert detail["data"]["detail"]["cv_schema"] == {
+        "supported": True,
+        "workflow_kind": "single_split_param_sweep",
+        "allowed_keys": ["param_grid", "metric"],
+        "default_metric": "total",
+        "param_grid_value_forms": ["list", "linspace_tuple", "logspace_tuple"],
+        "notes": [
+            "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is "
+            "not true k-fold cross-validation.",
+            "The best parameter combination is selected by the lowest aggregated metric value.",
+            "Param-grid dotted keys may target either explicit phases.* paths or legacy "
+            "training.* shorthand, which is normalized onto the first optimizer phase.",
+        ],
+    }
     assert (
         detail["data"]["detail"]["constraint_notes"][0]
         == "Setting encoder_layers=0 or decoder_layers=0 only yields a true identity map "
@@ -111,11 +145,26 @@ def test_user_tools_compile_train_and_evaluate_flow(tmp_path, monkeypatch) -> No
             "Linear, Weak, and NODE phases."
         ],
     }
+    assert detail["data"]["detail"]["examples"][2] == {
+        "name": "hyperparameter_sweep_from_plain_english",
+        "user_request": "Sweep Koopman dimensions 4 and 6, and choose the model with the lowest "
+        "total validation metric.",
+        "overrides": {
+            "cv": {
+                "param_grid": {"model.koopman_dimension": [4, 6]},
+                "metric": "total",
+            }
+        },
+        "notes": [
+            "This uses the existing single-split CV sweep runtime rather than true k-fold "
+            "cross-validation."
+        ],
+    }
     assert evaluation["data"]["capabilities"][0]["supported_metrics"] == ["rollout_rmse"]
     assert compiled["data"]["compiled_request"]["model_key"] == "kbf"
     assert compiled["data"]["compiled_request"]["reference_profile"] == "kbf-regular-default"
-    assert trained["ok"] is True
-    assert trained["data"]["result"]["reference_profile"] == "kbf-regular-default"
+    assert started["ok"] is True
+    assert started["data"]["training_run"]["reference_profile"] == "kbf-regular-default"
     assert evaluated["ok"] is True
     assert evaluated["data"]["result"]["metrics"]["rmse_mean"] >= 0.0
     assert materialized["model"]["koopman_dimension"] == 6
@@ -140,6 +189,52 @@ def test_user_tools_compile_training_request_accepts_json_string_overrides(tmp_p
     assert (
         compiled["data"]["compiled_request"]["effective_config"]["model"]["koopman_dimension"] == 5
     )
+
+
+def test_user_tools_compile_training_request_accepts_cv_overrides_and_surfaces_cv_artifacts(
+    tmp_path, monkeypatch
+) -> None:
+    _configure_worker_bootstrap(monkeypatch)
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+
+    tools = UserTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    train_dataset_handle = tools._context.facade.register_dataset_file(
+        path=str(dataset_path)
+    ).handle
+
+    compiled = tools.compile_training_request(
+        train_dataset_handle=train_dataset_handle,
+        model_key="kbf",
+        run_name="user_mode_cv",
+        overrides={"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}}},
+    )
+
+    assert compiled["ok"] is True
+    assert compiled["data"]["compiled_request"]["effective_config"]["cv"] == {
+        "param_grid": {"model.koopman_dimension": [4, 6]}
+    }
+
+    started = tools.start_training_run(
+        compiled_request_handle=compiled["data"]["summary"]["handle"],
+        artifact_root=str(tmp_path / "outputs"),
+    )
+    for _ in range(100):
+        trained = tools.describe_training_run(
+            training_run_handle=started["data"]["summary"]["handle"]
+        )
+        assert trained["ok"] is True
+        if trained["data"]["training_run"]["status"] == "SUCCEEDED":
+            break
+        if trained["data"]["training_run"]["status"] == "FAILED":
+            raise AssertionError(trained["data"]["training_run"])
+        time.sleep(0.05)
+    else:
+        raise AssertionError("training run did not finish")
+
+    assert trained["ok"] is True
+    assert Path(trained["data"]["training_run"]["artifacts"]["cv_results_path"]).is_file()
+    assert Path(trained["data"]["training_run"]["artifacts"]["cv_plot_path"]).is_file()
 
 
 def test_user_tools_compile_training_request_surfaces_identity_dimension_mismatch(tmp_path) -> None:
@@ -171,7 +266,10 @@ def test_build_server_registers_user_tools(monkeypatch, tmp_path) -> None:
             self.name = name
             self.tools: dict[str, object] = {}
 
-        def tool(self, fn):
+        def tool(self, fn=None, **kwargs):
+            del kwargs
+            if fn is None:
+                return self.tool
             self.tools[fn.__name__] = fn
             return fn
 
@@ -185,7 +283,9 @@ def test_build_server_registers_user_tools(monkeypatch, tmp_path) -> None:
     )
 
     assert "compile_training_request" in server.tools
-    assert "train_compiled_request" in server.tools
+    assert "start_training_run" in server.tools
+    assert "describe_training_run" in server.tools
+    assert "read_training_run_log" in server.tools
     assert "evaluate_checkpoint" in server.tools
     assert "list_evaluation_capabilities" in server.tools
 
@@ -201,7 +301,10 @@ def test_build_server_compile_training_request_accepts_json_string_overrides(
             self.name = name
             self.tools: dict[str, object] = {}
 
-        def tool(self, fn):
+        def tool(self, fn=None, **kwargs):
+            del kwargs
+            if fn is None:
+                return self.tool
             self.tools[fn.__name__] = fn
             return fn
 

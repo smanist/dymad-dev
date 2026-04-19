@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -111,6 +112,14 @@ class _FakeTrainer:
         (run_root / f"{run_name}_history.png").write_bytes(b"history")
         if config.get("plotting", {}).get("prediction", True):
             (run_root / f"{run_name}_prediction.png").write_bytes(b"prediction")
+        if isinstance(config.get("cv"), dict):
+            np.savez_compressed(
+                run_root / f"{run_name}_cv.npz",
+                all_results=np.array([], dtype=object),
+                metric_name=config["cv"].get("metric", "total"),
+                best_idx=0,
+            )
+            (run_root / "cv_results.png").write_bytes(b"cv")
 
 
 def _patch_fake_trainers(monkeypatch) -> None:
@@ -118,6 +127,29 @@ def _patch_fake_trainers(monkeypatch) -> None:
     monkeypatch.setattr(dymad.training, "NODETrainer", _FakeTrainer)
     monkeypatch.setattr(dymad.training, "LinearTrainer", _FakeTrainer)
     monkeypatch.setattr(dymad.training, "StackedTrainer", _FakeTrainer)
+
+
+def _configure_worker_bootstrap(monkeypatch, *, mode: str = "success") -> None:
+    monkeypatch.setenv(
+        "DYMAD_TRAINING_WORKER_BOOTSTRAP",
+        "tests.support.training_worker_bootstrap:bootstrap",
+    )
+    if mode == "fail":
+        monkeypatch.setenv("DYMAD_TRAINING_WORKER_MODE", "fail")
+    else:
+        monkeypatch.delenv("DYMAD_TRAINING_WORKER_MODE", raising=False)
+
+
+def _poll_training_run(tools: DemoTools, handle: str, *, timeout: float = 5.0) -> dict[str, object]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        response = tools.describe_training_run(training_run_handle=handle)
+        assert response["ok"] is True
+        status = response["data"]["training_run"]["status"]
+        if status in {"SUCCEEDED", "FAILED"}:
+            return response
+        time.sleep(0.05)
+    raise AssertionError(f"training run {handle} did not reach a terminal state")
 
 
 def test_register_dataset_file_and_inspect_dataset(tmp_path) -> None:
@@ -149,14 +181,14 @@ def test_inspect_dataset_without_control_inputs(tmp_path) -> None:
     assert inspected["data"]["inspection"]["control_dim"] == 0
 
 
-def test_train_model_infers_profile_and_persists_run(tmp_path, monkeypatch) -> None:
-    _patch_fake_trainers(monkeypatch)
+def test_start_model_training_infers_profile_and_persists_run(tmp_path, monkeypatch) -> None:
+    _configure_worker_bootstrap(monkeypatch)
     dataset_path = tmp_path / "train.npz"
     _write_regular_dataset(dataset_path)
     tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
     train_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
 
-    response = tools.train_model(
+    response = tools.start_model_training(
         train_dataset_handle=train_handle,
         model_ref="dymad.models.collections:KBF",
         artifact_root=str(tmp_path / "outputs"),
@@ -164,24 +196,27 @@ def test_train_model_infers_profile_and_persists_run(tmp_path, monkeypatch) -> N
         config={"model": {"koopman_dimension": 8}},
     )
 
-    result = response["data"]["result"]
+    result = response["data"]
+    polled = _poll_training_run(tools, result["summary"]["handle"])
     assert response["ok"] is True
-    assert result["reference_profile"] == "kbf-regular-default"
-    assert result["trainer_kind"] == "weak_form"
-    assert result["run_summary"]["kind"] == "training_run"
-    assert result["checkpoint_summary"]["kind"] == "checkpoint"
-    assert Path(result["artifacts"]["checkpoint_path"]).is_file()
-    assert Path(result["artifacts"]["training_summary_path"]).is_file()
+    assert result["summary"]["kind"] == "training_run"
+    assert result["compiled_request_summary"]["kind"] == "compiled_training_request"
+    assert result["training_run"]["reference_profile"] == "kbf-regular-default"
+    assert result["training_run"]["status"] == "QUEUED"
+    assert polled["data"]["training_run"]["status"] == "SUCCEEDED"
+    assert polled["data"]["training_run"]["checkpoint_handle"].startswith("chk_")
+    assert Path(polled["data"]["training_run"]["artifacts"]["checkpoint_path"]).is_file()
+    assert Path(polled["data"]["training_run"]["artifacts"]["training_summary_path"]).is_file()
 
 
-def test_train_model_replaces_phases_and_selects_stacked(tmp_path, monkeypatch) -> None:
-    _patch_fake_trainers(monkeypatch)
+def test_start_model_training_replaces_phases_and_selects_stacked(tmp_path, monkeypatch) -> None:
+    _configure_worker_bootstrap(monkeypatch)
     dataset_path = tmp_path / "train.npz"
     _write_regular_dataset(dataset_path)
     tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
     train_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
 
-    response = tools.train_model(
+    response = tools.start_model_training(
         train_dataset_handle=train_handle,
         model_ref="dymad.models.collections:KBF",
         artifact_root=str(tmp_path / "outputs"),
@@ -194,22 +229,23 @@ def test_train_model_replaces_phases_and_selects_stacked(tmp_path, monkeypatch) 
         },
     )
 
-    config_path = tmp_path / "outputs" / "stacked_case.yaml"
+    polled = _poll_training_run(tools, response["data"]["summary"]["handle"])
+    config_path = Path(polled["data"]["training_run"]["config_path"])
     materialized = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     assert response["ok"] is True
-    assert response["data"]["result"]["trainer_kind"] == "stacked"
+    assert polled["data"]["training_run"]["status"] == "SUCCEEDED"
     assert len(materialized["phases"]) == 2
     assert [phase["name"] for phase in materialized["phases"]] == ["Warmup", "Refine"]
 
 
-def test_train_model_rejects_reserved_runtime_paths(tmp_path) -> None:
+def test_start_model_training_rejects_reserved_runtime_paths(tmp_path) -> None:
     dataset_path = tmp_path / "train.npz"
     _write_regular_dataset(dataset_path)
     tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
     train_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
 
-    response = tools.train_model(
+    response = tools.start_model_training(
         train_dataset_handle=train_handle,
         model_ref="dymad.models.collections:KBF",
         artifact_root=str(tmp_path / "outputs"),
@@ -217,16 +253,16 @@ def test_train_model_rejects_reserved_runtime_paths(tmp_path) -> None:
     )
 
     assert response["ok"] is False
-    assert "reserved" in response["error"]["message"]
+    assert "runtime-owned" in response["error"]["message"]
 
 
-def test_train_model_rejects_run_name_with_path_separators(tmp_path) -> None:
+def test_start_model_training_rejects_run_name_with_path_separators(tmp_path) -> None:
     dataset_path = tmp_path / "train.npz"
     _write_regular_dataset(dataset_path)
     tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
     train_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
 
-    response = tools.train_model(
+    response = tools.start_model_training(
         train_dataset_handle=train_handle,
         model_ref="dymad.models.collections:KBF",
         artifact_root=str(tmp_path / "outputs"),
@@ -235,6 +271,33 @@ def test_train_model_rejects_run_name_with_path_separators(tmp_path) -> None:
 
     assert response["ok"] is False
     assert "run_name" in response["error"]["message"]
+
+
+def test_start_model_training_preserves_requested_concrete_model_variant(
+    tmp_path, monkeypatch
+) -> None:
+    _configure_worker_bootstrap(monkeypatch)
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    tools = DemoTools(context=context)
+    train_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"]["handle"]
+
+    response = tools.start_model_training(
+        train_dataset_handle=train_handle,
+        model_ref="dymad.models.collections:DKBF",
+        artifact_root=str(tmp_path / "outputs"),
+        run_name="dkbf_case",
+    )
+
+    compiled_request = context.facade.get_compiled_training_request(
+        response["data"]["compiled_request_summary"]["handle"]
+    )
+    polled = _poll_training_run(tools, response["data"]["summary"]["handle"])
+
+    assert response["ok"] is True
+    assert compiled_request.model_ref == "dymad.models.collections:DKBF"
+    assert polled["data"]["training_run"]["model_ref"] == "dymad.models.collections:DKBF"
 
 
 def test_evaluate_model_regular_writes_metrics_and_plot(tmp_path, monkeypatch) -> None:

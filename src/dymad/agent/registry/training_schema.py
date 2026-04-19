@@ -9,12 +9,14 @@ from dymad.agent.registry.types import (
     DatasetKind,
     TrainingCapabilityDetail,
     TrainingCapabilityExample,
+    TrainingCVSchema,
     TrainingPhaseEntrySchema,
 )
 from dymad.agent.registry.workflows import list_training_capabilities
 
 ALLOWED_TOP_LEVEL_OVERRIDE_KEYS: tuple[str, ...] = (
     "criterion",
+    "cv",
     "dataloader",
     "model",
     "phases",
@@ -32,6 +34,16 @@ RUNTIME_OWNED_OVERRIDE_PATHS: tuple[str, ...] = (
 )
 ALLOWED_DATA_OVERRIDE_KEYS: tuple[str, ...] = ("double_precision",)
 RUNTIME_OWNED_MODEL_KEYS: tuple[str, ...] = ("name",)
+CV_ALLOWED_KEYS: tuple[str, ...] = ("param_grid", "metric")
+CV_DEFAULT_METRIC = "total"
+CV_PARAM_GRID_VALUE_FORMS: tuple[str, ...] = ("list", "linspace_tuple", "logspace_tuple")
+CV_NOTES: tuple[str, ...] = (
+    "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
+    "true k-fold cross-validation.",
+    "The best parameter combination is selected by the lowest aggregated metric value.",
+    "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
+    "shorthand, which is normalized onto the first optimizer phase.",
+)
 AUTO_APPENDED_PHASES: tuple[str, ...] = (
     "analysis",
     "export_best_model",
@@ -41,9 +53,12 @@ AUTO_APPENDED_PHASES: tuple[str, ...] = (
 TRANSLATION_GUIDANCE: tuple[str, ...] = (
     "For any ordered trainer names mentioned by the user, emit one overrides.phases "
     "entry per trainer in the same order.",
+    "Encode hyperparameter sweep requests as overrides.cv.param_grid, with optional "
+    "overrides.cv.metric to choose the optimization metric.",
     "Supported optimizer trainer names are Linear, Weak, and NODE.",
     "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
-    "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters.",
+    "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters; "
+    "matching trainer defaults from the selected profile are preserved unless overridden.",
     "Add phase names only when they improve readability or reflect user-provided "
     "labels such as initialization or refinement.",
 )
@@ -185,10 +200,26 @@ def _examples() -> tuple[TrainingCapabilityExample, ...]:
             ),
         ),
         TrainingCapabilityExample(
+            name="hyperparameter_sweep_from_plain_english",
+            user_request=(
+                "Sweep Koopman dimensions 4 and 6, and choose the model with the lowest total "
+                "validation metric."
+            ),
+            overrides={
+                "cv": {
+                    "param_grid": {"model.koopman_dimension": [4, 6]},
+                    "metric": "total",
+                }
+            },
+            notes=(
+                "This uses the existing single-split CV sweep runtime rather than true k-fold "
+                "cross-validation.",
+            ),
+        ),
+        TrainingCapabilityExample(
             name="identity_encoder_decoder_for_two_state_lti",
             user_request=(
-                "Use trivial encoder and decoder, i.e. identity maps, for a 2-state "
-                "LTI model."
+                "Use trivial encoder and decoder, i.e. identity maps, for a 2-state LTI model."
             ),
             overrides={
                 "model": {
@@ -256,6 +287,14 @@ def describe_training_capability(
                 allowed_data_override_keys=ALLOWED_DATA_OVERRIDE_KEYS,
                 runtime_owned_model_keys=RUNTIME_OWNED_MODEL_KEYS,
                 phase_entry_schemas=_phase_entry_schemas(),
+                cv_schema=TrainingCVSchema(
+                    supported=True,
+                    workflow_kind="single_split_param_sweep",
+                    allowed_keys=CV_ALLOWED_KEYS,
+                    default_metric=CV_DEFAULT_METRIC,
+                    param_grid_value_forms=CV_PARAM_GRID_VALUE_FORMS,
+                    notes=CV_NOTES,
+                ),
                 translation_guidance=TRANSLATION_GUIDANCE,
                 constraint_notes=CONSTRAINT_NOTES,
                 auto_appended_phases=AUTO_APPENDED_PHASES,

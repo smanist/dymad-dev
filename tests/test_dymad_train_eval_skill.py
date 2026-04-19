@@ -10,10 +10,15 @@ def test_dymad_train_eval_skill_staging_files_exist() -> None:
 
     assert "register_dataset_file" in skill_body
     assert "inspect_dataset" in skill_body
+    assert "describe_training_capability" in skill_body
     assert "list_evaluation_capabilities" in skill_body
     assert "compile_training_request" in skill_body
-    assert "train_compiled_request" in skill_body
+    assert "start_training_run" in skill_body
+    assert "describe_training_run" in skill_body
+    assert "read_training_run_log" in skill_body
     assert "evaluate_checkpoint" in skill_body
+    assert "overrides.cv" in skill_body
+    assert "cv_results_path" in skill_body
     assert "supported_metrics" in skill_body
     assert "free text" in skill_body
     assert "DyMAD Train/Eval Workflow" in openai_yaml

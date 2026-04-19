@@ -19,6 +19,7 @@ from dymad.agent.store.object_store import (
     PredictionRequestRecord,
     SpectralSnapshotRecord,
     TrainingRunRecord,
+    TrainingRunStatus,
 )
 from dymad.sako.snapshot import KoopmanWeightSnapshot, SpectralSnapshot
 
@@ -82,6 +83,15 @@ class FilesystemArtifactStore:
     def persist_training_run(self, record: TrainingRunRecord) -> None:
         payload = {
             "handle": record.handle,
+            "compiled_request_handle": record.compiled_request_handle,
+            "status": record.status.value,
+            "created_at": record.created_at,
+            "started_at": record.started_at,
+            "finished_at": record.finished_at,
+            "pid": record.pid,
+            "log_path": record.log_path,
+            "config_path": record.config_path,
+            "run_root": record.run_root,
             "model_ref": record.model_ref,
             "train_dataset_handle": record.train_dataset_handle,
             "valid_dataset_handle": record.valid_dataset_handle,
@@ -89,6 +99,10 @@ class FilesystemArtifactStore:
             "checkpoint_handle": record.checkpoint_handle,
             "artifact_root": record.artifact_root,
             "run_name": record.run_name,
+            "artifacts": record.artifacts,
+            "metrics": record.metrics,
+            "error_type": record.error_type,
+            "error_message": record.error_message,
         }
         self._write_json("training_run", record.handle, payload)
 
@@ -96,13 +110,26 @@ class FilesystemArtifactStore:
         payload = self._read_json("training_run", handle)
         return TrainingRunRecord(
             handle=payload["handle"],
+            compiled_request_handle=payload["compiled_request_handle"],
+            status=TrainingRunStatus(payload["status"]),
+            created_at=payload["created_at"],
+            started_at=payload.get("started_at"),
+            finished_at=payload.get("finished_at"),
+            pid=payload.get("pid"),
+            log_path=payload.get("log_path"),
+            config_path=payload.get("config_path"),
+            run_root=payload.get("run_root"),
             model_ref=payload["model_ref"],
             train_dataset_handle=payload["train_dataset_handle"],
             valid_dataset_handle=payload.get("valid_dataset_handle"),
             reference_profile=payload.get("reference_profile"),
-            checkpoint_handle=payload["checkpoint_handle"],
+            checkpoint_handle=payload.get("checkpoint_handle"),
             artifact_root=payload["artifact_root"],
             run_name=payload["run_name"],
+            artifacts=dict(payload.get("artifacts", {})),
+            metrics=dict(payload.get("metrics", {})),
+            error_type=payload.get("error_type"),
+            error_message=payload.get("error_message"),
         )
 
     def persist_compiled_training_request(self, record: CompiledTrainingRequestRecord) -> None:
@@ -304,8 +331,8 @@ class FilesystemArtifactStore:
             return ObjectSummary(
                 handle=payload["handle"],
                 kind="training_run",
-                derived_from=payload["checkpoint_handle"],
-                preview=f"{payload['run_name']} ({payload['model_ref']})",
+                derived_from=payload["compiled_request_handle"],
+                preview=f"{payload['status']}: {payload['run_name']} ({payload['model_ref']})",
             )
         if kind == "compiled_training_request":
             return ObjectSummary(

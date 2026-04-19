@@ -108,7 +108,10 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
             self.name = name
             self.tools: dict[str, object] = {}
 
-        def tool(self, fn):
+        def tool(self, fn=None, **kwargs):
+            del kwargs
+            if fn is None:
+                return self.tool
             self.tools[fn.__name__] = fn
             return fn
 
@@ -124,6 +127,7 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
         "compile_analysis_request",
         "compile_training_request",
         "describe_training_capability",
+        "describe_training_run",
         "describe_object",
         "evaluate_checkpoint",
         "evaluate_model",
@@ -136,12 +140,13 @@ def test_build_server_registers_demo_tools(monkeypatch, tmp_path) -> None:
         "list_training_capabilities",
         "plan_checkpoint_prediction",
         "prepare_prediction_request",
+        "read_training_run_log",
         "register_dataset_file",
         "register_checkpoint",
         "resolve_model_capability",
         "run_analysis_request",
-        "train_compiled_request",
-        "train_model",
+        "start_model_training",
+        "start_training_run",
     }
     response = server.tools["register_checkpoint"](
         model_ref="dymad.models.collections:LDM",
