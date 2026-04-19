@@ -74,7 +74,9 @@ User mode is registry/compiler-backed. It currently exposes:
 - `list_evaluation_capabilities`
 - `describe_training_capability`
 - `compile_training_request`
-- `train_compiled_request`
+- `start_training_run`
+- `describe_training_run`
+- `read_training_run_log`
 - `evaluate_checkpoint`
 - `compile_analysis_request`
 - `run_analysis_request`
@@ -97,7 +99,9 @@ Developer mode keeps the raw and compatibility-oriented path available:
 - `register_checkpoint`
 - `prepare_prediction_request`
 - `plan_checkpoint_prediction`
-- `train_model`
+- `start_model_training`
+- `describe_training_run`
+- `read_training_run_log`
 - `evaluate_model`
 - `list_model_capabilities`
 - `resolve_model_capability`
@@ -119,7 +123,8 @@ High-level path:
 register_dataset_file
   -> describe_training_capability / list_training_capabilities
   -> compile_training_request
-  -> train_compiled_request
+  -> start_training_run
+  -> describe_training_run / read_training_run_log
   -> evaluate_checkpoint
 ```
 
@@ -137,7 +142,16 @@ Compilation resolves:
 - effective config
 - trainer kind
 
-Execution still routes through the current training runtime in `src/dymad/training/*`.
+Execution is now submit-and-poll:
+
+- `compile_training_request` still persists the validated compiled request
+- `start_training_run` / `start_model_training` persist a `training_run` record immediately and
+  spawn `dymad.agent.exec.training_worker`
+- the worker reloads the persisted context, marks the run `RUNNING`, executes the private
+  synchronous `_execute_training_run(...)` helper, then persists `SUCCEEDED` or `FAILED`
+- `describe_training_run` is the polling surface and reconciles stale `RUNNING` jobs whose worker
+  pid has disappeared without a terminal write
+- `read_training_run_log` returns incremental log chunks from the persisted worker log
 
 ### Analysis
 

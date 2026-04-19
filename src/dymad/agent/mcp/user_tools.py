@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from enum import Enum
 from typing import Any, cast
 
 from dymad.agent.compiler import (
@@ -123,21 +124,19 @@ class UserTools:
             )
         )
 
-    def train_compiled_request(
+    def start_training_run(
         self,
         *,
         compiled_request_handle: str,
         artifact_root: str,
     ) -> dict[str, Any]:
         return self._wrap(
-            lambda: {
-                "result": asdict(
-                    self._context.executor.train_compiled_request(
-                        compiled_request_handle=compiled_request_handle,
-                        artifact_root=artifact_root,
-                    )
+            lambda: asdict(
+                self._context.executor.start_training_run(
+                    compiled_request_handle=compiled_request_handle,
+                    artifact_root=artifact_root,
                 )
-            }
+            )
         )
 
     def compile_analysis_request(
@@ -207,6 +206,32 @@ class UserTools:
             }
         )
 
+    def describe_training_run(self, *, training_run_handle: str) -> dict[str, Any]:
+        return self._wrap(
+            lambda: asdict(
+                self._context.executor.describe_training_run(
+                    training_run_handle=training_run_handle
+                )
+            )
+        )
+
+    def read_training_run_log(
+        self,
+        *,
+        training_run_handle: str,
+        offset: int = 0,
+        max_bytes: int = 65536,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: asdict(
+                self._context.executor.read_training_run_log(
+                    training_run_handle=training_run_handle,
+                    offset=offset,
+                    max_bytes=max_bytes,
+                )
+            )
+        )
+
     def _wrap(self, fn) -> dict[str, Any]:
         try:
             return {
@@ -230,6 +255,8 @@ class UserTools:
             return [UserTools._json_safe(item) for item in value]
         if isinstance(value, tuple):
             return [UserTools._json_safe(item) for item in value]
+        if isinstance(value, Enum):
+            return value.value
         return value
 
     def _compiled_request_data(self, handle: str) -> dict[str, Any]:

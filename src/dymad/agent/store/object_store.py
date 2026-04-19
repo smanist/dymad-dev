@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import StrEnum
 from os import PathLike
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -35,16 +36,36 @@ class DatasetRecord:
     kind: str
 
 
+class TrainingRunStatus(StrEnum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+
+
 @dataclass(frozen=True)
 class TrainingRunRecord:
     handle: str
+    compiled_request_handle: str
+    status: TrainingRunStatus
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+    pid: int | None
+    log_path: str | None
+    config_path: str | None
+    run_root: str | None
     model_ref: str
     train_dataset_handle: str
     valid_dataset_handle: str | None
     reference_profile: str | None
-    checkpoint_handle: str
+    checkpoint_handle: str | None
     artifact_root: str
     run_name: str
+    artifacts: dict[str, str | None]
+    metrics: dict[str, float | None]
+    error_type: str | None
+    error_message: str | None
 
 
 @dataclass(frozen=True)
@@ -184,24 +205,48 @@ class ObjectStore:
     def put_training_run(
         self,
         *,
+        compiled_request_handle: str,
+        status: TrainingRunStatus,
+        created_at: str,
+        started_at: str | None,
+        finished_at: str | None,
+        pid: int | None,
+        log_path: str | None,
+        config_path: str | None,
+        run_root: str | None,
         model_ref: str,
         train_dataset_handle: str,
         valid_dataset_handle: str | None,
         reference_profile: str | None,
-        checkpoint_handle: str,
+        checkpoint_handle: str | None,
         artifact_root: str,
         run_name: str,
+        artifacts: dict[str, str | None] | None = None,
+        metrics: dict[str, float | None] | None = None,
+        error_type: str | None = None,
+        error_message: str | None = None,
     ) -> str:
+        self.get_compiled_training_request(compiled_request_handle)
         train_dataset = self.get_dataset(train_dataset_handle)
         if valid_dataset_handle is not None:
             self.get_dataset(valid_dataset_handle)
-        self.get_checkpoint(checkpoint_handle)
+        if checkpoint_handle is not None:
+            self.get_checkpoint(checkpoint_handle)
         artifact_store = self._ensure_artifact_store(
             anchor_path=train_dataset.path or artifact_root,
         )
         handle = self._new_handle("run")
         record = TrainingRunRecord(
             handle=handle,
+            compiled_request_handle=compiled_request_handle,
+            status=status,
+            created_at=created_at,
+            started_at=started_at,
+            finished_at=finished_at,
+            pid=pid,
+            log_path=log_path,
+            config_path=config_path,
+            run_root=run_root,
             model_ref=model_ref,
             train_dataset_handle=train_dataset_handle,
             valid_dataset_handle=valid_dataset_handle,
@@ -209,6 +254,10 @@ class ObjectStore:
             checkpoint_handle=checkpoint_handle,
             artifact_root=artifact_root,
             run_name=run_name,
+            artifacts={} if artifacts is None else dict(artifacts),
+            metrics={} if metrics is None else dict(metrics),
+            error_type=error_type,
+            error_message=error_message,
         )
         self._training_runs[handle] = record
         if artifact_store is not None:
@@ -225,6 +274,31 @@ class ObjectStore:
             record = artifact_store.load_training_run(handle)
             self._training_runs[handle] = record
             return record
+
+    def refresh_training_run(self, handle: str) -> TrainingRunRecord:
+        artifact_store = self._ensure_artifact_store()
+        if artifact_store is None:
+            return self.get_training_run(handle)
+        record = artifact_store.load_training_run(handle)
+        self._training_runs[handle] = record
+        return record
+
+    def update_training_run(self, handle: str, **changes: Any) -> TrainingRunRecord:
+        record = self.refresh_training_run(handle)
+        if "compiled_request_handle" in changes:
+            self.get_compiled_training_request(changes["compiled_request_handle"])
+        if "train_dataset_handle" in changes:
+            self.get_dataset(changes["train_dataset_handle"])
+        if changes.get("valid_dataset_handle") is not None:
+            self.get_dataset(changes["valid_dataset_handle"])
+        if changes.get("checkpoint_handle") is not None:
+            self.get_checkpoint(changes["checkpoint_handle"])
+        updated = replace(record, **changes)
+        self._training_runs[handle] = updated
+        artifact_store = self._ensure_artifact_store()
+        if artifact_store is not None:
+            artifact_store.persist_training_run(updated)
+        return updated
 
     def put_compiled_training_request(
         self,
@@ -449,8 +523,8 @@ class ObjectStore:
             return ObjectSummary(
                 handle=handle,
                 kind="training_run",
-                derived_from=run.checkpoint_handle,
-                preview=f"{run.run_name} ({run.model_ref})",
+                derived_from=run.compiled_request_handle,
+                preview=f"{run.status.value}: {run.run_name} ({run.model_ref})",
             )
         if handle.startswith("trainreq_"):
             request = self.get_compiled_training_request(handle)
@@ -531,6 +605,11 @@ class ObjectStore:
             for handle in self._spectral_snapshots:
                 summaries[handle] = self.summarize(handle)
         return [summaries[handle] for handle in sorted(summaries)]
+
+    @property
+    def artifact_store_root(self) -> str | None:
+        artifact_store = self._ensure_artifact_store()
+        return None if artifact_store is None else str(artifact_store.root)
 
     @staticmethod
     def _new_handle(prefix: str) -> str:

@@ -27,6 +27,7 @@ from dymad.agent.store.object_store import (
     PredictionRequestRecord,
     SpectralSnapshotRecord,
     TrainingRunRecord,
+    TrainingRunStatus,
 )
 
 if TYPE_CHECKING:
@@ -95,13 +96,26 @@ class FacadeOperations:
     def register_training_run(
         self,
         *,
+        compiled_request_handle: str,
+        status: TrainingRunStatus,
+        created_at: str,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+        pid: int | None = None,
+        log_path: str | None = None,
+        config_path: str | None = None,
+        run_root: str | None = None,
         model_ref: str,
         train_dataset_handle: str,
         valid_dataset_handle: str | None,
         reference_profile: str | None,
-        checkpoint_handle: str,
+        checkpoint_handle: str | None,
         artifact_root: str,
         run_name: str,
+        artifacts: dict[str, str | None] | None = None,
+        metrics: dict[str, float | None] | None = None,
+        error_type: str | None = None,
+        error_message: str | None = None,
     ) -> ObjectSummary:
         if not model_ref.strip():
             raise ValueError("model_ref cannot be empty")
@@ -109,23 +123,59 @@ class FacadeOperations:
             raise ValueError("artifact_root cannot be empty")
         if not run_name.strip():
             raise ValueError("run_name cannot be empty")
+        compiled_request = CompiledTrainingRequestHandle.parse(compiled_request_handle)
         train_dataset = DatasetHandle.parse(train_dataset_handle)
         valid_dataset = (
             None if valid_dataset_handle is None else DatasetHandle.parse(valid_dataset_handle)
         )
-        checkpoint = CheckpointHandle.parse(checkpoint_handle)
+        checkpoint = (
+            None if checkpoint_handle is None else CheckpointHandle.parse(checkpoint_handle)
+        )
         handle = self._store.put_training_run(
+            compiled_request_handle=compiled_request.value,
+            status=status,
+            created_at=created_at.strip(),
+            started_at=started_at,
+            finished_at=finished_at,
+            pid=pid,
+            log_path=log_path,
+            config_path=config_path,
+            run_root=run_root,
             model_ref=model_ref.strip(),
             train_dataset_handle=train_dataset.value,
             valid_dataset_handle=None if valid_dataset is None else valid_dataset.value,
             reference_profile=None
             if reference_profile is None
             else reference_profile.strip() or None,
-            checkpoint_handle=checkpoint.value,
+            checkpoint_handle=None if checkpoint is None else checkpoint.value,
             artifact_root=artifact_root.strip(),
             run_name=run_name.strip(),
+            artifacts=artifacts,
+            metrics=metrics,
+            error_type=None if error_type is None else error_type.strip() or None,
+            error_message=None if error_message is None else error_message.strip() or None,
         )
         return self._store.summarize(handle)
+
+    def update_training_run(self, handle: str, **changes: Any) -> TrainingRunRecord:
+        run = TrainingRunHandle.parse(handle)
+        if "compiled_request_handle" in changes and changes["compiled_request_handle"] is not None:
+            changes["compiled_request_handle"] = CompiledTrainingRequestHandle.parse(
+                changes["compiled_request_handle"]
+            ).value
+        if "train_dataset_handle" in changes and changes["train_dataset_handle"] is not None:
+            changes["train_dataset_handle"] = DatasetHandle.parse(
+                changes["train_dataset_handle"]
+            ).value
+        if "valid_dataset_handle" in changes and changes["valid_dataset_handle"] is not None:
+            changes["valid_dataset_handle"] = DatasetHandle.parse(
+                changes["valid_dataset_handle"]
+            ).value
+        if "checkpoint_handle" in changes and changes["checkpoint_handle"] is not None:
+            changes["checkpoint_handle"] = CheckpointHandle.parse(
+                changes["checkpoint_handle"]
+            ).value
+        return self._store.update_training_run(run.value, **changes)
 
     def register_compiled_training_request(
         self,
@@ -237,6 +287,10 @@ class FacadeOperations:
     def get_training_run(self, handle: str) -> TrainingRunRecord:
         run = TrainingRunHandle.parse(handle)
         return self._store.get_training_run(run.value)
+
+    def refresh_training_run(self, handle: str) -> TrainingRunRecord:
+        run = TrainingRunHandle.parse(handle)
+        return self._store.refresh_training_run(run.value)
 
     def get_compiled_training_request(self, handle: str) -> CompiledTrainingRequestRecord:
         request = CompiledTrainingRequestHandle.parse(handle)

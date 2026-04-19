@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from enum import Enum
 from typing import Any, cast
 
 from dymad.agent.exec.context import ExecutionContext, build_default_context
@@ -113,7 +114,7 @@ class DemoTools:
             }
         )
 
-    def train_model(
+    def start_model_training(
         self,
         *,
         train_dataset_handle: str,
@@ -128,22 +129,20 @@ class DemoTools:
         max_workers: int = 1,
     ) -> dict[str, Any]:
         return self._wrap(
-            lambda: {
-                "result": asdict(
-                    self._context.executor.train_model(
-                        train_dataset_handle=train_dataset_handle,
-                        valid_dataset_handle=valid_dataset_handle,
-                        model_ref=model_ref,
-                        reference_profile=reference_profile,
-                        config=config,
-                        run_name=run_name,
-                        artifact_root=artifact_root,
-                        seed=seed,
-                        device=device,
-                        max_workers=max_workers,
-                    )
+            lambda: asdict(
+                self._context.executor.start_model_training(
+                    train_dataset_handle=train_dataset_handle,
+                    valid_dataset_handle=valid_dataset_handle,
+                    model_ref=model_ref,
+                    reference_profile=reference_profile,
+                    config=config,
+                    run_name=run_name,
+                    artifact_root=artifact_root,
+                    seed=seed,
+                    device=device,
+                    max_workers=max_workers,
                 )
-            }
+            )
         )
 
     def evaluate_model(
@@ -257,6 +256,32 @@ class DemoTools:
             }
         )
 
+    def describe_training_run(self, *, training_run_handle: str) -> dict[str, Any]:
+        return self._wrap(
+            lambda: asdict(
+                self._context.executor.describe_training_run(
+                    training_run_handle=training_run_handle
+                )
+            )
+        )
+
+    def read_training_run_log(
+        self,
+        *,
+        training_run_handle: str,
+        offset: int = 0,
+        max_bytes: int = 65536,
+    ) -> dict[str, Any]:
+        return self._wrap(
+            lambda: asdict(
+                self._context.executor.read_training_run_log(
+                    training_run_handle=training_run_handle,
+                    offset=offset,
+                    max_bytes=max_bytes,
+                )
+            )
+        )
+
     def _wrap(self, fn) -> dict[str, Any]:
         try:
             return {
@@ -280,6 +305,8 @@ class DemoTools:
             return [DemoTools._json_safe(item) for item in value]
         if isinstance(value, tuple):
             return [DemoTools._json_safe(item) for item in value]
+        if isinstance(value, Enum):
+            return value.value
         return value
 
     @staticmethod

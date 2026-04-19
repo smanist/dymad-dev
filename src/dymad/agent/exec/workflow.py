@@ -6,9 +6,13 @@ import copy
 import importlib
 import json
 import logging
+import os
 import random
+import subprocess
+import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
@@ -20,17 +24,22 @@ import yaml
 from dymad.agent.exec.state import (
     AnalysisRunResult,
     DatasetInspection,
+    DescribeTrainingRunResult,
     EvaluateModelResult,
     PredictionWorkflowPlan,
+    ReadTrainingRunLogResult,
     SpectralWorkflowPlan,
-    TrainModelResult,
+    StartModelTrainingResult,
+    StartTrainingRunResult,
 )
 from dymad.agent.exec.training_profiles import profile_config, resolve_profile_name
 from dymad.agent.facade.operations import FacadeOperations
-from dymad.agent.registry import SUPPORTED_EVALUATION_METRICS
+from dymad.agent.registry import SUPPORTED_EVALUATION_METRICS, resolve_model_capability
 from dymad.agent.store.object_store import (
     CompiledAnalysisRequestRecord,
     CompiledTrainingRequestRecord,
+    ObjectSummary,
+    TrainingRunStatus,
 )
 from dymad.utils.misc import _normalize_legacy_training_config
 from dymad.utils.plot import plot_trajectory
@@ -42,6 +51,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+_INFRASTRUCTURE_ERROR_TYPE = "InfrastructureError"
 
 
 def _resolve_model_ref(model_ref: str):
@@ -111,6 +121,45 @@ def _ensure_dir(path: str | Path) -> Path:
     resolved = Path(path).expanduser().resolve()
     resolved.mkdir(parents=True, exist_ok=True)
     return resolved
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _is_pid_running(pid: int | None) -> bool:
+    if pid is None or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _requested_model_variant_ref(
+    *,
+    model_ref: str,
+    capability,
+    dataset_kind: str,
+) -> str | None:
+    normalized = model_ref.strip().lower()
+    for variant in capability.variants:
+        if normalized not in {
+            variant.key.lower(),
+            variant.name.lower(),
+            variant.model_ref.lower(),
+        }:
+            continue
+        if variant.dataset_kind != dataset_kind:
+            raise ValueError(
+                f"model_ref '{model_ref}' expects graph={variant.dataset_kind == 'graph'} "
+                f"but dataset kind is '{dataset_kind}'"
+            )
+        return variant.model_ref
+    return None
 
 
 def _build_manager(dataset_record, *, default_device: str = "cpu"):
@@ -231,6 +280,26 @@ def _load_training_metrics(summary_path: Path) -> dict[str, float | None]:
         }
 
 
+def _default_training_artifacts() -> dict[str, str | None]:
+    return {
+        "checkpoint_path": None,
+        "training_summary_path": None,
+        "history_plot_path": None,
+        "prediction_plot_path": None,
+        "cv_results_path": None,
+        "cv_plot_path": None,
+    }
+
+
+@dataclass(frozen=True)
+class _ExecutedTrainingRun:
+    checkpoint_summary: ObjectSummary
+    artifacts: dict[str, str | None]
+    metrics: dict[str, float | None]
+    reference_profile: str
+    trainer_kind: str
+
+
 def _execute_training_run(
     *,
     facade: FacadeOperations,
@@ -244,7 +313,7 @@ def _execute_training_run(
     seed: int | None,
     device: str,
     max_workers: int,
-) -> TrainModelResult:
+) -> _ExecutedTrainingRun:
     model = _resolve_model_ref(model_ref)
     artifact_root_path = _ensure_dir(artifact_root)
     trainer_cls, trainer_kind = _select_trainer(effective_config)
@@ -280,18 +349,7 @@ def _execute_training_run(
         checkpoint_path=str(checkpoint_path),
         device=str(trainer.device),
     )
-    run_summary = facade.register_training_run(
-        model_ref=model_ref,
-        train_dataset_handle=train_dataset_handle,
-        valid_dataset_handle=valid_dataset_handle,
-        reference_profile=reference_profile,
-        checkpoint_handle=checkpoint_summary.handle,
-        artifact_root=str(artifact_root_path),
-        run_name=run_name,
-    )
-
-    return TrainModelResult(
-        run_summary=run_summary,
+    return _ExecutedTrainingRun(
         checkpoint_summary=checkpoint_summary,
         artifacts={
             "checkpoint_path": str(checkpoint_path),
@@ -375,19 +433,20 @@ class CompatibilityExecutor:
             artifact_root=artifact_root,
         )
 
-    def train_compiled_request(
+    def start_training_run(
         self,
         *,
         compiled_request_handle: str,
         artifact_root: str,
-    ) -> TrainModelResult:
+    ) -> StartTrainingRunResult:
         compiled_request = self.facade.get_compiled_training_request(compiled_request_handle)
-        return self._train_compiled_request_record(
+        return self._start_training_run_record(
+            compiled_request_handle=compiled_request_handle,
             compiled_request=compiled_request,
             artifact_root=artifact_root,
         )
 
-    def train_model(
+    def start_model_training(
         self,
         *,
         train_dataset_handle: str,
@@ -400,62 +459,202 @@ class CompatibilityExecutor:
         seed: int | None = None,
         device: str = "auto",
         max_workers: int = 1,
-    ) -> TrainModelResult:
-        model = _resolve_model_ref(model_ref)
+    ) -> StartModelTrainingResult:
         dataset_record = self.facade.get_dataset(train_dataset_handle)
         valid_record = (
             None if valid_dataset_handle is None else self.facade.get_dataset(valid_dataset_handle)
         )
-        if bool(getattr(model, "GRAPH", False)) != (dataset_record.kind == "graph"):
-            raise ValueError(
-                f"model_ref '{model_ref}' expects graph={bool(getattr(model, 'GRAPH', False))} "
-                f"but dataset kind is '{dataset_record.kind}'"
-            )
         if valid_record is not None and valid_record.kind != dataset_record.kind:
             raise ValueError("train and valid datasets must have the same kind")
 
-        active_run_name = _validate_run_name(run_name or _default_run_name(model_ref))
-        profile_name, effective_config = _effective_config(
+        capability = resolve_model_capability(model_ref)
+        requested_variant_model_ref = _requested_model_variant_ref(
             model_ref=model_ref,
-            dataset_record=dataset_record,
-            valid_dataset_record=valid_record,
-            reference_profile=reference_profile,
-            user_config=config,
-            run_name=active_run_name,
+            capability=capability,
+            dataset_kind=dataset_record.kind,
         )
-        del model
-        return _execute_training_run(
+        from dymad.agent.compiler import TrainingRequest, compile_training_request
+
+        compiled_request = compile_training_request(
             facade=self.facade,
-            model_ref=model_ref,
-            train_dataset_handle=train_dataset_handle,
-            valid_dataset_handle=valid_dataset_handle,
-            reference_profile=profile_name,
-            run_name=active_run_name,
-            effective_config=effective_config,
+            request=TrainingRequest(
+                train_dataset_handle=train_dataset_handle,
+                model_key=capability.key,
+                valid_dataset_handle=valid_dataset_handle,
+                reference_profile=reference_profile,
+                overrides=config,
+                run_name=run_name,
+                seed=seed,
+                device=device,
+                max_workers=max_workers,
+            ),
+        )
+        if requested_variant_model_ref is not None:
+            _, effective_config = _effective_config(
+                model_ref=requested_variant_model_ref,
+                dataset_record=dataset_record,
+                valid_dataset_record=valid_record,
+                reference_profile=compiled_request.request.reference_profile,
+                user_config=cast(dict[str, Any] | None, compiled_request.request.overrides),
+                run_name=compiled_request.effective_run_name,
+            )
+            _, trainer_kind = _select_trainer(effective_config)
+            compiled_request = replace(
+                compiled_request,
+                model_ref=requested_variant_model_ref,
+                effective_config=effective_config,
+                trainer_kind=trainer_kind,
+            )
+        compiled_request_summary = self.facade.register_compiled_training_request(
+            compiled_request=compiled_request
+        )
+        launch = self._start_training_run_record(
+            compiled_request_handle=compiled_request_summary.handle,
+            compiled_request=self.facade.get_compiled_training_request(
+                compiled_request_summary.handle
+            ),
             artifact_root=artifact_root,
-            seed=seed,
-            device=device,
-            max_workers=max_workers,
+        )
+        return StartModelTrainingResult(
+            summary=launch.summary,
+            training_run=launch.training_run,
+            compiled_request_summary=compiled_request_summary,
         )
 
-    def _train_compiled_request_record(
+    def describe_training_run(
         self,
         *,
+        training_run_handle: str,
+    ) -> DescribeTrainingRunResult:
+        run = self.facade.refresh_training_run(training_run_handle)
+        if (
+            run.status in {TrainingRunStatus.QUEUED, TrainingRunStatus.RUNNING}
+            and run.finished_at is None
+            and run.pid is not None
+            and not _is_pid_running(run.pid)
+        ):
+            message = (
+                "training worker exited before recording a running state"
+                if run.status is TrainingRunStatus.QUEUED
+                else "training worker exited without recording a terminal state"
+            )
+            run = self.facade.update_training_run(
+                training_run_handle,
+                status=TrainingRunStatus.FAILED,
+                finished_at=_utc_now(),
+                error_type=_INFRASTRUCTURE_ERROR_TYPE,
+                error_message=message,
+            )
+        return DescribeTrainingRunResult(
+            summary=self.facade.describe_object(training_run_handle),
+            training_run=run,
+        )
+
+    def read_training_run_log(
+        self,
+        *,
+        training_run_handle: str,
+        offset: int = 0,
+        max_bytes: int = 65536,
+    ) -> ReadTrainingRunLogResult:
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        run = self.describe_training_run(training_run_handle=training_run_handle).training_run
+        if run.log_path is None:
+            return ReadTrainingRunLogResult(text="", next_offset=offset, eof=True)
+        log_path = Path(run.log_path)
+        if not log_path.is_file():
+            return ReadTrainingRunLogResult(text="", next_offset=offset, eof=True)
+        size = log_path.stat().st_size
+        next_offset = min(offset, size)
+        with log_path.open("rb") as fh:
+            fh.seek(next_offset)
+            chunk = fh.read(max_bytes)
+        updated_offset = next_offset + len(chunk)
+        return ReadTrainingRunLogResult(
+            text=chunk.decode("utf-8", errors="replace"),
+            next_offset=updated_offset,
+            eof=updated_offset >= size,
+        )
+
+    def _start_training_run_record(
+        self,
+        *,
+        compiled_request_handle: str,
         compiled_request: CompiledTrainingRequestRecord,
         artifact_root: str,
-    ) -> TrainModelResult:
-        return _execute_training_run(
-            facade=self.facade,
+    ) -> StartTrainingRunResult:
+        artifact_root_path = _ensure_dir(artifact_root)
+        run_root = artifact_root_path / compiled_request.effective_run_name
+        run_root.mkdir(parents=True, exist_ok=True)
+        config_path = artifact_root_path / f"{compiled_request.effective_run_name}.yaml"
+        log_path = run_root / "training.log"
+        log_path.touch(exist_ok=True)
+
+        run_summary = self.facade.register_training_run(
+            compiled_request_handle=compiled_request_handle,
+            status=TrainingRunStatus.QUEUED,
+            created_at=_utc_now(),
             model_ref=compiled_request.model_ref,
             train_dataset_handle=compiled_request.train_dataset_handle,
             valid_dataset_handle=compiled_request.valid_dataset_handle,
             reference_profile=compiled_request.reference_profile,
+            checkpoint_handle=None,
+            artifact_root=str(artifact_root_path),
             run_name=compiled_request.effective_run_name,
-            effective_config=compiled_request.effective_config,
-            artifact_root=artifact_root,
-            seed=compiled_request.seed,
-            device=compiled_request.device,
-            max_workers=compiled_request.max_workers,
+            artifacts=_default_training_artifacts(),
+            metrics={},
+        )
+
+        context = self._active_context()
+        store_root = context.store.artifact_store_root
+        if store_root is None:
+            raise RuntimeError("artifact store root is unavailable for training worker launch")
+
+        try:
+            with log_path.open("ab") as log_stream:
+                env = os.environ.copy()
+                env["PYTHONUNBUFFERED"] = "1"
+                process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "dymad.agent.exec.training_worker",
+                        "--artifact-root",
+                        store_root,
+                        "--run-handle",
+                        run_summary.handle,
+                    ],
+                    cwd=str(Path.cwd()),
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log_stream,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+            run = self.facade.update_training_run(
+                run_summary.handle,
+                pid=process.pid,
+                log_path=str(log_path),
+                config_path=str(config_path),
+                run_root=str(run_root),
+            )
+        except Exception as exc:
+            run = self.facade.update_training_run(
+                run_summary.handle,
+                status=TrainingRunStatus.FAILED,
+                finished_at=_utc_now(),
+                log_path=str(log_path),
+                config_path=str(config_path),
+                run_root=str(run_root),
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+        return StartTrainingRunResult(
+            summary=self.facade.describe_object(run_summary.handle),
+            training_run=run,
         )
 
     def _run_compiled_analysis_request(

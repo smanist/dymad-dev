@@ -14,7 +14,9 @@ Required MCP tools:
 - `describe_training_capability`
 - `list_evaluation_capabilities`
 - `compile_training_request`
-- `train_compiled_request`
+- `start_training_run`
+- `describe_training_run`
+- `read_training_run_log`
 - `evaluate_checkpoint`
 
 Workflow:
@@ -25,11 +27,13 @@ Workflow:
 5. Call `describe_training_capability` for that `model_key` and dataset kind before translating any nontrivial training request.
 6. Translate the user's natural-language modeling request into a structured `compile_training_request.overrides` dict using `translation_guidance`, `constraint_notes`, `phase_entry_schemas`, `cv_schema`, and `examples` from `describe_training_capability`.
 7. Call `compile_training_request`.
-8. Call `train_compiled_request`.
-9. Call `list_evaluation_capabilities` for the evaluation dataset handle before selecting an evaluation metric.
-10. Use the advertised `supported_metrics` and `parameter_schema.metric.default` as the authoritative source of evaluation metric names.
-11. Call `evaluate_checkpoint` on the returned checkpoint handle and the registered test dataset.
-12. Report the checkpoint path, training summary path, CV artifact paths when present, evaluation metrics, and representative rollout plot path.
+8. Call `start_training_run`.
+9. Poll with `describe_training_run` until the run reaches `SUCCEEDED` or `FAILED`; use `read_training_run_log` when you need incremental worker logs.
+10. If the run fails, report the structured error metadata and relevant log excerpt instead of continuing.
+11. Call `list_evaluation_capabilities` for the evaluation dataset handle before selecting an evaluation metric.
+12. Use the advertised `supported_metrics` and `parameter_schema.metric.default` as the authoritative source of evaluation metric names.
+13. Call `evaluate_checkpoint` on the returned checkpoint handle and the registered test dataset once `describe_training_run` reports `SUCCEEDED`.
+14. Report the checkpoint path, training summary path, CV artifact paths when present, evaluation metrics, and representative rollout plot path.
 
 Rules:
 - Do not pass free text into MCP tools. Natural-language interpretation happens in the skill, not the tool layer.
