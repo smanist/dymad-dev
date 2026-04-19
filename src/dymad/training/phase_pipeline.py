@@ -36,6 +36,15 @@ class PhasePipeline:
         if not self.phase_specs:
             raise ValueError("Experiment config must define at least one phase.")
 
+    def build_phase(self, spec: PhaseSpec):
+        return build_phase(
+            spec,
+            config=self.config,
+            model_class=self.model_class,
+            dtype=self.dtype,
+            execution_services=self.execution_services,
+        )
+
     def run(
         self,
         *,
@@ -59,13 +68,7 @@ class PhasePipeline:
         for phase_index in range(active_state.phase_cursor, len(self.phase_specs)):
             spec = self.phase_specs[phase_index]
             logger.info("=== Starting phase '%s' (%s) ===", spec.name, spec.kind)
-            phase = build_phase(
-                spec,
-                config=self.config,
-                model_class=self.model_class,
-                dtype=self.dtype,
-                execution_services=self.execution_services,
-            )
+            phase = self.build_phase(spec)
             result = phase.execute(
                 trainer_state=active_state,
                 phase_context=active_context,

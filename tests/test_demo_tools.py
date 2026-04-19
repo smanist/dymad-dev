@@ -78,6 +78,14 @@ def test_demo_tools_expose_json_safe_registry_discovery(tmp_path) -> None:
         entry["key"] == "repeat"
         for entry in training_detail["data"]["detail"]["phase_entry_schemas"]
     )
+    data_schema = next(
+        entry
+        for entry in training_detail["data"]["detail"]["phase_entry_schemas"]
+        if entry["key"] == "data"
+    )
+    assert data_schema["example"]["operation"] == "smooth"
+    assert data_schema["example"]["method"] == "savgol"
+    assert any("operation='smooth'" in note for note in data_schema["notes"])
     json.dumps(models)
     json.dumps(profiles)
     json.dumps(training)
