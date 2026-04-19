@@ -1,6 +1,8 @@
 import copy
+import hashlib
 import logging
 import os
+import pickle
 from collections.abc import Callable
 from os import PathLike
 from typing import Any, cast
@@ -30,12 +32,13 @@ def _independent_rng(
     rng: int | np.random.Generator | None,
 ) -> np.random.Generator:
     if isinstance(rng, np.random.Generator):
-        state_repr = repr(rng.bit_generator.state)
-        seed = sum(ord(ch) for ch in state_repr) % (2**32)
-        return np.random.default_rng(seed)
+        state_bytes = pickle.dumps(rng.bit_generator.state, protocol=5)
+        digest = hashlib.blake2b(state_bytes, digest_size=16).digest()
+        entropy = np.frombuffer(digest, dtype=np.uint32)
+        return np.random.default_rng(np.random.SeedSequence(entropy))
     if rng is None:
         return np.random.default_rng()
-    return np.random.default_rng(int(rng) + 1)
+    return np.random.default_rng(np.random.SeedSequence([int(rng), 1]))
 
 
 logger = logging.getLogger(__name__)
@@ -624,11 +627,32 @@ class TrajectorySampler:
         if callable(noise_spec):
             return y_grid + np.asarray(noise_spec(y_grid, traj_idx))
 
-        if isinstance(noise_spec, Array):
+        if not isinstance(noise_spec, dict) and not isinstance(noise_spec, (str, bytes)):
             noise_arr = np.asarray(noise_spec)
-            if noise_arr.ndim == y_grid.ndim - 1:
-                return y_grid + noise_arr
-            return y_grid + noise_arr[traj_idx]
+            if noise_arr.ndim == y_grid.ndim + 1:
+                try:
+                    return y_grid + np.broadcast_to(noise_arr[traj_idx], y_grid.shape)
+                except (IndexError, ValueError) as exc:
+                    raise ValueError(
+                        f"Noise array shape {noise_arr.shape} is incompatible with "
+                        f"observation shape {y_grid.shape} for trajectory {traj_idx}."
+                    ) from exc
+            if noise_arr.ndim == y_grid.ndim and noise_arr.shape[1:] == y_grid.shape[1:]:
+                if noise_arr.shape != y_grid.shape:
+                    try:
+                        return y_grid + np.broadcast_to(noise_arr[traj_idx], y_grid.shape)
+                    except (IndexError, ValueError) as exc:
+                        raise ValueError(
+                            f"Noise array shape {noise_arr.shape} is incompatible with "
+                            f"observation shape {y_grid.shape} for trajectory {traj_idx}."
+                        ) from exc
+            try:
+                return y_grid + np.broadcast_to(noise_arr, y_grid.shape)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Noise array shape {noise_arr.shape} is incompatible with "
+                    f"observation shape {y_grid.shape}."
+                ) from exc
 
         if isinstance(noise_spec, dict):
             kind = noise_spec["kind"].lower()

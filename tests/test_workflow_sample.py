@@ -179,6 +179,70 @@ def test_noise_sampler_save_writes_noisy_observations(tmp_path):
         assert not np.allclose(payload["x"], xs)
 
 
+def test_observation_noise_array_list_preserves_single_trajectory_grid():
+    fixed_noise = np.stack(
+        (
+            np.linspace(0.0, 0.25, N),
+            np.linspace(-0.1, 0.15, N),
+        ),
+        axis=1,
+    ).tolist()
+    sampler = TrajectorySampler(
+        f,
+        g,
+        config=config_path,
+        config_mod={
+            "control": np.zeros((N, 1)),
+            "x0": np.array([0.5, -0.25]),
+            "noise": fixed_noise,
+        },
+    )
+
+    _, xs, _, ys = sampler.sample(t_grid, batch=1)
+
+    np.testing.assert_allclose(ys[0] - xs[0], np.asarray(fixed_noise))
+
+
+def test_observation_noise_uses_generator_state_without_collisions():
+    noise_cfg = {"kind": "gaussian", "params": {"mean": 0.0, "std": 0.1}}
+    config_mod = {
+        "control": np.zeros((N, 1)),
+        "x0": np.array([0.5, -0.25]),
+        "noise": noise_cfg,
+    }
+
+    sampler_a = TrajectorySampler(
+        f,
+        g,
+        config=config_path,
+        rng=np.random.default_rng(5),
+        config_mod=config_mod,
+    )
+    sampler_b = TrajectorySampler(
+        f,
+        g,
+        config=config_path,
+        rng=np.random.default_rng(5),
+        config_mod=config_mod,
+    )
+    sampler_c = TrajectorySampler(
+        f,
+        g,
+        config=config_path,
+        rng=np.random.default_rng(21),
+        config_mod=config_mod,
+    )
+
+    _, xs_a, _, ys_a = sampler_a.sample(t_grid, batch=2)
+    _, xs_b, _, ys_b = sampler_b.sample(t_grid, batch=2)
+    _, xs_c, _, ys_c = sampler_c.sample(t_grid, batch=2)
+
+    np.testing.assert_allclose(xs_a, xs_b)
+    np.testing.assert_allclose(xs_a, xs_c)
+    np.testing.assert_allclose(ys_a, ys_b)
+    assert not np.allclose(ys_a, ys_c)
+
+
 if __name__ == "__main__":
     for j in range(len(ctrls)):
         test_sampling(j, plot=True)
