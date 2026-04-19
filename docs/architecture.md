@@ -130,6 +130,8 @@ Compilation resolves:
 - default or explicit profile
 - allowed user overrides
 - optional single-split CV sweep settings under `overrides.cv`
+- phase overrides normalized against matching profile defaults so trainer-specific phase config is
+  preserved unless explicitly overridden
 - translation guidance and surfaced constraint notes for clients that map natural-language requests
   into structured overrides, including CV sweep requests
 - effective config

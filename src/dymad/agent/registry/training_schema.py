@@ -57,7 +57,8 @@ TRANSLATION_GUIDANCE: tuple[str, ...] = (
     "overrides.cv.metric to choose the optimization metric.",
     "Supported optimizer trainer names are Linear, Weak, and NODE.",
     "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
-    "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters.",
+    "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters; "
+    "matching trainer defaults from the selected profile are preserved unless overridden.",
     "Add phase names only when they improve readability or reflect user-provided "
     "labels such as initialization or refinement.",
 )

@@ -393,6 +393,74 @@ def test_compile_training_request_accepts_other_supported_legacy_trainer_sequenc
     assert [phase["trainer"] for phase in compiled.effective_config["phases"]] == expected_trainers
 
 
+def test_compile_training_request_preserves_profile_weak_phase_defaults_in_staged_schedule(
+    tmp_path,
+) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="lti",
+            overrides={
+                "phases": [
+                    {"trainer": "Linear", "name": "initialization"},
+                    {"trainer": "Weak", "name": "refinement"},
+                ]
+            },
+        ),
+    )
+
+    weak_phase = compiled.effective_config["phases"][1]
+
+    assert compiled.trainer_kind == "stacked"
+    assert weak_phase["trainer"] == "Weak"
+    assert weak_phase["name"] == "refinement"
+    assert weak_phase["n_epochs"] == 25
+    assert weak_phase["learning_rate"] == 5e-3
+    assert weak_phase["weak_form_params"] == {"N": 13, "dN": 2, "ordpol": 2, "ordint": 2}
+
+
+def test_compile_training_request_preserves_profile_weak_defaults_unless_overridden(
+    tmp_path,
+) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="lti",
+            overrides={
+                "phases": [
+                    {
+                        "type": "optimizer",
+                        "name": "refinement",
+                        "trainer": "Weak",
+                        "n_epochs": 12,
+                        "weak_form_params": {"N": 17},
+                    }
+                ]
+            },
+        ),
+    )
+
+    weak_phase = compiled.effective_config["phases"][0]
+
+    assert compiled.trainer_kind == "weak_form"
+    assert weak_phase["trainer"] == "Weak"
+    assert weak_phase["name"] == "refinement"
+    assert weak_phase["n_epochs"] == 12
+    assert weak_phase["weak_form_params"] == {"N": 17, "dN": 2, "ordpol": 2, "ordint": 2}
+
+
 def test_compile_training_request_rejects_zero_layer_identity_dimension_mismatch(tmp_path) -> None:
     context = build_default_context(artifact_root=tmp_path / "artifacts")
     dataset_path = tmp_path / "train.npz"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from typing import Any, Never, cast
 
@@ -177,6 +178,93 @@ def _validate_overrides(config: dict[str, Any] | None, *, prefix: tuple[str, ...
             _validate_overrides(value, prefix=path)
 
 
+def _optimizer_trainer_from_phase_entry(entry: object) -> str | None:
+    if not isinstance(entry, dict):
+        return None
+    trainer = entry.get("trainer")
+    if not isinstance(trainer, str):
+        return None
+    phase_type = entry.get("type")
+    if phase_type not in (None, "optimizer"):
+        return None
+    return trainer
+
+
+def _default_optimizer_phase_by_trainer(
+    profile_config: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    phases = profile_config.get("phases")
+    if not isinstance(phases, list):
+        return {}
+
+    defaults: dict[str, dict[str, Any]] = {}
+    for phase in phases:
+        trainer = _optimizer_trainer_from_phase_entry(phase)
+        if trainer is None or trainer in defaults:
+            continue
+        defaults[trainer] = copy.deepcopy(cast(dict[str, Any], phase))
+    return defaults
+
+
+def _normalize_phase_override_entry(
+    entry: object,
+    *,
+    default_optimizer_phase_by_trainer: dict[str, dict[str, Any]],
+) -> object:
+    if not isinstance(entry, dict):
+        return copy.deepcopy(entry)
+
+    if "repeat" in entry:
+        normalized_entry = copy.deepcopy(entry)
+        repeat_cfg = normalized_entry.get("repeat")
+        if not isinstance(repeat_cfg, dict):
+            return normalized_entry
+        nested_phases = repeat_cfg.get("phases")
+        if isinstance(nested_phases, list):
+            repeat_cfg["phases"] = [
+                _normalize_phase_override_entry(
+                    phase_entry,
+                    default_optimizer_phase_by_trainer=default_optimizer_phase_by_trainer,
+                )
+                for phase_entry in nested_phases
+            ]
+        return normalized_entry
+
+    trainer = _optimizer_trainer_from_phase_entry(entry)
+    if trainer is None:
+        return copy.deepcopy(entry)
+
+    default_phase = default_optimizer_phase_by_trainer.get(trainer)
+    if default_phase is None:
+        return copy.deepcopy(entry)
+
+    return cast(dict[str, Any], exec_workflow._deep_merge(default_phase, entry))
+
+
+def _normalize_overrides_against_profile(
+    overrides: dict[str, Any] | None,
+    *,
+    profile_config: dict[str, Any],
+) -> dict[str, Any] | None:
+    if overrides is None:
+        return None
+
+    normalized_overrides = copy.deepcopy(overrides)
+    phases = normalized_overrides.get("phases")
+    if not isinstance(phases, list):
+        return normalized_overrides
+
+    default_optimizer_phase_by_trainer = _default_optimizer_phase_by_trainer(profile_config)
+    normalized_overrides["phases"] = [
+        _normalize_phase_override_entry(
+            phase_entry,
+            default_optimizer_phase_by_trainer=default_optimizer_phase_by_trainer,
+        )
+        for phase_entry in phases
+    ]
+    return normalized_overrides
+
+
 def _dataset_kind_from_record(dataset_record) -> DatasetKind:
     return cast(DatasetKind, dataset_record.kind)
 
@@ -299,10 +387,29 @@ def compile_training_request(
                 field_path=("reference_profile",),
             )
 
+    model_ref = model.default_model_ref_by_dataset_kind[train_dataset_kind]
+    profile_name = exec_workflow.resolve_profile_name(
+        model_ref=model_ref,
+        dataset_kind=train_dataset_kind,
+        reference_profile=normalized_request.reference_profile,
+    )
+    profile = _resolve_profile_capability(profile_name)
+    overrides = _normalize_overrides_against_profile(overrides, profile_config=profile.config)
+    normalized_request = TrainingRequest(
+        train_dataset_handle=request.train_dataset_handle,
+        model_key=request.model_key,
+        valid_dataset_handle=request.valid_dataset_handle,
+        reference_profile=request.reference_profile,
+        overrides=overrides,
+        run_name=request.run_name,
+        seed=request.seed,
+        device=request.device,
+        max_workers=request.max_workers,
+    )
+
     _validate_overrides(overrides)
     exec_workflow._validate_user_config(overrides or {})
 
-    model_ref = model.default_model_ref_by_dataset_kind[train_dataset_kind]
     effective_run_name = exec_workflow._validate_run_name(
         normalized_request.run_name or exec_workflow._default_run_name(model_ref)
     )
@@ -319,7 +426,6 @@ def compile_training_request(
         config=effective_config,
     )
     _, trainer_kind = exec_workflow._select_trainer(effective_config)
-    profile = _resolve_profile_capability(profile_name)
 
     return CompiledTrainingRequest(
         request=normalized_request,
