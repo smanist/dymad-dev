@@ -1455,6 +1455,82 @@ class LinearSolvePhase(BasePhase):
 
 
 class ContextDataPhase(BasePhase):
+    @staticmethod
+    def _series_signal_array(series: TrainerBatch) -> np.ndarray:
+        if isinstance(series, RegularSeries):
+            return series.state.detach().cpu().numpy()
+        if isinstance(series, GraphSeries):
+            return series.node_state.detach().cpu().numpy()
+        raise TypeError(f"Unsupported dataset item type '{type(series)}' for smoothing.")
+
+    @staticmethod
+    def _format_metrics_for_log(metrics: dict[str, float]) -> str:
+        split_metrics: dict[str, dict[str, float]] = {"train": {}, "valid": {}}
+        other_metrics: dict[str, float] = {}
+        for key, value in metrics.items():
+            if key.startswith("train_"):
+                split_metrics["train"][key.removeprefix("train_")] = value
+            elif key.startswith("valid_"):
+                split_metrics["valid"][key.removeprefix("valid_")] = value
+            else:
+                other_metrics[key] = value
+
+        metric_order = [
+            "size",
+            "delta_rmse",
+            "delta_mae",
+            "delta_max_abs",
+            "delta_rel_rmse",
+            "roughness_before",
+            "roughness_after",
+            "roughness_delta",
+            "roughness_ratio",
+        ]
+        metric_names = [
+            name
+            for name in metric_order
+            if name in split_metrics["train"] or name in split_metrics["valid"]
+        ]
+        extra_metric_names = sorted(
+            (
+                set(split_metrics["train"])
+                | set(split_metrics["valid"])
+            )
+            - set(metric_names)
+        )
+        metric_names.extend(extra_metric_names)
+
+        lines: list[str] = []
+        if metric_names:
+            metric_width = max(len("metric"), *(len(name) for name in metric_names))
+            value_width = 14
+            header = (
+                f"{'metric':<{metric_width}}  "
+                f"{'train':>{value_width}}  "
+                f"{'valid':>{value_width}}"
+            )
+            separator = (
+                f"{'-' * metric_width}  "
+                f"{'-' * value_width}  "
+                f"{'-' * value_width}"
+            )
+            lines.extend([header, separator])
+            for name in metric_names:
+                train_value = split_metrics["train"].get(name)
+                valid_value = split_metrics["valid"].get(name)
+                train_text = "-" if train_value is None else f"{train_value:.4e}"
+                valid_text = "-" if valid_value is None else f"{valid_value:.4e}"
+                lines.append(
+                    f"{name:<{metric_width}}  {train_text:>{value_width}}  {valid_text:>{value_width}}"
+                )
+
+        if other_metrics:
+            if lines:
+                lines.append("")
+            lines.extend(f"{key}={value:.4e}" for key, value in sorted(other_metrics.items()))
+
+        return "\n".join(lines)
+
     def _resolve_smoothing_method(self) -> str:
         spec = cast(DataPhaseSpec, self.spec)
         method = str(spec.config.get("method", "savgol")).lower()
@@ -1546,6 +1622,7 @@ class ContextDataPhase(BasePhase):
         *,
         method: str,
         savgol_cfg: dict[str, Any],
+        metrics: dict[str, float],
         split: str,
         dataset: Sequence[TrainerBatch],
     ) -> dict[str, Any]:
@@ -1561,19 +1638,82 @@ class ContextDataPhase(BasePhase):
                 "window_length": savgol_cfg["window_length"],
                 "polyorder": savgol_cfg["polyorder"],
                 "deriv": savgol_cfg["deriv"],
+                "metrics": copy.deepcopy(metrics),
             }
         )
         updated["data_phase_history"] = history
         return updated
 
+    def _compute_smoothing_metrics(
+        self,
+        *,
+        original: Sequence[TrainerBatch],
+        smoothed: Sequence[TrainerBatch],
+        split: str,
+    ) -> dict[str, float]:
+        if len(original) != len(smoothed):
+            raise ValueError(
+                f"Smoothing metrics require matching dataset lengths for split '{split}'."
+            )
+
+        sum_sq_delta = 0.0
+        sum_abs_delta = 0.0
+        max_abs_delta = 0.0
+        sum_sq_signal = 0.0
+        n_elements = 0
+        sum_sq_diff_before = 0.0
+        sum_sq_diff_after = 0.0
+        n_diff_elements = 0
+
+        for before_series, after_series in zip(original, smoothed, strict=False):
+            before = self._series_signal_array(before_series)
+            after = self._series_signal_array(after_series)
+            delta = after - before
+
+            sum_sq_delta += float(np.square(delta).sum())
+            sum_abs_delta += float(np.abs(delta).sum())
+            max_abs_delta = max(max_abs_delta, float(np.abs(delta).max(initial=0.0)))
+            sum_sq_signal += float(np.square(before).sum())
+            n_elements += int(delta.size)
+
+            if before.shape[0] > 1:
+                diff_before = np.diff(before, axis=0)
+                diff_after = np.diff(after, axis=0)
+                sum_sq_diff_before += float(np.square(diff_before).sum())
+                sum_sq_diff_after += float(np.square(diff_after).sum())
+                n_diff_elements += int(diff_before.size)
+
+        delta_rmse = float(np.sqrt(sum_sq_delta / n_elements)) if n_elements > 0 else 0.0
+        signal_rms = float(np.sqrt(sum_sq_signal / n_elements)) if n_elements > 0 else 0.0
+        roughness_before = sum_sq_diff_before / n_diff_elements if n_diff_elements > 0 else 0.0
+        roughness_after = sum_sq_diff_after / n_diff_elements if n_diff_elements > 0 else 0.0
+        if roughness_before > 0.0:
+            roughness_ratio = roughness_after / roughness_before
+        elif roughness_after == 0.0:
+            roughness_ratio = 1.0
+        else:
+            roughness_ratio = float("inf")
+
+        return {
+            f"{split}_delta_rmse": delta_rmse,
+            f"{split}_delta_mae": sum_abs_delta / n_elements if n_elements > 0 else 0.0,
+            f"{split}_delta_max_abs": max_abs_delta,
+            f"{split}_delta_rel_rmse": (delta_rmse / signal_rms) if signal_rms > 0.0 else 0.0,
+            f"{split}_roughness_before": roughness_before,
+            f"{split}_roughness_after": roughness_after,
+            f"{split}_roughness_delta": roughness_after - roughness_before,
+            f"{split}_roughness_ratio": roughness_ratio,
+        }
+
     def _apply_smoothing(
         self,
         *,
         phase_context: PhaseContext,
-    ) -> PhaseContext:
+    ) -> tuple[PhaseContext, dict[str, float]]:
         method = self._resolve_smoothing_method()
         splits = self._resolve_smoothing_splits()
         savgol_cfg = self._resolve_savgol_config()
+        metrics: dict[str, float] = {}
 
         train_set = phase_context.train_set
         train_md = phase_context.train_md
@@ -1585,11 +1725,18 @@ class ContextDataPhase(BasePhase):
             smoothed_train = [
                 self._smooth_series(series, savgol_cfg=savgol_cfg) for series in train_set
             ]
+            train_metrics = self._compute_smoothing_metrics(
+                original=train_set,
+                smoothed=cast(list[TrainerBatch], smoothed_train),
+                split="train",
+            )
+            metrics.update(train_metrics)
             train_set = cast(list[TrainerBatch], smoothed_train)
             train_md = self._append_phase_history(
                 phase_context.train_md,
                 method=method,
                 savgol_cfg=savgol_cfg,
+                metrics=train_metrics,
                 split="train",
                 dataset=train_set,
             )
@@ -1604,30 +1751,40 @@ class ContextDataPhase(BasePhase):
             smoothed_valid = [
                 self._smooth_series(series, savgol_cfg=savgol_cfg) for series in valid_set
             ]
+            valid_metrics = self._compute_smoothing_metrics(
+                original=valid_set,
+                smoothed=cast(list[TrainerBatch], smoothed_valid),
+                split="valid",
+            )
+            metrics.update(valid_metrics)
             valid_set = cast(list[TrainerBatch], smoothed_valid)
             valid_md = self._append_phase_history(
                 phase_context.valid_md,
                 method=method,
                 savgol_cfg=savgol_cfg,
+                metrics=valid_metrics,
                 split="valid",
                 dataset=valid_set,
             )
 
-        return PhaseContext(
-            train_set=train_set,
-            valid_set=valid_set,
-            train_loader=(
-                _build_dataset_loader(train_set, config=self.config)
-                if "train" in splits
-                else phase_context.train_loader
+        return (
+            PhaseContext(
+                train_set=train_set,
+                valid_set=valid_set,
+                train_loader=(
+                    _build_dataset_loader(train_set, config=self.config)
+                    if "train" in splits
+                    else phase_context.train_loader
+                ),
+                valid_loader=(
+                    _build_dataset_loader(valid_set, config=self.config)
+                    if "valid" in splits
+                    else phase_context.valid_loader
+                ),
+                train_md=train_md,
+                valid_md=valid_md,
             ),
-            valid_loader=(
-                _build_dataset_loader(valid_set, config=self.config)
-                if "valid" in splits
-                else phase_context.valid_loader
-            ),
-            train_md=train_md,
-            valid_md=valid_md,
+            metrics,
         )
 
     def _apply_operation(
@@ -1643,11 +1800,13 @@ class ContextDataPhase(BasePhase):
             }
             return phase_context, metrics
         if spec.operation == "smooth":
-            updated_context = self._apply_smoothing(phase_context=phase_context)
-            metrics = {
-                "train_size": float(_dataset_len(updated_context.train_set)),
-                "valid_size": float(_dataset_len(updated_context.valid_set)),
-            }
+            updated_context, metrics = self._apply_smoothing(phase_context=phase_context)
+            metrics.update(
+                {
+                    "train_size": float(_dataset_len(updated_context.train_set)),
+                    "valid_size": float(_dataset_len(updated_context.valid_set)),
+                }
+            )
             return updated_context, metrics
         raise PhaseSpecValidationError(f"Unsupported data phase operation '{spec.operation}'.")
 
@@ -1673,6 +1832,11 @@ class ContextDataPhase(BasePhase):
     ) -> PhaseResult:
         del run_name
         updated_context, metrics = self._apply_operation(phase_context=phase_context)
+        logger.info(
+            "Data phase '%s' completed:\n%s",
+            self.spec.name,
+            self._format_metrics_for_log(metrics),
+        )
         record = self._build_phase_record(
             trainer_state, metrics, artifacts, started_epoch=trainer_state.epoch
         )
@@ -1864,6 +2028,10 @@ class SummaryExportPhase(BasePhase):
             "final_train_loss": local_hist["train_total"][-1],
             "final_valid_loss": local_hist["valid_total"][-1],
             "best_valid_loss": copy.deepcopy(trainer_state.best_loss),
+            "phase_records": copy.deepcopy(trainer_state.phase_records),
+            "phase_metrics": {
+                record.name: copy.deepcopy(record.metrics) for record in trainer_state.phase_records
+            },
             "convergence_epoch": trainer_state.convergence_epoch,
             "hist": copy.deepcopy(history.hist),
             "crit_name": None if evaluation is None else evaluation.criterion_name,

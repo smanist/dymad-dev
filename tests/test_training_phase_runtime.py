@@ -18,6 +18,7 @@ from dymad.training.phase_runtime import (
     PhaseResult,
     TrainerState,
     TrainingCheckpointError,
+    TrainingHistoryArtifact,
 )
 from dymad.training.phases import (
     AnalysisPhaseSpec,
@@ -352,8 +353,71 @@ def test_smoothing_data_phase_rewrites_regular_context_and_loader():
         result.phase_context.train_set[0].state.detach().cpu().numpy(),
         savgol_filter(train_series.state.detach().cpu().numpy(), 5, 2, axis=0),
     )
+    train_delta = (
+        result.phase_context.train_set[0].state.detach().cpu().numpy()
+        - train_series.state.detach().cpu().numpy()
+    )
+    assert result.metrics["train_delta_rmse"] == pytest.approx(
+        float(np.sqrt(np.mean(np.square(train_delta))))
+    )
+    assert "train_num_trajectories" not in result.metrics
+    assert "train_num_elements" not in result.metrics
+    assert "train_num_diff_elements" not in result.metrics
+    assert result.metrics["train_delta_mae"] == pytest.approx(float(np.mean(np.abs(train_delta))))
+    assert result.metrics["train_roughness_ratio"] == pytest.approx(
+        result.metrics["train_roughness_after"] / result.metrics["train_roughness_before"]
+    )
+    assert result.record is not None
+    assert result.record.metrics["train_delta_rmse"] == pytest.approx(result.metrics["train_delta_rmse"])
     assert result.phase_context.train_md["data_phase_history"][-1]["method"] == "savgol"
+    assert result.phase_context.train_md["data_phase_history"][-1]["metrics"][
+        "train_delta_rmse"
+    ] == pytest.approx(result.metrics["train_delta_rmse"])
     assert result.phase_context.valid_md["data_phase_history"][-1]["split"] == "valid"
+
+
+def test_smoothing_data_phase_logs_train_valid_table(caplog):
+    train_series = _build_regular_series()
+    valid_series = _build_regular_series(offset=0.2)
+    context = PhaseContext(
+        train_set=[train_series],
+        valid_set=[valid_series],
+        train_loader=object(),
+        valid_loader=object(),
+        train_md={"dt_and_n_steps": [(0.1, 9)]},
+        valid_md={"dt_and_n_steps": [(0.1, 9)]},
+    )
+    config = {
+        "model": {"name": "demo"},
+        "dataloader": {"batch_size": 1, "shuffle": False},
+        "phases": [],
+    }
+    phase = _build_data_phase(
+        config,
+        DataPhaseSpec(
+            name="smooth",
+            operation="smooth",
+            config={"method": "savgol", "window_length": 5, "polyorder": 2},
+        ),
+    )
+
+    with caplog.at_level(logging.INFO):
+        phase.execute(
+            trainer_state=TrainerState(config=config, device=torch.device("cpu")),
+            phase_context=context,
+            artifacts=ArtifactRegistry(),
+            run_name="demo",
+            logger=logging.getLogger("test.smooth.table"),
+        )
+
+    assert "Data phase 'smooth' completed:" in caplog.text
+    assert "metric" in caplog.text
+    assert "train" in caplog.text
+    assert "valid" in caplog.text
+    assert "delta_rmse" in caplog.text
+    assert "roughness_ratio" in caplog.text
+    assert "num_trajectories" not in caplog.text
+    assert "num_elements" not in caplog.text
 
 
 def test_smoothing_data_phase_supports_train_only_split():
@@ -393,6 +457,8 @@ def test_smoothing_data_phase_supports_train_only_split():
     assert result.phase_context.valid_loader is original_context.valid_loader
     assert "data_phase_history" not in result.phase_context.valid_md
     assert result.phase_context.train_set is not original_context.train_set
+    assert "valid_delta_rmse" not in result.metrics
+    assert "train_delta_rmse" in result.metrics
 
 
 def test_smoothing_data_phase_supports_graph_node_state_only():
@@ -724,3 +790,71 @@ def test_trainer_run_replays_completed_data_phases_on_resume(monkeypatch, tmp_pa
     )
     assert replayed_context.train_md["data_phase_history"][-1]["phase"] == "smooth"
     assert captured["initial_state"] is resumed_state
+
+
+def test_summary_export_persists_phase_metrics(tmp_path):
+    config = {
+        "model": {"name": "demo"},
+        "plotting": {"prediction": False},
+        "path": {"checkpoint_prefix": str(tmp_path), "results_prefix": str(tmp_path)},
+        "phases": [],
+    }
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        ExportPhaseSpec(name="export_summary", export_kind="summary"),
+        config=config,
+        model_class=torch.nn.Linear,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    trainer_state = TrainerState(
+        config=config,
+        device=torch.device("cpu"),
+        best_loss={"valid_total": 0.3},
+        phase_records=[
+            PhaseRecord(
+                name="smooth",
+                kind="data",
+                started_epoch=0,
+                completed_epoch=0,
+                metrics={"train_delta_rmse": 0.1, "train_roughness_ratio": 0.8},
+            )
+        ],
+    )
+    artifacts = ArtifactRegistry()
+    artifacts.put(
+        "model",
+        ModelArtifact(
+            model=torch.nn.Linear(2, 2),
+            config=config,
+            train_md={},
+            valid_md={},
+            dtype=torch.float32,
+        ),
+    )
+    artifacts.put(
+        "history",
+        TrainingHistoryArtifact(
+            hist=[{"train_total": [0.2], "valid_total": [0.3]}],
+            epoch_times=[1.0],
+            best_loss={"valid_total": 0.3},
+        ),
+    )
+
+    result = phase.execute(
+        trainer_state=trainer_state,
+        phase_context=PhaseContext(),
+        artifacts=artifacts,
+        run_name="demo",
+        logger=logging.getLogger("test.export.summary"),
+    )
+
+    assert result.metrics["exports_written"] >= 1.0
+    with np.load(tmp_path / "demo_summary.npz", allow_pickle=True) as npz:
+        phase_metrics = npz["phase_metrics"].item()
+        phase_records = npz["phase_records"].tolist()
+
+    assert phase_metrics["smooth"]["train_delta_rmse"] == pytest.approx(0.1)
+    assert phase_metrics["smooth"]["train_roughness_ratio"] == pytest.approx(0.8)
+    assert len(phase_records) == 1
+    assert phase_records[0].name == "smooth"
