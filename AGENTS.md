@@ -14,6 +14,22 @@ Repo fast map:
   paths.
 - `tests/*`: workflow and boundary truth. Prefer targeted tests that match the layer you changed.
 
+Test naming rule:
+
+- New pytest files in `tests/` must use one of exactly five prefixes:
+  `test_assert_`, `test_workflow_`, `test_slow_`, `test_contract_`, or `test_agent_`.
+- Put numerics-heavy deterministic exact checks in `test_assert_*`.
+- Put execution-path coverage that mainly checks a workflow runs without error in
+  `test_workflow_*`.
+- Put slow deterministic baseline/regression coverage, usually CLI or end-to-end, in
+  `test_slow_*`.
+- Put deterministic contract/interface coverage for runtimes, adapters, boundaries, persistence,
+  typed batches, and public surfaces in `test_contract_*`.
+- Put deterministic integration coverage for agent-facing surfaces such as registries, compilers,
+  executors, MCP tools, demo tools, and skill staging in `test_agent_*`.
+- Pytest collection enforces these prefixes in `tests/conftest.py`; do not introduce new
+  `test_*.py` files outside these categories.
+
 Placement rules:
 
 - New MCP tool exposure belongs in `src/dymad/agent/mcp/*`; keep `server.py` focused on tool

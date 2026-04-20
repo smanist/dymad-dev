@@ -3,6 +3,9 @@ Organization of the test cases:
 - YAML files: Contains the definitions of data and model.
 - `*_baselines.json`: Reference metrics for slow deterministic regression tests.
 - `conftest.py`: The pytest fixtures that serve as inputs to test cases and make clean-ups when necessary.
+- New pytest case files must use one of exactly five prefixes:
+  `test_assert_`, `test_workflow_`, `test_slow_`, `test_contract_`, or `test_agent_`.
+  Pytest collection rejects any `test_*.py` file outside these categories.
 - `test_assert_*`: Exact tests that compare test outputs with reference outputs to numerical accuracy.
   - `di`: The DataInterface class
   - `dm`: Diffusion map

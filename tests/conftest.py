@@ -8,6 +8,13 @@ import pytest
 from dymad.utils import TrajectorySampler, adj_to_edge
 
 HERE = Path(__file__).parent
+ALLOWED_TEST_FILE_PREFIXES = (
+    "test_assert_",
+    "test_workflow_",
+    "test_slow_",
+    "test_contract_",
+    "test_agent_",
+)
 LTI_DATA_SEED = 12345
 LTI_TEST_SEED = 12346
 KP_DATA_SEED = 12347
@@ -27,6 +34,24 @@ def pytest_addoption(parser):
         default=False,
         help="Record baseline metrics for slow regression tests instead of comparing against them.",
     )
+
+
+def pytest_collection_modifyitems(config, items):
+    del config
+    invalid = sorted(
+        {
+            Path(item.fspath).name
+            for item in items
+            if not Path(item.fspath).name.startswith(ALLOWED_TEST_FILE_PREFIXES)
+        }
+    )
+    if invalid:
+        allowed = ", ".join(ALLOWED_TEST_FILE_PREFIXES)
+        invalid_list = ", ".join(invalid)
+        raise pytest.UsageError(
+            "Test file names must use one of the approved prefixes "
+            f"({allowed}). Offending files: {invalid_list}"
+        )
 
 
 A = np.array([[0.0, 1.0], [-1.0, -0.1]])
