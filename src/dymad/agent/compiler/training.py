@@ -22,6 +22,14 @@ from dymad.agent.registry.training_schema import (
     ALLOWED_DATA_OVERRIDE_KEYS,
     ALLOWED_TOP_LEVEL_OVERRIDE_KEYS,
     CV_ALLOWED_KEYS,
+    CV_DEFAULT_SEARCH_MODE,
+    CV_DEFAULT_SELECTION_GOAL,
+    CV_DEFAULT_SELECTION_TIE_BREAKERS,
+    CV_SEARCH_ALLOWED_KEYS,
+    CV_SEARCH_MODE_OPTIONS,
+    CV_SELECTION_ALLOWED_KEYS,
+    CV_SELECTION_GOAL_OPTIONS,
+    CV_SELECTION_TIE_BREAKER_OPTIONS,
     RUNTIME_OWNED_MODEL_KEYS,
     RUNTIME_OWNED_OVERRIDE_PATHS,
 )
@@ -120,6 +128,138 @@ def _normalize_param_grid_value(
     )
 
 
+def _validate_cv_search_config(search_config: object) -> None:
+    if not isinstance(search_config, dict):
+        _raise_invalid(
+            "overrides.cv.search must be a mapping",
+            field_path=("overrides", "cv", "search"),
+        )
+    search_mapping = cast(dict[str, Any], search_config)
+
+    unknown_keys = sorted(key for key in search_mapping if key not in CV_SEARCH_ALLOWED_KEYS)
+    if unknown_keys:
+        invalid_key = unknown_keys[0]
+        _raise_invalid(
+            f"overrides.cv.search.{invalid_key} is not supported by the user-mode compiler",
+            field_path=("overrides", "cv", "search", invalid_key),
+        )
+
+    mode = search_mapping.get("mode")
+    if mode is None:
+        search_mapping["mode"] = CV_DEFAULT_SEARCH_MODE
+    elif not isinstance(mode, str) or mode not in CV_SEARCH_MODE_OPTIONS:
+        _raise_invalid(
+            f"overrides.cv.search.mode must be one of {CV_SEARCH_MODE_OPTIONS}",
+            field_path=("overrides", "cv", "search", "mode"),
+        )
+
+    max_iterations = search_mapping.get("max_iterations")
+    if max_iterations is not None:
+        if not isinstance(max_iterations, int) or max_iterations <= 0:
+            _raise_invalid(
+                "overrides.cv.search.max_iterations must be a positive integer",
+                field_path=("overrides", "cv", "search", "max_iterations"),
+            )
+
+    reflection = search_mapping.get("reflection")
+    if reflection is not None:
+        if not isinstance(reflection, (int, float)) or float(reflection) <= 0.0:
+            _raise_invalid(
+                "overrides.cv.search.reflection must be a positive number",
+                field_path=("overrides", "cv", "search", "reflection"),
+            )
+        search_mapping["reflection"] = float(reflection)
+
+    expansion = search_mapping.get("expansion")
+    if expansion is not None:
+        if not isinstance(expansion, (int, float)) or float(expansion) <= 1.0:
+            _raise_invalid(
+                "overrides.cv.search.expansion must be greater than 1",
+                field_path=("overrides", "cv", "search", "expansion"),
+            )
+        search_mapping["expansion"] = float(expansion)
+
+    contraction = search_mapping.get("contraction")
+    if contraction is not None:
+        contraction_float = float(contraction) if isinstance(contraction, (int, float)) else None
+        if contraction_float is None or not (0.0 < contraction_float < 1.0):
+            _raise_invalid(
+                "overrides.cv.search.contraction must be in (0, 1)",
+                field_path=("overrides", "cv", "search", "contraction"),
+            )
+        search_mapping["contraction"] = contraction_float
+
+    shrink = search_mapping.get("shrink")
+    if shrink is not None:
+        shrink_float = float(shrink) if isinstance(shrink, (int, float)) else None
+        if shrink_float is None or not (0.0 < shrink_float < 1.0):
+            _raise_invalid(
+                "overrides.cv.search.shrink must be in (0, 1)",
+                field_path=("overrides", "cv", "search", "shrink"),
+            )
+        search_mapping["shrink"] = shrink_float
+
+
+def _validate_cv_selection_config(selection_config: object) -> None:
+    if not isinstance(selection_config, dict):
+        _raise_invalid(
+            "overrides.cv.selection must be a mapping",
+            field_path=("overrides", "cv", "selection"),
+        )
+    selection_mapping = cast(dict[str, Any], selection_config)
+
+    unknown_keys = sorted(key for key in selection_mapping if key not in CV_SELECTION_ALLOWED_KEYS)
+    if unknown_keys:
+        invalid_key = unknown_keys[0]
+        _raise_invalid(
+            f"overrides.cv.selection.{invalid_key} is not supported by the user-mode compiler",
+            field_path=("overrides", "cv", "selection", invalid_key),
+        )
+
+    goal = selection_mapping.get("goal")
+    if goal is None:
+        selection_mapping["goal"] = CV_DEFAULT_SELECTION_GOAL
+    elif not isinstance(goal, str) or goal not in CV_SELECTION_GOAL_OPTIONS:
+        _raise_invalid(
+            f"overrides.cv.selection.goal must be one of {CV_SELECTION_GOAL_OPTIONS}",
+            field_path=("overrides", "cv", "selection", "goal"),
+        )
+
+    tie_breakers = selection_mapping.get("tie_breakers")
+    if tie_breakers is None:
+        selection_mapping["tie_breakers"] = list(CV_DEFAULT_SELECTION_TIE_BREAKERS)
+        return
+
+    if not isinstance(tie_breakers, (list, tuple)) or len(tie_breakers) == 0:
+        _raise_invalid(
+            "overrides.cv.selection.tie_breakers must be a non-empty list of strings",
+            field_path=("overrides", "cv", "selection", "tie_breakers"),
+        )
+
+    normalized_tie_breakers: list[str] = []
+    seen: set[str] = set()
+    for index, tie_breaker in enumerate(tie_breakers):
+        if not isinstance(tie_breaker, str):
+            _raise_invalid(
+                "overrides.cv.selection.tie_breakers must contain only strings",
+                field_path=("overrides", "cv", "selection", "tie_breakers", str(index)),
+            )
+        if tie_breaker not in CV_SELECTION_TIE_BREAKER_OPTIONS:
+            _raise_invalid(
+                f"overrides.cv.selection.tie_breakers[{index}] must be one of "
+                f"{CV_SELECTION_TIE_BREAKER_OPTIONS}",
+                field_path=("overrides", "cv", "selection", "tie_breakers", str(index)),
+            )
+        if tie_breaker in seen:
+            _raise_invalid(
+                "overrides.cv.selection.tie_breakers must not contain duplicates",
+                field_path=("overrides", "cv", "selection", "tie_breakers", str(index)),
+            )
+        normalized_tie_breakers.append(tie_breaker)
+        seen.add(tie_breaker)
+    selection_mapping["tie_breakers"] = normalized_tie_breakers
+
+
 def _validate_cv_config(cv_config: object) -> None:
     if not isinstance(cv_config, dict):
         _raise_invalid(
@@ -158,6 +298,14 @@ def _validate_cv_config(cv_config: object) -> None:
             "overrides.cv.metric must be a string",
             field_path=("overrides", "cv", "metric"),
         )
+
+    search = cv_mapping.get("search")
+    if search is not None:
+        _validate_cv_search_config(search)
+
+    selection = cv_mapping.get("selection")
+    if selection is not None:
+        _validate_cv_selection_config(selection)
 
 
 def _validate_overrides(config: dict[str, Any] | None, *, prefix: tuple[str, ...] = ()) -> None:

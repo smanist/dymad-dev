@@ -9,6 +9,7 @@ import dymad.training.phases as phases_module
 from dymad.core import GraphSeries, RegularSeries, RegularTrainerBatch
 from dymad.training import driver
 from dymad.training.execution_services import ExecutionServices
+from dymad.training.helper import CVResult, select_best_cv_result
 from dymad.training.phase_runtime import (
     ArtifactRegistry,
     ModelArtifact,
@@ -368,7 +369,9 @@ def test_smoothing_data_phase_rewrites_regular_context_and_loader():
         result.metrics["train_roughness_after"] / result.metrics["train_roughness_before"]
     )
     assert result.record is not None
-    assert result.record.metrics["train_delta_rmse"] == pytest.approx(result.metrics["train_delta_rmse"])
+    assert result.record.metrics["train_delta_rmse"] == pytest.approx(
+        result.metrics["train_delta_rmse"]
+    )
     assert result.phase_context.train_md["data_phase_history"][-1]["method"] == "savgol"
     assert result.phase_context.train_md["data_phase_history"][-1]["metrics"][
         "train_delta_rmse"
@@ -679,6 +682,44 @@ def test_run_cv_single_uses_trainer_run_with_typed_context(monkeypatch):
     assert calls["results_prefix"] == "/tmp/rp"
     assert calls["execution_services"] is not None
     assert result["metric_value"] == expected_metric
+
+
+def test_select_best_cv_result_uses_goal_and_tie_breakers() -> None:
+    cv_results = [
+        CVResult(params={"model.koopman_dimension": 6}, fold_metrics=[1.0, 1.0]),
+        CVResult(params={"model.koopman_dimension": 4}, fold_metrics=[1.0, 1.2]),
+        CVResult(params={"model.koopman_dimension": 8}, fold_metrics=[1.1, 1.1]),
+    ]
+
+    best_idx = select_best_cv_result(
+        cv_results,
+        goal="minimize",
+        tie_breakers=("std_metric", "param_l1", "combo_index"),
+    )
+
+    assert best_idx == 0
+
+
+def test_select_best_cv_result_supports_maximize_goal() -> None:
+    cv_results = [
+        CVResult(params={"model.koopman_dimension": 6}, fold_metrics=[1.0, 1.0]),
+        CVResult(params={"model.koopman_dimension": 4}, fold_metrics=[2.0, 2.0]),
+    ]
+
+    best_idx = select_best_cv_result(
+        cv_results,
+        goal="maximize",
+        tie_breakers=("std_metric", "combo_index"),
+    )
+
+    assert best_idx == 1
+
+
+def test_select_best_cv_result_rejects_unsupported_tie_breaker() -> None:
+    cv_results = [CVResult(params={"model.koopman_dimension": 4}, fold_metrics=[1.0])]
+
+    with pytest.raises(ValueError, match="unsupported tie breaker"):
+        select_best_cv_result(cv_results, tie_breakers=("unknown_rule",))
 
 
 def test_trainer_run_rejects_legacy_resume_checkpoints(tmp_path):

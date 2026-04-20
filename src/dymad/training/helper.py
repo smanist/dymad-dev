@@ -46,6 +46,62 @@ def aggregate_cv_results(results: list[dict[str, Any]]):
     return cv_results
 
 
+def _param_l1_score(params: dict[str, Any]) -> float:
+    score = 0.0
+    for key in sorted(params):
+        value = params[key]
+        if isinstance(value, bool):
+            score += float(value)
+            continue
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            score += abs(float(value))
+    return score
+
+
+def select_best_cv_result(
+    cv_results: list[CVResult],
+    *,
+    goal: str = "minimize",
+    tie_breakers: tuple[str, ...] | list[str] = ("std_metric", "combo_index"),
+) -> int:
+    """
+    Return the selected best CV-result index using explicit selection rules.
+
+    Supported goals:
+      - minimize: lower mean metric is better
+      - maximize: higher mean metric is better
+
+    Supported tie breakers (applied in order):
+      - std_metric: lower std is better
+      - param_l1: lower numeric L1 score of tuned params is better
+      - combo_index: lower candidate index is better
+    """
+    if not cv_results:
+        raise ValueError("cv_results must be non-empty")
+    if goal not in {"minimize", "maximize"}:
+        raise ValueError("goal must be either 'minimize' or 'maximize'")
+
+    allowed_tie_breakers = {"std_metric", "param_l1", "combo_index"}
+    normalized_tie_breakers = tuple(tie_breakers)
+    unknown_tie_breakers = sorted(set(normalized_tie_breakers) - allowed_tie_breakers)
+    if unknown_tie_breakers:
+        raise ValueError(f"unsupported tie breaker(s): {unknown_tie_breakers}")
+
+    def _selection_key(index: int, result: CVResult) -> tuple[float, ...]:
+        primary = result.mean_metric if goal == "minimize" else -result.mean_metric
+        key_parts: list[float] = [primary]
+        for tie_breaker in normalized_tie_breakers:
+            if tie_breaker == "std_metric":
+                key_parts.append(result.std_metric)
+            elif tie_breaker == "param_l1":
+                key_parts.append(_param_l1_score(result.params))
+            elif tie_breaker == "combo_index":
+                key_parts.append(float(index))
+        return tuple(key_parts)
+
+    return min(range(len(cv_results)), key=lambda idx: _selection_key(idx, cv_results[idx]))
+
+
 def iter_param_grid(param_grid: dict[str, Iterable[Any]]):
     """
     param_grid: dict mapping dotted keys to iterables.

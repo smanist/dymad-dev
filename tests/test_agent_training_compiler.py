@@ -130,6 +130,58 @@ def test_compile_training_request_accepts_json_string_cv_overrides(tmp_path) -> 
     assert compiled.request.overrides == {"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}}}
 
 
+def test_compile_training_request_accepts_nelder_mead_like_cv_metadata(tmp_path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={
+                "cv": {
+                    "param_grid": {"model.koopman_dimension": [4, 6, 8]},
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "max_iterations": 8,
+                        "reflection": 1.0,
+                        "expansion": 2.0,
+                        "contraction": 0.5,
+                        "shrink": 0.5,
+                    },
+                    "selection": {
+                        "goal": "minimize",
+                        "tie_breakers": ["std_metric", "combo_index"],
+                    },
+                }
+            },
+        ),
+    )
+
+    assert compiled.request.overrides == {
+        "cv": {
+            "param_grid": {"model.koopman_dimension": [4, 6, 8]},
+            "search": {
+                "mode": "nelder_mead_like",
+                "max_iterations": 8,
+                "reflection": 1.0,
+                "expansion": 2.0,
+                "contraction": 0.5,
+                "shrink": 0.5,
+            },
+            "selection": {
+                "goal": "minimize",
+                "tie_breakers": ["std_metric", "combo_index"],
+            },
+        }
+    }
+    assert compiled.effective_config["cv"]["search"]["mode"] == "nelder_mead_like"
+    assert compiled.effective_config["cv"]["selection"]["goal"] == "minimize"
+
+
 def test_compile_training_request_normalizes_json_string_cv_range_overrides(tmp_path) -> None:
     context = build_default_context(artifact_root=tmp_path / "artifacts")
     dataset_path = tmp_path / "train.npz"
@@ -259,8 +311,26 @@ def test_compile_training_request_rewrites_legacy_training_param_grid_paths(tmp_
             ("overrides", "cv", "param_grid", "model.koopman_dimension"),
         ),
         (
-            {"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}, "mode": "sweep"}},
-            ("overrides", "cv", "mode"),
+            {"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}, "search": []}},
+            ("overrides", "cv", "search"),
+        ),
+        (
+            {
+                "cv": {
+                    "param_grid": {"model.koopman_dimension": [4, 6]},
+                    "selection": {"goal": "downhill"},
+                }
+            },
+            ("overrides", "cv", "selection", "goal"),
+        ),
+        (
+            {
+                "cv": {
+                    "param_grid": {"model.koopman_dimension": [4, 6]},
+                    "selection": {"tie_breakers": ["std_metric", "std_metric"]},
+                }
+            },
+            ("overrides", "cv", "selection", "tie_breakers", "1"),
         ),
     ],
 )

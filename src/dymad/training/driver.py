@@ -11,7 +11,13 @@ from torch.utils.data import DataLoader
 
 from dymad.io import TrajectoryManager, TrajectoryManagerGraph
 from dymad.training.execution_services import ExecutionServices
-from dymad.training.helper import CVResult, aggregate_cv_results, iter_param_grid, set_by_dotted_key
+from dymad.training.helper import (
+    CVResult,
+    aggregate_cv_results,
+    iter_param_grid,
+    select_best_cv_result,
+    set_by_dotted_key,
+)
 from dymad.training.phase_runtime import PhaseContext, build_initial_trainer_state
 from dymad.training.trainer_run import TrainerRun
 from dymad.utils import load_config, plot_cv_results
@@ -167,6 +173,14 @@ class DriverBase:
         cv_config = self.base_config.get("cv", {})
         self.param_grid = cv_config.get("param_grid", None)  # None = single combo
         self.metric = cv_config.get("metric", "total")
+        selection = cv_config.get("selection", {})
+        if not isinstance(selection, dict):
+            raise TypeError("cv.selection must be a mapping when provided.")
+        tie_breakers = selection.get("tie_breakers", ("std_metric", "combo_index"))
+        if not isinstance(tie_breakers, (list, tuple)):
+            raise TypeError("cv.selection.tie_breakers must be a list or tuple when provided.")
+        self.cv_selection_goal = str(selection.get("goal", "minimize"))
+        self.cv_selection_tie_breakers = tuple(str(item) for item in tie_breakers)
 
         # Setup paths
         self.base_name = self.base_config["model"]["name"]
@@ -275,11 +289,15 @@ class DriverBase:
             all_results = self._serial_run(trial_args_list)
         all_results = prev_all_results + all_results
 
-        # Select best, assuming lower is better
-        best_idx = int(np.argmin([r.mean_metric for r in all_results]))
+        best_idx = select_best_cv_result(
+            all_results,
+            goal=self.cv_selection_goal,
+            tie_breakers=self.cv_selection_tie_breakers,
+        )
         best_result = all_results[best_idx]
         self.cv_logger.info(
-            f"Best combo: {best_result.params} with {self.metric} = {best_result.mean_metric:.4e}"
+            f"Best combo: {best_result.params} with {self.metric} = {best_result.mean_metric:.4e} "
+            f"(selection goal={self.cv_selection_goal}, tie_breakers={self.cv_selection_tie_breakers})"
         )
 
         # Save CV results

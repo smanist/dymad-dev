@@ -85,6 +85,8 @@ class TrainingCVSchema:
     allowed_keys: tuple[str, ...]
     default_metric: str
     param_grid_value_forms: tuple[str, ...]
+    search_schema: dict[str, Any] = field(default_factory=dict)
+    selection_schema: dict[str, Any] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
 
 

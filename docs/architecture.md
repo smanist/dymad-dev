@@ -134,7 +134,12 @@ Compilation resolves:
 - dataset kind compatibility
 - default or explicit profile
 - allowed user overrides
-- optional single-split CV sweep settings under `overrides.cv`
+- optional single-split CV sweep settings under `overrides.cv`, including:
+  - `param_grid` candidate definitions
+  - optional `search` metadata (`mode="grid"` or `mode="nelder_mead_like"` plus simplex-style
+    coefficients)
+  - optional `selection` policy (`goal` plus ordered tie-breakers) for deterministic best-model
+    choice
 - phase overrides normalized against matching profile defaults so trainer-specific phase config is
   preserved unless explicitly overridden
 - translation guidance and surfaced constraint notes for clients that map natural-language requests

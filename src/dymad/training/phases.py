@@ -1492,11 +1492,7 @@ class ContextDataPhase(BasePhase):
             if name in split_metrics["train"] or name in split_metrics["valid"]
         ]
         extra_metric_names = sorted(
-            (
-                set(split_metrics["train"])
-                | set(split_metrics["valid"])
-            )
-            - set(metric_names)
+            (set(split_metrics["train"]) | set(split_metrics["valid"])) - set(metric_names)
         )
         metric_names.extend(extra_metric_names)
 
@@ -1505,15 +1501,9 @@ class ContextDataPhase(BasePhase):
             metric_width = max(len("metric"), *(len(name) for name in metric_names))
             value_width = 14
             header = (
-                f"{'metric':<{metric_width}}  "
-                f"{'train':>{value_width}}  "
-                f"{'valid':>{value_width}}"
+                f"{'metric':<{metric_width}}  {'train':>{value_width}}  {'valid':>{value_width}}"
             )
-            separator = (
-                f"{'-' * metric_width}  "
-                f"{'-' * value_width}  "
-                f"{'-' * value_width}"
-            )
+            separator = f"{'-' * metric_width}  {'-' * value_width}  {'-' * value_width}"
             lines.extend([header, separator])
             for name in metric_names:
                 train_value = split_metrics["train"].get(name)

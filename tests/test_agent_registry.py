@@ -126,21 +126,47 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
     }
     assert detail.cv_schema.supported is True
     assert detail.cv_schema.workflow_kind == "single_split_param_sweep"
-    assert detail.cv_schema.allowed_keys == ("param_grid", "metric")
+    assert detail.cv_schema.allowed_keys == ("param_grid", "metric", "search", "selection")
     assert detail.cv_schema.default_metric == "total"
     assert detail.cv_schema.param_grid_value_forms == ("list", "linspace_tuple", "logspace_tuple")
+    assert detail.cv_schema.search_schema == {
+        "allowed_keys": (
+            "mode",
+            "max_iterations",
+            "reflection",
+            "expansion",
+            "contraction",
+            "shrink",
+        ),
+        "mode_options": ("grid", "nelder_mead_like"),
+        "default_mode": "grid",
+    }
+    assert detail.cv_schema.selection_schema == {
+        "allowed_keys": ("goal", "tie_breakers"),
+        "goal_options": ("minimize", "maximize"),
+        "default_goal": "minimize",
+        "tie_breaker_options": ("std_metric", "param_l1", "combo_index"),
+        "default_tie_breakers": ("std_metric", "combo_index"),
+    }
     assert detail.cv_schema.notes == (
         "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
         "true k-fold cross-validation.",
-        "The best parameter combination is selected by the lowest aggregated metric value.",
+        "The best parameter combination is selected by cv.selection (default: minimize mean "
+        "metric, then std_metric, then combo_index).",
         "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
         "shorthand, which is normalized onto the first optimizer phase.",
+        "cv.search.mode='nelder_mead_like' exposes a Nelder-Mead-like interface for candidate "
+        "policy metadata while this runtime still evaluates the provided param_grid in "
+        "single-split mode.",
     )
     assert detail.translation_guidance == (
         "For any ordered trainer names mentioned by the user, emit one overrides.phases "
         "entry per trainer in the same order.",
         "Encode hyperparameter sweep requests as overrides.cv.param_grid, with optional "
         "overrides.cv.metric to choose the optimization metric.",
+        "For Nelder-Mead-like requests, set overrides.cv.search.mode='nelder_mead_like' and "
+        "provide optional simplex coefficients or max_iterations in overrides.cv.search.",
+        "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
         "Supported optimizer trainer names are Linear, Weak, and NODE.",
         "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
         "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters; "
@@ -180,4 +206,21 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
             "metric": "total",
         }
     }
-    assert detail.examples[3].overrides["model"]["koopman_dimension"] == 2
+    assert detail.examples[3].overrides == {
+        "cv": {
+            "param_grid": {"model.koopman_dimension": [4, 6, 8]},
+            "search": {
+                "mode": "nelder_mead_like",
+                "max_iterations": 12,
+                "reflection": 1.0,
+                "expansion": 2.0,
+                "contraction": 0.5,
+                "shrink": 0.5,
+            },
+            "selection": {
+                "goal": "minimize",
+                "tie_breakers": ["std_metric", "combo_index"],
+            },
+        }
+    }
+    assert detail.examples[4].overrides["model"]["koopman_dimension"] == 2

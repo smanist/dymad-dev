@@ -1,6 +1,12 @@
 from dymad.training.driver import DriverBase, SingleSplitDriver
 from dymad.training.execution_services import ExecutionServices
-from dymad.training.helper import CVResult, aggregate_cv_results, iter_param_grid, set_by_dotted_key
+from dymad.training.helper import (
+    CVResult,
+    aggregate_cv_results,
+    iter_param_grid,
+    select_best_cv_result,
+    set_by_dotted_key,
+)
 from dymad.training.phase_pipeline import PhasePipeline
 from dymad.training.phase_runtime import (
     ArtifactRegistry,
@@ -53,6 +59,7 @@ __all__ = [
     "PhaseRecord",
     "PhaseResult",
     "PhaseSpecValidationError",
+    "select_best_cv_result",
     "set_by_dotted_key",
     "SingleSplitDriver",
     "StackedTrainer",

@@ -95,20 +95,52 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
     )
     assert (
         detail["data"]["detail"]["translation_guidance"][2]
+        == "For Nelder-Mead-like requests, set overrides.cv.search.mode='nelder_mead_like' "
+        "and provide optional simplex coefficients or max_iterations in overrides.cv.search."
+    )
+    assert (
+        detail["data"]["detail"]["translation_guidance"][3]
+        == "Use overrides.cv.selection to control model choice policy (goal and tie_breakers)."
+    )
+    assert (
+        detail["data"]["detail"]["translation_guidance"][4]
         == "Supported optimizer trainer names are Linear, Weak, and NODE."
     )
     assert detail["data"]["detail"]["cv_schema"] == {
         "supported": True,
         "workflow_kind": "single_split_param_sweep",
-        "allowed_keys": ["param_grid", "metric"],
+        "allowed_keys": ["param_grid", "metric", "search", "selection"],
         "default_metric": "total",
         "param_grid_value_forms": ["list", "linspace_tuple", "logspace_tuple"],
+        "search_schema": {
+            "allowed_keys": [
+                "mode",
+                "max_iterations",
+                "reflection",
+                "expansion",
+                "contraction",
+                "shrink",
+            ],
+            "mode_options": ["grid", "nelder_mead_like"],
+            "default_mode": "grid",
+        },
+        "selection_schema": {
+            "allowed_keys": ["goal", "tie_breakers"],
+            "goal_options": ["minimize", "maximize"],
+            "default_goal": "minimize",
+            "tie_breaker_options": ["std_metric", "param_l1", "combo_index"],
+            "default_tie_breakers": ["std_metric", "combo_index"],
+        },
         "notes": [
             "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is "
             "not true k-fold cross-validation.",
-            "The best parameter combination is selected by the lowest aggregated metric value.",
+            "The best parameter combination is selected by cv.selection (default: minimize mean "
+            "metric, then std_metric, then combo_index).",
             "Param-grid dotted keys may target either explicit phases.* paths or legacy "
             "training.* shorthand, which is normalized onto the first optimizer phase.",
+            "cv.search.mode='nelder_mead_like' exposes a Nelder-Mead-like interface for "
+            "candidate policy metadata while this runtime still evaluates the provided "
+            "param_grid in single-split mode.",
         ],
     }
     assert (
@@ -158,6 +190,32 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
         "notes": [
             "This uses the existing single-split CV sweep runtime rather than true k-fold "
             "cross-validation."
+        ],
+    }
+    assert detail["data"]["detail"]["examples"][3] == {
+        "name": "nelder_mead_like_single_split_cv",
+        "user_request": "Use a Nelder-Mead-like single-split CV policy, stopping after 12 "
+        "iterations and preferring lower variance when metrics tie.",
+        "overrides": {
+            "cv": {
+                "param_grid": {"model.koopman_dimension": [4, 6, 8]},
+                "search": {
+                    "mode": "nelder_mead_like",
+                    "max_iterations": 12,
+                    "reflection": 1.0,
+                    "expansion": 2.0,
+                    "contraction": 0.5,
+                    "shrink": 0.5,
+                },
+                "selection": {
+                    "goal": "minimize",
+                    "tie_breakers": ["std_metric", "combo_index"],
+                },
+            }
+        },
+        "notes": [
+            "The search block is a policy interface; the current runtime remains a "
+            "single-split evaluation over param_grid candidates."
         ],
     }
     assert evaluation["data"]["capabilities"][0]["supported_metrics"] == ["rollout_rmse"]

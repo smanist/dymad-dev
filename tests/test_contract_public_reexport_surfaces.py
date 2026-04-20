@@ -106,6 +106,7 @@ EXPECTED_TRAINING_SURFACE = {
     "PhaseRecord",
     "PhaseResult",
     "PhaseSpecValidationError",
+    "select_best_cv_result",
     "set_by_dotted_key",
     "SingleSplitDriver",
     "StackedTrainer",

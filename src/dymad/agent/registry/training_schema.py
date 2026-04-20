@@ -34,15 +34,34 @@ RUNTIME_OWNED_OVERRIDE_PATHS: tuple[str, ...] = (
 )
 ALLOWED_DATA_OVERRIDE_KEYS: tuple[str, ...] = ("double_precision",)
 RUNTIME_OWNED_MODEL_KEYS: tuple[str, ...] = ("name",)
-CV_ALLOWED_KEYS: tuple[str, ...] = ("param_grid", "metric")
+CV_ALLOWED_KEYS: tuple[str, ...] = ("param_grid", "metric", "search", "selection")
 CV_DEFAULT_METRIC = "total"
 CV_PARAM_GRID_VALUE_FORMS: tuple[str, ...] = ("list", "linspace_tuple", "logspace_tuple")
+CV_SEARCH_ALLOWED_KEYS: tuple[str, ...] = (
+    "mode",
+    "max_iterations",
+    "reflection",
+    "expansion",
+    "contraction",
+    "shrink",
+)
+CV_SEARCH_MODE_OPTIONS: tuple[str, ...] = ("grid", "nelder_mead_like")
+CV_DEFAULT_SEARCH_MODE = "grid"
+CV_SELECTION_ALLOWED_KEYS: tuple[str, ...] = ("goal", "tie_breakers")
+CV_SELECTION_GOAL_OPTIONS: tuple[str, ...] = ("minimize", "maximize")
+CV_DEFAULT_SELECTION_GOAL = "minimize"
+CV_SELECTION_TIE_BREAKER_OPTIONS: tuple[str, ...] = ("std_metric", "param_l1", "combo_index")
+CV_DEFAULT_SELECTION_TIE_BREAKERS: tuple[str, ...] = ("std_metric", "combo_index")
 CV_NOTES: tuple[str, ...] = (
     "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
     "true k-fold cross-validation.",
-    "The best parameter combination is selected by the lowest aggregated metric value.",
+    "The best parameter combination is selected by cv.selection (default: minimize mean metric, "
+    "then std_metric, then combo_index).",
     "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
     "shorthand, which is normalized onto the first optimizer phase.",
+    "cv.search.mode='nelder_mead_like' exposes a Nelder-Mead-like interface for candidate "
+    "policy metadata while this runtime still evaluates the provided param_grid in single-split "
+    "mode.",
 )
 AUTO_APPENDED_PHASES: tuple[str, ...] = (
     "analysis",
@@ -55,6 +74,9 @@ TRANSLATION_GUIDANCE: tuple[str, ...] = (
     "entry per trainer in the same order.",
     "Encode hyperparameter sweep requests as overrides.cv.param_grid, with optional "
     "overrides.cv.metric to choose the optimization metric.",
+    "For Nelder-Mead-like requests, set overrides.cv.search.mode='nelder_mead_like' and provide "
+    "optional simplex coefficients or max_iterations in overrides.cv.search.",
+    "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
     "Supported optimizer trainer names are Linear, Weak, and NODE.",
     "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
     "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters; "
@@ -229,6 +251,34 @@ def _examples() -> tuple[TrainingCapabilityExample, ...]:
             ),
         ),
         TrainingCapabilityExample(
+            name="nelder_mead_like_single_split_cv",
+            user_request=(
+                "Use a Nelder-Mead-like single-split CV policy, stopping after 12 iterations "
+                "and preferring lower variance when metrics tie."
+            ),
+            overrides={
+                "cv": {
+                    "param_grid": {"model.koopman_dimension": [4, 6, 8]},
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "max_iterations": 12,
+                        "reflection": 1.0,
+                        "expansion": 2.0,
+                        "contraction": 0.5,
+                        "shrink": 0.5,
+                    },
+                    "selection": {
+                        "goal": "minimize",
+                        "tie_breakers": ["std_metric", "combo_index"],
+                    },
+                }
+            },
+            notes=(
+                "The search block is a policy interface; the current runtime remains a "
+                "single-split evaluation over param_grid candidates.",
+            ),
+        ),
+        TrainingCapabilityExample(
             name="identity_encoder_decoder_for_two_state_lti",
             user_request=(
                 "Use trivial encoder and decoder, i.e. identity maps, for a 2-state LTI model."
@@ -305,6 +355,18 @@ def describe_training_capability(
                     allowed_keys=CV_ALLOWED_KEYS,
                     default_metric=CV_DEFAULT_METRIC,
                     param_grid_value_forms=CV_PARAM_GRID_VALUE_FORMS,
+                    search_schema={
+                        "allowed_keys": CV_SEARCH_ALLOWED_KEYS,
+                        "mode_options": CV_SEARCH_MODE_OPTIONS,
+                        "default_mode": CV_DEFAULT_SEARCH_MODE,
+                    },
+                    selection_schema={
+                        "allowed_keys": CV_SELECTION_ALLOWED_KEYS,
+                        "goal_options": CV_SELECTION_GOAL_OPTIONS,
+                        "default_goal": CV_DEFAULT_SELECTION_GOAL,
+                        "tie_breaker_options": CV_SELECTION_TIE_BREAKER_OPTIONS,
+                        "default_tie_breakers": CV_DEFAULT_SELECTION_TIE_BREAKERS,
+                    },
                     notes=CV_NOTES,
                 ),
                 translation_guidance=TRANSLATION_GUIDANCE,
