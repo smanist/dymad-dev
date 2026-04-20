@@ -8,7 +8,7 @@ import yaml
 
 from dymad.agent.compiler import TrainingRequest, compile_training_request
 from dymad.agent.exec.context import build_default_context
-from tests.test_mcp_train_eval_tools import _configure_worker_bootstrap
+from tests.test_agent_mcp_train_eval_tools import _configure_worker_bootstrap
 
 
 def _write_regular_dataset(path: Path) -> None:

@@ -1,6 +1,7 @@
 Organization of the test cases:
 
 - YAML files: Contains the definitions of data and model.
+- `*_baselines.json`: Reference metrics for slow deterministic regression tests.
 - `conftest.py`: The pytest fixtures that serve as inputs to test cases and make clean-ups when necessary.
 - `test_assert_*`: Exact tests that compare test outputs with reference outputs to numerical accuracy.
   - `di`: The DataInterface class
@@ -31,3 +32,10 @@ Organization of the test cases:
   - `lti`: Dynamics with inputs, based on a LTI model
   - `sa_lti`: Spectral analysis of a LTI model
   - `sample`: Sampling functionalities
+- `test_contract_*`: Deterministic contract tests for typed runtimes, adapters, boundaries, persistence,
+  model-spec resolution, and other public/runtime surfaces. These validate invariants and interface
+  behavior rather than numerics-heavy reference values.
+- `test_agent_*`: Deterministic integration tests for agent-facing surfaces, including the registry,
+  compiler/executor flow, MCP/demo/user tools, and skill staging.
+- `test_slow_*`: Slow deterministic regression cases, usually CLI or end-to-end flows checked against
+  exact baseline metrics.

@@ -8,7 +8,7 @@ import yaml
 import dymad.io
 from dymad.agent.exec.context import build_default_context
 from dymad.agent.mcp import UserTools
-from tests.test_mcp_train_eval_tools import (
+from tests.test_agent_mcp_train_eval_tools import (
     _configure_worker_bootstrap,
     _write_regular_dataset,
 )
