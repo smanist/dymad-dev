@@ -9,7 +9,7 @@ import dymad.training.phases as phases_module
 from dymad.core import GraphSeries, RegularSeries, RegularTrainerBatch
 from dymad.training import driver
 from dymad.training.execution_services import ExecutionServices
-from dymad.training.helper import CVResult, select_best_cv_result
+from dymad.training.helper import CVResult, nelder_mead_like_search_indices, select_best_cv_result
 from dymad.training.phase_runtime import (
     ArtifactRegistry,
     ModelArtifact,
@@ -715,11 +715,209 @@ def test_select_best_cv_result_supports_maximize_goal() -> None:
     assert best_idx == 1
 
 
+def test_select_best_cv_result_uses_explicit_combo_indices_for_tie_breaker() -> None:
+    cv_results = [
+        CVResult(params={"model.koopman_dimension": 8}, fold_metrics=[1.0]),
+        CVResult(params={"model.koopman_dimension": 5}, fold_metrics=[1.0]),
+        CVResult(params={"model.koopman_dimension": 3}, fold_metrics=[1.0]),
+    ]
+
+    best_idx = select_best_cv_result(
+        cv_results,
+        goal="minimize",
+        tie_breakers=("std_metric", "combo_index"),
+        combo_indices=(8, 5, 3),
+    )
+
+    assert best_idx == 2
+
+
 def test_select_best_cv_result_rejects_unsupported_tie_breaker() -> None:
     cv_results = [CVResult(params={"model.koopman_dimension": 4}, fold_metrics=[1.0])]
 
     with pytest.raises(ValueError, match="unsupported tie breaker"):
         select_best_cv_result(cv_results, tie_breakers=("unknown_rule",))
+
+
+def test_nelder_mead_like_search_indices_limits_evaluations() -> None:
+    combos = [{"model.koopman_dimension": value} for value in range(9)]
+    evaluation_calls: list[int] = []
+
+    def _evaluate(index: int) -> float:
+        evaluation_calls.append(index)
+        value = float(combos[index]["model.koopman_dimension"])
+        return (value - 5.0) ** 2
+
+    evaluated = nelder_mead_like_search_indices(
+        combos,
+        evaluate_index=_evaluate,
+        max_iterations=1,
+    )
+
+    assert evaluated == evaluation_calls
+    assert evaluated[:2] == [0, 8]
+    assert len(evaluated) == 4
+    assert 6 in evaluated
+
+
+def test_nelder_mead_like_search_indices_falls_back_to_grid_for_non_numeric_values() -> None:
+    combos = [{"model.variant": name} for name in ("a", "b", "c")]
+    evaluation_calls: list[int] = []
+
+    def _evaluate(index: int) -> float:
+        evaluation_calls.append(index)
+        return float(index)
+
+    evaluated = nelder_mead_like_search_indices(
+        combos,
+        evaluate_index=_evaluate,
+        max_iterations=3,
+    )
+
+    assert evaluated == [0, 1, 2]
+    assert evaluation_calls == [0, 1, 2]
+
+
+def test_single_split_driver_train_supports_nelder_mead_like_search(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+phases:
+  - trainer: Linear
+cv:
+  param_grid:
+    model.koopman_dimension: [0, 1, 2, 3, 4]
+  search:
+    mode: nelder_mead_like
+    max_iterations: 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+    monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+
+    evaluated_dims: list[int] = []
+
+    def _fake_run_cv_single(args):
+        value = int(args["combo"]["model.koopman_dimension"])
+        evaluated_dims.append(value)
+        model_prefix = f"{args['checkpoint_prefix']}/fake_{args['combo_idx']}_{args['fold_idx']}"
+        with open(f"{model_prefix}.pt", "wb") as handle:
+            handle.write(b"pt")
+        np.savez_compressed(f"{model_prefix}_summary.npz", koopman_dimension=np.array([value]))
+        return {
+            "combo_idx": args["combo_idx"],
+            "fold_idx": args["fold_idx"],
+            "combo": args["combo"],
+            "metric_value": float((value - 2) ** 2),
+            "model_prefix": model_prefix,
+        }
+
+    monkeypatch.setattr(driver, "run_cv_single", _fake_run_cv_single)
+    monkeypatch.setattr(driver, "plot_cv_results", lambda *args, **kwargs: None)
+
+    trainer = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        device=torch.device("cpu"),
+    )
+    _, best_result, all_results = trainer.train()
+
+    assert len(all_results) == 4
+    assert len(evaluated_dims) == 4
+    assert best_result.params["model.koopman_dimension"] == 2
+
+
+def test_single_split_driver_train_uses_grid_combo_index_for_tie_breaker(
+    monkeypatch, tmp_path
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+phases:
+  - trainer: Linear
+cv:
+  param_grid:
+    model.koopman_dimension: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+  search:
+    mode: nelder_mead_like
+    max_iterations: 2
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+    monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+    def _fake_nelder_mead_like_search_indices(combos, *, evaluate_index, **kwargs):
+        evaluated = [0, 8, 2, 5, 7, 4, 1, 3]
+        for index in evaluated:
+            evaluate_index(index)
+        return evaluated
+
+    monkeypatch.setattr(
+        driver,
+        "nelder_mead_like_search_indices",
+        _fake_nelder_mead_like_search_indices,
+    )
+
+    evaluated_dims: list[int] = []
+
+    def _fake_run_cv_single(args):
+        value = int(args["combo"]["model.koopman_dimension"])
+        evaluated_dims.append(value)
+        model_prefix = f"{args['checkpoint_prefix']}/fake_{args['combo_idx']}_{args['fold_idx']}"
+        with open(f"{model_prefix}.pt", "wb") as handle:
+            handle.write(b"pt")
+        np.savez_compressed(f"{model_prefix}_summary.npz", koopman_dimension=np.array([value]))
+        metric_value = 0.0 if value in {8, 5, 3} else 1.0
+        return {
+            "combo_idx": args["combo_idx"],
+            "fold_idx": args["fold_idx"],
+            "combo": args["combo"],
+            "metric_value": metric_value,
+            "model_prefix": model_prefix,
+        }
+
+    monkeypatch.setattr(driver, "run_cv_single", _fake_run_cv_single)
+    monkeypatch.setattr(driver, "plot_cv_results", lambda *args, **kwargs: None)
+
+    trainer = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        device=torch.device("cpu"),
+    )
+    _, best_result, all_results = trainer.train()
+
+    assert evaluated_dims == [0, 8, 2, 5, 7, 4, 1, 3]
+    assert len(all_results) == 8
+    assert best_result.params["model.koopman_dimension"] == 3
 
 
 def test_trainer_run_rejects_legacy_resume_checkpoints(tmp_path):

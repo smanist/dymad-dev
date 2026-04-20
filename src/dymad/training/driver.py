@@ -15,6 +15,7 @@ from dymad.training.helper import (
     CVResult,
     aggregate_cv_results,
     iter_param_grid,
+    nelder_mead_like_search_indices,
     select_best_cv_result,
     set_by_dotted_key,
 )
@@ -181,6 +182,37 @@ class DriverBase:
             raise TypeError("cv.selection.tie_breakers must be a list or tuple when provided.")
         self.cv_selection_goal = str(selection.get("goal", "minimize"))
         self.cv_selection_tie_breakers = tuple(str(item) for item in tie_breakers)
+        search = cv_config.get("search", {})
+        if not isinstance(search, dict):
+            raise TypeError("cv.search must be a mapping when provided.")
+        self.cv_search_mode = str(search.get("mode", "grid"))
+        if self.cv_search_mode not in {"grid", "nelder_mead_like"}:
+            raise ValueError(
+                "cv.search.mode must be either 'grid' or 'nelder_mead_like' when provided."
+            )
+
+        max_iterations = search.get("max_iterations")
+        if max_iterations is not None:
+            if not isinstance(max_iterations, int) or max_iterations <= 0:
+                raise TypeError("cv.search.max_iterations must be a positive integer when provided.")
+        self.cv_search_max_iterations = max_iterations
+
+        reflection = search.get("reflection", 1.0)
+        expansion = search.get("expansion", 2.0)
+        contraction = search.get("contraction", 0.5)
+        shrink = search.get("shrink", 0.5)
+        if not isinstance(reflection, (int, float)) or float(reflection) <= 0.0:
+            raise TypeError("cv.search.reflection must be a positive number when provided.")
+        if not isinstance(expansion, (int, float)) or float(expansion) <= 1.0:
+            raise TypeError("cv.search.expansion must be greater than 1 when provided.")
+        if not isinstance(contraction, (int, float)) or not (0.0 < float(contraction) < 1.0):
+            raise TypeError("cv.search.contraction must be in (0, 1) when provided.")
+        if not isinstance(shrink, (int, float)) or not (0.0 < float(shrink) < 1.0):
+            raise TypeError("cv.search.shrink must be in (0, 1) when provided.")
+        self.cv_search_reflection = float(reflection)
+        self.cv_search_expansion = float(expansion)
+        self.cv_search_contraction = float(contraction)
+        self.cv_search_shrink = float(shrink)
 
         # Setup paths
         self.base_name = self.base_config["model"]["name"]
@@ -264,35 +296,83 @@ class DriverBase:
         else:
             combos = list(iter_param_grid(self.param_grid))
 
-        trial_args_list = []
-        for combo_idx, combo in enumerate(combos):
-            for fold_idx, fold_cfg in self.iter_folds():
-                args = {
-                    "combo_idx": combo_idx + combo_offset,
-                    "fold_idx": fold_idx,
-                    "fold_cfg": fold_cfg,
-                    "combo": combo,
-                    "base_name": self.base_name,
-                    "checkpoint_prefix": self.checkpoint_prefix,
-                    "results_prefix": self.results_prefix,
-                    "train_sets": self.train_sets,
-                    "valid_sets": self.valid_sets,
-                    "model_class": self.model_class,
-                    "device": self.device,
-                    "metric": self.metric,
-                }
-                trial_args_list.append(args)
+        fold_specs = list(self.iter_folds())
+        all_results: list[CVResult]
+        selection_combo_indices: list[int] | None = None
+        if self.cv_search_mode == "nelder_mead_like" and self.param_grid is not None:
+            if continue_training:
+                raise ValueError(
+                    "continue_training is not supported with cv.search.mode='nelder_mead_like'."
+                )
+            if len(fold_specs) != 1:
+                self.cv_logger.warning(
+                    "cv.search.mode='nelder_mead_like' is only supported for single-split CV; "
+                    "falling back to grid search."
+                )
+                trial_args_list = []
+                for combo_idx, combo in enumerate(combos):
+                    trial_args_list.extend(
+                        self._trial_args_for_combo(
+                            combo_idx=combo_idx + combo_offset,
+                            combo=combo,
+                            fold_specs=fold_specs,
+                        )
+                    )
+                if self.max_workers > 1:
+                    all_results = self._parallel_run(trial_args_list)
+                else:
+                    all_results = self._serial_run(trial_args_list)
+            else:
+                combo_results: dict[int, CVResult] = {}
 
-        if self.max_workers > 1:
-            all_results = self._parallel_run(trial_args_list)
+                def _evaluate_combo(index: int) -> float:
+                    if index not in combo_results:
+                        combo_results[index] = self._run_single_combo(
+                            combo_idx=index + combo_offset,
+                            combo=combos[index],
+                            fold_specs=fold_specs,
+                        )
+                    return combo_results[index].mean_metric
+
+                evaluated_indices = nelder_mead_like_search_indices(
+                    combos,
+                    evaluate_index=_evaluate_combo,
+                    goal=self.cv_selection_goal,
+                    max_iterations=self.cv_search_max_iterations,
+                    reflection=self.cv_search_reflection,
+                    expansion=self.cv_search_expansion,
+                    contraction=self.cv_search_contraction,
+                    shrink=self.cv_search_shrink,
+                )
+                self.cv_logger.info(
+                    "Nelder-Mead-like single-split search evaluated %d/%d candidates.",
+                    len(evaluated_indices),
+                    len(combos),
+                )
+                all_results = [combo_results[index] for index in evaluated_indices]
+                selection_combo_indices = [index + combo_offset for index in evaluated_indices]
         else:
-            all_results = self._serial_run(trial_args_list)
+            trial_args_list = []
+            for combo_idx, combo in enumerate(combos):
+                trial_args_list.extend(
+                    self._trial_args_for_combo(
+                        combo_idx=combo_idx + combo_offset,
+                        combo=combo,
+                        fold_specs=fold_specs,
+                    )
+                )
+            if self.max_workers > 1:
+                all_results = self._parallel_run(trial_args_list)
+            else:
+                all_results = self._serial_run(trial_args_list)
+
         all_results = prev_all_results + all_results
 
         best_idx = select_best_cv_result(
             all_results,
             goal=self.cv_selection_goal,
             tie_breakers=self.cv_selection_tie_breakers,
+            combo_indices=selection_combo_indices,
         )
         best_result = all_results[best_idx]
         self.cv_logger.info(
@@ -302,7 +382,10 @@ class DriverBase:
 
         # Save CV results
         np.savez_compressed(
-            file_name, all_results=all_results, metric_name=self.metric, best_idx=best_idx
+            file_name,
+            all_results=np.asarray(all_results, dtype=object),
+            metric_name=self.metric,
+            best_idx=best_idx,
         )
         self.cv_logger.info(f"Saved CV results to {file_name}")
         plot_cv_results(file_name, ifclose=True, prefix=self.results_prefix)
@@ -328,6 +411,55 @@ class DriverBase:
     # --------------------
     # Helper functions
     # --------------------
+
+    def _trial_args_for_combo(
+        self,
+        *,
+        combo_idx: int,
+        combo: dict[str, Any],
+        fold_specs: Sequence[tuple[int, dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
+        trial_args_list = []
+        for fold_idx, fold_cfg in fold_specs:
+            trial_args_list.append(
+                {
+                    "combo_idx": combo_idx,
+                    "fold_idx": fold_idx,
+                    "fold_cfg": fold_cfg,
+                    "combo": combo,
+                    "base_name": self.base_name,
+                    "checkpoint_prefix": self.checkpoint_prefix,
+                    "results_prefix": self.results_prefix,
+                    "train_sets": self.train_sets,
+                    "valid_sets": self.valid_sets,
+                    "model_class": self.model_class,
+                    "device": self.device,
+                    "metric": self.metric,
+                }
+            )
+        return trial_args_list
+
+    def _run_single_combo(
+        self,
+        *,
+        combo_idx: int,
+        combo: dict[str, Any],
+        fold_specs: Sequence[tuple[int, dict[str, Any]]],
+    ) -> CVResult:
+        trial_args_list = self._trial_args_for_combo(
+            combo_idx=combo_idx,
+            combo=combo,
+            fold_specs=fold_specs,
+        )
+        if self.max_workers > 1:
+            combo_results = self._parallel_run(trial_args_list)
+        else:
+            combo_results = self._serial_run(trial_args_list)
+        if len(combo_results) != 1:
+            raise RuntimeError(
+                f"Expected one aggregated CVResult for combo {combo_idx}, got {len(combo_results)}."
+            )
+        return combo_results[0]
 
     def _create_trajectory_manager(
         self, data_key: str

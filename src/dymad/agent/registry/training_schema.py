@@ -59,9 +59,8 @@ CV_NOTES: tuple[str, ...] = (
     "then std_metric, then combo_index).",
     "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
     "shorthand, which is normalized onto the first optimizer phase.",
-    "cv.search.mode='nelder_mead_like' exposes a Nelder-Mead-like interface for candidate "
-    "policy metadata while this runtime still evaluates the provided param_grid in single-split "
-    "mode.",
+    "cv.search.mode='nelder_mead_like' runs a Nelder-Mead-like adaptive candidate path over "
+    "numeric param_grid values in single-split mode; non-numeric values fall back to grid order.",
 )
 AUTO_APPENDED_PHASES: tuple[str, ...] = (
     "analysis",
@@ -274,8 +273,8 @@ def _examples() -> tuple[TrainingCapabilityExample, ...]:
                 }
             },
             notes=(
-                "The search block is a policy interface; the current runtime remains a "
-                "single-split evaluation over param_grid candidates.",
+                "This executes a Nelder-Mead-like adaptive search path over single-split "
+                "param_grid candidates.",
             ),
         ),
         TrainingCapabilityExample(
