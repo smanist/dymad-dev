@@ -440,8 +440,50 @@ def uniform_noise(
     return _sampler
 
 
+def laplace_noise(
+    *,
+    loc: float | Array,
+    scale: float | Array,
+    dim: int,
+    rng: Rng = None,
+) -> NoiseSampler:
+    """Generate additive Laplace observation noise."""
+    rng = _require_rng(rng)
+    loc = np.broadcast_to(loc, (dim,))
+    scale = np.broadcast_to(scale, (dim,))
+
+    def _sampler(y_grid: Array, traj_idx: int) -> Array:
+        del traj_idx
+        return rng.laplace(loc, scale, size=y_grid.shape)
+
+    return _sampler
+
+
+def student_t_noise(
+    *,
+    df: float | Array,
+    loc: float | Array = 0.0,
+    scale: float | Array = 1.0,
+    dim: int,
+    rng: Rng = None,
+) -> NoiseSampler:
+    """Generate additive Student-t observation noise."""
+    rng = _require_rng(rng)
+    df = np.broadcast_to(df, (dim,))
+    loc = np.broadcast_to(loc, (dim,))
+    scale = np.broadcast_to(scale, (dim,))
+
+    def _sampler(y_grid: Array, traj_idx: int) -> Array:
+        del traj_idx
+        return loc + scale * rng.standard_t(df, size=y_grid.shape)
+
+    return _sampler
+
+
 NOISE_MAP = {
     "gaussian": gaussian_noise,
+    "laplace": laplace_noise,
+    "student_t": student_t_noise,
     "uniform": uniform_noise,
 }
 

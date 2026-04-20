@@ -135,6 +135,8 @@ def test_sampling(idx, plot=False):
     "noise_cfg",
     [
         {"kind": "gaussian", "params": {"mean": 0.0, "std": 0.1}},
+        {"kind": "laplace", "params": {"loc": [0.0, 0.0], "scale": [0.05, 0.1]}},
+        {"kind": "student_t", "params": {"df": [5.0, 7.0], "loc": [0.0, 0.0], "scale": [0.04, 0.08]}},
         {"kind": "uniform", "params": {"bounds": [[-0.2, 0.2], [-0.1, 0.1]]}},
     ],
 )
