@@ -336,6 +336,16 @@ def _unit_point_key(point: np.ndarray) -> tuple[float, ...]:
     return tuple(float(value) for value in np.round(clipped, decimals=12))
 
 
+def _initial_bounded_simplex(dim: int) -> list[np.ndarray]:
+    base = np.full(dim, 0.5, dtype=float)
+    simplex = [base]
+    for axis in range(dim):
+        vertex = base.copy()
+        vertex[axis] = 1.0
+        simplex.append(vertex)
+    return simplex
+
+
 def bounded_nelder_mead_search_points(
     *,
     lower_bounds: Sequence[float],
@@ -400,12 +410,7 @@ def bounded_nelder_mead_search_points(
         return score_cache[key]
 
     dim = lower.size
-    center = np.full(dim, 0.5, dtype=float)
-    simplex = [center]
-    for axis in range(dim):
-        vertex = center.copy()
-        vertex[axis] = 0.75
-        simplex.append(vertex)
+    simplex = _initial_bounded_simplex(dim)
 
     for vertex in simplex:
         _ensure_score(vertex)

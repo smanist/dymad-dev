@@ -1015,6 +1015,72 @@ cv:
     assert best_result.params["phases.0.weak_form_params.N"] == 11
 
 
+def test_single_split_driver_bounded_nelder_mead_evaluates_integer_upper_endpoint(
+    monkeypatch, tmp_path
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+  koopman_dimension: 1
+phases:
+  - trainer: Linear
+cv:
+  search:
+    mode: nelder_mead_like
+    bounds:
+      model.koopman_dimension: [0, 3]
+    max_iterations: 4
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+    monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+
+    evaluated_dims: list[int] = []
+
+    def _fake_run_cv_single(args):
+        value = int(args["combo"]["model.koopman_dimension"])
+        evaluated_dims.append(value)
+        model_prefix = f"{args['checkpoint_prefix']}/fake_{args['combo_idx']}_{args['fold_idx']}"
+        with open(f"{model_prefix}.pt", "wb") as handle:
+            handle.write(b"pt")
+        np.savez_compressed(f"{model_prefix}_summary.npz", koopman_dimension=np.array([value]))
+        return {
+            "combo_idx": args["combo_idx"],
+            "fold_idx": args["fold_idx"],
+            "combo": args["combo"],
+            "metric_value": float((value - 3) ** 2),
+            "model_prefix": model_prefix,
+        }
+
+    monkeypatch.setattr(driver, "run_cv_single", _fake_run_cv_single)
+    monkeypatch.setattr(driver, "plot_cv_results", lambda *args, **kwargs: None)
+
+    trainer = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        device=torch.device("cpu"),
+    )
+    _, best_result, _ = trainer.train()
+
+    assert 3 in evaluated_dims
+    assert best_result.params["model.koopman_dimension"] == 3
+
+
 def test_single_split_driver_train_uses_grid_combo_index_for_tie_breaker(
     monkeypatch, tmp_path
 ) -> None:
