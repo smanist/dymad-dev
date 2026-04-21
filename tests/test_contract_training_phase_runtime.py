@@ -9,7 +9,12 @@ import dymad.training.phases as phases_module
 from dymad.core import GraphSeries, RegularSeries, RegularTrainerBatch
 from dymad.training import driver
 from dymad.training.execution_services import ExecutionServices
-from dymad.training.helper import CVResult, nelder_mead_like_search_indices, select_best_cv_result
+from dymad.training.helper import (
+    CVResult,
+    bounded_nelder_mead_search_points,
+    nelder_mead_like_search_indices,
+    select_best_cv_result,
+)
 from dymad.training.phase_runtime import (
     ArtifactRegistry,
     ModelArtifact,
@@ -572,6 +577,10 @@ phases:
 cv:
   param_grid:
     training.learning_rate: [0.1, 0.2]
+  search:
+    mode: nelder_mead_like
+    bounds:
+      training.weight_decay: [1.0e-4, 1.0e-2]
 """.strip(),
         encoding="utf-8",
     )
@@ -582,6 +591,7 @@ cv:
     assert config["phases"][0]["ode_method"] == "rk4"
     assert config["phases"][0]["ode_args"] == {"step_size": 0.2}
     assert config["cv"]["param_grid"] == {"phases.0.learning_rate": [0.1, 0.2]}
+    assert config["cv"]["search"]["bounds"] == {"phases.0.weight_decay": [1.0e-4, 1.0e-2]}
 
     execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
     phase = build_phase(
@@ -778,6 +788,27 @@ def test_nelder_mead_like_search_indices_falls_back_to_grid_for_non_numeric_valu
     assert evaluation_calls == [0, 1, 2]
 
 
+def test_bounded_nelder_mead_search_points_respects_bounds() -> None:
+    target = np.array([0.25, 0.75], dtype=float)
+
+    def _evaluate(point: np.ndarray) -> float:
+        return float(np.sum((point - target) ** 2))
+
+    evaluated = bounded_nelder_mead_search_points(
+        lower_bounds=[0.0, 0.0],
+        upper_bounds=[1.0, 1.0],
+        evaluate_point=_evaluate,
+        max_iterations=6,
+    )
+
+    assert evaluated
+    for point in evaluated:
+        assert np.all(point >= 0.0)
+        assert np.all(point <= 1.0)
+    best_point = min(evaluated, key=_evaluate)
+    assert np.linalg.norm(best_point - target) <= 0.25
+
+
 def test_single_split_driver_train_supports_nelder_mead_like_search(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -840,6 +871,148 @@ cv:
     assert len(all_results) == 4
     assert len(evaluated_dims) == 4
     assert best_result.params["model.koopman_dimension"] == 2
+
+
+def test_single_split_driver_train_supports_explicit_grid_search(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+phases:
+  - trainer: Linear
+cv:
+  param_grid:
+    model.koopman_dimension: [0, 1, 2, 3, 4]
+  search:
+    mode: grid
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+    monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+
+    evaluated_dims: list[int] = []
+
+    def _fake_run_cv_single(args):
+        value = int(args["combo"]["model.koopman_dimension"])
+        evaluated_dims.append(value)
+        model_prefix = f"{args['checkpoint_prefix']}/fake_{args['combo_idx']}_{args['fold_idx']}"
+        with open(f"{model_prefix}.pt", "wb") as handle:
+            handle.write(b"pt")
+        np.savez_compressed(f"{model_prefix}_summary.npz", koopman_dimension=np.array([value]))
+        return {
+            "combo_idx": args["combo_idx"],
+            "fold_idx": args["fold_idx"],
+            "combo": args["combo"],
+            "metric_value": float((value - 2) ** 2),
+            "model_prefix": model_prefix,
+        }
+
+    monkeypatch.setattr(driver, "run_cv_single", _fake_run_cv_single)
+    monkeypatch.setattr(driver, "plot_cv_results", lambda *args, **kwargs: None)
+
+    trainer = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        device=torch.device("cpu"),
+    )
+    _, best_result, all_results = trainer.train()
+
+    assert evaluated_dims == [0, 1, 2, 3, 4]
+    assert len(all_results) == 5
+    assert best_result.params["model.koopman_dimension"] == 2
+
+
+def test_single_split_driver_train_supports_bounded_nelder_mead_search(
+    monkeypatch, tmp_path
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+  koopman_dimension: 1
+training:
+  weak_form_params:
+    N: 13
+phases:
+  - trainer: Weak
+cv:
+  search:
+    mode: nelder_mead_like
+    bounds:
+      model.koopman_dimension: [0, 4]
+      training.weak_form_params.N: [9, 17]
+    max_iterations: 6
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+    monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+
+    evaluated_params: list[tuple[int, int]] = []
+
+    def _fake_run_cv_single(args):
+        koopman_dimension = int(args["combo"]["model.koopman_dimension"])
+        weak_n = int(args["combo"]["phases.0.weak_form_params.N"])
+        evaluated_params.append((koopman_dimension, weak_n))
+        model_prefix = f"{args['checkpoint_prefix']}/fake_{args['combo_idx']}_{args['fold_idx']}"
+        with open(f"{model_prefix}.pt", "wb") as handle:
+            handle.write(b"pt")
+        np.savez_compressed(
+            f"{model_prefix}_summary.npz",
+            koopman_dimension=np.array([koopman_dimension]),
+            weak_n=np.array([weak_n]),
+        )
+        return {
+            "combo_idx": args["combo_idx"],
+            "fold_idx": args["fold_idx"],
+            "combo": args["combo"],
+            "metric_value": float((koopman_dimension - 2) ** 2 + 0.01 * (weak_n - 11) ** 2),
+            "model_prefix": model_prefix,
+        }
+
+    monkeypatch.setattr(driver, "run_cv_single", _fake_run_cv_single)
+    monkeypatch.setattr(driver, "plot_cv_results", lambda *args, **kwargs: None)
+
+    trainer = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        device=torch.device("cpu"),
+    )
+    _, best_result, all_results = trainer.train()
+
+    assert all_results
+    assert evaluated_params
+    assert all(0 <= koopman_dimension <= 4 for koopman_dimension, _ in evaluated_params)
+    assert all(9 <= weak_n <= 17 for _, weak_n in evaluated_params)
+    assert best_result.params["model.koopman_dimension"] == 2
+    assert best_result.params["phases.0.weak_form_params.N"] == 11
 
 
 def test_single_split_driver_train_uses_grid_combo_index_for_tie_breaker(

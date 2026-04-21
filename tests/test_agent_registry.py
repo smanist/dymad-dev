@@ -132,6 +132,7 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
     assert detail.cv_schema.search_schema == {
         "allowed_keys": (
             "mode",
+            "bounds",
             "max_iterations",
             "reflection",
             "expansion",
@@ -151,21 +152,26 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
     assert detail.cv_schema.notes == (
         "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
         "true k-fold cross-validation.",
+        "cv.search.mode selects the CV optimizer. Grid search operates on cv.param_grid; "
+        "Nelder-Mead-like search operates on cv.search.bounds when provided.",
         "The best parameter combination is selected by cv.selection (default: minimize mean "
         "metric, then std_metric, then combo_index).",
         "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
         "shorthand, which is normalized onto the first optimizer phase.",
-        "cv.search.mode='nelder_mead_like' runs a Nelder-Mead-like adaptive candidate path over "
-        "numeric param_grid values in single-split mode; non-numeric values fall back to grid "
-        "order.",
+        "cv.search.mode='nelder_mead_like' with cv.search.bounds runs a bounded Nelder-Mead "
+        "search over lower/upper parameter ranges in single-split mode. Without bounds, it "
+        "falls back to the legacy adaptive path over numeric param_grid values; non-numeric "
+        "values fall back to grid order.",
     )
     assert detail.translation_guidance == (
         "For any ordered trainer names mentioned by the user, emit one overrides.phases "
         "entry per trainer in the same order.",
-        "Encode hyperparameter sweep requests as overrides.cv.param_grid, with optional "
-        "overrides.cv.metric to choose the optimization metric.",
-        "For Nelder-Mead-like requests, set overrides.cv.search.mode='nelder_mead_like' and "
-        "provide optional simplex coefficients or max_iterations in overrides.cv.search.",
+        "Encode grid-search sweep requests as overrides.cv.param_grid, with optional "
+        "overrides.cv.metric to choose the optimization metric and optional "
+        "overrides.cv.search.mode='grid' for explicitness.",
+        "For bounded Nelder-Mead requests, set overrides.cv.search.mode='nelder_mead_like' and "
+        "provide lower/upper pairs in overrides.cv.search.bounds. If bounds are omitted, the "
+        "runtime uses the legacy adaptive walk over param_grid candidates.",
         "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
         "Supported optimizer trainer names are Linear, Weak, and NODE.",
         "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
@@ -208,9 +214,9 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
     }
     assert detail.examples[3].overrides == {
         "cv": {
-            "param_grid": {"model.koopman_dimension": [4, 6, 8]},
             "search": {
                 "mode": "nelder_mead_like",
+                "bounds": {"model.koopman_dimension": [4, 8]},
                 "max_iterations": 12,
                 "reflection": 1.0,
                 "expansion": 2.0,
@@ -224,7 +230,7 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         }
     }
     assert detail.examples[3].notes == (
-        "This executes a Nelder-Mead-like adaptive search path over single-split param_grid "
-        "candidates.",
+        "This executes a bounded Nelder-Mead search over the provided lower/upper parameter "
+        "ranges.",
     )
     assert detail.examples[4].overrides["model"]["koopman_dimension"] == 2

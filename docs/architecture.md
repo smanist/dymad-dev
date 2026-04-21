@@ -135,10 +135,12 @@ Compilation resolves:
 - default or explicit profile
 - allowed user overrides
 - optional single-split CV sweep settings under `overrides.cv`, including:
-  - `param_grid` candidate definitions
-  - optional `search` policy (`mode="grid"` or `mode="nelder_mead_like"` plus simplex-style
-    coefficients); in current runtime `nelder_mead_like` drives a Nelder-Mead-like adaptive path
-    over numeric single-split `param_grid` candidates
+  - `param_grid` candidate definitions for grid or legacy candidate-based adaptive search
+  - optional `search` policy whose `mode` selects the CV optimizer (`grid` or
+    `nelder_mead_like`) plus optimizer-specific config such as simplex-style coefficients; in
+    current runtime `nelder_mead_like` can either run a bounded continuous search over
+    `search.bounds` lower/upper pairs or, when bounds are omitted, the legacy adaptive path over
+    numeric single-split `param_grid` candidates
   - optional `selection` policy (`goal` plus ordered tie-breakers) for deterministic best-model
     choice
 - phase overrides normalized against matching profile defaults so trainer-specific phase config is

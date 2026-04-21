@@ -39,6 +39,7 @@ CV_DEFAULT_METRIC = "total"
 CV_PARAM_GRID_VALUE_FORMS: tuple[str, ...] = ("list", "linspace_tuple", "logspace_tuple")
 CV_SEARCH_ALLOWED_KEYS: tuple[str, ...] = (
     "mode",
+    "bounds",
     "max_iterations",
     "reflection",
     "expansion",
@@ -55,12 +56,16 @@ CV_DEFAULT_SELECTION_TIE_BREAKERS: tuple[str, ...] = ("std_metric", "combo_index
 CV_NOTES: tuple[str, ...] = (
     "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
     "true k-fold cross-validation.",
+    "cv.search.mode selects the CV optimizer. Grid search operates on cv.param_grid; "
+    "Nelder-Mead-like search operates on cv.search.bounds when provided.",
     "The best parameter combination is selected by cv.selection (default: minimize mean metric, "
     "then std_metric, then combo_index).",
     "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
     "shorthand, which is normalized onto the first optimizer phase.",
-    "cv.search.mode='nelder_mead_like' runs a Nelder-Mead-like adaptive candidate path over "
-    "numeric param_grid values in single-split mode; non-numeric values fall back to grid order.",
+    "cv.search.mode='nelder_mead_like' with cv.search.bounds runs a bounded Nelder-Mead search "
+    "over lower/upper parameter ranges in single-split mode. Without bounds, it falls back to "
+    "the legacy adaptive path over numeric param_grid values; non-numeric values fall back to "
+    "grid order.",
 )
 AUTO_APPENDED_PHASES: tuple[str, ...] = (
     "analysis",
@@ -71,10 +76,12 @@ AUTO_APPENDED_PHASES: tuple[str, ...] = (
 TRANSLATION_GUIDANCE: tuple[str, ...] = (
     "For any ordered trainer names mentioned by the user, emit one overrides.phases "
     "entry per trainer in the same order.",
-    "Encode hyperparameter sweep requests as overrides.cv.param_grid, with optional "
-    "overrides.cv.metric to choose the optimization metric.",
-    "For Nelder-Mead-like requests, set overrides.cv.search.mode='nelder_mead_like' and provide "
-    "optional simplex coefficients or max_iterations in overrides.cv.search.",
+    "Encode grid-search sweep requests as overrides.cv.param_grid, with optional "
+    "overrides.cv.metric to choose the optimization metric and optional "
+    "overrides.cv.search.mode='grid' for explicitness.",
+    "For bounded Nelder-Mead requests, set overrides.cv.search.mode='nelder_mead_like' and "
+    "provide lower/upper pairs in overrides.cv.search.bounds. If bounds are omitted, the runtime "
+    "uses the legacy adaptive walk over param_grid candidates.",
     "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
     "Supported optimizer trainer names are Linear, Weak, and NODE.",
     "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
@@ -252,14 +259,14 @@ def _examples() -> tuple[TrainingCapabilityExample, ...]:
         TrainingCapabilityExample(
             name="nelder_mead_like_single_split_cv",
             user_request=(
-                "Use a Nelder-Mead-like single-split CV policy, stopping after 12 iterations "
-                "and preferring lower variance when metrics tie."
+                "Use a bounded Nelder-Mead single-split CV policy over Koopman dimensions 4 to 8, "
+                "stopping after 12 iterations and preferring lower variance when metrics tie."
             ),
             overrides={
                 "cv": {
-                    "param_grid": {"model.koopman_dimension": [4, 6, 8]},
                     "search": {
                         "mode": "nelder_mead_like",
+                        "bounds": {"model.koopman_dimension": [4, 8]},
                         "max_iterations": 12,
                         "reflection": 1.0,
                         "expansion": 2.0,
@@ -273,8 +280,8 @@ def _examples() -> tuple[TrainingCapabilityExample, ...]:
                 }
             },
             notes=(
-                "This executes a Nelder-Mead-like adaptive search path over single-split "
-                "param_grid candidates.",
+                "This executes a bounded Nelder-Mead search over the provided lower/upper "
+                "parameter ranges.",
             ),
         ),
         TrainingCapabilityExample(
