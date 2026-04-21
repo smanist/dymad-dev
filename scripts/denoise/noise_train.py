@@ -2,6 +2,7 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.stats as sps
 import torch
 
 from dymad.io import load_model
@@ -44,10 +45,8 @@ config_gau = {
 }
 
 config_noise = {
-    "noise": {
-        "kind": "gaussian",
-        "params": {"mean": 0.0, "std": 0.1},
-    }
+    "kind": "gaussian",
+    "params": {"mean": 0.0, "std": 0.1},
 }
 
 cases = [
@@ -62,9 +61,10 @@ IDX = [0]
 labels = [cases[i]["name"] for i in IDX]
 
 ifdat = 1
-iftrn = 1
-ifplt = 1
-ifprd = 1
+ifdst = 1
+iftrn = 0
+ifplt = 0
+ifprd = 0
 
 if ifdat:
     os.makedirs("./data", exist_ok=True)
@@ -72,10 +72,23 @@ if ifdat:
         f,
         g,
         config="noise_data.yaml",
-        config_mod={**config_chr, **config_noise},
+        config_mod={**config_chr, **{"noise" : config_noise}},
     )
     ts, xs, us, ys = sampler.sample(t_grid, batch=B)
     np.savez_compressed("./data/lti_denoise.npz", t=ts, x=ys, u=us)
+
+    if ifdst:
+        rv = sps.norm(loc=0, scale=0.1)
+        m, s = 0.0, 0.1
+
+        noise = (ys - xs).reshape(-1, 2).T
+        xx = np.linspace(np.min(noise), np.max(noise), 100)
+
+        f, ax = plt.subplots(nrows=2, sharex=True)
+        ax[0].hist(noise[0], bins=20, density=True)
+        ax[0].plot(xx, rv.pdf(xx))
+        ax[1].hist(noise[1], bins=20, density=True)
+        ax[0].plot(xx, rv.pdf(xx))
 
 if iftrn:
     for _i in IDX:
@@ -97,7 +110,7 @@ if ifprd:
         f,
         g,
         config="noise_data.yaml",
-        config_mod={**config_gau, **config_noise},
+        config_mod={**config_gau, **{"noise" : config_noise}},
     )
 
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
