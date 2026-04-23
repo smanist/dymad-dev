@@ -331,6 +331,142 @@ def nelder_mead_like_search_indices(
     return evaluated_order
 
 
+def _unit_point_key(point: np.ndarray) -> tuple[float, ...]:
+    clipped = np.clip(np.asarray(point, dtype=float), 0.0, 1.0)
+    return tuple(float(value) for value in np.round(clipped, decimals=12))
+
+
+def _initial_bounded_simplex(dim: int) -> list[np.ndarray]:
+    base = np.full(dim, 0.5, dtype=float)
+    simplex = [base]
+    for axis in range(dim):
+        vertex = base.copy()
+        vertex[axis] = 1.0
+        simplex.append(vertex)
+    return simplex
+
+
+def bounded_nelder_mead_search_points(
+    *,
+    lower_bounds: Sequence[float],
+    upper_bounds: Sequence[float],
+    evaluate_point: Callable[[np.ndarray], float],
+    goal: str = "minimize",
+    max_iterations: int | None = None,
+    reflection: float = 1.0,
+    expansion: float = 2.0,
+    contraction: float = 0.5,
+    shrink: float = 0.5,
+) -> list[np.ndarray]:
+    """
+    Evaluate points through a bounded Nelder-Mead search in a continuous box domain.
+
+    Returns the ordered list of unique denormalized points that were evaluated.
+    """
+    if goal not in {"minimize", "maximize"}:
+        raise ValueError("goal must be either 'minimize' or 'maximize'")
+    if max_iterations is not None and max_iterations <= 0:
+        raise ValueError("max_iterations must be a positive integer when provided")
+
+    lower = np.asarray(lower_bounds, dtype=float)
+    upper = np.asarray(upper_bounds, dtype=float)
+    if lower.ndim != 1 or upper.ndim != 1 or lower.shape != upper.shape:
+        raise ValueError("lower_bounds and upper_bounds must be 1D arrays with matching shapes")
+    if lower.size == 0:
+        return []
+    if not np.all(np.isfinite(lower)) or not np.all(np.isfinite(upper)):
+        raise ValueError("bounds must be finite")
+    if np.any(lower >= upper):
+        raise ValueError("each lower bound must be strictly less than the corresponding upper bound")
+    if not isinstance(reflection, (int, float)) or float(reflection) <= 0.0:
+        raise ValueError("reflection must be a positive number")
+    if not isinstance(expansion, (int, float)) or float(expansion) <= 1.0:
+        raise ValueError("expansion must be greater than 1")
+    if not isinstance(contraction, (int, float)) or not (0.0 < float(contraction) < 1.0):
+        raise ValueError("contraction must be in (0, 1)")
+    if not isinstance(shrink, (int, float)) or not (0.0 < float(shrink) < 1.0):
+        raise ValueError("shrink must be in (0, 1)")
+
+    span = upper - lower
+    evaluated_points: list[np.ndarray] = []
+    score_cache: dict[tuple[float, ...], float] = {}
+
+    def _objective(metric: float) -> float:
+        return metric if goal == "minimize" else -metric
+
+    def _clip_unit(point: np.ndarray) -> np.ndarray:
+        return np.clip(np.asarray(point, dtype=float), 0.0, 1.0)
+
+    def _denormalize(unit_point: np.ndarray) -> np.ndarray:
+        return lower + _clip_unit(unit_point) * span
+
+    def _ensure_score(unit_point: np.ndarray) -> float:
+        key = _unit_point_key(unit_point)
+        if key not in score_cache:
+            denormalized = _denormalize(np.asarray(key, dtype=float))
+            metric = float(evaluate_point(denormalized.copy()))
+            score_cache[key] = _objective(metric)
+            evaluated_points.append(denormalized)
+        return score_cache[key]
+
+    dim = lower.size
+    simplex = _initial_bounded_simplex(dim)
+
+    for vertex in simplex:
+        _ensure_score(vertex)
+
+    iteration_budget = max_iterations if max_iterations is not None else max(20, 8 * dim)
+    for _ in range(iteration_budget):
+        simplex = sorted(simplex, key=_ensure_score)
+        best = simplex[0]
+        worst = simplex[-1]
+        second_worst = simplex[-2] if len(simplex) > 1 else worst
+        centroid = np.mean(simplex[:-1], axis=0) if len(simplex) > 1 else best.copy()
+
+        best_score = _ensure_score(best)
+        worst_score = _ensure_score(worst)
+        second_worst_score = _ensure_score(second_worst)
+
+        reflected = _clip_unit(centroid + reflection * (centroid - worst))
+        reflected_score = _ensure_score(reflected)
+
+        if reflected_score < best_score:
+            expanded = _clip_unit(centroid + expansion * (reflected - centroid))
+            expanded_score = _ensure_score(expanded)
+            simplex[-1] = expanded if expanded_score < reflected_score else reflected
+            continue
+
+        if reflected_score < second_worst_score:
+            simplex[-1] = reflected
+            continue
+
+        if reflected_score < worst_score:
+            contracted = _clip_unit(centroid + contraction * (reflected - centroid))
+        else:
+            contracted = _clip_unit(centroid + contraction * (worst - centroid))
+        contracted_score = _ensure_score(contracted)
+        if contracted_score < min(worst_score, reflected_score):
+            simplex[-1] = contracted
+            continue
+
+        simplex = [best] + [_clip_unit(best + shrink * (vertex - best)) for vertex in simplex[1:]]
+
+    return evaluated_points
+
+
+def get_by_dotted_key(d: dict[str, Any], dotted_key: str) -> Any:
+    """
+    Read nested dict/list paths for dotted keys such as 'a.b.c' or 'phases.0.n_epochs'.
+    """
+    curr: Any = d
+    for part in dotted_key.split("."):
+        if isinstance(curr, list):
+            curr = curr[int(part)]
+        else:
+            curr = curr[part]
+    return curr
+
+
 def set_by_dotted_key(d: dict[str, Any], dotted_key: str, value: Any):
     """
     Set nested dict/list paths for dotted keys such as 'a.b.c' or 'phases.0.n_epochs'.

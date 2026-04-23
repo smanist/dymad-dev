@@ -130,21 +130,35 @@ def _first_optimizer_phase_index(phases: object) -> int:
     return 0
 
 
-def _rewrite_legacy_training_param_grid(config: dict, phase_index: int) -> None:
+def _rewrite_legacy_training_cv_paths(config: dict, phase_index: int) -> None:
     cv_cfg = config.get("cv")
     if not isinstance(cv_cfg, dict):
         return
     param_grid = cv_cfg.get("param_grid")
-    if not isinstance(param_grid, dict):
+    if isinstance(param_grid, dict):
+        rewritten = {}
+        for key, value in param_grid.items():
+            if isinstance(key, str) and key.startswith("training."):
+                suffix = key.split(".", 1)[1]
+                rewritten[f"phases.{phase_index}.{suffix}"] = value
+            else:
+                rewritten[key] = value
+        cv_cfg["param_grid"] = rewritten
+
+    search_cfg = cv_cfg.get("search")
+    if not isinstance(search_cfg, dict):
         return
-    rewritten = {}
-    for key, value in param_grid.items():
+    bounds = search_cfg.get("bounds")
+    if not isinstance(bounds, dict):
+        return
+    rewritten_bounds = {}
+    for key, value in bounds.items():
         if isinstance(key, str) and key.startswith("training."):
             suffix = key.split(".", 1)[1]
-            rewritten[f"phases.{phase_index}.{suffix}"] = value
+            rewritten_bounds[f"phases.{phase_index}.{suffix}"] = value
         else:
-            rewritten[key] = value
-    cv_cfg["param_grid"] = rewritten
+            rewritten_bounds[key] = value
+    search_cfg["bounds"] = rewritten_bounds
 
 
 def _normalize_legacy_training_config(config: dict) -> None:
@@ -160,7 +174,7 @@ def _normalize_legacy_training_config(config: dict) -> None:
                 merged_phase.update(copy.deepcopy(training_cfg))
                 merged_phase.setdefault("type", "optimizer")
                 phases[index] = merged_phase
-                _rewrite_legacy_training_param_grid(config, index)
+                _rewrite_legacy_training_cv_paths(config, index)
                 merged = True
                 break
             if not merged:
@@ -172,12 +186,12 @@ def _normalize_legacy_training_config(config: dict) -> None:
                         trainer="NODE",
                     ),
                 )
-                _rewrite_legacy_training_param_grid(config, 0)
+                _rewrite_legacy_training_cv_paths(config, 0)
         else:
             config["phases"] = [
                 _normalized_legacy_training_phase(training_cfg, name="phase_0", trainer="NODE")
             ]
-            _rewrite_legacy_training_param_grid(config, 0)
+            _rewrite_legacy_training_cv_paths(config, 0)
         del config["training"]
     else:
-        _rewrite_legacy_training_param_grid(config, _first_optimizer_phase_index(phases))
+        _rewrite_legacy_training_cv_paths(config, _first_optimizer_phase_index(phases))

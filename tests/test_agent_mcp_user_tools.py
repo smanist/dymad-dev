@@ -90,13 +90,16 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
     )
     assert (
         detail["data"]["detail"]["translation_guidance"][1]
-        == "Encode hyperparameter sweep requests as overrides.cv.param_grid, with optional "
-        "overrides.cv.metric to choose the optimization metric."
+        == "Encode grid-search sweep requests as overrides.cv.param_grid, with optional "
+        "overrides.cv.metric to choose the optimization metric and optional "
+        "overrides.cv.search.mode='grid' for explicitness."
     )
     assert (
         detail["data"]["detail"]["translation_guidance"][2]
-        == "For Nelder-Mead-like requests, set overrides.cv.search.mode='nelder_mead_like' "
-        "and provide optional simplex coefficients or max_iterations in overrides.cv.search."
+        == "For bounded Nelder-Mead requests, set overrides.cv.search.mode='nelder_mead_like' "
+        "and provide lower/upper bounds in overrides.cv.search.bounds, optionally adding "
+        "parity='odd' or 'even' for integer-valued fields. If bounds are omitted, the runtime "
+        "uses the legacy adaptive walk over param_grid candidates."
     )
     assert (
         detail["data"]["detail"]["translation_guidance"][3]
@@ -115,6 +118,7 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
         "search_schema": {
             "allowed_keys": [
                 "mode",
+                "bounds",
                 "max_iterations",
                 "reflection",
                 "expansion",
@@ -134,13 +138,17 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
         "notes": [
             "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is "
             "not true k-fold cross-validation.",
+            "cv.search.mode selects the CV optimizer. Grid search operates on cv.param_grid; "
+            "Nelder-Mead-like search operates on cv.search.bounds when provided.",
             "The best parameter combination is selected by cv.selection (default: minimize mean "
             "metric, then std_metric, then combo_index).",
             "Param-grid dotted keys may target either explicit phases.* paths or legacy "
             "training.* shorthand, which is normalized onto the first optimizer phase.",
-            "cv.search.mode='nelder_mead_like' runs a Nelder-Mead-like adaptive candidate "
-            "path over numeric param_grid values in single-split mode; non-numeric values "
-            "fall back to grid order.",
+            "cv.search.mode='nelder_mead_like' with cv.search.bounds runs a bounded "
+            "Nelder-Mead search over lower/upper parameter ranges in single-split mode; "
+            "integer-valued bounds may also specify parity='odd' or 'even'. Without bounds, "
+            "it falls back to the legacy adaptive path over numeric param_grid values; "
+            "non-numeric values fall back to grid order.",
         ],
     }
     assert (
@@ -194,13 +202,21 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
     }
     assert detail["data"]["detail"]["examples"][3] == {
         "name": "nelder_mead_like_single_split_cv",
-        "user_request": "Use a Nelder-Mead-like single-split CV policy, stopping after 12 "
-        "iterations and preferring lower variance when metrics tie.",
+        "user_request": "Use a bounded Nelder-Mead single-split CV policy over Koopman "
+        "dimensions 4 to 8, stopping after 12 iterations and preferring lower variance "
+        "when metrics tie.",
         "overrides": {
             "cv": {
-                "param_grid": {"model.koopman_dimension": [4, 6, 8]},
                 "search": {
                     "mode": "nelder_mead_like",
+                    "bounds": {
+                        "model.koopman_dimension": [4, 8],
+                        "training.weak_form_params.N": {
+                            "lower": 9,
+                            "upper": 17,
+                            "parity": "odd",
+                        },
+                    },
                     "max_iterations": 12,
                     "reflection": 1.0,
                     "expansion": 2.0,
@@ -214,8 +230,8 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
             }
         },
         "notes": [
-            "This executes a Nelder-Mead-like adaptive search path over single-split "
-            "param_grid candidates."
+            "This executes a bounded Nelder-Mead search over the provided lower/upper "
+            "parameter ranges."
         ],
     }
     assert evaluation["data"]["capabilities"][0]["supported_metrics"] == ["rollout_rmse"]

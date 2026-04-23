@@ -182,6 +182,114 @@ def test_compile_training_request_accepts_nelder_mead_like_cv_metadata(tmp_path)
     assert compiled.effective_config["cv"]["selection"]["goal"] == "minimize"
 
 
+def test_compile_training_request_accepts_explicit_grid_cv_metadata(tmp_path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={
+                "cv": {
+                    "param_grid": {"model.koopman_dimension": [4, 6, 8]},
+                    "search": {"mode": "grid"},
+                }
+            },
+        ),
+    )
+
+    assert compiled.request.overrides == {
+        "cv": {
+            "param_grid": {"model.koopman_dimension": [4, 6, 8]},
+            "search": {"mode": "grid"},
+        }
+    }
+    assert compiled.effective_config["cv"]["param_grid"] == {
+        "model.koopman_dimension": [4, 6, 8]
+    }
+    assert compiled.effective_config["cv"]["search"]["mode"] == "grid"
+
+
+def test_compile_training_request_accepts_bounded_nelder_mead_cv_metadata(tmp_path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={
+                "cv": {
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "bounds": {"model.koopman_dimension": [4, 8]},
+                        "max_iterations": 8,
+                    }
+                }
+            },
+        ),
+    )
+
+    assert compiled.request.overrides == {
+        "cv": {
+            "search": {
+                "mode": "nelder_mead_like",
+                "bounds": {"model.koopman_dimension": [4, 8]},
+                "max_iterations": 8,
+            }
+        }
+    }
+    assert compiled.effective_config["cv"]["search"]["mode"] == "nelder_mead_like"
+    assert compiled.effective_config["cv"]["search"]["bounds"] == {
+        "model.koopman_dimension": [4, 8]
+    }
+
+
+def test_compile_training_request_accepts_parity_constrained_bounded_nelder_mead_cv_metadata(
+    tmp_path,
+) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={
+                "cv": {
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "bounds": {
+                            "model.koopman_dimension": [4, 8],
+                            "training.weak_form_params.N": {
+                                "lower": 9,
+                                "upper": 17,
+                                "parity": "odd",
+                            },
+                        },
+                        "max_iterations": 8,
+                    }
+                }
+            },
+        ),
+    )
+
+    assert compiled.effective_config["cv"]["search"]["bounds"] == {
+        "model.koopman_dimension": [4, 8],
+        "phases.0.weak_form_params.N": {"lower": 9, "upper": 17, "parity": "odd"},
+    }
+
+
 def test_compile_training_request_normalizes_json_string_cv_range_overrides(tmp_path) -> None:
     context = build_default_context(artifact_root=tmp_path / "artifacts")
     dataset_path = tmp_path / "train.npz"
@@ -283,11 +391,73 @@ def test_compile_training_request_rewrites_legacy_training_param_grid_paths(tmp_
     assert compiled.effective_config["cv"]["param_grid"] == {"phases.0.learning_rate": [0.1, 0.2]}
 
 
+def test_compile_training_request_rewrites_legacy_training_search_bounds_paths(tmp_path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={
+                "cv": {
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "bounds": {"training.learning_rate": [0.1, 0.2]},
+                    }
+                }
+            },
+        ),
+    )
+
+    assert compiled.effective_config["cv"]["search"]["bounds"] == {
+        "phases.0.learning_rate": [0.1, 0.2]
+    }
+
+
+def test_compile_training_request_rewrites_legacy_training_search_bounds_paths_with_parity(
+    tmp_path,
+) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={
+                "cv": {
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "bounds": {
+                            "training.weak_form_params.N": {
+                                "lower": 9,
+                                "upper": 17,
+                                "parity": "odd",
+                            }
+                        },
+                    }
+                }
+            },
+        ),
+    )
+
+    assert compiled.effective_config["cv"]["search"]["bounds"] == {
+        "phases.0.weak_form_params.N": {"lower": 9, "upper": 17, "parity": "odd"}
+    }
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected_field_path"),
     [
         ({"cv": []}, ("overrides", "cv")),
-        ({"cv": {"metric": "total"}}, ("overrides", "cv", "param_grid")),
+        ({"cv": {"metric": "total"}}, ("overrides", "cv")),
         ({"cv": {"param_grid": {}}}, ("overrides", "cv", "param_grid")),
         (
             {"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}, "metric": 1}},
@@ -313,6 +483,46 @@ def test_compile_training_request_rewrites_legacy_training_param_grid_paths(tmp_
         (
             {"cv": {"param_grid": {"model.koopman_dimension": [4, 6]}, "search": []}},
             ("overrides", "cv", "search"),
+        ),
+        (
+            {
+                "cv": {
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "bounds": {"model.koopman_dimension": [8, 4]},
+                    }
+                }
+            },
+            ("overrides", "cv", "search", "bounds", "model.koopman_dimension"),
+        ),
+        (
+            {
+                "cv": {
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "bounds": {
+                            "model.koopman_dimension": {
+                                "lower": 4,
+                                "upper": 8,
+                                "parity": "prime",
+                            }
+                        },
+                    }
+                }
+            },
+            ("overrides", "cv", "search", "bounds", "model.koopman_dimension", "parity"),
+        ),
+        (
+            {
+                "cv": {
+                    "param_grid": {"model.koopman_dimension": [4, 6]},
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "bounds": {"model.koopman_dimension": [4, 8]},
+                    },
+                }
+            },
+            ("overrides", "cv"),
         ),
         (
             {

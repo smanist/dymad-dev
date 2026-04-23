@@ -1,0 +1,64 @@
+data:
+  path: './data/lti.npz'
+  n_samples: 128
+  n_steps: 501
+  double_precision: false
+
+transform_x:
+  type: "identity"
+
+transform_u:
+  type: "identity"
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 64
+
+model:
+  name: 'lti_kbf_nm'
+  encoder_layers: 1
+  decoder_layers: 1
+  hidden_dimension: 32
+  koopman_dimension: 4
+  const_term: true
+  activation: "none"
+  weight_init: "xavier_uniform"
+  input_order: "cubic"
+
+criterion:
+  dynamics:
+    weight: 1.0
+  recon:
+    weight: 1.0
+
+training:
+  n_epochs: 300
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 5e-3
+  weak_form_params:
+    N: 13
+    dN: 2
+    ordpol: 2
+    ordint: 2
+
+cv:
+  metric: "total"
+  search:
+    mode: "nelder_mead_like"
+    bounds:
+      model.koopman_dimension: [3, 6]
+      phases.0.weak_form_params.N:
+        lower: 9
+        upper: 17
+        parity: "odd"
+    max_iterations: 12
+    reflection: 1.0
+    expansion: 2.0
+    contraction: 0.5
+    shrink: 0.5
+  selection:
+    goal: "minimize"
+    tie_breakers: ["std_metric", "combo_index"]

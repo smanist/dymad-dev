@@ -575,9 +575,19 @@ def _collect_cv_results(cv_file, keys):
     metric_name = tmp["metric_name"]
     best_idx = tmp["best_idx"]
 
+    _keys = []
+    for _k in keys:
+        if _k.startswith("training"):
+            # Legacy key update
+            _ss = _k.split(".")
+            _ss[0] = "phases.0"
+            _keys.append(".".join(_ss))
+        else:
+            _keys.append(_k)
+
     params, metrics = [], []
     for res in cv_res:
-        params.append([res.params[k] for k in keys])
+        params.append([res.params[k] for k in _keys])
         metrics.append([res.mean_metric, res.std_metric])
 
     return np.array(params), np.array(metrics), metric_name, best_idx

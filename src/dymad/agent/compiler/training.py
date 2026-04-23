@@ -128,6 +128,59 @@ def _normalize_param_grid_value(
     )
 
 
+def _normalize_cv_search_bound_value(value: object, *, key: str) -> list[Any] | dict[str, Any]:
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        lower, upper = value
+        if not isinstance(lower, (int, float)) or not isinstance(upper, (int, float)):
+            _raise_invalid(
+                "overrides.cv.search.bounds values must be numeric lower/upper pairs",
+                field_path=("overrides", "cv", "search", "bounds", key),
+            )
+        if float(lower) >= float(upper):
+            _raise_invalid(
+                "overrides.cv.search.bounds values must satisfy lower < upper",
+                field_path=("overrides", "cv", "search", "bounds", key),
+            )
+        return [lower, upper]
+
+    if isinstance(value, dict):
+        unknown_keys = sorted(item for item in value if item not in {"lower", "upper", "parity"})
+        if unknown_keys:
+            invalid_key = unknown_keys[0]
+            _raise_invalid(
+                f"overrides.cv.search.bounds.{key}.{invalid_key} is not supported",
+                field_path=("overrides", "cv", "search", "bounds", key, invalid_key),
+            )
+        lower = value.get("lower")
+        upper = value.get("upper")
+        if not isinstance(lower, (int, float)) or not isinstance(upper, (int, float)):
+            _raise_invalid(
+                "overrides.cv.search.bounds values must define numeric lower and upper fields",
+                field_path=("overrides", "cv", "search", "bounds", key),
+            )
+        if float(lower) >= float(upper):
+            _raise_invalid(
+                "overrides.cv.search.bounds values must satisfy lower < upper",
+                field_path=("overrides", "cv", "search", "bounds", key),
+            )
+        parity = value.get("parity")
+        if parity is not None and (not isinstance(parity, str) or parity not in {"odd", "even"}):
+            _raise_invalid(
+                "overrides.cv.search.bounds parity must be 'odd' or 'even' when provided",
+                field_path=("overrides", "cv", "search", "bounds", key, "parity"),
+            )
+        normalized: dict[str, Any] = {"lower": lower, "upper": upper}
+        if parity is not None:
+            normalized["parity"] = parity
+        return normalized
+
+    _raise_invalid(
+        "overrides.cv.search.bounds values must be [lower, upper] pairs or mappings with "
+        "lower/upper and optional parity",
+        field_path=("overrides", "cv", "search", "bounds", key),
+    )
+
+
 def _validate_cv_search_config(search_config: object) -> None:
     if not isinstance(search_config, dict):
         _raise_invalid(
@@ -152,6 +205,27 @@ def _validate_cv_search_config(search_config: object) -> None:
             f"overrides.cv.search.mode must be one of {CV_SEARCH_MODE_OPTIONS}",
             field_path=("overrides", "cv", "search", "mode"),
         )
+
+    bounds = search_mapping.get("bounds")
+    if bounds is not None:
+        if search_mapping["mode"] != "nelder_mead_like":
+            _raise_invalid(
+                "overrides.cv.search.bounds requires overrides.cv.search.mode='nelder_mead_like'",
+                field_path=("overrides", "cv", "search", "bounds"),
+            )
+        if not isinstance(bounds, dict) or not bounds:
+            _raise_invalid(
+                "overrides.cv.search.bounds must be a non-empty mapping",
+                field_path=("overrides", "cv", "search", "bounds"),
+            )
+        for key, value in bounds.items():
+            if not _is_non_empty_dotted_key(key):
+                _raise_invalid(
+                    "overrides.cv.search.bounds keys must be non-empty dotted config paths",
+                    field_path=("overrides", "cv", "search", "bounds"),
+                )
+            _validate_override_path(tuple(key.split(".")))
+            bounds[key] = _normalize_cv_search_bound_value(value, key=key)
 
     max_iterations = search_mapping.get("max_iterations")
     if max_iterations is not None:
@@ -276,22 +350,6 @@ def _validate_cv_config(cv_config: object) -> None:
             field_path=("overrides", "cv", invalid_key),
         )
 
-    param_grid = cv_mapping.get("param_grid")
-    if not isinstance(param_grid, dict) or not param_grid:
-        _raise_invalid(
-            "overrides.cv.param_grid must be a non-empty mapping",
-            field_path=("overrides", "cv", "param_grid"),
-        )
-    param_grid_mapping = cast(dict[str, Any], param_grid)
-    for key, value in param_grid_mapping.items():
-        if not _is_non_empty_dotted_key(key):
-            _raise_invalid(
-                "overrides.cv.param_grid keys must be non-empty dotted config paths",
-                field_path=("overrides", "cv", "param_grid"),
-            )
-        _validate_override_path(tuple(key.split(".")))
-        param_grid_mapping[key] = _normalize_param_grid_value(value, key=key)
-
     metric = cv_mapping.get("metric")
     if metric is not None and not isinstance(metric, str):
         _raise_invalid(
@@ -302,6 +360,36 @@ def _validate_cv_config(cv_config: object) -> None:
     search = cv_mapping.get("search")
     if search is not None:
         _validate_cv_search_config(search)
+    search_mapping = cast(dict[str, Any], search) if isinstance(search, dict) else None
+
+    param_grid = cv_mapping.get("param_grid")
+    if param_grid is not None:
+        if not isinstance(param_grid, dict) or not param_grid:
+            _raise_invalid(
+                "overrides.cv.param_grid must be a non-empty mapping",
+                field_path=("overrides", "cv", "param_grid"),
+            )
+        param_grid_mapping = cast(dict[str, Any], param_grid)
+        for key, value in param_grid_mapping.items():
+            if not _is_non_empty_dotted_key(key):
+                _raise_invalid(
+                    "overrides.cv.param_grid keys must be non-empty dotted config paths",
+                    field_path=("overrides", "cv", "param_grid"),
+                )
+            _validate_override_path(tuple(key.split(".")))
+            param_grid_mapping[key] = _normalize_param_grid_value(value, key=key)
+
+    has_bounds = bool(search_mapping and isinstance(search_mapping.get("bounds"), dict))
+    if param_grid is None and not has_bounds:
+        _raise_invalid(
+            "overrides.cv must provide either cv.param_grid or cv.search.bounds",
+            field_path=("overrides", "cv"),
+        )
+    if param_grid is not None and has_bounds:
+        _raise_invalid(
+            "overrides.cv cannot combine cv.param_grid with cv.search.bounds",
+            field_path=("overrides", "cv"),
+        )
 
     selection = cv_mapping.get("selection")
     if selection is not None:
