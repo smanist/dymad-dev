@@ -955,7 +955,10 @@ cv:
     mode: nelder_mead_like
     bounds:
       model.koopman_dimension: [0, 4]
-      training.weak_form_params.N: [9, 17]
+      training.weak_form_params.N:
+        lower: 9
+        upper: 17
+        parity: odd
     max_iterations: 6
 """.strip(),
         encoding="utf-8",
@@ -1010,7 +1013,7 @@ cv:
     assert all_results
     assert evaluated_params
     assert all(0 <= koopman_dimension <= 4 for koopman_dimension, _ in evaluated_params)
-    assert all(9 <= weak_n <= 17 for _, weak_n in evaluated_params)
+    assert all(9 <= weak_n <= 17 and weak_n % 2 == 1 for _, weak_n in evaluated_params)
     assert best_result.params["model.koopman_dimension"] == 2
     assert best_result.params["phases.0.weak_form_params.N"] == 11
 

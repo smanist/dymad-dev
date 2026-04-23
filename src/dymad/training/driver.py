@@ -35,6 +35,15 @@ class CVSearchRunResult:
     selection_combo_indices: list[int] | None = None
 
 
+@dataclass
+class CVSearchBoundSpec:
+    key: str
+    lower: float
+    upper: float
+    value_kind: str
+    parity: str | None = None
+
+
 CVSearchHandler = Callable[..., CVSearchRunResult]
 
 
@@ -536,8 +545,8 @@ class DriverBase:
             return bounded_combo_results[combo_key].mean_metric
 
         bounded_nelder_mead_search_points(
-            lower_bounds=[spec[1] for spec in self.cv_search_bound_specs],
-            upper_bounds=[spec[2] for spec in self.cv_search_bound_specs],
+            lower_bounds=[spec.lower for spec in self.cv_search_bound_specs],
+            upper_bounds=[spec.upper for spec in self.cv_search_bound_specs],
             evaluate_point=_evaluate_point,
             goal=self.cv_selection_goal,
             max_iterations=self.cv_search_max_iterations,
@@ -610,19 +619,32 @@ class DriverBase:
             selection_combo_indices=[index + combo_offset for index in evaluated_indices],
         )
 
-    def _build_cv_search_bound_specs(self) -> list[tuple[str, float, float, str]]:
+    def _build_cv_search_bound_specs(self) -> list[CVSearchBoundSpec]:
         if self.cv_search_bounds is None:
             return []
 
-        specs: list[tuple[str, float, float, str]] = []
+        specs: list[CVSearchBoundSpec] = []
         for key, bounds in self.cv_search_bounds.items():
             if not isinstance(key, str) or not key:
                 raise TypeError("cv.search.bounds keys must be non-empty dotted config paths.")
-            if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+            parity: str | None = None
+            if isinstance(bounds, dict):
+                lower = bounds.get("lower")
+                upper = bounds.get("upper")
+                parity_value = bounds.get("parity")
+                if parity_value is not None:
+                    if not isinstance(parity_value, str) or parity_value not in {"odd", "even"}:
+                        raise TypeError(
+                            f"cv.search.bounds[{key!r}].parity must be 'odd' or 'even'."
+                        )
+                    parity = parity_value
+            elif isinstance(bounds, (list, tuple)) and len(bounds) == 2:
+                lower, upper = bounds
+            else:
                 raise TypeError(
-                    f"cv.search.bounds[{key!r}] must be a two-item [lower, upper] sequence."
+                    f"cv.search.bounds[{key!r}] must be [lower, upper] or a mapping with "
+                    "lower/upper and optional parity."
                 )
-            lower, upper = bounds
             if not isinstance(lower, (int, float)) or not isinstance(upper, (int, float)):
                 raise TypeError(f"cv.search.bounds[{key!r}] values must be numeric.")
             lower_float = float(lower)
@@ -643,15 +665,38 @@ class DriverBase:
             if isinstance(current_value, (int, np.integer)):
                 lower_int = int(np.ceil(lower_float))
                 upper_int = int(np.floor(upper_float))
+                if parity is not None:
+                    lower_int = self._adjust_to_parity(lower_int, parity=parity, direction="up")
+                    upper_int = self._adjust_to_parity(upper_int, parity=parity, direction="down")
                 if lower_int > upper_int:
                     raise TypeError(
-                        f"cv.search.bounds[{key!r}] contains no integer values in "
-                        f"[{lower_float}, {upper_float}]."
+                        f"cv.search.bounds[{key!r}] contains no valid integer values in "
+                        f"[{lower_float}, {upper_float}] for parity={parity!r}."
                     )
-                specs.append((key, lower_float, upper_float, "int"))
+                specs.append(
+                    CVSearchBoundSpec(
+                        key=key,
+                        lower=float(lower_int),
+                        upper=float(upper_int),
+                        value_kind="int",
+                        parity=parity,
+                    )
+                )
                 continue
             if isinstance(current_value, (float, np.floating)):
-                specs.append((key, lower_float, upper_float, "float"))
+                if parity is not None:
+                    raise TypeError(
+                        f"cv.search.bounds[{key!r}] parity is only supported for integer-valued "
+                        "config fields."
+                    )
+                specs.append(
+                    CVSearchBoundSpec(
+                        key=key,
+                        lower=lower_float,
+                        upper=upper_float,
+                        value_kind="float",
+                    )
+                )
                 continue
             raise TypeError(
                 f"cv.search.bounds[{key!r}] must target an integer or floating-point config value."
@@ -660,19 +705,45 @@ class DriverBase:
 
     def _bounded_search_combo(self, point: np.ndarray) -> dict[str, Any]:
         combo: dict[str, Any] = {}
-        for value, (key, lower, upper, value_kind) in zip(
+        for value, spec in zip(
             np.asarray(point, dtype=float),
             self.cv_search_bound_specs,
             strict=False,
         ):
-            clipped = float(np.clip(value, lower, upper))
-            if value_kind == "int":
-                lower_int = int(np.ceil(lower))
-                upper_int = int(np.floor(upper))
-                combo[key] = int(np.clip(int(round(clipped)), lower_int, upper_int))
+            clipped = float(np.clip(value, spec.lower, spec.upper))
+            if spec.value_kind == "int":
+                lower_int = int(np.ceil(spec.lower))
+                upper_int = int(np.floor(spec.upper))
+                candidate = int(np.clip(int(round(clipped)), lower_int, upper_int))
+                if spec.parity is not None and candidate % 2 != (1 if spec.parity == "odd" else 0):
+                    lower_candidate = candidate - 1
+                    upper_candidate = candidate + 1
+                    valid_candidates = [
+                        value
+                        for value in (lower_candidate, upper_candidate)
+                        if lower_int <= value <= upper_int
+                        and value % 2 == (1 if spec.parity == "odd" else 0)
+                    ]
+                    if not valid_candidates:
+                        raise RuntimeError(
+                            f"No valid parity-constrained integer candidates for {spec.key}."
+                        )
+                    candidate = min(valid_candidates, key=lambda current: abs(current - clipped))
+                combo[spec.key] = candidate
             else:
-                combo[key] = float(np.clip(clipped, lower, upper))
+                combo[spec.key] = float(np.clip(clipped, spec.lower, spec.upper))
         return combo
+
+    @staticmethod
+    def _adjust_to_parity(value: int, *, parity: str, direction: str) -> int:
+        want_mod = 1 if parity == "odd" else 0
+        if value % 2 == want_mod:
+            return value
+        if direction == "up":
+            return value + 1
+        if direction == "down":
+            return value - 1
+        raise ValueError(f"Unsupported direction {direction!r}.")
 
     @staticmethod
     def _combo_key(combo: dict[str, Any]) -> tuple[tuple[str, Any], ...]:

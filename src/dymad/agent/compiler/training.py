@@ -128,6 +128,59 @@ def _normalize_param_grid_value(
     )
 
 
+def _normalize_cv_search_bound_value(value: object, *, key: str) -> list[Any] | dict[str, Any]:
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        lower, upper = value
+        if not isinstance(lower, (int, float)) or not isinstance(upper, (int, float)):
+            _raise_invalid(
+                "overrides.cv.search.bounds values must be numeric lower/upper pairs",
+                field_path=("overrides", "cv", "search", "bounds", key),
+            )
+        if float(lower) >= float(upper):
+            _raise_invalid(
+                "overrides.cv.search.bounds values must satisfy lower < upper",
+                field_path=("overrides", "cv", "search", "bounds", key),
+            )
+        return [lower, upper]
+
+    if isinstance(value, dict):
+        unknown_keys = sorted(item for item in value if item not in {"lower", "upper", "parity"})
+        if unknown_keys:
+            invalid_key = unknown_keys[0]
+            _raise_invalid(
+                f"overrides.cv.search.bounds.{key}.{invalid_key} is not supported",
+                field_path=("overrides", "cv", "search", "bounds", key, invalid_key),
+            )
+        lower = value.get("lower")
+        upper = value.get("upper")
+        if not isinstance(lower, (int, float)) or not isinstance(upper, (int, float)):
+            _raise_invalid(
+                "overrides.cv.search.bounds values must define numeric lower and upper fields",
+                field_path=("overrides", "cv", "search", "bounds", key),
+            )
+        if float(lower) >= float(upper):
+            _raise_invalid(
+                "overrides.cv.search.bounds values must satisfy lower < upper",
+                field_path=("overrides", "cv", "search", "bounds", key),
+            )
+        parity = value.get("parity")
+        if parity is not None and (not isinstance(parity, str) or parity not in {"odd", "even"}):
+            _raise_invalid(
+                "overrides.cv.search.bounds parity must be 'odd' or 'even' when provided",
+                field_path=("overrides", "cv", "search", "bounds", key, "parity"),
+            )
+        normalized: dict[str, Any] = {"lower": lower, "upper": upper}
+        if parity is not None:
+            normalized["parity"] = parity
+        return normalized
+
+    _raise_invalid(
+        "overrides.cv.search.bounds values must be [lower, upper] pairs or mappings with "
+        "lower/upper and optional parity",
+        field_path=("overrides", "cv", "search", "bounds", key),
+    )
+
+
 def _validate_cv_search_config(search_config: object) -> None:
     if not isinstance(search_config, dict):
         _raise_invalid(
@@ -172,23 +225,7 @@ def _validate_cv_search_config(search_config: object) -> None:
                     field_path=("overrides", "cv", "search", "bounds"),
                 )
             _validate_override_path(tuple(key.split(".")))
-            if not isinstance(value, (list, tuple)) or len(value) != 2:
-                _raise_invalid(
-                    "overrides.cv.search.bounds values must be [lower, upper] pairs",
-                    field_path=("overrides", "cv", "search", "bounds", key),
-                )
-            lower, upper = value
-            if not isinstance(lower, (int, float)) or not isinstance(upper, (int, float)):
-                _raise_invalid(
-                    "overrides.cv.search.bounds values must be numeric lower/upper pairs",
-                    field_path=("overrides", "cv", "search", "bounds", key),
-                )
-            if float(lower) >= float(upper):
-                _raise_invalid(
-                    "overrides.cv.search.bounds values must satisfy lower < upper",
-                    field_path=("overrides", "cv", "search", "bounds", key),
-                )
-            bounds[key] = [lower, upper]
+            bounds[key] = _normalize_cv_search_bound_value(value, key=key)
 
     max_iterations = search_mapping.get("max_iterations")
     if max_iterations is not None:

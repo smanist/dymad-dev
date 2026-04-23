@@ -252,6 +252,44 @@ def test_compile_training_request_accepts_bounded_nelder_mead_cv_metadata(tmp_pa
     }
 
 
+def test_compile_training_request_accepts_parity_constrained_bounded_nelder_mead_cv_metadata(
+    tmp_path,
+) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={
+                "cv": {
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "bounds": {
+                            "model.koopman_dimension": [4, 8],
+                            "training.weak_form_params.N": {
+                                "lower": 9,
+                                "upper": 17,
+                                "parity": "odd",
+                            },
+                        },
+                        "max_iterations": 8,
+                    }
+                }
+            },
+        ),
+    )
+
+    assert compiled.effective_config["cv"]["search"]["bounds"] == {
+        "model.koopman_dimension": [4, 8],
+        "phases.0.weak_form_params.N": {"lower": 9, "upper": 17, "parity": "odd"},
+    }
+
+
 def test_compile_training_request_normalizes_json_string_cv_range_overrides(tmp_path) -> None:
     context = build_default_context(artifact_root=tmp_path / "artifacts")
     dataset_path = tmp_path / "train.npz"
@@ -380,6 +418,41 @@ def test_compile_training_request_rewrites_legacy_training_search_bounds_paths(t
     }
 
 
+def test_compile_training_request_rewrites_legacy_training_search_bounds_paths_with_parity(
+    tmp_path,
+) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={
+                "cv": {
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "bounds": {
+                            "training.weak_form_params.N": {
+                                "lower": 9,
+                                "upper": 17,
+                                "parity": "odd",
+                            }
+                        },
+                    }
+                }
+            },
+        ),
+    )
+
+    assert compiled.effective_config["cv"]["search"]["bounds"] == {
+        "phases.0.weak_form_params.N": {"lower": 9, "upper": 17, "parity": "odd"}
+    }
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected_field_path"),
     [
@@ -421,6 +494,23 @@ def test_compile_training_request_rewrites_legacy_training_search_bounds_paths(t
                 }
             },
             ("overrides", "cv", "search", "bounds", "model.koopman_dimension"),
+        ),
+        (
+            {
+                "cv": {
+                    "search": {
+                        "mode": "nelder_mead_like",
+                        "bounds": {
+                            "model.koopman_dimension": {
+                                "lower": 4,
+                                "upper": 8,
+                                "parity": "prime",
+                            }
+                        },
+                    }
+                }
+            },
+            ("overrides", "cv", "search", "bounds", "model.koopman_dimension", "parity"),
         ),
         (
             {

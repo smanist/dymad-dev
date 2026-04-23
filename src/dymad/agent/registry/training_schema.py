@@ -63,9 +63,9 @@ CV_NOTES: tuple[str, ...] = (
     "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
     "shorthand, which is normalized onto the first optimizer phase.",
     "cv.search.mode='nelder_mead_like' with cv.search.bounds runs a bounded Nelder-Mead search "
-    "over lower/upper parameter ranges in single-split mode. Without bounds, it falls back to "
-    "the legacy adaptive path over numeric param_grid values; non-numeric values fall back to "
-    "grid order.",
+    "over lower/upper parameter ranges in single-split mode; integer-valued bounds may also "
+    "specify parity='odd' or 'even'. Without bounds, it falls back to the legacy adaptive path "
+    "over numeric param_grid values; non-numeric values fall back to grid order.",
 )
 AUTO_APPENDED_PHASES: tuple[str, ...] = (
     "analysis",
@@ -80,8 +80,9 @@ TRANSLATION_GUIDANCE: tuple[str, ...] = (
     "overrides.cv.metric to choose the optimization metric and optional "
     "overrides.cv.search.mode='grid' for explicitness.",
     "For bounded Nelder-Mead requests, set overrides.cv.search.mode='nelder_mead_like' and "
-    "provide lower/upper pairs in overrides.cv.search.bounds. If bounds are omitted, the runtime "
-    "uses the legacy adaptive walk over param_grid candidates.",
+    "provide lower/upper bounds in overrides.cv.search.bounds, optionally adding parity='odd' "
+    "or 'even' for integer-valued fields. If bounds are omitted, the runtime uses the legacy "
+    "adaptive walk over param_grid candidates.",
     "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
     "Supported optimizer trainer names are Linear, Weak, and NODE.",
     "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
@@ -266,7 +267,14 @@ def _examples() -> tuple[TrainingCapabilityExample, ...]:
                 "cv": {
                     "search": {
                         "mode": "nelder_mead_like",
-                        "bounds": {"model.koopman_dimension": [4, 8]},
+                        "bounds": {
+                            "model.koopman_dimension": [4, 8],
+                            "training.weak_form_params.N": {
+                                "lower": 9,
+                                "upper": 17,
+                                "parity": "odd",
+                            },
+                        },
                         "max_iterations": 12,
                         "reflection": 1.0,
                         "expansion": 2.0,
