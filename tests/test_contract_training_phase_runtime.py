@@ -1084,6 +1084,88 @@ cv:
     assert best_result.params["model.koopman_dimension"] == 3
 
 
+@pytest.mark.parametrize(
+    ("config_text", "expected_error", "expected_match"),
+    [
+        (
+            """
+model:
+  name: demo
+phases:
+  - trainer: Linear
+    learning_rate: 0.1
+cv:
+  search:
+    mode: nelder_mead_like
+    bounds:
+      phases.0.learning_rate:
+        lower: 0.01
+        upper: 0.2
+        parity: odd
+""".strip(),
+            TypeError,
+            "parity is only supported for integer-valued config fields",
+        ),
+        (
+            """
+model:
+  name: demo
+phases:
+  - trainer: Linear
+cv:
+  search:
+    mode: nelder_mead_like
+    bounds:
+      model.name: [0, 4]
+""".strip(),
+            TypeError,
+            "must target an integer or floating-point config value",
+        ),
+        (
+            """
+model:
+  name: demo
+phases:
+  - trainer: Linear
+cv:
+  search:
+    mode: nelder_mead_like
+    bounds:
+      model.missing_dimension: [0, 4]
+""".strip(),
+            TypeError,
+            "does not resolve in the config",
+        ),
+    ],
+)
+def test_single_split_driver_rejects_invalid_bounded_nelder_mead_yaml_configs(
+    monkeypatch, tmp_path, config_text, expected_error, expected_match
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(config_text, encoding="utf-8")
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+    monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+
+    with pytest.raises(expected_error, match=expected_match):
+        driver.SingleSplitDriver(
+            config_path=str(config_path),
+            model_class=torch.nn.Module,
+            device=torch.device("cpu"),
+        )
+
+
 def test_single_split_driver_train_uses_grid_combo_index_for_tie_breaker(
     monkeypatch, tmp_path
 ) -> None:
