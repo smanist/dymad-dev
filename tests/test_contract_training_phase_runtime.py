@@ -428,6 +428,60 @@ def test_smoothing_data_phase_logs_train_valid_table(caplog):
     assert "num_elements" not in caplog.text
 
 
+def test_smoothing_data_phase_smooths_each_regular_series_independently():
+    train_series = [_build_regular_series(), _build_regular_series(offset=0.4)]
+    valid_series = [_build_regular_series(offset=0.2), _build_regular_series(offset=0.6)]
+    context = PhaseContext(
+        train_set=train_series,
+        valid_set=valid_series,
+        train_loader=object(),
+        valid_loader=object(),
+        train_md={"dt_and_n_steps": [(0.1, 9), (0.1, 9)]},
+        valid_md={"dt_and_n_steps": [(0.1, 9), (0.1, 9)]},
+    )
+    config = {
+        "model": {"name": "demo"},
+        "dataloader": {"batch_size": 2, "shuffle": False},
+        "phases": [],
+    }
+    phase = _build_data_phase(
+        config,
+        DataPhaseSpec(
+            name="smooth",
+            operation="smooth",
+            config={"method": "savgol", "window_length": 5, "polyorder": 2},
+        ),
+    )
+
+    result = phase.execute(
+        trainer_state=TrainerState(config=config, device=torch.device("cpu")),
+        phase_context=context,
+        artifacts=ArtifactRegistry(),
+        run_name="demo",
+        logger=logging.getLogger("test.smooth.multiple"),
+    )
+
+    for actual_series, original_series in zip(
+        result.phase_context.train_set,
+        train_series,
+        strict=False,
+    ):
+        np.testing.assert_allclose(
+            actual_series.state.detach().cpu().numpy(),
+            savgol_filter(original_series.state.detach().cpu().numpy(), 5, 2, axis=0),
+        )
+
+    for actual_series, original_series in zip(
+        result.phase_context.valid_set,
+        valid_series,
+        strict=False,
+    ):
+        np.testing.assert_allclose(
+            actual_series.state.detach().cpu().numpy(),
+            savgol_filter(original_series.state.detach().cpu().numpy(), 5, 2, axis=0),
+        )
+
+
 def test_smoothing_data_phase_uses_standalone_denoising_helpers(monkeypatch):
     train_series = _build_regular_series()
     context = PhaseContext(

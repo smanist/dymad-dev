@@ -830,15 +830,31 @@ class DataInterface:
         """
         Encode new trajectory data to the observer space.
         """
-        _Z = self._trans_x.transform([np.atleast_2d(X)], rng)[0]
-        return _Z.squeeze()
+        return self._transform_state_array(X, rng=rng)
 
     def decode(self, X: np.ndarray, rng: list | None = None) -> np.ndarray:
         """
         Decode trajectory data from the observer space.
         """
-        _Z = self._trans_x.inverse_transform([np.atleast_2d(X)], rng)[0]
-        return _Z.squeeze()
+        return self._transform_state_array(X, rng=rng, inverse=True)
+
+    def _transform_state_array(
+        self,
+        X: np.ndarray,
+        *,
+        rng: list | None = None,
+        inverse: bool = False,
+    ) -> np.ndarray:
+        array = np.asarray(X)
+        if array.ndim <= 2:
+            payloads = [np.atleast_2d(array)]
+        else:
+            payloads = [np.atleast_2d(item) for item in array]
+        transform = self._trans_x.inverse_transform if inverse else self._trans_x.transform
+        outputs = transform(payloads, rng)
+        if len(outputs) == 1:
+            return outputs[0].squeeze()
+        return np.stack(outputs, axis=0)
 
     def apply_obs(self, fobs: Callable) -> np.ndarray:
         """
