@@ -66,8 +66,6 @@ if ifprd:
             _pred = prd_func(xs, ts, u=us)
         res.append(_pred)
 
-    plot_multi_trajs(
-        np.array(res), ts[0], "LTI", us=us, labels=["Truth"] + labels, ifclose=False
-    )
+    plot_multi_trajs(np.array(res), ts[0], "LTI", us=us, labels=["Truth"] + labels, ifclose=False)
 
 plt.show()

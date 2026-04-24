@@ -208,9 +208,7 @@ def test_compile_training_request_accepts_explicit_grid_cv_metadata(tmp_path) ->
             "search": {"mode": "grid"},
         }
     }
-    assert compiled.effective_config["cv"]["param_grid"] == {
-        "model.koopman_dimension": [4, 6, 8]
-    }
+    assert compiled.effective_config["cv"]["param_grid"] == {"model.koopman_dimension": [4, 6, 8]}
     assert compiled.effective_config["cv"]["search"]["mode"] == "grid"
 
 
