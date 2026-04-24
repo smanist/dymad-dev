@@ -72,3 +72,7 @@ pr:
     {agent_notes}
 
     '
+agent:
+  command: codex exec --full-auto
+  model: gpt-5.4
+  reasoning: high
