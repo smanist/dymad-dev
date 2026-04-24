@@ -2,7 +2,7 @@
 # Replace repo with the target GitHub repository in owner/repo form.
 # Verifier commands run inside the issue worktree and are trusted local config.
 repo: smanist/dymad-dev
-base_branch: main
+base_branch: worker_test
 paths:
   worktree_root: .ai-worktrees
   run_root: .ai-runs
