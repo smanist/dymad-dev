@@ -12,8 +12,10 @@ Sweep mode included for NODE training.
 
 import copy
 import os
+import random
 import shutil
 
+import numpy as np
 import pytest
 import torch
 
@@ -203,7 +205,15 @@ cfgs = [
 ]
 
 
+def _set_case_seed(idx: int) -> None:
+    seed = 1000 + idx
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+
 def train_case(idx, data, path):
+    _set_case_seed(idx)
     _, MDL, Trainer, opt = cfgs[idx]
     opt.update({"data": {"path": data}})
     config_path = path / "lti_model.yaml"
