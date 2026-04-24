@@ -40,6 +40,28 @@ def test_denoise_savgol_preserves_torch_dtype_and_device():
     )
 
 
+def test_denoise_savgol_rejects_window_longer_than_signal():
+    data = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 1.0],
+            [2.0, 0.0],
+            [3.0, 1.0],
+        ]
+    )
+
+    with pytest.raises(ValueError, match="window_length"):
+        denoise(data, method="savgol", window_length=5, polyorder=2)
+
+
+def test_denoise_savgol_requires_window_length_and_polyorder():
+    with pytest.raises(TypeError, match="window_length"):
+        denoise(np.ones((9, 2)), method="savgol", polyorder=2)
+
+    with pytest.raises(TypeError, match="polyorder"):
+        denoise(np.ones((9, 2)), method="savgol", window_length=5)
+
+
 def test_denoising_metrics_aggregate_multiple_signals():
     original = [
         np.array([[0.0, 0.0], [1.0, 2.0], [2.0, 1.0]]),

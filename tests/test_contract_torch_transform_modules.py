@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import torch
 
 from dymad.core import (
     AddOneTransform,
     ComposeTransform,
     DelayEmbeddingTransform,
+    DenoisingTransform,
     FieldTransformModule,
     FixedGraphSeries,
     GraphSeriesBatch,
@@ -18,6 +20,7 @@ from dymad.core import (
     SeriesTransformPipeline,
     build_transform_module,
 )
+from dymad.numerics import denoise
 
 
 def _as_torch_batch(arrays: list[np.ndarray]) -> list[torch.Tensor]:
@@ -172,3 +175,92 @@ def test_lift_transform_mixed_matches_legacy_behavior() -> None:
     torch.testing.assert_close(actual, torch.as_tensor(expected, dtype=actual.dtype))
     recovered = transform.inverse(actual)
     torch.testing.assert_close(recovered, torch.as_tensor(payload, dtype=actual.dtype))
+
+
+def test_denoising_transform_matches_helper_and_inverse_is_identity() -> None:
+    payload = torch.tensor(
+        [
+            [0.0, 0.2],
+            [0.5, 0.1],
+            [1.0, -0.1],
+            [0.5, 0.0],
+            [0.0, 0.2],
+        ],
+        dtype=torch.float64,
+    )
+    transform = DenoisingTransform(method="savgol", window_length=5, polyorder=2)
+    transform.fit([payload])
+
+    expected = denoise(payload, method="savgol", window_length=5, polyorder=2)
+    actual = transform(payload)
+
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(transform.inverse(actual), actual)
+    assert transform.metadata.supports_gradients == "false"
+    assert transform.input_dim == 2
+    assert transform.output_dim == 2
+
+    grad_payload = payload.detach().clone().requires_grad_(True)
+    assert not transform(grad_payload).requires_grad
+    assert not transform.inverse(grad_payload).requires_grad
+
+
+def test_denoising_stage_disables_gradient_modes_for_compose() -> None:
+    payload = torch.tensor(
+        [
+            [0.0, 1.0],
+            [1.0, 3.0],
+            [2.0, 5.0],
+            [3.0, 7.0],
+            [4.0, 9.0],
+        ],
+        dtype=torch.float32,
+    )
+    transform = ComposeTransform(
+        [
+            DenoisingTransform(method="savgol", window_length=5, polyorder=2),
+            ScalerTransform("std"),
+        ]
+    )
+    transform.fit([payload])
+
+    assert transform.supports_gradients == "false"
+
+    with pytest.raises(NotImplementedError, match="gradient-dependent operation"):
+        transform.get_forward_modes(ref=payload)
+
+    with pytest.raises(NotImplementedError, match="gradient-dependent operation"):
+        transform.get_backward_modes(ref=transform(payload))
+
+
+def test_range_scoped_modes_use_selected_differentiable_stage() -> None:
+    payload = torch.tensor(
+        [
+            [0.0, 1.0],
+            [1.0, 3.0],
+            [2.0, 5.0],
+            [3.0, 7.0],
+            [4.0, 9.0],
+        ],
+        dtype=torch.float64,
+    )
+    transform = ComposeTransform(
+        [
+            ScalerTransform("std"),
+            DenoisingTransform(method="savgol", window_length=5, polyorder=2),
+            ScalerTransform("01"),
+        ]
+    )
+    transform.fit([payload])
+
+    differentiable_stage = transform.transforms[0]
+    ref = payload[2]
+    scaled_ref = differentiable_stage(ref)
+
+    expected_forward = differentiable_stage.get_forward_modes(ref=ref)
+    actual_forward = transform.get_forward_modes(ref=ref, rng=[0, 1])
+    np.testing.assert_allclose(actual_forward, expected_forward)
+
+    expected_backward = differentiable_stage.get_backward_modes(ref=scaled_ref)
+    actual_backward = transform.get_backward_modes(ref=scaled_ref, rng=[0, 1])
+    np.testing.assert_allclose(actual_backward, expected_backward)
