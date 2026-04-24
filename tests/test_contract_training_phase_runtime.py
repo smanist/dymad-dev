@@ -1003,6 +1003,70 @@ cv:
     assert best_result.params["model.koopman_dimension"] == 2
 
 
+def test_single_split_driver_uses_configured_split_seed(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+data:
+  split_seed: 7
+split:
+  train_frac: 0.6
+phases:
+  - trainer: Linear
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+        metadata = {"n_samples": 10}
+
+        def __init__(self):
+            self.data_index = None
+
+        def set_data_index(self, data_index):
+            self.data_index = data_index.clone()
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+
+    torch.manual_seed(123)
+    trainer_a = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        device=torch.device("cpu"),
+    )
+
+    torch.manual_seed(999)
+    trainer_b = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        device=torch.device("cpu"),
+    )
+
+    trainer_c = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        config_mod={"data": {"split_seed": 11}},
+        device=torch.device("cpu"),
+    )
+
+    assert trainer_a.base_config["data"]["split_seed"] == 7
+    assert torch.equal(trainer_a.train_set_index, trainer_b.train_set_index)
+    assert torch.equal(trainer_a.valid_set_index, trainer_b.valid_set_index)
+    assert not torch.equal(trainer_a.train_set_index, trainer_c.train_set_index)
+    assert not torch.equal(trainer_a.valid_set_index, trainer_c.valid_set_index)
+
+
 def test_single_split_driver_train_supports_bounded_nelder_mead_search(
     monkeypatch, tmp_path
 ) -> None:

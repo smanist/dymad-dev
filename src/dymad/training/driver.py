@@ -885,6 +885,15 @@ class SingleSplitDriver(DriverBase):
         The training fraction is specified in the YAML config (default 0.75).
         The split is performed by shuffling whole trajectories.
         """
+        data_cfg = self.base_config.setdefault("data", {})
+        split_seed = data_cfg.get("split_seed")
+        if split_seed is None:
+            split_seed = 0
+        if not isinstance(split_seed, (int, np.integer)):
+            raise TypeError("data.split_seed must be an integer when provided.")
+        split_seed = int(split_seed)
+        data_cfg["split_seed"] = split_seed
+
         if "data_valid" in self.base_config:
             # A separate validation dataset is specified
             # No need to split
@@ -906,7 +915,9 @@ class SingleSplitDriver(DriverBase):
         else:
             n_train = int(n_samples * train_frac)
             n_val = n_samples - n_train
-            perm = torch.randperm(n_samples)
+            generator = torch.Generator()
+            generator.manual_seed(split_seed)
+            perm = torch.randperm(n_samples, generator=generator)
             self.train_set_index = perm[:n_train]
             self.valid_set_index = perm[n_train:]
         assert n_train > 0, f"Training set must have at least one sample. Got {n_train}."

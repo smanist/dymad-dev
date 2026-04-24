@@ -6,10 +6,11 @@ from dymad.numerics import DMF, Manifold, ManifoldAnalytical, tangent_2torus
 
 # Data
 a, b = 1.0, 2.0
+TEST_SEED = 0
 
 
-def torus_sample(Nsmp):
-    tmp = np.random.rand(2, Nsmp) * 2 * np.pi
+def torus_sample(Nsmp, *, seed=TEST_SEED):
+    tmp = np.random.default_rng(seed).random((2, Nsmp)) * 2 * np.pi
     x = (a * np.cos(tmp[0]) + b) * np.cos(tmp[1])
     y = (a * np.cos(tmp[0]) + b) * np.sin(tmp[1])
     z = a * np.sin(tmp[0])
