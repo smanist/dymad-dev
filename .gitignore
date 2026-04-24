@@ -2,6 +2,9 @@
 .VSCodeCounter
 .ruff_cache/
 .dymad/
+.ai-logs/
+.ai-runs/
+.ai-runtime/
 **/__pycache__/
 **/*.log
 **/*.png
