@@ -428,6 +428,73 @@ def test_smoothing_data_phase_logs_train_valid_table(caplog):
     assert "num_elements" not in caplog.text
 
 
+def test_smoothing_data_phase_uses_standalone_denoising_helpers(monkeypatch):
+    train_series = _build_regular_series()
+    context = PhaseContext(
+        train_set=[train_series],
+        valid_set=None,
+        train_loader=object(),
+        valid_loader=None,
+        train_md={"dt_and_n_steps": [(0.1, 9)]},
+        valid_md=None,
+    )
+    config = {
+        "model": {"name": "demo"},
+        "dataloader": {"batch_size": 1, "shuffle": False},
+        "phases": [],
+    }
+    phase = _build_data_phase(
+        config,
+        DataPhaseSpec(
+            name="smooth_train",
+            operation="smooth",
+            config={"splits": ["train"], "window_length": 5, "polyorder": 2},
+        ),
+    )
+    calls: dict[str, object] = {}
+
+    def fake_denoise(data, *, method, axis=0, **kwargs):
+        calls["denoise"] = {
+            "method": method,
+            "axis": axis,
+            "window_length": kwargs["window_length"],
+            "polyorder": kwargs["polyorder"],
+        }
+        return data + 1.0
+
+    def fake_metrics(*, original, denoised):
+        calls["metrics"] = {
+            "num_original": len(original),
+            "num_denoised": len(denoised),
+        }
+        return {"delta_rmse": 2.5, "roughness_ratio": 0.4}
+
+    monkeypatch.setattr(phases_module, "denoise", fake_denoise)
+    monkeypatch.setattr(phases_module, "denoising_metrics", fake_metrics)
+
+    result = phase.execute(
+        trainer_state=TrainerState(config=config, device=torch.device("cpu")),
+        phase_context=context,
+        artifacts=ArtifactRegistry(),
+        run_name="demo",
+        logger=logging.getLogger("test.smooth.delegate"),
+    )
+
+    assert calls["denoise"] == {
+        "method": "savgol",
+        "axis": 0,
+        "window_length": 5,
+        "polyorder": 2,
+    }
+    assert calls["metrics"] == {"num_original": 1, "num_denoised": 1}
+    np.testing.assert_allclose(
+        result.phase_context.train_set[0].state.detach().cpu().numpy(),
+        train_series.state.detach().cpu().numpy() + 1.0,
+    )
+    assert result.metrics["train_delta_rmse"] == pytest.approx(2.5)
+    assert result.metrics["train_roughness_ratio"] == pytest.approx(0.4)
+
+
 def test_smoothing_data_phase_supports_train_only_split():
     train_series = _build_regular_series()
     valid_series = _build_regular_series(offset=0.2)
@@ -1199,6 +1266,7 @@ cv:
         _fake_init_trajectory_managers,
     )
     monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+
     def _fake_nelder_mead_like_search_indices(combos, *, evaluate_index, **kwargs):
         evaluated = [0, 8, 2, 5, 7, 4, 1, 3]
         for index in evaluated:

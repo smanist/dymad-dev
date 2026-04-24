@@ -114,6 +114,7 @@ def plot_noise_distribution_check(xs, ys, config_noise):
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
     return fig, ax
 
+
 cases = [
     {
         "name": "lti_denoise_wf",

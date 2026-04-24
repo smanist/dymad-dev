@@ -233,7 +233,9 @@ class DriverBase:
         max_iterations = search.get("max_iterations")
         if max_iterations is not None:
             if not isinstance(max_iterations, int) or max_iterations <= 0:
-                raise TypeError("cv.search.max_iterations must be a positive integer when provided.")
+                raise TypeError(
+                    "cv.search.max_iterations must be a positive integer when provided."
+                )
         self.cv_search_max_iterations = max_iterations
 
         reflection = search.get("reflection", 1.0)
@@ -657,7 +659,9 @@ class DriverBase:
             try:
                 current_value = get_by_dotted_key(self.base_config, key)
             except (KeyError, IndexError, TypeError, ValueError) as exc:
-                raise TypeError(f"cv.search.bounds[{key!r}] does not resolve in the config.") from exc
+                raise TypeError(
+                    f"cv.search.bounds[{key!r}] does not resolve in the config."
+                ) from exc
             if isinstance(current_value, bool):
                 raise TypeError(
                     f"cv.search.bounds[{key!r}] must target an integer or floating-point config value."
