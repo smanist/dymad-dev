@@ -12,7 +12,8 @@ DenoiseMethod = Literal["savgol"]
 
 
 def _denoise_savgol(data: ArrayLike, *, axis: int, **kwargs) -> ArrayLike:
-    smoothed = savgol_filter(_to_numpy(data), axis=axis, **kwargs)
+    array = _to_numpy(data)
+    smoothed = savgol_filter(array, axis=axis, **kwargs)
     if isinstance(data, torch.Tensor):
         return torch.as_tensor(smoothed, device=data.device, dtype=data.dtype)
     return np.asarray(smoothed, dtype=data.dtype)

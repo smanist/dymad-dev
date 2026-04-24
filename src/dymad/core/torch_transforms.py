@@ -8,6 +8,7 @@ from typing import cast
 import torch
 
 from dymad.core.transform_module import GradientSupport, Invertibility, TransformModule
+from dymad.numerics import denoise
 
 
 class IdentityTransform(TransformModule):
@@ -290,6 +291,26 @@ class DelayEmbeddingTransform(TransformModule):
         perm = [len(mid_dims)] + list(range(len(mid_dims))) + [len(mid_dims) + 1]
         tail = tail.permute(*perm)
         return torch.cat((head, tail), dim=0)
+
+
+class DenoisingTransform(TransformModule):
+    def __init__(self, *, method: str = "savgol", axis: int = 0, **kwargs) -> None:
+        super().__init__(invertibility="none", supports_gradients="false")
+        self.method = str(method)
+        self.axis = int(axis)
+        self.kwargs = dict(kwargs)
+
+    def fit(self, data: Sequence[torch.Tensor]) -> DenoisingTransform:
+        if data:
+            self.input_dim = int(data[0].shape[-1])
+            self.output_dim = self.input_dim
+        return self
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        return denoise(data, method=self.method, axis=self.axis, **self.kwargs)
+
+    def inverse(self, data: torch.Tensor) -> torch.Tensor:
+        return data.detach().clone()
 
 
 def _resolve_svd_rank(singular_values: torch.Tensor, order, *, beta: float = 1.0) -> int:

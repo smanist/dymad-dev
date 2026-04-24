@@ -9,6 +9,7 @@ EXPECTED_CORE_SURFACE = {
     "AutoencoderTransform",
     "CallableExternalTransform",
     "ComposeTransform",
+    "DenoisingTransform",
     "DelayEmbeddingTransform",
     "DiffMapTransform",
     "DiffMapVBTransform",

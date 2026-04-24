@@ -17,6 +17,7 @@ from dymad.core.torch_transforms import (
     AutoencoderTransform,
     ComposeTransform,
     DelayEmbeddingTransform,
+    DenoisingTransform,
     IdentityTransform,
     LiftTransform,
     ScalerTransform,
@@ -89,6 +90,15 @@ def export_transform_state(module: TransformModule) -> dict[str, Any]:
     if isinstance(module, DelayEmbeddingTransform):
         return {
             "delay": module.delay,
+            "inp": module.input_dim,
+            "out": module.output_dim,
+        }
+
+    if isinstance(module, DenoisingTransform):
+        return {
+            "method": module.method,
+            "axis": module.axis,
+            "kwargs": dict(module.kwargs),
             "inp": module.input_dim,
             "out": module.output_dim,
         }
@@ -240,6 +250,12 @@ def _build_stage_module(
             _load_native_stage_state(module, state_dict)
         return module
 
+    if stage_type == "denoise":
+        module = DenoisingTransform(**kwargs)
+        if state_dict is not None:
+            _load_native_stage_state(module, state_dict)
+        return module
+
     if stage_type == "svd":
         module = SVDTransform(order=kwargs.get("order", 1.0), ifcen=kwargs.get("ifcen", False))
         if state_dict is not None:
@@ -318,6 +334,14 @@ def _load_native_stage_state(module: TransformModule, state_dict: dict[str, Any]
 
     if isinstance(module, DelayEmbeddingTransform):
         module.delay = int(state_dict["delay"])
+        module.input_dim = state_dict.get("inp")
+        module.output_dim = state_dict.get("out")
+        return
+
+    if isinstance(module, DenoisingTransform):
+        module.method = str(state_dict.get("method", module.method))
+        module.axis = int(state_dict.get("axis", module.axis))
+        module.kwargs = dict(state_dict.get("kwargs", module.kwargs))
         module.input_dim = state_dict.get("inp")
         module.output_dim = state_dict.get("out")
         return
@@ -402,6 +426,8 @@ def _legacy_type_name(module: TransformModule) -> str:
         return "scaler"
     if isinstance(module, DelayEmbeddingTransform):
         return "delay"
+    if isinstance(module, DenoisingTransform):
+        return "denoise"
     if isinstance(module, LiftTransform):
         return "lift"
     if isinstance(module, SVDTransform):
