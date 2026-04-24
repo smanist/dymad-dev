@@ -377,7 +377,9 @@ def bounded_nelder_mead_search_points(
     if not np.all(np.isfinite(lower)) or not np.all(np.isfinite(upper)):
         raise ValueError("bounds must be finite")
     if np.any(lower >= upper):
-        raise ValueError("each lower bound must be strictly less than the corresponding upper bound")
+        raise ValueError(
+            "each lower bound must be strictly less than the corresponding upper bound"
+        )
     if not isinstance(reflection, (int, float)) or float(reflection) <= 0.0:
         raise ValueError("reflection must be a positive number")
     if not isinstance(expansion, (int, float)) or float(expansion) <= 1.0:
