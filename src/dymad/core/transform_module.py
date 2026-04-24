@@ -163,6 +163,13 @@ class TransformModule(nn.Module, ABC):
     def fit(self, data: Sequence[torch.Tensor]) -> TransformModule:
         return self
 
+    def _require_gradient_support(self, operation: str) -> None:
+        if self.supports_gradients == "false":
+            raise NotImplementedError(
+                f"{type(self).__name__} does not support gradient-dependent operation "
+                f"'{operation}'."
+            )
+
     @abstractmethod
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
@@ -233,14 +240,17 @@ class TransformModule(nn.Module, ABC):
         return [item.detach().cpu().numpy() for item in outputs]
 
     def forward_jacobian(self, ref):
+        self._require_gradient_support("forward_jacobian")
         device, dtype = _module_device_dtype(self)
         return _autograd_jacobian(self.forward, ref, device=device, dtype=dtype)
 
     def inverse_jacobian(self, ref):
+        self._require_gradient_support("inverse_jacobian")
         device, dtype = _module_device_dtype(self)
         return _autograd_jacobian(self.inverse, ref, device=device, dtype=dtype)
 
     def forward_vjp(self, ref, cotangent):
+        self._require_gradient_support("forward_vjp")
         device, dtype = _module_device_dtype(self)
         ref_tensor, ref_is_tensor = _ref_to_tensor(ref, device=device, dtype=dtype)
         cotangent_tensor, cot_is_tensor = _ref_to_tensor(cotangent, device=device, dtype=dtype)
@@ -251,6 +261,7 @@ class TransformModule(nn.Module, ABC):
         return _restore_like(grad, as_tensor=ref_is_tensor or cot_is_tensor)
 
     def inverse_vjp(self, ref, cotangent):
+        self._require_gradient_support("inverse_vjp")
         device, dtype = _module_device_dtype(self)
         ref_tensor, ref_is_tensor = _ref_to_tensor(ref, device=device, dtype=dtype)
         cotangent_tensor, cot_is_tensor = _ref_to_tensor(cotangent, device=device, dtype=dtype)
@@ -263,14 +274,15 @@ class TransformModule(nn.Module, ABC):
     def get_forward_modes(self, ref=None, rng: list[int] | None = None, **_kwargs) -> np.ndarray:
         if ref is None:
             raise ValueError("A reference point is required to compute forward modes.")
-        if rng is None:
-            return np.asarray(self.forward_jacobian(ref))
-        return np.asarray(self._module_for_range(rng).forward_jacobian(ref))
+        module = self if rng is None else self._module_for_range(rng)
+        module._require_gradient_support("get_forward_modes")
+        return np.asarray(module.forward_jacobian(ref))
 
     def get_backward_modes(self, ref=None, rng: list[int] | None = None, **_kwargs) -> np.ndarray:
         if ref is None:
             raise ValueError("A reference point is required to compute backward modes.")
         module = self if rng is None else self._module_for_range(rng)
+        module._require_gradient_support("get_backward_modes")
         jacobian = np.asarray(module.inverse_jacobian(ref))
         return jacobian.T
 

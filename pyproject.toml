@@ -26,7 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "pyright>=1.1.408",
+  "pyright>=1.1.409",
   "ruff>=0.15.7",
 ]
 docs = [
@@ -127,3 +127,4 @@ exclude = [
 extraPaths = ["src"]
 reportMissingImports = "none"
 reportMissingTypeStubs = "none"
+reportPrivateImportUsage = "none"

@@ -11,13 +11,12 @@ from typing import Any, cast
 
 import numpy as np
 import torch
-from scipy.signal import savgol_filter
 from torch.utils.data import DataLoader
 
 from dymad.core import GraphSeries, GraphTrainerBatch, RegularSeries, RegularTrainerBatch
 from dymad.core.transform_builder import build_transform_module
 from dymad.losses import LOSS_MAP
-from dymad.numerics import generate_weak_weights
+from dymad.numerics import denoise, denoising_metrics, generate_weak_weights
 from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_runtime
 from dymad.training.execution_services import ExecutionServices
 from dymad.training.ls_update import LSUpdater
@@ -1577,31 +1576,37 @@ class ContextDataPhase(BasePhase):
             "cval": cval,
         }
 
-    def _smooth_tensor(self, tensor: torch.Tensor, *, savgol_cfg: dict[str, Any]) -> torch.Tensor:
-        if tensor.shape[0] < savgol_cfg["window_length"]:
+    def _smooth_tensor(
+        self,
+        tensor: torch.Tensor,
+        *,
+        method: str,
+        denoise_cfg: dict[str, Any],
+    ) -> torch.Tensor:
+        if tensor.shape[0] < denoise_cfg["window_length"]:
             raise PhaseSpecValidationError(
                 f"Data phase '{self.spec.name}' requires every selected trajectory to have at least "
-                f"{savgol_cfg['window_length']} steps."
+                f"{denoise_cfg['window_length']} steps."
             )
-        smoothed = savgol_filter(
-            tensor.detach().cpu().numpy(),
-            axis=0,
-            **savgol_cfg,
-        )
-        return torch.as_tensor(smoothed, device=tensor.device, dtype=tensor.dtype)
+        return cast(torch.Tensor, denoise(tensor, method=method, axis=0, **denoise_cfg))
 
     def _smooth_series(
         self,
         series: TrainerBatch,
         *,
-        savgol_cfg: dict[str, Any],
+        method: str,
+        denoise_cfg: dict[str, Any],
     ) -> TrainerBatch:
         if isinstance(series, RegularSeries):
-            return series.with_state(self._smooth_tensor(series.state, savgol_cfg=savgol_cfg))
+            return series.with_state(
+                self._smooth_tensor(series.state, method=method, denoise_cfg=denoise_cfg)
+            )
         if isinstance(series, GraphSeries):
             return replace(
                 series,
-                node_state=self._smooth_tensor(series.node_state, savgol_cfg=savgol_cfg),
+                node_state=self._smooth_tensor(
+                    series.node_state, method=method, denoise_cfg=denoise_cfg
+                ),
                 meta=dict(series.meta),
             )
         raise TypeError(f"Unsupported dataset item type '{type(series)}' for smoothing.")
@@ -1645,55 +1650,11 @@ class ContextDataPhase(BasePhase):
             raise ValueError(
                 f"Smoothing metrics require matching dataset lengths for split '{split}'."
             )
-
-        sum_sq_delta = 0.0
-        sum_abs_delta = 0.0
-        max_abs_delta = 0.0
-        sum_sq_signal = 0.0
-        n_elements = 0
-        sum_sq_diff_before = 0.0
-        sum_sq_diff_after = 0.0
-        n_diff_elements = 0
-
-        for before_series, after_series in zip(original, smoothed, strict=False):
-            before = self._series_signal_array(before_series)
-            after = self._series_signal_array(after_series)
-            delta = after - before
-
-            sum_sq_delta += float(np.square(delta).sum())
-            sum_abs_delta += float(np.abs(delta).sum())
-            max_abs_delta = max(max_abs_delta, float(np.abs(delta).max(initial=0.0)))
-            sum_sq_signal += float(np.square(before).sum())
-            n_elements += int(delta.size)
-
-            if before.shape[0] > 1:
-                diff_before = np.diff(before, axis=0)
-                diff_after = np.diff(after, axis=0)
-                sum_sq_diff_before += float(np.square(diff_before).sum())
-                sum_sq_diff_after += float(np.square(diff_after).sum())
-                n_diff_elements += int(diff_before.size)
-
-        delta_rmse = float(np.sqrt(sum_sq_delta / n_elements)) if n_elements > 0 else 0.0
-        signal_rms = float(np.sqrt(sum_sq_signal / n_elements)) if n_elements > 0 else 0.0
-        roughness_before = sum_sq_diff_before / n_diff_elements if n_diff_elements > 0 else 0.0
-        roughness_after = sum_sq_diff_after / n_diff_elements if n_diff_elements > 0 else 0.0
-        if roughness_before > 0.0:
-            roughness_ratio = roughness_after / roughness_before
-        elif roughness_after == 0.0:
-            roughness_ratio = 1.0
-        else:
-            roughness_ratio = float("inf")
-
-        return {
-            f"{split}_delta_rmse": delta_rmse,
-            f"{split}_delta_mae": sum_abs_delta / n_elements if n_elements > 0 else 0.0,
-            f"{split}_delta_max_abs": max_abs_delta,
-            f"{split}_delta_rel_rmse": (delta_rmse / signal_rms) if signal_rms > 0.0 else 0.0,
-            f"{split}_roughness_before": roughness_before,
-            f"{split}_roughness_after": roughness_after,
-            f"{split}_roughness_delta": roughness_after - roughness_before,
-            f"{split}_roughness_ratio": roughness_ratio,
-        }
+        metrics = denoising_metrics(
+            original=[self._series_signal_array(series) for series in original],
+            denoised=[self._series_signal_array(series) for series in smoothed],
+        )
+        return {f"{split}_{key}": value for key, value in metrics.items()}
 
     def _apply_smoothing(
         self,
@@ -1702,7 +1663,7 @@ class ContextDataPhase(BasePhase):
     ) -> tuple[PhaseContext, dict[str, float]]:
         method = self._resolve_smoothing_method()
         splits = self._resolve_smoothing_splits()
-        savgol_cfg = self._resolve_savgol_config()
+        denoise_cfg = self._resolve_savgol_config()
         metrics: dict[str, float] = {}
 
         train_set = phase_context.train_set
@@ -1713,7 +1674,8 @@ class ContextDataPhase(BasePhase):
                     f"Data phase '{self.spec.name}' cannot smooth the train split because it is missing."
                 )
             smoothed_train = [
-                self._smooth_series(series, savgol_cfg=savgol_cfg) for series in train_set
+                self._smooth_series(series, method=method, denoise_cfg=denoise_cfg)
+                for series in train_set
             ]
             train_metrics = self._compute_smoothing_metrics(
                 original=train_set,
@@ -1725,7 +1687,7 @@ class ContextDataPhase(BasePhase):
             train_md = self._append_phase_history(
                 phase_context.train_md,
                 method=method,
-                savgol_cfg=savgol_cfg,
+                savgol_cfg=denoise_cfg,
                 metrics=train_metrics,
                 split="train",
                 dataset=train_set,
@@ -1739,7 +1701,8 @@ class ContextDataPhase(BasePhase):
                     f"Data phase '{self.spec.name}' cannot smooth the valid split because it is missing."
                 )
             smoothed_valid = [
-                self._smooth_series(series, savgol_cfg=savgol_cfg) for series in valid_set
+                self._smooth_series(series, method=method, denoise_cfg=denoise_cfg)
+                for series in valid_set
             ]
             valid_metrics = self._compute_smoothing_metrics(
                 original=valid_set,
@@ -1751,7 +1714,7 @@ class ContextDataPhase(BasePhase):
             valid_md = self._append_phase_history(
                 phase_context.valid_md,
                 method=method,
-                savgol_cfg=savgol_cfg,
+                savgol_cfg=denoise_cfg,
                 metrics=valid_metrics,
                 split="valid",
                 dataset=valid_set,

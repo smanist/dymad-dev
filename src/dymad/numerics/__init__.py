@@ -1,4 +1,5 @@
 from dymad.numerics.complex import complex_grid, complex_map, complex_plot, disc2cont
+from dymad.numerics.denoising import denoise, denoising_metrics
 from dymad.numerics.dm import DM, DMF, VBDM
 from dymad.numerics.gradients import central_diff, complex_step, torch_jacobian
 from dymad.numerics.linalg import (
@@ -38,6 +39,8 @@ __all__ = [
     "complex_step",
     "DimensionEstimator",
     "disc2cont",
+    "denoise",
+    "denoising_metrics",
     "DM",
     "DMF",
     "eig_low_rank",

@@ -428,6 +428,127 @@ def test_smoothing_data_phase_logs_train_valid_table(caplog):
     assert "num_elements" not in caplog.text
 
 
+def test_smoothing_data_phase_smooths_each_regular_series_independently():
+    train_series = [_build_regular_series(), _build_regular_series(offset=0.4)]
+    valid_series = [_build_regular_series(offset=0.2), _build_regular_series(offset=0.6)]
+    context = PhaseContext(
+        train_set=train_series,
+        valid_set=valid_series,
+        train_loader=object(),
+        valid_loader=object(),
+        train_md={"dt_and_n_steps": [(0.1, 9), (0.1, 9)]},
+        valid_md={"dt_and_n_steps": [(0.1, 9), (0.1, 9)]},
+    )
+    config = {
+        "model": {"name": "demo"},
+        "dataloader": {"batch_size": 2, "shuffle": False},
+        "phases": [],
+    }
+    phase = _build_data_phase(
+        config,
+        DataPhaseSpec(
+            name="smooth",
+            operation="smooth",
+            config={"method": "savgol", "window_length": 5, "polyorder": 2},
+        ),
+    )
+
+    result = phase.execute(
+        trainer_state=TrainerState(config=config, device=torch.device("cpu")),
+        phase_context=context,
+        artifacts=ArtifactRegistry(),
+        run_name="demo",
+        logger=logging.getLogger("test.smooth.multiple"),
+    )
+
+    for actual_series, original_series in zip(
+        result.phase_context.train_set,
+        train_series,
+        strict=False,
+    ):
+        np.testing.assert_allclose(
+            actual_series.state.detach().cpu().numpy(),
+            savgol_filter(original_series.state.detach().cpu().numpy(), 5, 2, axis=0),
+        )
+
+    for actual_series, original_series in zip(
+        result.phase_context.valid_set,
+        valid_series,
+        strict=False,
+    ):
+        np.testing.assert_allclose(
+            actual_series.state.detach().cpu().numpy(),
+            savgol_filter(original_series.state.detach().cpu().numpy(), 5, 2, axis=0),
+        )
+
+
+def test_smoothing_data_phase_uses_standalone_denoising_helpers(monkeypatch):
+    train_series = _build_regular_series()
+    context = PhaseContext(
+        train_set=[train_series],
+        valid_set=None,
+        train_loader=object(),
+        valid_loader=None,
+        train_md={"dt_and_n_steps": [(0.1, 9)]},
+        valid_md=None,
+    )
+    config = {
+        "model": {"name": "demo"},
+        "dataloader": {"batch_size": 1, "shuffle": False},
+        "phases": [],
+    }
+    phase = _build_data_phase(
+        config,
+        DataPhaseSpec(
+            name="smooth_train",
+            operation="smooth",
+            config={"splits": ["train"], "window_length": 5, "polyorder": 2},
+        ),
+    )
+    calls: dict[str, object] = {}
+
+    def fake_denoise(data, *, method, axis=0, **kwargs):
+        calls["denoise"] = {
+            "method": method,
+            "axis": axis,
+            "window_length": kwargs["window_length"],
+            "polyorder": kwargs["polyorder"],
+        }
+        return data + 1.0
+
+    def fake_metrics(*, original, denoised):
+        calls["metrics"] = {
+            "num_original": len(original),
+            "num_denoised": len(denoised),
+        }
+        return {"delta_rmse": 2.5, "roughness_ratio": 0.4}
+
+    monkeypatch.setattr(phases_module, "denoise", fake_denoise)
+    monkeypatch.setattr(phases_module, "denoising_metrics", fake_metrics)
+
+    result = phase.execute(
+        trainer_state=TrainerState(config=config, device=torch.device("cpu")),
+        phase_context=context,
+        artifacts=ArtifactRegistry(),
+        run_name="demo",
+        logger=logging.getLogger("test.smooth.delegate"),
+    )
+
+    assert calls["denoise"] == {
+        "method": "savgol",
+        "axis": 0,
+        "window_length": 5,
+        "polyorder": 2,
+    }
+    assert calls["metrics"] == {"num_original": 1, "num_denoised": 1}
+    np.testing.assert_allclose(
+        result.phase_context.train_set[0].state.detach().cpu().numpy(),
+        train_series.state.detach().cpu().numpy() + 1.0,
+    )
+    assert result.metrics["train_delta_rmse"] == pytest.approx(2.5)
+    assert result.metrics["train_roughness_ratio"] == pytest.approx(0.4)
+
+
 def test_smoothing_data_phase_supports_train_only_split():
     train_series = _build_regular_series()
     valid_series = _build_regular_series(offset=0.2)
@@ -936,6 +1057,70 @@ cv:
     assert best_result.params["model.koopman_dimension"] == 2
 
 
+def test_single_split_driver_uses_configured_split_seed(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+data:
+  split_seed: 7
+split:
+  train_frac: 0.6
+phases:
+  - trainer: Linear
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+        metadata = {"n_samples": 10}
+
+        def __init__(self):
+            self.data_index = None
+
+        def set_data_index(self, data_index):
+            self.data_index = data_index.clone()
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+
+    torch.manual_seed(123)
+    trainer_a = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        device=torch.device("cpu"),
+    )
+
+    torch.manual_seed(999)
+    trainer_b = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        device=torch.device("cpu"),
+    )
+
+    trainer_c = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        config_mod={"data": {"split_seed": 11}},
+        device=torch.device("cpu"),
+    )
+
+    assert trainer_a.base_config["data"]["split_seed"] == 7
+    assert torch.equal(trainer_a.train_set_index, trainer_b.train_set_index)
+    assert torch.equal(trainer_a.valid_set_index, trainer_b.valid_set_index)
+    assert not torch.equal(trainer_a.train_set_index, trainer_c.train_set_index)
+    assert not torch.equal(trainer_a.valid_set_index, trainer_c.valid_set_index)
+
+
 def test_single_split_driver_train_supports_bounded_nelder_mead_search(
     monkeypatch, tmp_path
 ) -> None:
@@ -1199,6 +1384,7 @@ cv:
         _fake_init_trajectory_managers,
     )
     monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+
     def _fake_nelder_mead_like_search_indices(combos, *, evaluate_index, **kwargs):
         evaluated = [0, 8, 2, 5, 7, 4, 1, 3]
         for index in evaluated:

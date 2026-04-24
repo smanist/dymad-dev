@@ -7,12 +7,14 @@ from dymad.core import (
     AddOneTransform,
     ComposeTransform,
     DelayEmbeddingTransform,
+    DenoisingTransform,
     IdentityTransform,
     ScalerTransform,
     SVDTransform,
     build_transform_module,
 )
 from dymad.core.transform_builder import export_transform_state
+from dymad.numerics import denoise
 
 
 def _fit(module, arrays):
@@ -162,3 +164,28 @@ def test_negative_order_svd_uses_matrix_aspect_ratio() -> None:
     expected_rank = max(1, int(expected_rank))
 
     assert module.transforms[0].output_dim == expected_rank
+
+
+def test_denoise() -> None:
+    config = {"type": "Denoise", "method": "savgol", "window_length": 3, "polyorder": 2}
+    module = _fit(build_transform_module(config), Xs)
+    child = module.transforms[0]
+
+    assert isinstance(child, DenoisingTransform)
+    assert child.input_dim == Xs[0].shape[-1]
+    assert child.output_dim == Xs[0].shape[-1]
+
+    Xt = module.transform([Xn])[0]
+    Xr = denoise(Xn, method="savgol", window_length=3, polyorder=2)
+    check_data([Xt], [Xr], label="Denoise")
+
+    Xi = module.inverse_transform([Xt])[0]
+    check_data([Xi], [Xt], label="Inverse Denoise")
+
+    state = export_transform_state(module)
+    assert state["children"][0]["method"] == "savgol"
+    assert state["children"][0]["kwargs"] == {"window_length": 3, "polyorder": 2}
+
+    reld = build_transform_module(config, state)
+    Xt = reld.transform([Xn])[0]
+    check_data([Xt], [Xr], label="Denoise reload")

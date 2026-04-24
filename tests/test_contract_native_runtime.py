@@ -124,7 +124,7 @@ def test_predict_discrete_returns_padded_ragged_batch():
 
 
 def test_native_hot_paths_do_not_route_through_legacy_runtime():
-    root = Path("/Users/daninghuang/Repos/dymad-dev/src/dymad")
+    root = Path(__file__).resolve().parents[1] / "src" / "dymad"
     files = [
         root / "models" / "prediction.py",
         root / "models" / "runtime_view.py",
