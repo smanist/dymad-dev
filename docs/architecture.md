@@ -240,6 +240,6 @@ Use these as the fastest ground truth for the current architecture:
 
 ## When Adding Features
 
-If you are deciding where a change belongs, use [feature-placement.md](/Users/daninghuang/Repos/dymad-dev/docs/feature-placement.md).
+If you are deciding where a change belongs, use [feature-placement.md](feature-placement.md).
 
 If your change moves the answer, update that file too.

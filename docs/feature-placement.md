@@ -4,7 +4,7 @@
 
 This is the shortest possible answer to "where should this feature go?".
 
-Read [architecture.md](/Users/daninghuang/Repos/dymad-dev/docs/architecture.md) first if the
+Read [architecture.md](architecture.md) first if the
 boundary between `agent/*` and the legacy runtime is unclear.
 
 Maintenance rule:

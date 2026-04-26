@@ -1,7 +1,7 @@
 # Codex Instructions
 
-Read [docs/architecture.md](/Users/daninghuang/Repos/dymad-dev/docs/architecture.md) and
-[docs/feature-placement.md](/Users/daninghuang/Repos/dymad-dev/docs/feature-placement.md)
+Read [docs/architecture.md](docs/architecture.md) and
+[docs/feature-placement.md](docs/feature-placement.md)
 before broad repo spelunking. They are the fastest path to the current boundaries and feature
 ownership.
 
@@ -13,6 +13,14 @@ Repo fast map:
   `src/dymad/numerics`, `src/dymad/sako`: model/runtime/math implementation and legacy execution
   paths.
 - `tests/*`: workflow and boundary truth. Prefer targeted tests that match the layer you changed.
+
+Script example rule:
+
+- Before adding a new runnable example under `scripts/`, read
+  [docs/example-script-pattern.md](docs/example-script-pattern.md). Both documented patterns are
+  valid: use the old inline if-block style for developer-facing examples that intentionally expose
+  the execution details, or the `*_cli.py` scaffold plus `scripts/cli_helpers.py` for user-facing
+  examples that should be runnable without script edits.
 
 Test naming rule:
 
@@ -46,8 +54,8 @@ Documentation maintenance:
 
 - If your change affects package ownership, MCP tool surfaces, registry/compiler behavior,
   checkpoint layering, persisted handle types, or the recommended place to add features, review
-  and update [docs/architecture.md](/Users/daninghuang/Repos/dymad-dev/docs/architecture.md) and
-  [docs/feature-placement.md](/Users/daninghuang/Repos/dymad-dev/docs/feature-placement.md) in the
+  and update [docs/architecture.md](docs/architecture.md) and
+  [docs/feature-placement.md](docs/feature-placement.md) in the
   same change.
 - Do not leave architecture docs describing the pre-change state after moving boundaries or adding
   new workflows.
