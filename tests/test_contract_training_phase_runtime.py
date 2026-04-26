@@ -727,6 +727,51 @@ cv:
     assert phase._prediction_settings() == ("rk4", {"step_size": 0.2})
 
 
+def test_load_config_preserves_explicit_phases_when_training_is_disabled(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+training:
+  n_epochs: 1000
+  save_interval: 10
+  chop_mode: unfold
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(
+        str(config_path),
+        config_mod={
+            "training": None,
+            "phases": [
+                {
+                    "type": "optimizer",
+                    "name": "warm",
+                    "trainer": "OneStep",
+                    "n_epochs": 300,
+                    "save_interval": 20,
+                },
+                {
+                    "type": "optimizer",
+                    "name": "node",
+                    "trainer": "NODE",
+                    "n_epochs": 900,
+                    "chop_mode": "initial",
+                },
+            ],
+        },
+    )
+
+    assert config["training"] is None
+    assert config["phases"][0]["n_epochs"] == 300
+    assert config["phases"][0]["save_interval"] == 20
+    assert "chop_mode" not in config["phases"][0]
+    assert config["phases"][1]["n_epochs"] == 900
+    assert config["phases"][1]["chop_mode"] == "initial"
+
+
 def test_run_cv_single_uses_trainer_run_with_typed_context(monkeypatch):
     calls = {"init": 0, "run": 0}
     expected_metric = 0.123
