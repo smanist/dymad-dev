@@ -1,3 +1,14 @@
+"""
+Continuous-time one-step nonlinear solver example for the controlled LTI case.
+
+This expands the original one-step example in place. The `lti_dt/` location is
+historical; the comparison below now targets the continuous-time `LDM` setup so
+the missing CT workflow lives next to the original development script. The
+system and hyperparameter baseline match the existing continuous-time LTI
+examples, while keeping the same `if`-block control flow for easy regression
+checks.
+"""
+
 import copy
 import os
 from pathlib import Path
@@ -7,11 +18,13 @@ import numpy as np
 import torch
 
 from dymad.io import load_model
-from dymad.models import DLDM
+from dymad.models import LDM
 from dymad.training import OneStepTrainer, StackedTrainer
 from dymad.utils import TrajectorySampler, plot_summary, plot_trajectory
 
 BASE_DIR = Path(__file__).resolve().parent
+DATA_CONFIG_PATH = BASE_DIR.parent / "linear_time_invariant" / "lti_data.yaml"
+TRAINING_CONFIG_PATH = BASE_DIR.parent / "linear_time_invariant" / "lti_ldm_node.yaml"
 os.chdir(BASE_DIR)
 
 B = 128
@@ -56,7 +69,7 @@ config_gau = {
 }
 
 mdl_ld = {
-    "name": "lti_dldm",
+    "name": "lti_ldm",
     "encoder_layers": 0,
     "processor_layers": 1,
     "decoder_layers": 0,
@@ -83,9 +96,10 @@ trn_node = {
     "load_checkpoint": False,
     "learning_rate": 1e-3,
     "decay_rate": 0.999,
-    "chop_mode": "initial",
-    "sweep_lengths": [3, 5, 7],
-    "sweep_epoch_step": 200,
+    "sweep_lengths": [50, 100, 200, 300, 501],
+    "sweep_epoch_step": 100,
+    "ode_method": "dopri5",
+    "ode_args": {"rtol": 1.0e-7, "atol": 1.0e-9},
 }
 
 
@@ -96,7 +110,7 @@ def _optimizer_phase(trainer, cfg):
 
 
 def generate_data():
-    sampler = TrajectorySampler(f, g, config=BASE_DIR / "lti_data.yaml", config_mod=config_chr)
+    sampler = TrajectorySampler(f, g, config=DATA_CONFIG_PATH, config_mod=config_chr)
     ts, _xs, us, ys = sampler.sample(t_grid, batch=B)
     DATA_PATH.parent.mkdir(exist_ok=True)
     np.savez_compressed(DATA_PATH, t=ts, x=ys, u=us)
@@ -105,14 +119,14 @@ def generate_data():
 
 cases = [
     {
-        "name": "dldm_step",
-        "model": DLDM,
+        "name": "ldm_step",
+        "model": LDM,
         "trainer": OneStepTrainer,
         "config_mod": {"model": mdl_ld, "training": trn_step},
     },
     {
-        "name": "dldm_step_node",
-        "model": DLDM,
+        "name": "ldm_step_node",
+        "model": LDM,
         "trainer": StackedTrainer,
         "config_mod": {
             "model": mdl_ld,
@@ -145,7 +159,7 @@ if iftrn:
         case = cases[i]
         opt = copy.deepcopy(case["config_mod"])
         opt["model"]["name"] = f"lti_{case['name']}"
-        trainer = case["trainer"](BASE_DIR / "lti_dldm.yaml", case["model"], config_mod=opt)
+        trainer = case["trainer"](TRAINING_CONFIG_PATH, case["model"], config_mod=opt)
         trainer.train()
 
 if ifplt:
@@ -156,7 +170,7 @@ if ifplt:
         print(f"Epoch time {label}: {npz['avg_epoch_time']}")
 
 if ifprd:
-    sampler = TrajectorySampler(f, g, config=BASE_DIR / "lti_data.yaml", config_mod=config_gau)
+    sampler = TrajectorySampler(f, g, config=DATA_CONFIG_PATH, config_mod=config_gau)
 
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
@@ -174,7 +188,7 @@ if ifprd:
     plot_trajectory(
         np.array(res),
         t_data,
-        "LTI",
+        "LTI CT",
         us=u_data,
         labels=["Truth"] + labels,
         ifclose=False,
