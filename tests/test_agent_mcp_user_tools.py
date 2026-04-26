@@ -107,7 +107,7 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
     )
     assert (
         detail["data"]["detail"]["translation_guidance"][4]
-        == "Supported optimizer trainer names are Linear, Weak, and NODE."
+        == "Supported optimizer trainer names are Linear, OneStep, Weak, and NODE."
     )
     assert detail["data"]["detail"]["cv_schema"] == {
         "supported": True,
@@ -182,7 +182,7 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
         },
         "notes": [
             "The same ordered-trainer translation rule applies to any supported mix of "
-            "Linear, Weak, and NODE phases."
+            "Linear, OneStep, Weak, and NODE phases."
         ],
     }
     assert detail["data"]["detail"]["examples"][2] == {

@@ -100,6 +100,7 @@ EXPECTED_TRAINING_SURFACE = {
     "ModelArtifact",
     "NODETrainer",
     "normalize_phase_specs",
+    "OneStepTrainer",
     "OptimizerPhaseSpec",
     "OptimizerStateArtifact",
     "PhaseContext",

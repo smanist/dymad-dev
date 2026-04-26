@@ -15,6 +15,7 @@ from dymad.training.helper import (
     nelder_mead_like_search_indices,
     select_best_cv_result,
 )
+from dymad.training.ls_update import _comp_linear_eval_ct, _comp_linear_eval_dt
 from dymad.training.phase_runtime import (
     ArtifactRegistry,
     ModelArtifact,
@@ -813,6 +814,251 @@ def test_run_cv_single_uses_trainer_run_with_typed_context(monkeypatch):
     assert calls["results_prefix"] == "/tmp/rp"
     assert calls["execution_services"] is not None
     assert result["metric_value"] == expected_metric
+
+
+def test_one_step_optimizer_phase_uses_discrete_next_state_targets():
+    class _DiscreteModel(torch.nn.Module):
+        CONT = False
+
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+        def linear_eval(self, runtime):
+            z = runtime.x
+            return self.weight * z, z
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(name="one_step", trainer="OneStep", config={}),
+        config=config,
+        model_class=_DiscreteModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _DiscreteModel()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        criteria=[torch.nn.MSELoss(), torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+        _one_step_dt=1.0,
+    )
+    series = RegularSeries(
+        time=torch.tensor([0.0, 1.0, 2.0]),
+        state=torch.tensor([[1.0], [2.0], [4.0]]),
+        control=None,
+        meta={},
+    )
+    batch = RegularTrainerBatch.collate_series([series])
+
+    losses = phase._compute_losses(model, optimizer_state, batch, "dopri5", {})
+
+    assert losses[0].item() == pytest.approx(2.5)
+
+
+def test_one_step_optimizer_phase_uses_continuous_rate_targets():
+    class _ContinuousModel(torch.nn.Module):
+        CONT = True
+
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+        def linear_eval(self, runtime):
+            z = runtime.x
+            return self.weight * z, z
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(name="one_step", trainer="OneStep", config={"order": 1}),
+        config=config,
+        model_class=_ContinuousModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _ContinuousModel()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        criteria=[torch.nn.MSELoss(), torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+        _one_step_dt=1.0,
+        _one_step_kwargs={"order": 1},
+    )
+    series = RegularSeries(
+        time=torch.tensor([0.0, 1.0, 2.0]),
+        state=torch.tensor([[0.0], [1.0], [4.0]]),
+        control=None,
+        meta={},
+    )
+    batch = RegularTrainerBatch.collate_series([series])
+
+    losses = phase._compute_losses(model, optimizer_state, batch, "dopri5", {})
+
+    assert losses[0].item() == pytest.approx(2.0)
+
+
+def test_one_step_optimizer_phase_supports_default_continuous_targets_with_trainable_encoder():
+    class _ContinuousEncoderModel(torch.nn.Module):
+        CONT = True
+
+        def __init__(self):
+            super().__init__()
+            self.encoder_scale = torch.nn.Parameter(torch.tensor(2.0))
+            self.prediction_scale = torch.nn.Parameter(torch.tensor(0.5))
+
+        def encoder(self, runtime):
+            return self.encoder_scale * runtime.x
+
+        def linear_eval(self, runtime):
+            z = self.encoder(runtime)
+            return self.prediction_scale * z, z
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(name="one_step", trainer="OneStep", config={}),
+        config=config,
+        model_class=_ContinuousEncoderModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _ContinuousEncoderModel()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        criteria=[torch.nn.MSELoss(), torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+        _one_step_dt=1.0,
+    )
+    series = RegularSeries(
+        time=torch.tensor([0.0, 1.0, 2.0]),
+        state=torch.tensor([[0.0], [1.0], [4.0]]),
+        control=None,
+        meta={},
+    )
+    batch = RegularTrainerBatch.collate_series([series])
+
+    losses = phase._compute_losses(model, optimizer_state, batch, "dopri5", {})
+    losses[0].backward()
+
+    assert torch.isfinite(losses[0])
+    assert model.encoder_scale.grad is not None
+    assert model.encoder_scale.grad.item() != pytest.approx(0.0)
+
+
+def test_one_step_optimizer_phase_detaches_discrete_targets_for_trainable_encoder():
+    class _DiscreteEncoderModel(torch.nn.Module):
+        CONT = False
+
+        def __init__(self):
+            super().__init__()
+            self.encoder_scale = torch.nn.Parameter(torch.tensor(2.0))
+            self.prediction_scale = torch.nn.Parameter(torch.tensor(0.5))
+
+        def encoder(self, runtime):
+            return self.encoder_scale * runtime.x
+
+        def linear_eval(self, runtime):
+            z = self.encoder(runtime)
+            return self.prediction_scale * z, z
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(name="one_step", trainer="OneStep", config={}),
+        config=config,
+        model_class=_DiscreteEncoderModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _DiscreteEncoderModel()
+    criterion = torch.nn.MSELoss()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        criteria=[criterion, torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+        _one_step_dt=1.0,
+    )
+    series = RegularSeries(
+        time=torch.tensor([0.0, 1.0, 2.0]),
+        state=torch.tensor([[1.0], [2.0], [4.0]]),
+        control=None,
+        meta={},
+    )
+    batch = RegularTrainerBatch.collate_series([series])
+
+    loss = phase._compute_losses(model, optimizer_state, batch, "dopri5", {})[0]
+    actual_grad = torch.autograd.grad(loss, model.encoder_scale)[0]
+
+    runtime_batch = batch.to(phase.device)
+    predictions, targets = _comp_linear_eval_dt(model, runtime_batch, dt=1.0)
+    expected_loss = criterion(predictions, targets.detach())
+    expected_grad = torch.autograd.grad(expected_loss, model.encoder_scale)[0]
+
+    assert targets.requires_grad is False
+    assert actual_grad is not None
+    assert actual_grad.item() == pytest.approx(expected_grad.item())
+
+
+def test_one_step_optimizer_phase_detaches_first_order_continuous_targets_for_trainable_encoder():
+    class _ContinuousEncoderModel(torch.nn.Module):
+        CONT = True
+
+        def __init__(self):
+            super().__init__()
+            self.encoder_scale = torch.nn.Parameter(torch.tensor(2.0))
+            self.prediction_scale = torch.nn.Parameter(torch.tensor(0.5))
+
+        def encoder(self, runtime):
+            return self.encoder_scale * runtime.x
+
+        def linear_eval(self, runtime):
+            z = self.encoder(runtime)
+            return self.prediction_scale * z, z
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(name="one_step", trainer="OneStep", config={"order": 1}),
+        config=config,
+        model_class=_ContinuousEncoderModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _ContinuousEncoderModel()
+    criterion = torch.nn.MSELoss()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        criteria=[criterion, torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+        _one_step_dt=1.0,
+        _one_step_kwargs={"order": 1},
+    )
+    series = RegularSeries(
+        time=torch.tensor([0.0, 1.0, 2.0]),
+        state=torch.tensor([[0.0], [1.0], [4.0]]),
+        control=None,
+        meta={},
+    )
+    batch = RegularTrainerBatch.collate_series([series])
+
+    loss = phase._compute_losses(model, optimizer_state, batch, "dopri5", {})[0]
+    actual_grad = torch.autograd.grad(loss, model.encoder_scale)[0]
+
+    runtime_batch = batch.to(phase.device)
+    predictions, targets = _comp_linear_eval_ct(model, runtime_batch, dt=1.0, order=1)
+    expected_loss = criterion(predictions, targets.detach())
+    expected_grad = torch.autograd.grad(expected_loss, model.encoder_scale)[0]
+
+    assert targets.requires_grad is False
+    assert actual_grad is not None
+    assert actual_grad.item() == pytest.approx(expected_grad.item())
 
 
 def test_select_best_cv_result_uses_goal_and_tie_breakers() -> None:
