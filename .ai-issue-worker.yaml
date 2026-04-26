@@ -18,6 +18,9 @@ issue_selection:
   blocked_labels:
   - blocked
   - needs-human
+  respect_issue_dependencies: true
+  allow_stacked_prs: true
+  max_stack_depth: 3
   max_issues_per_run: 1
   selection_order: oldest_updated
 git:

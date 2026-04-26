@@ -43,6 +43,7 @@ Explore More
    getting_started
    architecture
    feature-placement
+   example-script-pattern
    roadmap
    examples
    theory
