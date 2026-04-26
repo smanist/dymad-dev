@@ -1,0 +1,38 @@
+data:
+  path: './data/lti_vlen.npz'
+  double_precision: false
+  # Leave n_steps unset so each trajectory keeps its own native horizon.
+
+transform_x:
+  type: "identity"
+
+transform_u:
+  type: "identity"
+
+split:
+  train_frac: 0.75
+
+dataloader:
+  batch_size: 16
+  shuffle: true
+
+model:
+  name: 'lti_vlen_ldm_node'
+  encoder_layers: 0
+  processor_layers: 1
+  decoder_layers: 0
+  hidden_dimension: 32
+  activation: "none"
+  weight_init: "xavier_uniform"
+  input_order: "cubic"
+
+training:
+  n_epochs: 100
+  save_interval: 10
+  load_checkpoint: false
+  learning_rate: 1e-3
+  decay_rate: 0.999
+  ode_method: 'dopri5'
+  ode_args:
+    rtol: 1.e-7
+    atol: 1.e-9
