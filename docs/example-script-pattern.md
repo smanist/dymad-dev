@@ -31,8 +31,7 @@ file itself.
 Common shape:
 
 1. Define module-level constants, configs, and case metadata near the top of the file.
-2. Put the training / plotting / prediction code directly in `main()` or, in older files, directly
-   in the `if __name__ == "__main__":` block.
+2. Do not use `main()` or `if __name__ == "__main__":`.
 3. Use inline phase toggles such as `ifdat`, `iftrn`, `ifviz`, `ifprd`, or `ifplt` when the goal
    is to make the execution phases visible and easy for a developer to modify.
 4. Keep it acceptable for a reader to edit the file directly to switch phases, inspect
@@ -41,16 +40,9 @@ Common shape:
    in a list at the beginning.
 6. When appropriate, a typical script contains:
    - `ifdat`: Data generation
-   - `iftrn`: A loop over cases to be trained
-   - `ifplt`: Plotting training history
-   - `ifprd`: Prediction on test data using chosen model(s)
-
-Recommended guard:
-
-```python
-if __name__ == "__main__":
-    main()
-```
+   - `iftrn`: A loop over chosen case(s) to be trained
+   - `ifplt`: Plotting training history of chosen case(s)
+   - `ifprd`: Prediction on test data using chosen case(s)
 
 Use this style when showing all details is more important than providing a polished command-line
 interface.
