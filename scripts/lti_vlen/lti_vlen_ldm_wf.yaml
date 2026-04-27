@@ -33,7 +33,7 @@ criterion:
     weight: 1.0
 
 training:
-  n_epochs: 100
+  n_epochs: 500
   save_interval: 10
   load_checkpoint: false
   learning_rate: 5e-3

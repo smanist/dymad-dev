@@ -47,13 +47,12 @@ cases = [
         "config": "lti_vlen_ldm_wf.yaml",
     },
 ]
-# IDX = [0, 1]
-IDX = [1]
+IDX = [0, 1]
 labels = [cases[i]["label"] for i in IDX]
 npz_files = [f"lti_vlen_{cases[i]['name']}" for i in IDX]
 
 
-ifdat = 0
+ifdat = 1
 iftrn = 1
 ifplt = 1
 ifprd = 1
