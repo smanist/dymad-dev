@@ -1,0 +1,47 @@
+name: Slow CI
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  slow-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Decide whether slow suite is due
+        id: cadence
+        shell: bash
+        run: |
+          anchor_date="2026-04-27"
+          anchor_days=$(( $(date -u -d "$anchor_date" +%s) / 86400 ))
+          today_days=$(( $(date -u +%s) / 86400 ))
+          delta_days=$(( today_days - anchor_days ))
+
+          if (( delta_days % 3 == 0 )); then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+            echo "Running slow suite on 3-day cadence."
+          else
+            echo "due=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping slow suite; next run is not due today."
+          fi
+
+      - name: Install package + test deps
+        if: steps.cadence.outputs.due == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+
+      - name: Run slow tests
+        if: steps.cadence.outputs.due == 'true'
+        run: pytest -q -m "slow or extra_slow"
