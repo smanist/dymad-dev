@@ -214,6 +214,18 @@ def _determine_chop_step(window: int, step: int | float) -> int:
     raise ValueError(f"Invalid step type: {type(step)}. Expected int or float.")
 
 
+def _mask_ragged_tensor(runtime: Any, tensor: torch.Tensor) -> torch.Tensor:
+    if getattr(runtime, "is_uniform_length", True):
+        return tensor
+    valid_mask = getattr(runtime, "valid_mask", None)
+    if valid_mask is None:
+        return tensor
+    mask = valid_mask
+    while mask.ndim < tensor.ndim:
+        mask = mask.unsqueeze(-1)
+    return tensor * mask.to(dtype=tensor.dtype)
+
+
 def _normalize_legacy_optimizer_name(trainer: str) -> str:
     if trainer not in {"NODE", "Weak", "Linear"}:
         raise PhaseSpecValidationError(
@@ -833,30 +845,20 @@ class BaseOptimizerPhase(BasePhase):
         else:
             runtime = cast(Any, batch_to_runtime(cast(TrainerBatch, batch)))
 
+        truth_x = runtime.x
         if hasattr(runtime, "is_uniform_length") and not runtime.is_uniform_length:
-            if x_hat is not None or predictions is not None:
-                raise ValueError(
-                    "Ragged runtime collections require per-sample criteria evaluation."
-                )
-            nested_losses = [
-                self._additional_criteria_evaluation(
-                    model,
-                    optimizer_state,
-                    None,
-                    None,
-                    item,
-                    ode_method,
-                    ode_args,
-                )
-                for item in runtime.iter_series()
-            ]
-            return self._average_loss_lists(nested_losses)
+            truth_x = _mask_ragged_tensor(runtime, truth_x)
+            if x_hat is not None:
+                x_hat = _mask_ragged_tensor(runtime, x_hat)
+            if predictions is not None:
+                predictions = _mask_ragged_tensor(runtime, predictions)
 
         if optimizer_state.criteria_names[1] == "recon":
             if x_hat is None:
                 latent = cast(Any, model).encoder(runtime)
                 x_hat = cast(Any, model).decoder(latent, runtime)
-            recon_loss = optimizer_state.criteria[1](runtime.x, x_hat.view(*runtime.x.shape))
+                x_hat = _mask_ragged_tensor(runtime, x_hat)
+            recon_loss = optimizer_state.criteria[1](truth_x, x_hat.view(*truth_x.shape))
             loss_list.append(recon_loss)
             next_index = 2
         else:
@@ -869,9 +871,10 @@ class BaseOptimizerPhase(BasePhase):
             preds = cast(Any, model).predict(
                 init_states, runtime, ts, method=ode_method, **ode_args
             )
+            preds = _mask_ragged_tensor(runtime, preds)
 
         for idx in range(next_index, len(optimizer_state.criteria) - 1):
-            loss_list.append(optimizer_state.criteria[idx](preds, runtime.x))
+            loss_list.append(optimizer_state.criteria[idx](preds, truth_x))
 
         return loss_list
 
@@ -1196,14 +1199,6 @@ class NodeOptimizerPhase(BaseOptimizerPhase):
         ode_args: dict[str, Any],
     ) -> list[torch.Tensor]:
         batch_any = cast(Any, batch)
-        if getattr(batch_any, "is_ragged", False):
-            return self._average_loss_lists(
-                [
-                    self._compute_losses(model, optimizer_state, sample, ode_method, ode_args)
-                    for sample in batch_any.iter_single_batches()
-                ]
-            )
-
         num_steps = optimizer_state.schedulers[1].get_length()
         if num_steps is None:
             runtime = cast(Any, batch_to_runtime(batch))

@@ -56,6 +56,39 @@ def test_regular_typed_dataloader_emits_regular_trainer_batch(tmp_path) -> None:
     assert batch.initial_state().shape == (2, 2)
 
 
+def test_regular_typed_dataloader_accepts_ragged_object_arrays(tmp_path) -> None:
+    data_path = tmp_path / "toy_regular_ragged_typed_loader.npz"
+    t = np.empty(2, dtype=object)
+    x = np.empty(2, dtype=object)
+    u = np.empty(2, dtype=object)
+    t[0] = np.arange(4, dtype=float) * 0.1
+    t[1] = np.arange(6, dtype=float) * 0.1
+    x[0] = np.column_stack((np.linspace(0.0, 1.0, 4), np.linspace(1.0, 2.0, 4)))
+    x[1] = np.column_stack((np.linspace(2.0, 3.0, 6), np.linspace(3.0, 4.0, 6)))
+    u[0] = np.linspace(0.0, 0.3, 4).reshape(-1, 1)
+    u[1] = np.linspace(0.3, 0.8, 6).reshape(-1, 1)
+    np.savez(data_path, t=t, x=x, u=u)
+
+    manager = TrajectoryManager(
+        metadata={
+            "data_key": "data",
+            "config": {
+                "data": {"path": str(data_path)},
+                "dataloader": {"batch_size": 2, "shuffle": False},
+            },
+        }
+    )
+    dataloader, dataset, metadata = manager.process_all(typed=True)
+    batch = next(iter(dataloader))
+
+    assert isinstance(batch, RegularTrainerBatch)
+    assert len(dataset) == 2
+    assert batch.is_ragged is True
+    assert batch.series is not None
+    assert batch.series.step_lengths == (4, 6)
+    assert metadata["dt_and_n_steps"] == [[0.1, 4], [0.1, 6]]
+
+
 def test_graph_typed_dataloader_emits_graph_trainer_batch(ltg_data) -> None:
     metadata = {
         "data_key": "data",

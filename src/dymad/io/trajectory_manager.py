@@ -36,6 +36,12 @@ def _stack_if_uniform(data):
         return list(data)
 
 
+def _unpack_object_array(data):
+    if isinstance(data, np.ndarray) and data.dtype == object:
+        return [_unpack_object_array(item) for item in data.tolist()]
+    return data
+
+
 def _pack_graph_series_time_varying_topology(series: GraphSeries) -> GraphSeries:
     if not isinstance(series.edge_index, tuple) or series.edge_weight is None:
         return series
@@ -114,6 +120,7 @@ def _process_data(data, x, label, base_dim=1, offset=0):
     d_i itself can be an array or a list, depending on the input data type.
     """
     _dim = base_dim - offset
+    data = _unpack_object_array(data)
     if data is None:
         logger.info(f"No {label} detected. Setting to None.")
         if offset == 0:
@@ -184,7 +191,18 @@ def _process_data(data, x, label, base_dim=1, offset=0):
         # - list of lists of one array - (n_traj, 1, ...)  - broadcast to all steps
         # - list of arrays             - (n_steps, ...)    - single traj data, broadcast to all trajs
         if isinstance(data[0], np.ndarray):
-            if data[0].ndim == _dim:  # (n_steps, ...)
+            if data[0].ndim == _dim + 1:  # (n_traj, n_steps, ...)
+                if len(data) == 1 and len(x) > 1:
+                    logger.info(
+                        f"Detected {label} as list of trajectory arrays {data[0].shape} for multiple x. Broadcasting to all trajectories."
+                    )
+                    _data = [np.array(data[0]) for _ in x]
+                else:
+                    logger.info(
+                        f"Detected {label} as list of trajectory arrays with shape {data[0].shape}. Returning one array per trajectory."
+                    )
+                    _data = [np.array(item) for item in data]
+            elif data[0].ndim == _dim:  # (n_steps, ...)
                 if len(x) > 1:
                     logger.info(
                         f"Detected {label} as lists (n_steps, ...): {data[0].shape} but x is multi-traj ({len(x)})."
@@ -551,7 +569,7 @@ class TrajectoryManager:
         keys = ["t", "x", "y", "u", "p"]
         vals = []
         for k in keys:
-            _tmp = data.get(k, None)
+            _tmp = _unpack_object_array(data.get(k, None))
             if k == "x" and _tmp is None:
                 msg = "x must be provided in the data file."
                 logger.error(msg)
@@ -591,9 +609,7 @@ class TrajectoryManager:
         # Process t
         self.t = cast(
             list[np.ndarray],
-            _process_data(
-                None if vals[0] is None else np.array(vals[0]), self.x, "t", base_dim=0, offset=0
-            ),
+            _process_data(vals[0], self.x, "t", base_dim=0, offset=0),
         )
         if self.t[0].size == 0:
             self.t = [np.arange(_x.shape[0]) for _x in self.x]
@@ -602,26 +618,20 @@ class TrajectoryManager:
         # Process y
         self.y = cast(
             list[np.ndarray],
-            _process_data(
-                None if vals[2] is None else np.array(vals[2]), self.x, "y", base_dim=1, offset=0
-            ),
+            _process_data(vals[2], self.x, "y", base_dim=1, offset=0),
         )
 
         # Process u
         self.u = cast(
             list[np.ndarray],
-            _process_data(
-                None if vals[3] is None else np.array(vals[3]), self.x, "u", base_dim=1, offset=0
-            ),
+            _process_data(vals[3], self.x, "u", base_dim=1, offset=0),
         )
         self._is_autonomous = self.u[0].size == 0
 
         # Process p
         self.p = cast(
             list[np.ndarray],
-            _process_data(
-                None if vals[4] is None else np.array(vals[4]), self.x, "p", base_dim=1, offset=1
-            ),
+            _process_data(vals[4], self.x, "p", base_dim=1, offset=1),
         )
 
         return data

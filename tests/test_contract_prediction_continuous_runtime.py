@@ -1,7 +1,7 @@
 import torch
 
-from dymad.core.runtime import runtime_from_series
-from dymad.core.series import RegularSeries
+from dymad.core.runtime import runtime_from_series, to_padded_regular_runtime
+from dymad.core.series import RegularSeries, RegularSeriesBatch
 from dymad.models.prediction import predict_continuous, predict_continuous_np
 
 
@@ -84,3 +84,44 @@ def test_predict_continuous_np_retries_underflow_with_rk4(monkeypatch):
     assert calls[1][0] == "rk4"
     assert "rtol" not in calls[1][1]
     assert "atol" not in calls[1][1]
+
+
+def test_predict_continuous_batches_shared_grid_ragged_series(monkeypatch):
+    batch = RegularSeriesBatch.collate(
+        [
+            RegularSeries(
+                time=torch.tensor([0.0, 0.5, 1.0]),
+                state=torch.tensor([[1.0], [1.0], [1.0]]),
+                control=torch.zeros(3, 1),
+            ),
+            RegularSeries(
+                time=torch.tensor([0.0, 0.5]),
+                state=torch.tensor([[2.0], [2.0]]),
+                control=torch.zeros(2, 1),
+            ),
+        ]
+    )
+    runtime = to_padded_regular_runtime(batch)
+    model = _RuntimeAwareModel()
+    calls = []
+
+    def fake_odeint(func, z0, ts, method=None, **kwargs):
+        _ = func, method, kwargs
+        calls.append(ts.clone())
+        return z0.unsqueeze(0).expand(ts.shape[0], *z0.shape)
+
+    monkeypatch.setattr("dymad.models.prediction.odeint", fake_odeint)
+
+    pred = predict_continuous(
+        model,
+        x0=runtime.x[:, 0, :],
+        ts=runtime.t,
+        ws=runtime,
+        order="linear",
+    )
+
+    assert pred.shape == (2, 3, 1)
+    assert len(calls) == 1
+    assert torch.allclose(calls[0], torch.tensor([0.0, 0.5, 1.0]))
+    assert torch.allclose(pred[0], torch.tensor([[1.0], [1.0], [1.0]]))
+    assert torch.allclose(pred[1], torch.tensor([[2.0], [2.0], [0.0]]))

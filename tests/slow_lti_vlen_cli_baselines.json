@@ -1,0 +1,96 @@
+{
+  "ldm_node": {
+    "metrics": {
+      "best_valid_total": 0.008925430476665497,
+      "crit_train_last": 0.0035406118258833885,
+      "crit_valid_last": 0.5392205119132996,
+      "final_valid_loss": 0.008925430476665497,
+      "rmse": 0.532956609550058
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "crit_epoch_count": 100,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_total",
+        "valid_dynamics",
+        "valid_total"
+      ],
+      "model_name_prefix": "lti_vlen_ldm_node",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "phase_metrics",
+        "phase_records",
+        "total_training_time"
+      ]
+    }
+  },
+  "ldm_wf": {
+    "metrics": {
+      "best_valid_total": 0.13214972615242004,
+      "crit_train_last": 3.4427273931214586e-05,
+      "crit_valid_last": 1.9006629372597672e-05,
+      "final_valid_loss": 0.13228321075439453,
+      "rmse": 0.07437159600960072
+    },
+    "summary_signature": {
+      "best_valid_loss_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "crit_epoch_count": 50,
+      "crit_name": "dynamics",
+      "crit_series_count": 2,
+      "hist_count": 1,
+      "hist_entry_keys": [
+        "epoch",
+        "train_dynamics",
+        "train_recon",
+        "train_total",
+        "valid_dynamics",
+        "valid_recon",
+        "valid_total"
+      ],
+      "model_name_prefix": "lti_vlen_ldm_wf",
+      "top_level_keys": [
+        "avg_epoch_time",
+        "best_valid_loss",
+        "convergence_epoch",
+        "crit_epoch",
+        "crit_name",
+        "crits",
+        "final_train_loss",
+        "final_valid_loss",
+        "hist",
+        "model_name",
+        "phase_metrics",
+        "phase_records",
+        "total_training_time"
+      ]
+    }
+  }
+}

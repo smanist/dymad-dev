@@ -15,7 +15,12 @@ class _SweepScheduler:
 
 
 class _IdentityPredictModel:
+    def __init__(self):
+        self.calls = 0
+
     def predict(self, init_states, runtime, ts, **kwargs):
+        _ = init_states, ts, kwargs
+        self.calls += 1
         return runtime.x
 
 
@@ -40,6 +45,20 @@ def _build_regular_batch(n_steps: int = 6) -> RegularTrainerBatch:
     control = torch.zeros(n_steps, 1)
     series = RegularSeries(time=time, state=state, control=control)
     return RegularTrainerBatch.collate_series([series])
+
+
+def _build_ragged_regular_batch() -> RegularTrainerBatch:
+    series_a = RegularSeries(
+        time=torch.linspace(0.0, 1.0, 5),
+        state=torch.arange(10, dtype=torch.float32).reshape(5, 2),
+        control=torch.zeros(5, 1),
+    )
+    series_b = RegularSeries(
+        time=torch.linspace(0.0, 0.75, 4),
+        state=torch.arange(8, dtype=torch.float32).reshape(4, 2),
+        control=torch.zeros(4, 1),
+    )
+    return RegularTrainerBatch.collate_series([series_a, series_b])
 
 
 def test_opt_node_accepts_typed_regular_batch_initial_mode():
@@ -74,3 +93,21 @@ def test_opt_node_accepts_typed_regular_batch_unfold_mode():
 
     assert len(losses) == 1
     assert torch.isclose(losses[0], torch.tensor(0.0))
+
+
+def test_opt_node_keeps_ragged_batch_prediction_batched():
+    opt = _build_opt_node(chop_mode="initial")
+    batch = _build_ragged_regular_batch()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.Adam([torch.nn.Parameter(torch.tensor(0.0))]),
+        schedulers=opt.schedulers,
+        criteria=[torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics"],
+    )
+
+    losses = opt._compute_losses(opt.model, optimizer_state, batch, opt.ode_method, opt.ode_args)
+
+    assert len(losses) == 1
+    assert torch.isclose(losses[0], torch.tensor(0.0))
+    assert opt.model.calls == 1
