@@ -1,15 +1,11 @@
-import os
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 
+from dymad.io import load_model
 from dymad.models import LDM
 from dymad.training import NODETrainer, WeakFormTrainer
-from dymad.utils import TrajectorySampler, plot_summary
-
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+from dymad.utils import TrajectorySampler, plot_summary, plot_trajectory
 
 # Keep a shared sampling interval across trajectories; the weak-form path currently
 # builds one set of integration weights from dataset metadata.
@@ -35,9 +31,35 @@ def _to_object_array(items):
     return data
 
 
-def generate_variable_length_data():
-    DATA_DIR.mkdir(exist_ok=True)
-    sampler = TrajectorySampler(f, g, config=BASE_DIR / "lti_vlen_data.yaml", rng=7)
+cases = [
+    {
+        "name": "ldm_node",
+        "label": "NODE",
+        "model": LDM,
+        "trainer": NODETrainer,
+        "config": "lti_vlen_ldm_node.yaml",
+    },
+    {
+        "name": "ldm_wf",
+        "label": "Weak form",
+        "model": LDM,
+        "trainer": WeakFormTrainer,
+        "config": "lti_vlen_ldm_wf.yaml",
+    },
+]
+# IDX = [0, 1]
+IDX = [1]
+labels = [cases[i]["label"] for i in IDX]
+npz_files = [f"lti_vlen_{cases[i]['name']}" for i in IDX]
+
+
+ifdat = 0
+iftrn = 1
+ifplt = 1
+ifprd = 1
+
+if ifdat:
+    sampler = TrajectorySampler(f, g, config="lti_vlen_data.yaml", rng=7)
 
     ts_all = []
     ys_all = []
@@ -51,44 +73,44 @@ def generate_variable_length_data():
 
     # Store ragged object arrays on purpose; padding here would defeat the example.
     np.savez_compressed(
-        DATA_DIR / "lti_vlen.npz",
+        "./data/lti_vlen.npz",
         t=_to_object_array(ts_all),
         x=_to_object_array(ys_all),
         u=_to_object_array(us_all),
     )
 
-
-def train_node():
-    trainer = NODETrainer(str(BASE_DIR / "lti_vlen_ldm_node.yaml"), LDM)
-    trainer.train()
-
-
-def train_weak_form():
-    trainer = WeakFormTrainer(str(BASE_DIR / "lti_vlen_ldm_wf.yaml"), LDM)
-    trainer.train()
-
-
-ifdat = 1
-ifnode = 1
-ifwf = 1
-ifplt = 1
-
-os.chdir(BASE_DIR)
-
-if ifdat:
-    generate_variable_length_data()
-
-if ifnode:
-    train_node()
-
-if ifwf:
-    train_weak_form()
+if iftrn:
+    for i in IDX:
+        Model = cases[i]["model"]
+        Trainer = cases[i]["trainer"]
+        config_path = cases[i]["config"]
+        trainer = Trainer(config_path, Model)
+        trainer.train()
 
 if ifplt:
-    plot_summary(
-        ["lti_vlen_ldm_node", "lti_vlen_ldm_wf"],
-        labels=["NODE", "Weak form"],
-        ifclose=False,
+    plot_summary(npz_files, labels=labels, ifclose=False)
+
+if ifprd:
+    sampler = TrajectorySampler(f, g, config="lti_vlen_data.yaml", rng=11)
+
+    t_grid = DT * np.arange(LENGTHS[-1])
+    ts, xs, us, ys = sampler.sample(t_grid, batch=1)
+    x_data = xs[0]
+    t_data = ts[0]
+    u_data = us[0]
+
+    res = [x_data]
+    for i in IDX:
+        mdl = cases[i]["name"]
+        MDL = cases[i]["model"]
+        _, prd_func = load_model(MDL, f"lti_vlen_{mdl}.pt")
+
+        with torch.no_grad():
+            pred = prd_func(x_data, t_data, u=u_data)
+        res.append(pred)
+
+    plot_trajectory(
+        np.array(res), t_data, "lti_vlen", us=u_data, labels=["Truth"] + labels, ifclose=False
     )
 
 plt.show()
