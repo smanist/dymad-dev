@@ -1,12 +1,8 @@
 """
-Continuous-time one-step nonlinear solver example for the controlled LTI case.
+Standalone one-step optimizer example for the controlled continuous-time LTI case.
 
-This expands the original one-step example in place. The `lti_dt/` location is
-historical; the comparison below now targets the continuous-time `LDM` setup so
-the missing CT workflow lives next to the original development script. The
-system and hyperparameter baseline match the existing continuous-time LTI
-examples, while keeping the same `if`-block control flow for easy regression
-checks.
+This example owns its local data generation and training configs so it can live
+independently from the discrete-time and baseline continuous-time LTI folders.
 """
 
 import copy
@@ -23,14 +19,15 @@ from dymad.training import OneStepTrainer, StackedTrainer
 from dymad.utils import TrajectorySampler, plot_summary, plot_trajectory
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_CONFIG_PATH = BASE_DIR.parent / "linear_time_invariant" / "lti_data.yaml"
-TRAINING_CONFIG_PATH = BASE_DIR.parent / "linear_time_invariant" / "lti_ldm_node.yaml"
+DATA_CONFIG_PATH = BASE_DIR / "lti_1s_data.yaml"
+TRAINING_CONFIG_PATH = BASE_DIR / "lti_1s_ldm_node.yaml"
+DATA_PATH = BASE_DIR / "data" / "lti_1s.npz"
+
 os.chdir(BASE_DIR)
 
 B = 128
 N = 501
 t_grid = np.linspace(0, 5, N)
-DATA_PATH = BASE_DIR / "data" / "lti.npz"
 
 A = np.array([[0.0, 1.0], [-1.0, -0.1]])
 
@@ -69,7 +66,6 @@ config_gau = {
 }
 
 mdl_ld = {
-    "name": "lti_ldm",
     "encoder_layers": 0,
     "processor_layers": 1,
     "decoder_layers": 0,
@@ -77,9 +73,9 @@ mdl_ld = {
     "activation": "none",
     "weight_init": "xavier_uniform",
     "gain": 0.01,
+    "input_order": "cubic",
 }
 
-# The one-step-only run is intentionally longer because it does not get a NODE refinement phase.
 trn_step = {
     "n_epochs": 1200,
     "save_interval": 20,
@@ -119,19 +115,22 @@ def generate_data():
 
 cases = [
     {
-        "name": "ldm_step",
+        "label": "ldm_step",
+        "artifact_name": "lti_1s_ldm_step",
         "model": LDM,
         "trainer": OneStepTrainer,
-        "config_mod": {"model": mdl_ld, "training": trn_step},
+        "config_mod": {
+            "model": {"name": "lti_1s_ldm_step", **mdl_ld},
+            "training": trn_step,
+        },
     },
     {
-        "name": "ldm_step_node",
+        "label": "ldm_step_node",
+        "artifact_name": "lti_1s_ldm_step_node",
         "model": LDM,
         "trainer": StackedTrainer,
         "config_mod": {
-            "model": mdl_ld,
-            # Clear the legacy single-stage block from the base YAML so it does not
-            # overwrite the explicit warm-start phase during config normalization.
+            "model": {"name": "lti_1s_ldm_step_node", **mdl_ld},
             "training": None,
             "phases": [
                 _optimizer_phase("OneStep", trn_step_warm),
@@ -142,7 +141,7 @@ cases = [
 ]
 
 IDX = [0, 1]
-labels = [cases[i]["name"] for i in IDX]
+labels = [cases[i]["label"] for i in IDX]
 
 ifdat = 0
 iftrn = 1
@@ -157,13 +156,15 @@ if iftrn:
         generate_data()
     for i in IDX:
         case = cases[i]
-        opt = copy.deepcopy(case["config_mod"])
-        opt["model"]["name"] = f"lti_{case['name']}"
-        trainer = case["trainer"](TRAINING_CONFIG_PATH, case["model"], config_mod=opt)
+        trainer = case["trainer"](
+            TRAINING_CONFIG_PATH,
+            case["model"],
+            config_mod=copy.deepcopy(case["config_mod"]),
+        )
         trainer.train()
 
 if ifplt:
-    npz_files = [f"lti_{label}" for label in labels]
+    npz_files = [cases[i]["artifact_name"] for i in IDX]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
 
     for label, npz in zip(labels, npzs, strict=False):
@@ -180,7 +181,7 @@ if ifprd:
     res = [x_data]
     for i in IDX:
         case = cases[i]
-        _, prd_func = load_model(case["model"], f"lti_{case['name']}.pt")
+        _, prd_func = load_model(case["model"], f"{case['artifact_name']}.pt")
         with torch.no_grad():
             pred = prd_func(x_data, t_data, u=u_data)
         res.append(pred)
