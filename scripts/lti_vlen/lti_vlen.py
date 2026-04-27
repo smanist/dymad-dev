@@ -11,9 +11,8 @@ from dymad.utils import TrajectorySampler, plot_summary
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 
-# Keep a shared sampling interval across trajectories. The weak-form path currently
-# builds one set of integration weights from dataset metadata, so this example
-# varies trajectory length only and leaves mixed-dt support explicit for follow-up work.
+# Keep a shared sampling interval across trajectories; the weak-form path currently
+# builds one set of integration weights from dataset metadata.
 DT = 0.05
 LENGTHS = [41, 61, 81, 101]
 TRAJ_PER_LENGTH = 8
@@ -36,7 +35,7 @@ def _to_object_array(items):
     return data
 
 
-def generate_variable_length_data() -> None:
+def generate_variable_length_data():
     DATA_DIR.mkdir(exist_ok=True)
     sampler = TrajectorySampler(f, g, config=BASE_DIR / "lti_vlen_data.yaml", rng=7)
 
@@ -59,12 +58,12 @@ def generate_variable_length_data() -> None:
     )
 
 
-def train_node() -> None:
+def train_node():
     trainer = NODETrainer(str(BASE_DIR / "lti_vlen_ldm_node.yaml"), LDM)
     trainer.train()
 
 
-def train_weak_form() -> None:
+def train_weak_form():
     trainer = WeakFormTrainer(str(BASE_DIR / "lti_vlen_ldm_wf.yaml"), LDM)
     trainer.train()
 
@@ -74,28 +73,22 @@ ifnode = 1
 ifwf = 1
 ifplt = 1
 
+os.chdir(BASE_DIR)
 
-def main() -> None:
-    os.chdir(BASE_DIR)
+if ifdat:
+    generate_variable_length_data()
 
-    if ifdat:
-        generate_variable_length_data()
+if ifnode:
+    train_node()
 
-    if ifnode:
-        train_node()
+if ifwf:
+    train_weak_form()
 
-    if ifwf:
-        train_weak_form()
+if ifplt:
+    plot_summary(
+        ["lti_vlen_ldm_node", "lti_vlen_ldm_wf"],
+        labels=["NODE", "Weak form"],
+        ifclose=False,
+    )
 
-    if ifplt:
-        plot_summary(
-            ["lti_vlen_ldm_node", "lti_vlen_ldm_wf"],
-            labels=["NODE", "Weak form"],
-            ifclose=False,
-        )
-
-    plt.show()
-
-
-if __name__ == "__main__":
-    main()
+plt.show()
