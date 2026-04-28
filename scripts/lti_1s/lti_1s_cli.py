@@ -1,14 +1,8 @@
-"""
-Standalone one-step optimizer examples for controlled LTI systems.
-
-The folder owns its local data generation and training configs. It compares:
-
-- continuous-time: one-step only, one-step followed by weak-form refinement
-- discrete-time: one-step only, one-step followed by NODE refinement
-"""
-
+import argparse
 import copy
 import os
+import random
+import shutil
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -21,12 +15,10 @@ from dymad.training import OneStepTrainer, StackedTrainer
 from dymad.utils import TrajectorySampler, plot_summary, plot_trajectory
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_CONFIG_PATH = BASE_DIR / "lti_1s_data.yaml"
-CT_CONFIG_PATH = BASE_DIR / "lti_1s_ct.yaml"
-DT_CONFIG_PATH = BASE_DIR / "lti_1s_dt.yaml"
-DATA_PATH = BASE_DIR / "data" / "lti_1s.npz"
-
-os.chdir(BASE_DIR)
+DATA_CONFIG_NAME = "lti_1s_data.yaml"
+CT_CONFIG_NAME = "lti_1s_ct.yaml"
+DT_CONFIG_NAME = "lti_1s_dt.yaml"
+DEFAULT_CASES = [0, 1, 2, 3]
 
 B = 128
 N = 501
@@ -132,19 +124,11 @@ def _optimizer_phase(trainer, cfg):
     return phase
 
 
-def generate_data():
-    sampler = TrajectorySampler(f, g, config=DATA_CONFIG_PATH, config_mod=config_chr)
-    ts, _xs, us, ys = sampler.sample(t_grid, batch=B)
-    DATA_PATH.parent.mkdir(exist_ok=True)
-    np.savez_compressed(DATA_PATH, t=ts, x=ys, u=us)
-    print(f"Generated data: {DATA_PATH}")
-
-
 cases = [
     {
         "label": "ct_step",
         "artifact_name": "lti_1s_ct_step",
-        "config_path": CT_CONFIG_PATH,
+        "config": CT_CONFIG_NAME,
         "model": LDM,
         "trainer": OneStepTrainer,
         "config_mod": {
@@ -155,7 +139,7 @@ cases = [
     {
         "label": "ct_step_wf",
         "artifact_name": "lti_1s_ct_step_wf",
-        "config_path": CT_CONFIG_PATH,
+        "config": CT_CONFIG_NAME,
         "model": LDM,
         "trainer": StackedTrainer,
         "config_mod": {
@@ -170,7 +154,7 @@ cases = [
     {
         "label": "dt_step",
         "artifact_name": "lti_1s_dt_step",
-        "config_path": DT_CONFIG_PATH,
+        "config": DT_CONFIG_NAME,
         "model": DLDM,
         "trainer": OneStepTrainer,
         "config_mod": {
@@ -181,7 +165,7 @@ cases = [
     {
         "label": "dt_step_node",
         "artifact_name": "lti_1s_dt_step_node",
-        "config_path": DT_CONFIG_PATH,
+        "config": DT_CONFIG_NAME,
         "model": DLDM,
         "trainer": StackedTrainer,
         "config_mod": {
@@ -195,45 +179,95 @@ cases = [
     },
 ]
 
-IDX = [0, 1, 2, 3]
-labels = [cases[i]["label"] for i in IDX]
 
-ifdat = 0
-iftrn = 1
-ifplt = 1
-ifprd = 1
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run LTI one-step comparison cases.")
+    parser.add_argument("--case", nargs="+", type=int, help="Case indices to run.")
+    parser.add_argument("--list-cases", action="store_true")
+    parser.add_argument("--data", action="store_true")
+    parser.add_argument("--workdir", type=Path)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--no-train", action="store_true")
+    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--no-predict", action="store_true")
+    parser.add_argument("--no-show", action="store_true")
+    return parser.parse_args()
 
-if ifdat:
-    generate_data()
 
-if iftrn:
-    if not DATA_PATH.exists():
-        generate_data()
-    for i in IDX:
-        case = cases[i]
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def resolve_indices(values):
+    indices = DEFAULT_CASES if values is None else values
+    invalid = [idx for idx in indices if idx < 0 or idx >= len(cases)]
+    if invalid:
+        raise ValueError(f"Invalid case indices: {invalid}")
+    return indices
+
+
+def print_cases():
+    for idx, case in enumerate(cases):
+        print(f"{idx}: {case['label']} [{case['config']}]")
+
+
+def prepare_workdir(root: Path):
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "data").mkdir(exist_ok=True)
+    for name in (DATA_CONFIG_NAME, CT_CONFIG_NAME, DT_CONFIG_NAME):
+        src = BASE_DIR / name
+        dst = root / name
+        if not dst.exists():
+            shutil.copy2(src, dst)
+
+
+def generate_data(root: Path = BASE_DIR, seed: int | None = None):
+    sampler = TrajectorySampler(
+        f, g, config=root / DATA_CONFIG_NAME, rng=seed, config_mod=config_chr
+    )
+    ts, _xs, us, ys = sampler.sample(t_grid, batch=B)
+    data_path = root / "data" / "lti_1s.npz"
+    data_path.parent.mkdir(exist_ok=True)
+    np.savez_compressed(data_path, t=ts, x=ys, u=us)
+    print(f"Generated data: {data_path}")
+
+
+def train(selected, root: Path = BASE_DIR):
+    for idx in selected:
+        case = cases[idx]
         trainer = case["trainer"](
-            case["config_path"],
+            root / case["config"],
             case["model"],
             config_mod=copy.deepcopy(case["config_mod"]),
         )
         trainer.train()
 
-if ifplt:
-    npz_files = [cases[i]["artifact_name"] for i in IDX]
+
+def plot(selected):
+    labels = [cases[idx]["label"] for idx in selected]
+    npz_files = [cases[idx]["artifact_name"] for idx in selected]
     npzs = plot_summary(npz_files, labels=labels, ifclose=False)
     for label, npz in zip(labels, npzs, strict=False):
         print(f"Epoch time {label}: {npz['avg_epoch_time']}")
 
-if ifprd:
-    sampler = TrajectorySampler(f, g, config=DATA_CONFIG_PATH, config_mod=config_gau)
+
+def predict(selected, root: Path = BASE_DIR, seed: int | None = None):
+    sampler = TrajectorySampler(
+        f, g, config=root / DATA_CONFIG_NAME, rng=seed, config_mod=config_gau
+    )
     ts, xs, us, ys = sampler.sample(t_grid, batch=1)
     x_data = xs[0]
     t_data = ts[0]
     u_data = us[0]
 
     res = [x_data]
-    for i in IDX:
-        case = cases[i]
+    labels = [cases[idx]["label"] for idx in selected]
+    for idx in selected:
+        case = cases[idx]
         _, prd_func = load_model(case["model"], f"{case['artifact_name']}.pt")
         with torch.no_grad():
             pred = prd_func(x_data, t_data, u=u_data)
@@ -248,4 +282,34 @@ if ifprd:
         ifclose=False,
     )
 
-plt.show()
+
+def main():
+    args = parse_args()
+    if args.seed is not None:
+        set_seed(args.seed)
+    root = BASE_DIR if args.workdir is None else args.workdir.resolve()
+    if args.workdir is not None:
+        prepare_workdir(root)
+    os.chdir(root)
+
+    if args.list_cases:
+        print_cases()
+        return 0
+
+    selected = resolve_indices(args.case)
+    data_path = root / "data" / "lti_1s.npz"
+    if args.data or (args.workdir is not None and not data_path.exists()):
+        generate_data(root, args.seed)
+    if not args.no_train:
+        train(selected, root)
+    if not args.no_plot:
+        plot(selected)
+    if not args.no_predict:
+        predict(selected, root, args.seed)
+    if not args.no_show and (not args.no_plot or not args.no_predict):
+        plt.show()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
