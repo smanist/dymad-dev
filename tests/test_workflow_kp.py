@@ -17,7 +17,13 @@ import torch
 import dymad.training.driver as training_driver
 from dymad.io import load_model
 from dymad.models import DKBF, DLDM, KBF, LDM
-from dymad.training import LinearTrainer, NODETrainer, StackedTrainer, WeakFormTrainer
+from dymad.training import (
+    LinearTrainer,
+    NODETrainer,
+    OneStepTrainer,
+    StackedTrainer,
+    WeakFormTrainer,
+)
 
 mdl_kb = {
     "name": "kp_model",
@@ -89,6 +95,16 @@ trn_dt = {
     "sweep_epoch_step": 5,
     "chop_mode": "initial",
 }
+trn_os = {
+    "n_epochs": 5,
+    "save_interval": 5,
+    "load_checkpoint": False,
+    "learning_rate": 5e-3,
+    "decay_rate": 0.999,
+}
+trn_nd_warm = copy.deepcopy(trn_nd)
+trn_nd_warm["n_epochs"] = 5
+trn_nd_warm["sweep_lengths"] = [10]
 trn_ln = {
     "n_epochs": 1,
     "save_interval": 1,
@@ -159,6 +175,19 @@ cfgs = [
     ("kbf_wfls", KBF, StackedTrainer, {"model": mdl_kb, "phases": _mixed_schedule("Weak", trn_wf)}),
     ("kbf_ndls", KBF, StackedTrainer, {"model": mdl_kb, "phases": _mixed_schedule("NODE", trn_nd)}),
     ("kbf_ln", KBF, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
+    ("ldm_step", LDM, OneStepTrainer, {"model": mdl_ld, "training": trn_os}),
+    (
+        "ldm_step_node",
+        LDM,
+        StackedTrainer,
+        {
+            "model": mdl_ld,
+            "phases": [
+                _optimizer_phase("OneStep", trn_os),
+                _optimizer_phase("NODE", trn_nd_warm),
+            ],
+        },
+    ),
     ("dldm_nd", DLDM, NODETrainer, {"model": mdl_ld, "training": trn_dt}),
     ("dkbf_nd", DKBF, NODETrainer, {"model": mdl_kb, "training": trn_dt, "cv": cv}),
     (

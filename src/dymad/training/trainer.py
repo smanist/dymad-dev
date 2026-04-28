@@ -99,6 +99,32 @@ class LinearTrainer(SingleSplitDriver):
         ]
 
 
+class OneStepTrainer(SingleSplitDriver):
+    """
+    Simple interface for single-split single-stage training by nonlinear one-step optimization.
+    """
+
+    def __init__(
+        self,
+        config_path: str,
+        model_class: type[torch.nn.Module],
+        config_mod: dict[str, Any] | None = None,
+        device: torch.device | None = None,
+        max_workers: int = 1,
+    ):
+        super().__init__(
+            config_path=config_path,
+            model_class=model_class,
+            config_mod=config_mod,
+            device=device,
+            max_workers=max_workers,
+        )
+
+        self.base_config["phases"] = [
+            _select_single_stage_phase(self.base_config, name="OneStep", trainer="OneStep")
+        ]
+
+
 class StackedTrainer(SingleSplitDriver):
     """
     Simple interface for single-split phased training.

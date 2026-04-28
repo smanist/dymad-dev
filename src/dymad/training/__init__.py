@@ -31,7 +31,13 @@ from dymad.training.phases import (
     PhaseSpecValidationError,
     normalize_phase_specs,
 )
-from dymad.training.trainer import LinearTrainer, NODETrainer, StackedTrainer, WeakFormTrainer
+from dymad.training.trainer import (
+    LinearTrainer,
+    NODETrainer,
+    OneStepTrainer,
+    StackedTrainer,
+    WeakFormTrainer,
+)
 from dymad.training.trainer_run import TrainerRun
 
 __all__ = [
@@ -52,6 +58,7 @@ __all__ = [
     "ModelArtifact",
     "NODETrainer",
     "normalize_phase_specs",
+    "OneStepTrainer",
     "OptimizerPhaseSpec",
     "OptimizerStateArtifact",
     "PhaseContext",

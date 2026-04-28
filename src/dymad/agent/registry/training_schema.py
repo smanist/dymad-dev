@@ -84,7 +84,7 @@ TRANSLATION_GUIDANCE: tuple[str, ...] = (
     "or 'even' for integer-valued fields. If bounds are omitted, the runtime uses the legacy "
     "adaptive walk over param_grid candidates.",
     "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
-    "Supported optimizer trainer names are Linear, Weak, and NODE.",
+    "Supported optimizer trainer names are Linear, OneStep, Weak, and NODE.",
     "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
     "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters; "
     "matching trainer defaults from the selected profile are preserved unless overridden.",
@@ -106,10 +106,10 @@ def _phase_entry_schemas() -> tuple[TrainingPhaseEntrySchema, ...]:
         TrainingPhaseEntrySchema(
             key="legacy_optimizer",
             summary="Legacy shorthand for one optimizer phase.",
-            accepted_shape='{"trainer": "NODE" | "Weak" | "Linear", ...}',
+            accepted_shape='{"trainer": "NODE" | "Weak" | "Linear" | "OneStep", ...}',
             required_fields=("trainer",),
-            optional_fields=("name",),
-            enum_fields={"trainer": ("NODE", "Weak", "Linear")},
+            optional_fields=("name", "reset_optimizer"),
+            enum_fields={"trainer": ("NODE", "Weak", "Linear", "OneStep")},
             allows_additional_keys=True,
             notes=(
                 "Any extra keys are treated as optimizer-phase config.",
@@ -120,10 +120,10 @@ def _phase_entry_schemas() -> tuple[TrainingPhaseEntrySchema, ...]:
         TrainingPhaseEntrySchema(
             key="optimizer",
             summary="Explicit optimizer phase.",
-            accepted_shape='{"type": "optimizer", "trainer": "NODE" | "Weak" | "Linear", ...}',
+            accepted_shape='{"type": "optimizer", "trainer": "NODE" | "Weak" | "Linear" | "OneStep", ...}',
             required_fields=("type", "trainer"),
-            optional_fields=("name",),
-            enum_fields={"trainer": ("NODE", "Weak", "Linear")},
+            optional_fields=("name", "reset_optimizer"),
+            enum_fields={"trainer": ("NODE", "Weak", "Linear", "OneStep")},
             allows_additional_keys=True,
             notes=("Any extra keys are treated as optimizer-phase config.",),
             example={"type": "optimizer", "name": "Refine", "trainer": "NODE", "n_epochs": 25},
@@ -237,7 +237,7 @@ def _examples() -> tuple[TrainingCapabilityExample, ...]:
             },
             notes=(
                 "The same ordered-trainer translation rule applies to any supported "
-                "mix of Linear, Weak, and NODE phases.",
+                "mix of Linear, OneStep, Weak, and NODE phases.",
             ),
         ),
         TrainingCapabilityExample(

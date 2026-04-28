@@ -238,7 +238,13 @@ def _effective_config(
 
 
 def _select_trainer(config: dict[str, Any]):
-    from dymad.training import LinearTrainer, NODETrainer, StackedTrainer, WeakFormTrainer
+    from dymad.training import (
+        LinearTrainer,
+        NODETrainer,
+        OneStepTrainer,
+        StackedTrainer,
+        WeakFormTrainer,
+    )
 
     phases = config.get("phases")
     if not isinstance(phases, list) or not phases:
@@ -259,6 +265,8 @@ def _select_trainer(config: dict[str, Any]):
         return WeakFormTrainer, "weak_form"
     if trainer == "Linear":
         return LinearTrainer, "linear"
+    if trainer == "OneStep":
+        return OneStepTrainer, "one_step"
     raise ValueError(f"unsupported trainer kind in phases: {trainer}")
 
 

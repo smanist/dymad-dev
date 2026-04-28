@@ -19,7 +19,7 @@ from dymad.losses import LOSS_MAP
 from dymad.numerics import denoise, denoising_metrics, generate_weak_weights
 from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_runtime
 from dymad.training.execution_services import ExecutionServices
-from dymad.training.ls_update import LSUpdater
+from dymad.training.ls_update import LSUpdater, _comp_linear_eval_ct, _comp_linear_eval_dt
 from dymad.training.phase_runtime import (
     ArtifactRegistry,
     EvaluationArtifact,
@@ -62,11 +62,20 @@ class BasePhaseSpec:
 @dataclass(frozen=True)
 class OptimizerPhaseSpec(BasePhaseSpec):
     trainer: str = "NODE"
+    reset_optimizer: bool = False
 
-    def __init__(self, name: str, trainer: str, config: dict[str, Any]):
+    def __init__(
+        self,
+        name: str,
+        trainer: str,
+        config: dict[str, Any],
+        *,
+        reset_optimizer: bool = False,
+    ):
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "kind", "optimizer")
         object.__setattr__(self, "trainer", trainer)
+        object.__setattr__(self, "reset_optimizer", reset_optimizer)
         object.__setattr__(self, "config", config)
 
 
@@ -227,9 +236,9 @@ def _mask_ragged_tensor(runtime: Any, tensor: torch.Tensor) -> torch.Tensor:
 
 
 def _normalize_legacy_optimizer_name(trainer: str) -> str:
-    if trainer not in {"NODE", "Weak", "Linear"}:
+    if trainer not in {"NODE", "Weak", "Linear", "OneStep"}:
         raise PhaseSpecValidationError(
-            f"Unsupported trainer '{trainer}'. Expected one of NODE, Weak, Linear."
+            f"Unsupported trainer '{trainer}'. Expected one of NODE, Weak, Linear, OneStep."
         )
     return trainer
 
@@ -239,10 +248,16 @@ def _optimizer_spec_from_legacy(
 ) -> OptimizerPhaseSpec:
     cfg = copy.deepcopy(entry)
     trainer = _normalize_legacy_optimizer_name(cfg.pop("trainer"))
+    reset_optimizer = bool(cfg.pop("reset_optimizer", False))
     name = cfg.get("name", f"phase_{index}")
     if suffix:
         name = f"{name}_{suffix}"
-    return OptimizerPhaseSpec(name=name, trainer=trainer, config=cfg)
+    return OptimizerPhaseSpec(
+        name=name,
+        trainer=trainer,
+        config=cfg,
+        reset_optimizer=reset_optimizer,
+    )
 
 
 def _raise_legacy_ls_update_error() -> None:
@@ -288,10 +303,11 @@ def _normalize_explicit_phase(entry: dict[str, Any], index: int) -> PhaseSpec:
         return OptimizerPhaseSpec(
             name=entry.get("name", f"phase_{index}"),
             trainer=trainer,
+            reset_optimizer=entry.get("reset_optimizer", False),
             config={
                 k: copy.deepcopy(v)
                 for k, v in entry.items()
-                if k not in {"type", "name", "trainer"}
+                if k not in {"type", "name", "trainer", "reset_optimizer"}
             },
         )
     if phase_type == "linear_solve":
@@ -507,7 +523,7 @@ class BasePhase:
                 continue
             phase_type = phase_cfg.get("type")
             trainer_name = phase_cfg.get("trainer")
-            if phase_type == "optimizer" or trainer_name in {"NODE", "Weak", "Linear"}:
+            if phase_type == "optimizer" or trainer_name in {"NODE", "Weak", "Linear", "OneStep"}:
                 return (
                     phase_cfg.get("ode_method", "dopri5"),
                     copy.deepcopy(phase_cfg.get("ode_args", {})),
@@ -723,16 +739,21 @@ class BaseOptimizerPhase(BasePhase):
         model: torch.nn.Module,
         artifacts: ArtifactRegistry,
     ) -> OptimizerStateArtifact:
-        phase_cfg = self.spec.config
+        spec = cast(OptimizerPhaseSpec, self.spec)
+        phase_cfg = spec.config
         lr = float(phase_cfg.get("learning_rate", 1e-3))
         gamma = float(phase_cfg.get("decay_rate", 0.999))
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         prior = artifacts.get("optimizer_state")
-        if isinstance(prior, OptimizerStateArtifact):
+        if isinstance(prior, OptimizerStateArtifact) and not spec.reset_optimizer:
             try:
                 optimizer.load_state_dict(prior.optimizer.state_dict())
             except ValueError:
                 pass
+            else:
+                # Reuse moments/step counters while still honoring the new phase lr.
+                for param_group in optimizer.param_groups:
+                    param_group["lr"] = lr
         schedulers = [
             make_scheduler(torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma))
         ]
@@ -1376,6 +1397,75 @@ class LinearRegressionPhase(BaseOptimizerPhase):
         avg_loss, _ = updater.update(model, _require_loader(phase_context.train_loader))
         items = [float(avg_loss)] + [0.0] * (len(optimizer_state.criteria_weights) - 1)
         return float(avg_loss), items, False
+
+
+class OneStepOptimizerPhase(BaseOptimizerPhase):
+    def _customize_optimizer_artifact(
+        self,
+        optimizer_state: OptimizerStateArtifact,
+        model: torch.nn.Module,
+        phase_context: PhaseContext,
+        phase_logger: logging.Logger,
+    ) -> None:
+        del model, phase_logger
+        train_md = _require_metadata(phase_context.train_md)
+        optimizer_state._one_step_dt = float(train_md["dt_and_n_steps"][0][0])
+        optimizer_state._one_step_kwargs = {}
+        kwargs_cfg = self.spec.config.get("kwargs", {})
+        if isinstance(kwargs_cfg, dict):
+            optimizer_state._one_step_kwargs.update(copy.deepcopy(kwargs_cfg))
+        if "order" in self.spec.config:
+            optimizer_state._one_step_kwargs["order"] = self.spec.config["order"]
+
+    def _compute_losses(
+        self,
+        model: torch.nn.Module,
+        optimizer_state: OptimizerStateArtifact,
+        batch: TrainerBatch,
+        ode_method: str,
+        ode_args: dict[str, Any],
+    ) -> list[torch.Tensor]:
+        batch_any = cast(Any, batch)
+        if getattr(batch_any, "is_ragged", False):
+            return self._average_loss_lists(
+                [
+                    self._compute_losses(model, optimizer_state, sample, ode_method, ode_args)
+                    for sample in batch_any.iter_single_batches()
+                ]
+            )
+
+        dt = optimizer_state._one_step_dt
+        if dt is None:
+            raise ValueError("One-step target time step is not initialized.")
+
+        runtime_batch = batch_any.to(self.device)
+        if getattr(model, "CONT", False):
+            predictions, targets = _comp_linear_eval_ct(
+                model,
+                runtime_batch,
+                dt=dt,
+                **optimizer_state._one_step_kwargs,
+            )
+        else:
+            predictions, targets = _comp_linear_eval_dt(
+                model,
+                runtime_batch,
+                dt=dt,
+                **optimizer_state._one_step_kwargs,
+            )
+        losses = [optimizer_state.criteria[0](predictions, targets)]
+        losses.extend(
+            self._additional_criteria_evaluation(
+                model,
+                optimizer_state,
+                None,
+                None,
+                runtime_batch,
+                ode_method,
+                ode_args,
+            )
+        )
+        return losses
 
 
 class LinearSolvePhase(BasePhase):
@@ -2057,6 +2147,14 @@ def build_phase(
             )
         if spec.trainer == "Linear":
             return LinearRegressionPhase(
+                spec=spec,
+                config=config,
+                model_class=model_class,
+                dtype=dtype,
+                execution_services=execution_services,
+            )
+        if spec.trainer == "OneStep":
+            return OneStepOptimizerPhase(
                 spec=spec,
                 config=config,
                 model_class=model_class,

@@ -149,6 +149,9 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "tie_breaker_options": ("std_metric", "param_l1", "combo_index"),
         "default_tie_breakers": ("std_metric", "combo_index"),
     }
+    phase_schemas = {entry.key: entry for entry in detail.phase_entry_schemas}
+    assert "reset_optimizer" in phase_schemas["legacy_optimizer"].optional_fields
+    assert "reset_optimizer" in phase_schemas["optimizer"].optional_fields
     assert detail.cv_schema.notes == (
         "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
         "true k-fold cross-validation.",
@@ -175,7 +178,7 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "parity='odd' or 'even' for integer-valued fields. If bounds are omitted, the runtime "
         "uses the legacy adaptive walk over param_grid candidates.",
         "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
-        "Supported optimizer trainer names are Linear, Weak, and NODE.",
+        "Supported optimizer trainer names are Linear, OneStep, Weak, and NODE.",
         "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
         "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters; "
         "matching trainer defaults from the selected profile are preserved unless overridden.",

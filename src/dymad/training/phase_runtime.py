@@ -39,6 +39,8 @@ class OptimizerStateArtifact:
     _weak_N: int | None = None
     _weak_dN: int | None = None
     _linear_updater: LSUpdater | None = None
+    _one_step_dt: float | None = None
+    _one_step_kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

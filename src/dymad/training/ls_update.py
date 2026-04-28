@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ----------------
 def _dt_target(z: torch.Tensor) -> torch.Tensor:
     """Compute discrete-time targets."""
-    return z[..., 1:, :]
+    return z[..., 1:, :].detach()
 
 
 def _as_runtime_batch(batch: TrainerBatch | RuntimeBatch) -> RuntimeBatch:
@@ -71,9 +71,9 @@ def _ct_target(z: torch.Tensor, dt, order=2) -> torch.Tensor:
     if order == 1:
         dz = (z[..., 1:, :] - z[..., :-1, :]) / dt
         dz = torch.concatenate((dz, dz[..., -1:, :]), dim=-2)
-        return dz
+        return dz.detach()
     elif order == 2:
-        dz = np.gradient(z.cpu().numpy(), dt, axis=-2, edge_order=2)
+        dz = np.gradient(z.detach().cpu().numpy(), dt, axis=-2, edge_order=2)
         return torch.tensor(dz, dtype=z.dtype, device=z.device)
     else:
         raise ValueError(f"Unsupported FD order: {order}. Only 1 and 2 are supported.")

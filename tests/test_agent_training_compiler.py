@@ -645,6 +645,7 @@ def test_compile_training_request_accepts_minimal_staged_legacy_optimizer_shorth
     ("phase_sequence", "expected_trainers"),
     [
         ([{"trainer": "Linear"}, {"trainer": "Weak"}], ["Linear", "Weak"]),
+        ([{"trainer": "OneStep"}, {"trainer": "NODE"}], ["OneStep", "NODE"]),
         ([{"trainer": "Weak"}, {"trainer": "NODE"}], ["Weak", "NODE"]),
     ],
 )
