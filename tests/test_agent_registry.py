@@ -149,6 +149,9 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "tie_breaker_options": ("std_metric", "param_l1", "combo_index"),
         "default_tie_breakers": ("std_metric", "combo_index"),
     }
+    phase_schemas = {entry.key: entry for entry in detail.phase_entry_schemas}
+    assert "reset_optimizer" in phase_schemas["legacy_optimizer"].optional_fields
+    assert "reset_optimizer" in phase_schemas["optimizer"].optional_fields
     assert detail.cv_schema.notes == (
         "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
         "true k-fold cross-validation.",

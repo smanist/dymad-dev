@@ -213,6 +213,37 @@ def test_normalize_phase_specs_accepts_smoothing_data_phase():
     assert data_spec.config["method"] == "savgol"
 
 
+def test_normalize_phase_specs_accepts_optimizer_reset_flag():
+    specs = normalize_phase_specs(
+        {
+            "model": {"name": "demo"},
+            "phases": [
+                {
+                    "type": "optimizer",
+                    "name": "warmup",
+                    "trainer": "Weak",
+                    "reset_optimizer": True,
+                    "n_epochs": 5,
+                },
+                {
+                    "trainer": "NODE",
+                    "reset_optimizer": True,
+                    "n_epochs": 7,
+                },
+            ],
+        }
+    )
+
+    warmup = specs[0]
+    refine = specs[1]
+    assert isinstance(warmup, OptimizerPhaseSpec)
+    assert isinstance(refine, OptimizerPhaseSpec)
+    assert warmup.reset_optimizer is True
+    assert refine.reset_optimizer is True
+    assert "reset_optimizer" not in warmup.config
+    assert "reset_optimizer" not in refine.config
+
+
 def test_normalize_phase_specs_rejects_legacy_ls_update():
     with pytest.raises(
         PhaseSpecValidationError, match="'ls_update' is deprecated and no longer supported"
@@ -901,6 +932,97 @@ def test_one_step_optimizer_phase_uses_discrete_next_state_targets():
     losses = phase._compute_losses(model, optimizer_state, batch, "dopri5", {})
 
     assert losses[0].item() == pytest.approx(2.5)
+
+
+def test_optimizer_phase_reuses_prior_state_but_honors_new_phase_lr():
+    class _SimpleModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(
+            name="weak",
+            trainer="Weak",
+            config={
+                "learning_rate": 5.0e-3,
+                "weak_form_params": {"N": 5, "dN": 1, "ordpol": 1, "ordint": 1},
+            },
+        ),
+        config=config,
+        model_class=_SimpleModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _SimpleModel()
+    prior_optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-3)
+    prior_optimizer.zero_grad(set_to_none=True)
+    (model.weight.square()).backward()
+    prior_optimizer.step()
+
+    artifacts = ArtifactRegistry()
+    artifacts.put(
+        "optimizer_state",
+        OptimizerStateArtifact(
+            optimizer=prior_optimizer,
+            criteria=[],
+            criteria_weights=[],
+            criteria_names=[],
+        ),
+    )
+
+    optimizer_state = phase._build_optimizer_artifact(model, artifacts)
+
+    assert optimizer_state.optimizer.state
+    assert optimizer_state.optimizer.param_groups[0]["lr"] == pytest.approx(5.0e-3)
+
+
+def test_optimizer_phase_reset_optimizer_starts_with_fresh_state():
+    class _SimpleModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(
+            name="weak",
+            trainer="Weak",
+            config={
+                "learning_rate": 5.0e-3,
+                "weak_form_params": {"N": 5, "dN": 1, "ordpol": 1, "ordint": 1},
+            },
+            reset_optimizer=True,
+        ),
+        config=config,
+        model_class=_SimpleModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _SimpleModel()
+    prior_optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-3)
+    prior_optimizer.zero_grad(set_to_none=True)
+    (model.weight.square()).backward()
+    prior_optimizer.step()
+
+    artifacts = ArtifactRegistry()
+    artifacts.put(
+        "optimizer_state",
+        OptimizerStateArtifact(
+            optimizer=prior_optimizer,
+            criteria=[],
+            criteria_weights=[],
+            criteria_names=[],
+        ),
+    )
+
+    optimizer_state = phase._build_optimizer_artifact(model, artifacts)
+
+    assert optimizer_state.optimizer.state == {}
+    assert optimizer_state.optimizer.param_groups[0]["lr"] == pytest.approx(5.0e-3)
 
 
 def test_one_step_optimizer_phase_uses_continuous_rate_targets():

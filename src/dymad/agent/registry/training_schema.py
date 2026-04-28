@@ -108,7 +108,7 @@ def _phase_entry_schemas() -> tuple[TrainingPhaseEntrySchema, ...]:
             summary="Legacy shorthand for one optimizer phase.",
             accepted_shape='{"trainer": "NODE" | "Weak" | "Linear" | "OneStep", ...}',
             required_fields=("trainer",),
-            optional_fields=("name",),
+            optional_fields=("name", "reset_optimizer"),
             enum_fields={"trainer": ("NODE", "Weak", "Linear", "OneStep")},
             allows_additional_keys=True,
             notes=(
@@ -122,7 +122,7 @@ def _phase_entry_schemas() -> tuple[TrainingPhaseEntrySchema, ...]:
             summary="Explicit optimizer phase.",
             accepted_shape='{"type": "optimizer", "trainer": "NODE" | "Weak" | "Linear" | "OneStep", ...}',
             required_fields=("type", "trainer"),
-            optional_fields=("name",),
+            optional_fields=("name", "reset_optimizer"),
             enum_fields={"trainer": ("NODE", "Weak", "Linear", "OneStep")},
             allows_additional_keys=True,
             notes=("Any extra keys are treated as optimizer-phase config.",),

@@ -100,7 +100,7 @@ trn_step_warm = copy.deepcopy(trn_step)
 trn_step_warm["n_epochs"] = 1000
 
 trn_weak = {
-    "n_epochs": 1000,
+    "n_epochs": 500,
     "save_interval": 50,
     "load_checkpoint": False,
     "learning_rate": 5e-3,
@@ -114,7 +114,7 @@ trn_weak = {
 }
 
 trn_dt_node = {
-    "n_epochs": 1000,
+    "n_epochs": 500,
     "save_interval": 50,
     "load_checkpoint": False,
     "learning_rate": 1e-3,
@@ -163,7 +163,7 @@ cases = [
             "training": None,
             "phases": [
                 _optimizer_phase("OneStep", trn_step_warm),
-                _optimizer_phase("Weak", trn_weak),
+                _optimizer_phase("Weak", {**trn_weak, "reset_optimizer": True}),
             ],
         },
     },
@@ -189,19 +189,18 @@ cases = [
             "training": None,
             "phases": [
                 _optimizer_phase("OneStep", trn_step_warm),
-                _optimizer_phase("NODE", trn_dt_node),
+                _optimizer_phase("NODE", {**trn_dt_node, "reset_optimizer": True}),
             ],
         },
     },
 ]
 
-# IDX = [0, 1, 2, 3]
-IDX = [1]
+IDX = [0, 1, 2, 3]
 labels = [cases[i]["label"] for i in IDX]
 
 ifdat = 0
-iftrn = 1
-ifplt = 1
+iftrn = 0
+ifplt = 0
 ifprd = 1
 
 if ifdat:
