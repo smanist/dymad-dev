@@ -1,8 +1,10 @@
 """
-Standalone one-step optimizer example for the controlled continuous-time LTI case.
+Standalone one-step optimizer examples for controlled LTI systems.
 
-This example owns its local data generation and training configs so it can live
-independently from the discrete-time and baseline continuous-time LTI folders.
+The folder owns its local data generation and training configs. It compares:
+
+- continuous-time: one-step only, one-step followed by weak-form refinement
+- discrete-time: one-step only, one-step followed by NODE refinement
 """
 
 import copy
@@ -14,13 +16,14 @@ import numpy as np
 import torch
 
 from dymad.io import load_model
-from dymad.models import LDM
+from dymad.models import DLDM, LDM
 from dymad.training import OneStepTrainer, StackedTrainer
 from dymad.utils import TrajectorySampler, plot_summary, plot_trajectory
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_CONFIG_PATH = BASE_DIR / "lti_1s_data.yaml"
-TRAINING_CONFIG_PATH = BASE_DIR / "lti_1s_ldm_node.yaml"
+CT_CONFIG_PATH = BASE_DIR / "lti_1s_ct.yaml"
+DT_CONFIG_PATH = BASE_DIR / "lti_1s_dt.yaml"
 DATA_PATH = BASE_DIR / "data" / "lti_1s.npz"
 
 os.chdir(BASE_DIR)
@@ -65,7 +68,7 @@ config_gau = {
     }
 }
 
-mdl_ld = {
+mdl_ct = {
     "encoder_layers": 0,
     "processor_layers": 1,
     "decoder_layers": 0,
@@ -74,6 +77,16 @@ mdl_ld = {
     "weight_init": "xavier_uniform",
     "gain": 0.01,
     "input_order": "cubic",
+}
+
+mdl_dt = {
+    "encoder_layers": 0,
+    "processor_layers": 1,
+    "decoder_layers": 0,
+    "hidden_dimension": 32,
+    "activation": "none",
+    "weight_init": "xavier_uniform",
+    "gain": 0.01,
 }
 
 trn_step = {
@@ -86,18 +99,30 @@ trn_step = {
 trn_step_warm = copy.deepcopy(trn_step)
 trn_step_warm["n_epochs"] = 1000
 
-trn_node = {
+trn_weak = {
+    "n_epochs": 1000,
+    "save_interval": 50,
+    "load_checkpoint": False,
+    "learning_rate": 5e-3,
+    "decay_rate": 0.999,
+    "weak_form_params": {
+        "N": 13,
+        "dN": 2,
+        "ordpol": 2,
+        "ordint": 2,
+    },
+}
+
+trn_dt_node = {
     "n_epochs": 1000,
     "save_interval": 50,
     "load_checkpoint": False,
     "learning_rate": 1e-3,
     "decay_rate": 0.999,
-    "sweep_lengths": [20, 40],
+    "chop_mode": "unfold",
+    "chop_step": 0.5,
+    "sweep_lengths": [3, 5, 7],
     "sweep_epoch_step": 200,
-    # "chop_mode": "unfold",
-    # "chop_step": 0.5,
-    "ode_method": "dopri5",
-    "ode_args": {"rtol": 1.0e-7, "atol": 1.0e-9},
 }
 
 
@@ -117,32 +142,61 @@ def generate_data():
 
 cases = [
     {
-        "label": "ldm_step",
-        "artifact_name": "lti_1s_ldm_step",
+        "label": "ct_step",
+        "artifact_name": "lti_1s_ct_step",
+        "config_path": CT_CONFIG_PATH,
         "model": LDM,
         "trainer": OneStepTrainer,
         "config_mod": {
-            "model": {"name": "lti_1s_ldm_step", **mdl_ld},
+            "model": {"name": "lti_1s_ct_step", **mdl_ct},
             "training": trn_step,
         },
     },
     {
-        "label": "ldm_step_node",
-        "artifact_name": "lti_1s_ldm_step_node",
+        "label": "ct_step_wf",
+        "artifact_name": "lti_1s_ct_step_wf",
+        "config_path": CT_CONFIG_PATH,
         "model": LDM,
         "trainer": StackedTrainer,
         "config_mod": {
-            "model": {"name": "lti_1s_ldm_step_node", **mdl_ld},
+            "model": {"name": "lti_1s_ct_step_wf", **mdl_ct},
             "training": None,
             "phases": [
                 _optimizer_phase("OneStep", trn_step_warm),
-                _optimizer_phase("NODE", trn_node),
+                _optimizer_phase("Weak", trn_weak),
+            ],
+        },
+    },
+    {
+        "label": "dt_step",
+        "artifact_name": "lti_1s_dt_step",
+        "config_path": DT_CONFIG_PATH,
+        "model": DLDM,
+        "trainer": OneStepTrainer,
+        "config_mod": {
+            "model": {"name": "lti_1s_dt_step", **mdl_dt},
+            "training": trn_step,
+        },
+    },
+    {
+        "label": "dt_step_node",
+        "artifact_name": "lti_1s_dt_step_node",
+        "config_path": DT_CONFIG_PATH,
+        "model": DLDM,
+        "trainer": StackedTrainer,
+        "config_mod": {
+            "model": {"name": "lti_1s_dt_step_node", **mdl_dt},
+            "training": None,
+            "phases": [
+                _optimizer_phase("OneStep", trn_step_warm),
+                _optimizer_phase("NODE", trn_dt_node),
             ],
         },
     },
 ]
 
-IDX = [0, 1]
+# IDX = [0, 1, 2, 3]
+IDX = [1]
 labels = [cases[i]["label"] for i in IDX]
 
 ifdat = 0
@@ -159,7 +213,7 @@ if iftrn:
     for i in IDX:
         case = cases[i]
         trainer = case["trainer"](
-            TRAINING_CONFIG_PATH,
+            case["config_path"],
             case["model"],
             config_mod=copy.deepcopy(case["config_mod"]),
         )
@@ -191,7 +245,7 @@ if ifprd:
     plot_trajectory(
         np.array(res),
         t_data,
-        "LTI CT",
+        "LTI",
         us=u_data,
         labels=["Truth"] + labels,
         ifclose=False,
