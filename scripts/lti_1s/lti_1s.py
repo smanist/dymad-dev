@@ -77,23 +77,25 @@ mdl_ld = {
 }
 
 trn_step = {
-    "n_epochs": 1200,
-    "save_interval": 20,
+    "n_epochs": 2000,
+    "save_interval": 50,
     "load_checkpoint": False,
     "learning_rate": 1e-3,
     "decay_rate": 0.999,
 }
 trn_step_warm = copy.deepcopy(trn_step)
-trn_step_warm["n_epochs"] = 300
+trn_step_warm["n_epochs"] = 1000
 
 trn_node = {
-    "n_epochs": 900,
-    "save_interval": 20,
+    "n_epochs": 1000,
+    "save_interval": 50,
     "load_checkpoint": False,
     "learning_rate": 1e-3,
     "decay_rate": 0.999,
-    "sweep_lengths": [50, 100, 200, 300, 501],
-    "sweep_epoch_step": 100,
+    "sweep_lengths": [20, 40],
+    "sweep_epoch_step": 200,
+    # "chop_mode": "unfold",
+    # "chop_step": 0.5,
     "ode_method": "dopri5",
     "ode_args": {"rtol": 1.0e-7, "atol": 1.0e-9},
 }
