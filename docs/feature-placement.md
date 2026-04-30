@@ -6,6 +6,10 @@ This is the shortest possible answer to "where should this feature go?".
 
 Read [architecture.md](architecture.md) first if the
 boundary between `agent/*` and the legacy runtime is unclear.
+Use this file for fast triage before reading the longer
+[algorithm-integration-guide.md](algorithm-integration-guide.md). After choosing the matching row
+below, read only the guide sections relevant to that change type for interface, schema, test,
+example, and benchmark expectations.
 
 Maintenance rule:
 
@@ -28,6 +32,21 @@ Maintenance rule:
 | A new low-level runtime, transform, or batching behavior | `src/dymad/core/*`, `src/dymad/io/*`, `src/dymad/training/*` | Do not route this through `agent/*` unless the boundary contract changes |
 | A new numerical primitive or solver | `src/dymad/numerics/*` | Keep numerics isolated from agent/MCP concerns |
 | A new spectral runtime or adapter behavior | `src/dymad/sako/*`, then registry/executor files if you want it exposed as an analysis workflow | Library behavior first, user-facing exposure second |
+
+## Follow-Up Guide Sections
+
+After the decision table identifies the likely owner, use this map to read the focused parts of
+[algorithm-integration-guide.md](algorithm-integration-guide.md):
+
+| Triage result | Read these guide sections |
+| --- | --- |
+| MCP tool, user-facing capability, request validation, execution workflow, or persisted handle | `MCP Tools`, `Agent-Facing Schema Checklist`, `Data Structures To Consume And Return`, `Mandatory Tests`, `What Not To Touch` |
+| Model family or variant | `Models and Prediction`, `Agent-Facing Schema Checklist` if user-mode exposed, `Mandatory Tests`, `Naming Conventions` |
+| Training phase or optimizer behavior | `Training Algorithms and Phases`, `Agent-Facing Schema Checklist` if user-mode exposed, `Mandatory Tests`, `Examples` |
+| Analysis workflow or spectral adapter | `Analysis Workflows`, `Agent-Facing Schema Checklist`, `Mandatory Tests`, `Examples` |
+| Core runtime, transform, batching, or data structure | `Core Data Structures`, `Data Structures To Consume And Return`, `Mandatory Tests` |
+| Numerical primitive or solver | `Numerical Algorithms`, `Mandatory Tests`, `Benchmarks` when the hot path changes |
+| Runnable example or benchmark | `Examples`, `Benchmarks`, `Naming Conventions` |
 
 ## Rules of Thumb
 

@@ -10,7 +10,8 @@ This document is the current source of truth for:
 - checkpoint compatibility flow
 - where new features should plug in
 
-Use it instead of the old `docs/mcp_*.md` and `docs/checkpoint-e2e-layering.md` design notes.
+For algorithm-specific integration expectations, read [`feature-placement.md`](feature-placement.md)
+after this document.
 
 Maintenance rule:
 
