@@ -44,6 +44,7 @@ Explore More
    architecture
    feature-placement
    algorithm-integration-guide
+   scratch-scripting
    example-script-pattern
    roadmap
    examples

@@ -7,6 +7,7 @@ phase, or agent-facing tool. It complements:
 
 - [architecture.md](architecture.md), which defines package ownership and boundary layers
 - [feature-placement.md](feature-placement.md), which gives the short placement table
+- [scratch-scripting.md](scratch-scripting.md), which defines temporary external scratch work
 - [example-script-pattern.md](example-script-pattern.md), which defines runnable script patterns
 
 The goal is to help AI agents decide where an algorithm belongs, what interface it must expose, and
@@ -30,7 +31,8 @@ only when the algorithm becomes a stable user-facing workflow or capability.
 | Validates or normalizes user-mode request fields | Execute workflow logic or persist artifacts | `src/dymad/agent/compiler/*` | Store compiled requests through facade/store if calls must be durable |
 | Persists a new request, artifact, run, snapshot, or handle | Implement the algorithm itself | `src/dymad/agent/store/*` and `src/dymad/agent/facade/*` | `agent/exec/*` and MCP tools |
 | Adds an MCP tool for an existing capability or workflow | Define business logic in the server | `src/dymad/agent/mcp/user_tools.py` or `demo_tools.py` | `src/dymad/agent/mcp/server.py` registration only |
-| Is a runnable demo, benchmark, or experiment | Need to be imported as library behavior | `scripts/*` or `examples/*` | Follow [example-script-pattern.md](example-script-pattern.md) |
+| Is a temporary one-off exploration or benchmark | Need to become maintained repo behavior | External scratch folder | Follow [scratch-scripting.md](scratch-scripting.md) |
+| Is a committed runnable demo, benchmark, or experiment | Need to be imported as library behavior | `scripts/*` or `examples/*` | Follow [example-script-pattern.md](example-script-pattern.md) |
 
 If two rows seem to apply, split the change: implementation first, agent-facing exposure second.
 
@@ -214,7 +216,9 @@ New pytest files must use exactly one of the allowed prefixes enforced by `tests
 
 ## Examples
 
-Add examples only when they teach a workflow that tests and docs do not already make clear.
+Add examples only when they teach a maintained workflow that tests and docs do not already make
+clear. For one-off exploration, use an external scratch folder first and follow
+[scratch-scripting.md](scratch-scripting.md).
 
 Expected placement:
 
@@ -292,7 +296,8 @@ Before opening a change:
 7. Add store/facade records only for durable objects that must be referenced across calls.
 8. Add MCP tool exposure last.
 9. Add mandatory targeted tests using the required test-file prefix.
-10. Add examples and benchmarks when the algorithm introduces a new user workflow or hot path.
+10. Keep one-off explorations in scratch space; add examples and benchmarks only when the algorithm
+    introduces a maintained user workflow or hot path.
 11. Update [architecture.md](architecture.md) and [feature-placement.md](feature-placement.md) if
     ownership, boundaries, handles, workflows, or placement guidance changed.
 12. For Python edits, run `make check` before reporting completion.

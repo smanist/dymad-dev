@@ -16,6 +16,10 @@ Repo fast map:
 
 Script example rule:
 
+- For temporary developer-facing exploration that should not modify the repo, read
+  [docs/scratch-scripting.md](docs/scratch-scripting.md). Scratch scripts should live outside
+  repo-tracked paths and write artifacts under their scratch folder unless explicitly instructed
+  otherwise.
 - Before adding a new runnable example under `scripts/`, read
   [docs/example-script-pattern.md](docs/example-script-pattern.md). Both documented patterns are
   valid: use the old inline if-block style for developer-facing examples that intentionally expose

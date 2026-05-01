@@ -42,8 +42,6 @@ Training Utilities
 Data Manipulation Utilities
 ---------------------------
 
-.. dict-keys:: dymad.transform.collection.TRN_MAP
-
 .. dict-keys:: dymad.utils.sampling.CTRL_MAP
 
 .. dict-keys:: dymad.utils.sampling.X0_MAP
