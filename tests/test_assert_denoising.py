@@ -4,6 +4,7 @@ import torch
 from scipy.signal import savgol_filter
 
 from dymad.numerics import denoise, denoising_metrics
+from dymad.numerics.denoising import _build_kernel_design_matrix
 
 
 def test_denoise_savgol_matches_scipy_for_numpy_arrays():
@@ -60,6 +61,231 @@ def test_denoise_savgol_requires_window_length_and_polyorder():
 
     with pytest.raises(TypeError, match="polyorder"):
         denoise(np.ones((9, 2)), method="savgol", window_length=5)
+
+
+@pytest.mark.parametrize(
+    ("kernel", "degree", "expected"),
+    [
+        (
+            "gaussian",
+            4.0,
+            np.exp(
+                -0.5
+                * np.square(
+                    (np.array([0.0, 0.5, 1.0])[:, None] - np.array([0.0, 1.0])[None, :]) / 0.5
+                )
+            ),
+        ),
+        (
+            "compact_polynomial",
+            2.0,
+            np.power(
+                np.maximum(
+                    1.0
+                    - np.square(
+                        (np.array([0.0, 0.5, 1.0])[:, None] - np.array([0.0, 1.0])[None, :]) / 0.75
+                    ),
+                    0.0,
+                ),
+                2.0,
+            ),
+        ),
+    ],
+)
+def test_kernel_smoothing_design_matrix_matches_closed_forms(
+    kernel: str,
+    degree: float,
+    expected: np.ndarray,
+) -> None:
+    time = np.array([0.0, 0.5, 1.0], dtype=np.float64)
+    anchors = np.array([0.0, 1.0], dtype=np.float64)
+    bandwidth = 0.5 if kernel == "gaussian" else 0.75
+
+    actual = _build_kernel_design_matrix(
+        time,
+        anchors,
+        kernel=kernel,
+        bandwidth=bandwidth,
+        degree=degree,
+    )
+
+    np.testing.assert_allclose(actual, expected)
+
+
+def test_denoise_kernel_smoothing_preserves_shape_and_handles_negative_axis() -> None:
+    base = np.linspace(0.0, 1.0, 7)
+    data = np.stack(
+        [
+            np.stack((base, np.sin(base * np.pi)), axis=1),
+            np.stack((base**2, np.cos(base * np.pi)), axis=1),
+            np.stack((np.sqrt(base + 1.0), np.sin(base * 2.0 * np.pi)), axis=1),
+        ],
+        axis=0,
+    )
+
+    actual = denoise(
+        data,
+        method="kernel_smoothing",
+        axis=-2,
+        kernel="gaussian",
+        anchor_count=5,
+        bandwidth_multiplier=1.5,
+    )
+    expected = np.stack(
+        [
+            denoise(
+                trajectory,
+                method="kernel_smoothing",
+                axis=0,
+                kernel="gaussian",
+                anchor_count=5,
+                bandwidth_multiplier=1.5,
+            )
+            for trajectory in data
+        ],
+        axis=0,
+    )
+
+    assert actual.shape == data.shape
+    np.testing.assert_allclose(actual, expected)
+
+
+def test_denoise_kernel_smoothing_preserves_torch_dtype_and_device() -> None:
+    time = np.linspace(0.0, 1.0, 9, dtype=np.float64)
+    data = torch.stack(
+        (
+            torch.linspace(0.0, 1.0, 9, dtype=torch.float32),
+            torch.cos(torch.linspace(0.0, np.pi, 9, dtype=torch.float32)),
+        ),
+        dim=1,
+    )
+
+    result = denoise(
+        data,
+        method="kernel_smoothing",
+        kernel="compact_polynomial",
+        anchor_count=6,
+        bandwidth_multiplier=2.0,
+        degree=4,
+        time=time,
+    )
+
+    assert isinstance(result, torch.Tensor)
+    assert result.dtype is data.dtype
+    assert result.device == data.device
+    np.testing.assert_allclose(
+        result.detach().cpu().numpy(),
+        denoise(
+            data.detach().cpu().numpy(),
+            method="kernel_smoothing",
+            kernel="compact_polynomial",
+            anchor_count=6,
+            bandwidth_multiplier=2.0,
+            degree=4,
+            time=time,
+        ).astype(np.float32),
+        atol=1e-6,
+        rtol=1e-6,
+    )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        (
+            {"kernel": "triangle", "anchor_count": 3, "bandwidth_multiplier": 1.0},
+            "Unsupported kernel",
+        ),
+        (
+            {"axis": 2, "anchor_count": 3, "bandwidth_multiplier": 1.0},
+            "Invalid axis",
+        ),
+        (
+            {"anchor_count": 3, "bandwidth": 0.0},
+            "bandwidth must be positive",
+        ),
+        (
+            {"anchor_count": 3, "bandwidth_multiplier": 0.0},
+            "bandwidth_multiplier must be positive",
+        ),
+        (
+            {
+                "kernel": "compact_polynomial",
+                "anchor_count": 3,
+                "bandwidth_multiplier": 1.0,
+                "degree": 0.0,
+            },
+            "degree must be positive",
+        ),
+        (
+            {"bandwidth_multiplier": 1.0},
+            "anchor_count or anchor_density",
+        ),
+        (
+            {"anchor_count": 3, "bandwidth_multiplier": 1.0, "time": np.ones((5, 1))},
+            "time must be a 1D array",
+        ),
+        (
+            {"anchor_count": 3, "bandwidth_multiplier": 1.0, "time": np.ones(4)},
+            "same length",
+        ),
+        (
+            {
+                "anchor_count": 3,
+                "bandwidth_multiplier": 1.0,
+                "time": np.array([0.0, 0.2, 0.2, 0.7, 1.0]),
+            },
+            "strictly increasing",
+        ),
+    ],
+)
+def test_denoise_kernel_smoothing_rejects_invalid_configuration(
+    kwargs: dict[str, object],
+    match: str,
+) -> None:
+    data = np.ones((5, 2), dtype=np.float64)
+
+    with pytest.raises(ValueError, match=match):
+        denoise(data, method="kernel_smoothing", **kwargs)
+
+
+def test_denoise_kernel_smoothing_rejects_short_and_nonfinite_inputs() -> None:
+    with pytest.raises(ValueError, match="at least 2 samples"):
+        denoise(
+            np.ones((1, 2), dtype=np.float64),
+            method="kernel_smoothing",
+            anchor_count=1,
+            bandwidth_multiplier=1.0,
+        )
+
+    with pytest.raises(ValueError, match="finite"):
+        denoise(
+            np.array([[0.0], [np.nan]], dtype=np.float64),
+            method="kernel_smoothing",
+            anchor_count=2,
+            bandwidth_multiplier=1.0,
+        )
+
+
+def test_denoise_kernel_smoothing_improves_rmse_on_noisy_signal() -> None:
+    rng = np.random.default_rng(12)
+    time = np.linspace(0.0, 4.0 * np.pi, 128, dtype=np.float64)
+    clean = np.stack((np.sin(time), np.cos(0.5 * time)), axis=1)
+    noisy = clean + rng.normal(scale=0.35, size=clean.shape)
+
+    smoothed = denoise(
+        noisy,
+        method="kernel_smoothing",
+        kernel="gaussian",
+        anchor_count=32,
+        bandwidth_multiplier=2.0,
+        time=time,
+    )
+
+    noisy_rmse = float(np.sqrt(np.mean(np.square(noisy - clean))))
+    smoothed_rmse = float(np.sqrt(np.mean(np.square(smoothed - clean))))
+
+    assert smoothed_rmse < noisy_rmse
 
 
 def test_denoising_metrics_aggregate_multiple_signals():
