@@ -7,6 +7,7 @@ from scipy.signal import savgol_filter
 
 import dymad.training.phases as phases_module
 from dymad.core import GraphSeries, RegularSeries, RegularTrainerBatch
+from dymad.numerics import denoise
 from dymad.training import driver
 from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import (
@@ -211,6 +212,31 @@ def test_normalize_phase_specs_accepts_smoothing_data_phase():
     assert isinstance(data_spec, DataPhaseSpec)
     assert data_spec.operation == "smooth"
     assert data_spec.config["method"] == "savgol"
+
+
+def test_normalize_phase_specs_accepts_kernel_smoothing_data_phase():
+    specs = normalize_phase_specs(
+        {
+            "model": {"name": "demo"},
+            "phases": [
+                {
+                    "type": "data",
+                    "name": "smooth",
+                    "operation": "smooth",
+                    "method": "kernel_smoothing",
+                    "kernel": "compact_polynomial",
+                    "anchor_count": 5,
+                    "bandwidth_multiplier": 2.0,
+                    "degree": 4.0,
+                }
+            ],
+        }
+    )
+
+    data_spec = specs[0]
+    assert isinstance(data_spec, DataPhaseSpec)
+    assert data_spec.config["method"] == "kernel_smoothing"
+    assert data_spec.config["kernel"] == "compact_polynomial"
 
 
 def test_normalize_phase_specs_accepts_optimizer_reset_flag():
@@ -514,6 +540,58 @@ def test_smoothing_data_phase_smooths_each_regular_series_independently():
         )
 
 
+def test_smoothing_data_phase_supports_kernel_smoothing_config():
+    train_series = _build_regular_series()
+    context = PhaseContext(
+        train_set=[train_series],
+        valid_set=None,
+        train_loader=object(),
+        valid_loader=None,
+        train_md={"dt_and_n_steps": [(0.1, 9)]},
+        valid_md=None,
+    )
+    config = {
+        "model": {"name": "demo"},
+        "dataloader": {"batch_size": 1, "shuffle": False},
+        "phases": [],
+    }
+    denoise_config = {
+        "method": "kernel_smoothing",
+        "kernel": "gaussian",
+        "anchor_count": 5,
+        "bandwidth_multiplier": 2.0,
+    }
+    phase = _build_data_phase(
+        config,
+        DataPhaseSpec(
+            name="smooth_kernel",
+            operation="smooth",
+            config={**denoise_config, "splits": ["train"]},
+        ),
+    )
+
+    result = phase.execute(
+        trainer_state=TrainerState(config=config, device=torch.device("cpu")),
+        phase_context=context,
+        artifacts=ArtifactRegistry(),
+        run_name="demo",
+        logger=logging.getLogger("test.smooth.kernel"),
+    )
+
+    expected = denoise(train_series.state, axis=0, **denoise_config)
+    np.testing.assert_allclose(
+        result.phase_context.train_set[0].state.detach().cpu().numpy(),
+        expected.detach().cpu().numpy(),
+    )
+    history = result.phase_context.train_md["data_phase_history"][-1]
+    assert history["method"] == "kernel_smoothing"
+    assert history["config"] == {
+        "kernel": "gaussian",
+        "anchor_count": 5,
+        "bandwidth_multiplier": 2.0,
+    }
+
+
 def test_smoothing_data_phase_uses_standalone_denoising_helpers(monkeypatch):
     train_series = _build_regular_series()
     context = PhaseContext(
@@ -674,6 +752,7 @@ def test_smoothing_data_phase_supports_graph_node_state_only():
             {"method": "median", "window_length": 5, "polyorder": 2},
             "Unsupported data smoothing method",
         ),
+        ({"axis": 3, "window_length": 5, "polyorder": 2}, "Invalid axis"),
         ({"splits": ["test"], "window_length": 5, "polyorder": 2}, "invalid splits"),
     ],
 )

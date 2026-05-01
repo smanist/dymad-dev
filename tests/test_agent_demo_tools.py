@@ -84,7 +84,7 @@ def test_demo_tools_expose_json_safe_registry_discovery(tmp_path) -> None:
         if entry["key"] == "data"
     )
     assert data_schema["example"]["operation"] == "smooth"
-    assert data_schema["example"]["method"] == "savgol"
+    assert data_schema["example"]["method"] == "kernel_smoothing"
     assert any("operation='smooth'" in note for note in data_schema["notes"])
     json.dumps(models)
     json.dumps(profiles)

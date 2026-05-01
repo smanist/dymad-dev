@@ -1608,9 +1608,10 @@ class ContextDataPhase(BasePhase):
     def _resolve_smoothing_method(self) -> str:
         spec = cast(DataPhaseSpec, self.spec)
         method = str(spec.config.get("method", "savgol")).lower()
-        if method != "savgol":
+        if method not in {"savgol", "kernel_smoothing"}:
             raise PhaseSpecValidationError(
-                f"Unsupported data smoothing method '{method}'. Expected 'savgol'."
+                f"Unsupported data smoothing method '{method}'. "
+                "Expected 'savgol' or 'kernel_smoothing'."
             )
         return method
 
@@ -1632,8 +1633,7 @@ class ContextDataPhase(BasePhase):
             )
         return splits
 
-    def _resolve_savgol_config(self) -> dict[str, Any]:
-        cfg = cast(DataPhaseSpec, self.spec).config
+    def _resolve_savgol_config(self, cfg: dict[str, Any]) -> dict[str, Any]:
         window_length = int(cfg.get("window_length", 7))
         polyorder = int(cfg.get("polyorder", 3))
         deriv = int(cfg.get("deriv", 0))
@@ -1661,36 +1661,61 @@ class ContextDataPhase(BasePhase):
             "cval": cval,
         }
 
+    def _resolve_denoise_config(self, *, method: str) -> dict[str, Any]:
+        cfg = cast(DataPhaseSpec, self.spec).config
+        if method == "savgol":
+            return self._resolve_savgol_config(cfg)
+        return {
+            key: value
+            for key, value in cfg.items()
+            if key not in {"method", "axis", "splits", "type", "name", "operation"}
+        }
+
+    def _resolve_denoise_axis(self) -> int:
+        cfg = cast(DataPhaseSpec, self.spec).config
+        return int(cfg.get("axis", 0))
+
     def _smooth_tensor(
         self,
         tensor: torch.Tensor,
         *,
         method: str,
+        axis: int,
         denoise_cfg: dict[str, Any],
     ) -> torch.Tensor:
-        if tensor.shape[0] < denoise_cfg["window_length"]:
+        if not -tensor.ndim <= axis < tensor.ndim:
+            raise PhaseSpecValidationError(
+                f"Invalid axis {axis} for data phase '{self.spec.name}' tensor with "
+                f"{tensor.ndim} dimensions."
+            )
+        denoise_axis = axis % tensor.ndim
+        if method == "savgol" and tensor.shape[denoise_axis] < denoise_cfg["window_length"]:
             raise PhaseSpecValidationError(
                 f"Data phase '{self.spec.name}' requires every selected trajectory to have at least "
                 f"{denoise_cfg['window_length']} steps."
             )
-        return cast(torch.Tensor, denoise(tensor, method=method, axis=0, **denoise_cfg))
+        try:
+            return cast(torch.Tensor, denoise(tensor, method=method, axis=axis, **denoise_cfg))
+        except (TypeError, ValueError) as exc:
+            raise PhaseSpecValidationError(str(exc)) from exc
 
     def _smooth_series(
         self,
         series: TrainerBatch,
         *,
         method: str,
+        axis: int,
         denoise_cfg: dict[str, Any],
     ) -> TrainerBatch:
         if isinstance(series, RegularSeries):
             return series.with_state(
-                self._smooth_tensor(series.state, method=method, denoise_cfg=denoise_cfg)
+                self._smooth_tensor(series.state, method=method, axis=axis, denoise_cfg=denoise_cfg)
             )
         if isinstance(series, GraphSeries):
             return replace(
                 series,
                 node_state=self._smooth_tensor(
-                    series.node_state, method=method, denoise_cfg=denoise_cfg
+                    series.node_state, method=method, axis=axis, denoise_cfg=denoise_cfg
                 ),
                 meta=dict(series.meta),
             )
@@ -1701,7 +1726,8 @@ class ContextDataPhase(BasePhase):
         metadata: dict[str, Any] | None,
         *,
         method: str,
-        savgol_cfg: dict[str, Any],
+        axis: int,
+        denoise_cfg: dict[str, Any],
         metrics: dict[str, float],
         split: str,
         dataset: Sequence[TrainerBatch],
@@ -1713,14 +1739,21 @@ class ContextDataPhase(BasePhase):
                 "phase": self.spec.name,
                 "operation": "smooth",
                 "method": method,
+                "axis": axis,
                 "split": split,
                 "num_trajectories": len(dataset),
-                "window_length": savgol_cfg["window_length"],
-                "polyorder": savgol_cfg["polyorder"],
-                "deriv": savgol_cfg["deriv"],
+                "config": copy.deepcopy(denoise_cfg),
                 "metrics": copy.deepcopy(metrics),
             }
         )
+        if method == "savgol":
+            history[-1].update(
+                {
+                    "window_length": denoise_cfg["window_length"],
+                    "polyorder": denoise_cfg["polyorder"],
+                    "deriv": denoise_cfg["deriv"],
+                }
+            )
         updated["data_phase_history"] = history
         return updated
 
@@ -1747,8 +1780,9 @@ class ContextDataPhase(BasePhase):
         phase_context: PhaseContext,
     ) -> tuple[PhaseContext, dict[str, float]]:
         method = self._resolve_smoothing_method()
+        axis = self._resolve_denoise_axis()
         splits = self._resolve_smoothing_splits()
-        denoise_cfg = self._resolve_savgol_config()
+        denoise_cfg = self._resolve_denoise_config(method=method)
         metrics: dict[str, float] = {}
 
         train_set = phase_context.train_set
@@ -1759,7 +1793,7 @@ class ContextDataPhase(BasePhase):
                     f"Data phase '{self.spec.name}' cannot smooth the train split because it is missing."
                 )
             smoothed_train = [
-                self._smooth_series(series, method=method, denoise_cfg=denoise_cfg)
+                self._smooth_series(series, method=method, axis=axis, denoise_cfg=denoise_cfg)
                 for series in train_set
             ]
             train_metrics = self._compute_smoothing_metrics(
@@ -1772,7 +1806,8 @@ class ContextDataPhase(BasePhase):
             train_md = self._append_phase_history(
                 phase_context.train_md,
                 method=method,
-                savgol_cfg=denoise_cfg,
+                axis=axis,
+                denoise_cfg=denoise_cfg,
                 metrics=train_metrics,
                 split="train",
                 dataset=train_set,
@@ -1786,7 +1821,7 @@ class ContextDataPhase(BasePhase):
                     f"Data phase '{self.spec.name}' cannot smooth the valid split because it is missing."
                 )
             smoothed_valid = [
-                self._smooth_series(series, method=method, denoise_cfg=denoise_cfg)
+                self._smooth_series(series, method=method, axis=axis, denoise_cfg=denoise_cfg)
                 for series in valid_set
             ]
             valid_metrics = self._compute_smoothing_metrics(
@@ -1799,7 +1834,8 @@ class ContextDataPhase(BasePhase):
             valid_md = self._append_phase_history(
                 phase_context.valid_md,
                 method=method,
-                savgol_cfg=denoise_cfg,
+                axis=axis,
+                denoise_cfg=denoise_cfg,
                 metrics=valid_metrics,
                 split="valid",
                 dataset=valid_set,

@@ -40,8 +40,8 @@ phases:
     method: 'kernel_smoothing'
     splits: ['train', 'valid']
     kernel: "compact_polynomial"
-    anchor_count: 64
-    bandwidth_multiplier: 2.0
+    anchor_count: 32
+    bandwidth_multiplier: 4.0
     degree: 4.0
 
   - type: 'optimizer'
