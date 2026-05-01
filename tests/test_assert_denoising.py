@@ -4,6 +4,7 @@ import torch
 from scipy.signal import savgol_filter
 
 from dymad.numerics import denoise, denoising_metrics
+from dymad.numerics.kernel_smoothing import kernel_smoothing
 
 
 def test_denoise_savgol_matches_scipy_for_numpy_arrays():
@@ -101,3 +102,177 @@ def test_denoising_metrics_aggregate_multiple_signals():
 def test_denoise_rejects_unknown_method():
     with pytest.raises(ValueError, match="Unsupported denoising method"):
         denoise(np.ones((9, 2)), method="median")
+
+
+def _kernel_basis(
+    time: np.ndarray,
+    *,
+    kernel: str,
+    anchor_count: int,
+    bandwidth: float,
+    degree: int,
+) -> np.ndarray:
+    anchors = np.linspace(time[0], time[-1], anchor_count, dtype=np.float64)
+    scaled_distance = np.abs(time[:, None] - anchors[None, :]) / bandwidth
+    if kernel == "gaussian":
+        return np.exp(-0.5 * np.square(scaled_distance))
+
+    support = scaled_distance <= 1.0
+    if degree == 0:
+        return support.astype(np.float64)
+
+    basis = np.clip(1.0 - scaled_distance, a_min=0.0, a_max=None)
+    return np.where(support, basis**degree, 0.0)
+
+
+def test_kernel_smoothing_matches_global_lstsq_on_flattened_targets():
+    time = np.array([0.0, 0.2, 0.45, 0.9, 1.4, 2.0], dtype=np.float64)
+    base = np.stack(
+        (
+            np.sin(time),
+            np.cos(time),
+        ),
+        axis=1,
+    )
+    data = np.stack((base, base + np.array([0.3, -0.1])), axis=0)
+
+    result = kernel_smoothing(
+        data,
+        axis=1,
+        time=time,
+        kernel="gaussian",
+        anchor_count=3,
+        bandwidth=0.7,
+        rcond=1e-10,
+    )
+
+    moved = np.moveaxis(data, 1, 0)
+    design = _kernel_basis(time, kernel="gaussian", anchor_count=3, bandwidth=0.7, degree=3)
+    expected_flat, _, _, _ = np.linalg.lstsq(design, moved.reshape(len(time), -1), rcond=1e-10)
+    expected = (design @ expected_flat).reshape(moved.shape)
+    expected = np.moveaxis(expected, 0, 1)
+
+    assert result.shape == data.shape
+    np.testing.assert_allclose(result, expected)
+
+
+def test_kernel_smoothing_supports_compact_polynomial_kernel_and_negative_axis():
+    time = np.array([0.0, 0.15, 0.5, 1.1, 1.8], dtype=np.float64)
+    data = np.array(
+        [
+            [[0.0, 1.0, 0.5, -0.5, -1.0], [1.0, 0.0, 0.5, 1.0, 0.0]],
+            [[0.2, 1.2, 0.7, -0.2, -0.8], [0.8, 0.1, 0.4, 1.1, 0.2]],
+        ],
+        dtype=np.float64,
+    )
+
+    result = kernel_smoothing(
+        data,
+        axis=-1,
+        time=time,
+        kernel="compact_polynomial",
+        anchor_count=4,
+        bandwidth=0.9,
+        degree=2,
+    )
+
+    design = _kernel_basis(
+        time,
+        kernel="compact_polynomial",
+        anchor_count=4,
+        bandwidth=0.9,
+        degree=2,
+    )
+    moved = np.moveaxis(data, -1, 0)
+    expected_flat, _, _, _ = np.linalg.lstsq(design, moved.reshape(len(time), -1), rcond=None)
+    expected = (design @ expected_flat).reshape(moved.shape)
+    expected = np.moveaxis(expected, 0, -1)
+
+    assert result.shape == data.shape
+    np.testing.assert_allclose(result, expected)
+
+
+def test_kernel_smoothing_preserves_compact_support_for_zero_degree():
+    time = np.array([0.0, 1.0, 2.0], dtype=np.float64)
+    data = np.array([1.0, 999.0, 2.0], dtype=np.float64)
+
+    result = kernel_smoothing(
+        data,
+        time=time,
+        kernel="compact_polynomial",
+        anchor_count=2,
+        bandwidth=0.75,
+        degree=0,
+    )
+
+    expected_design = np.array(
+        [
+            [1.0, 0.0],
+            [0.0, 0.0],
+            [0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+    expected_coefficients, _, _, _ = np.linalg.lstsq(
+        expected_design,
+        data[:, None],
+        rcond=None,
+    )
+    expected = (expected_design @ expected_coefficients).ravel()
+
+    np.testing.assert_allclose(result, expected)
+
+
+def test_kernel_smoothing_default_bandwidth_scales_with_time_for_single_anchor():
+    time = np.array([0.0, 0.25, 0.6, 1.0, 1.55, 2.1, 2.8, 3.7], dtype=np.float64)
+    data = np.stack((np.sin(time), np.cos(time)), axis=1)
+
+    baseline = kernel_smoothing(data, time=time, kernel="gaussian")
+    scaled = kernel_smoothing(data, time=time * 100.0, kernel="gaussian")
+
+    np.testing.assert_allclose(scaled, baseline)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"axis": -3}, "out of bounds"),
+        ({"anchor_count": 2, "anchor_density": 0.5}, "Specify only one"),
+        ({"bandwidth": 1.0, "bandwidth_multiplier": 2.0, "anchor_count": 2}, "Specify only one"),
+        ({"kernel": "epanechnikov", "anchor_count": 2, "bandwidth": 1.0}, "Unsupported kernel"),
+        ({"anchor_density": 0.0}, "anchor_density"),
+        ({"anchor_count": 0}, "anchor_count"),
+        ({"degree": -1}, "degree"),
+        ({"ridge": -1.0}, "ridge"),
+        ({"rcond": -1.0}, "rcond"),
+    ],
+)
+def test_kernel_smoothing_rejects_invalid_hyperparameters(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        kernel_smoothing(np.ones((6, 2)), **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("time", "match"),
+    [
+        (np.array([0.0, 0.5, 1.0]), "shape"),
+        (np.array([0.0, 0.5, 0.5, 1.0, 1.5, 2.0]), "strictly increasing"),
+        (np.array([0.0, 0.5, np.nan, 1.0, 1.5, 2.0]), "finite"),
+    ],
+)
+def test_kernel_smoothing_rejects_invalid_time(time, match):
+    with pytest.raises(ValueError, match=match):
+        kernel_smoothing(np.ones((6, 2)), time=time)
+
+
+def test_kernel_smoothing_rejects_non_finite_input_values():
+    data = np.ones((6, 2))
+    data[2, 1] = np.inf
+
+    with pytest.raises(ValueError, match="finite input values"):
+        kernel_smoothing(data)
+
+
+def test_kernel_smoothing_rejects_length_one_axis():
+    with pytest.raises(ValueError, match="at least two samples"):
+        kernel_smoothing(np.ones((1, 3)))

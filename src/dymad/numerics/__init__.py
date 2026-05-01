@@ -2,6 +2,7 @@ from dymad.numerics.complex import complex_grid, complex_map, complex_plot, disc
 from dymad.numerics.denoising import denoise, denoising_metrics
 from dymad.numerics.dm import DM, DMF, VBDM
 from dymad.numerics.gradients import central_diff, complex_step, torch_jacobian
+from dymad.numerics.kernel_smoothing import kernel_smoothing
 from dymad.numerics.linalg import (
     check_direction,
     check_orthogonality,
@@ -49,6 +50,7 @@ __all__ = [
     "fe_step",
     "generate_coef",
     "generate_weak_weights",
+    "kernel_smoothing",
     "logm_low_rank",
     "make_random_matrix",
     "Manifold",
