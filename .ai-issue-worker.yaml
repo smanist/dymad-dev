@@ -12,9 +12,13 @@ scheduler:
   interval_minutes: 30
 issue_selection:
   ready_label: ai-ready
+  resume_label: ai-resume
   working_label: ai-working
   failed_label: ai-failed
   pr_opened_label: ai-pr-opened
+  parent_label: ai-parent
+  child_label: ai-child
+  parent_done_label: ai-parent-done
   blocked_labels:
   - blocked
   - needs-human
@@ -22,6 +26,7 @@ issue_selection:
   allow_stacked_prs: true
   max_stack_depth: 3
   max_issues_per_run: 1
+  max_parent_children_per_run: 3
   selection_order: oldest_updated
 git:
   branch_prefix: ai/issue-
@@ -31,10 +36,9 @@ git:
   allow_dirty_base: false
   remove_ready_on_pr: false
 agent:
-  backend: codex
-  command: codex
-  timeout_minutes: 30
-  max_repair_attempts: 1
+  command: codex exec --full-auto
+  model: gpt-5.4
+  reasoning: high
 verify:
   commands:
   - make check
@@ -75,7 +79,3 @@ pr:
     {agent_notes}
 
     '
-agent:
-  command: codex exec --full-auto
-  model: gpt-5.4
-  reasoning: high
