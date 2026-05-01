@@ -5,6 +5,7 @@
 .ai-logs/
 .ai-runs/
 .ai-runtime/
+.ai-worktrees/
 **/__pycache__/
 **/*.log
 **/*.png

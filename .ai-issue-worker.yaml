@@ -1,8 +1,8 @@
 # Local AI Issue Worker configuration
-# Replace repo with the target GitHub repository in owner/repo form.
+# Repo and base_branch were inferred from local git when possible.
 # Verifier commands run inside the issue worktree and are trusted local config.
 repo: smanist/dymad-dev
-base_branch: worker_test
+base_branch: main
 paths:
   worktree_root: .ai-worktrees
   run_root: .ai-runs
@@ -36,9 +36,19 @@ git:
   allow_dirty_base: false
   remove_ready_on_pr: false
 agent:
+  backend: codex
   command: codex exec --full-auto
   model: gpt-5.4
   reasoning: high
+  timeout_minutes: 30
+  max_repair_attempts: 1
+review:
+  enabled: true
+  command: codex exec --sandbox read-only
+  max_iterations: 3
+  fix_priorities:
+  - P0
+  - P1
 verify:
   commands:
   - make check
