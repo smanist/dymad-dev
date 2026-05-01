@@ -69,7 +69,33 @@ def test_build_transform_module_wraps_external_transforms(config, module_type, r
     np.testing.assert_allclose(recovered, reference_inverse, rtol=rtol, atol=rtol)
 
 
-def test_build_transform_module_supports_denoise_config_and_state_reload() -> None:
+@pytest.mark.parametrize(
+    ("config", "expected_kwargs"),
+    [
+        (
+            {"type": "Denoise", "method": "savgol", "window_length": 5, "polyorder": 2},
+            {"window_length": 5, "polyorder": 2},
+        ),
+        (
+            {
+                "type": "Denoise",
+                "method": "kernel_smoothing",
+                "kernel": "gaussian",
+                "anchor_count": 4,
+                "bandwidth_multiplier": 2.0,
+            },
+            {
+                "kernel": "gaussian",
+                "anchor_count": 4,
+                "bandwidth_multiplier": 2.0,
+            },
+        ),
+    ],
+)
+def test_build_transform_module_supports_denoise_config_and_state_reload(
+    config: dict[str, object],
+    expected_kwargs: dict[str, object],
+) -> None:
     payload = np.array(
         [
             [0.0, 0.1],
@@ -80,7 +106,6 @@ def test_build_transform_module_supports_denoise_config_and_state_reload() -> No
         ],
         dtype=np.float32,
     )
-    config = {"type": "Denoise", "method": "savgol", "window_length": 5, "polyorder": 2}
 
     module = build_transform_module(config)
     module.fit([torch.as_tensor(payload)])
@@ -89,8 +114,8 @@ def test_build_transform_module_supports_denoise_config_and_state_reload() -> No
 
     assert isinstance(module.transforms[0], DenoisingTransform)
     assert isinstance(reloaded.transforms[0], DenoisingTransform)
-    assert state["children"][0]["method"] == "savgol"
-    assert state["children"][0]["kwargs"] == {"window_length": 5, "polyorder": 2}
+    assert state["children"][0]["method"] == config["method"]
+    assert state["children"][0]["kwargs"] == expected_kwargs
 
     actual = reloaded.transform_batch([torch.as_tensor(payload)])[0]
     expected = module.transform_batch([torch.as_tensor(payload)])[0]

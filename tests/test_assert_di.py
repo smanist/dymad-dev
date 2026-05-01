@@ -2,6 +2,7 @@ import numpy as np
 from scipy.signal import savgol_filter
 
 from dymad.io import DataInterface
+from dymad.numerics import denoise
 
 
 def train_case(data, sample, path):
@@ -49,6 +50,42 @@ def test_di_encode_applies_denoise_per_trajectory_for_batched_inputs(kp_data, en
 
     actual = di.encode(x_batch)
     expected = savgol_filter(x_batch, window_length=5, polyorder=2, axis=1)
+
+    np.testing.assert_allclose(actual, expected, atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(di.decode(actual), actual, atol=1e-6, rtol=1e-6)
+
+
+def test_di_encode_supports_kernel_smoothing_per_trajectory(kp_data, env_setup):
+    x_batch = np.load(kp_data)["x"]
+    config_path = env_setup / "ker_model_auto.yaml"
+    config_mod = {
+        "data": {"path": kp_data},
+        "transform_x": [
+            {
+                "type": "denoise",
+                "method": "kernel_smoothing",
+                "kernel": "gaussian",
+                "anchor_count": 8,
+                "bandwidth_multiplier": 2.0,
+            }
+        ],
+    }
+    di = DataInterface(config_path=config_path, config_mod=config_mod)
+
+    actual = di.encode(x_batch)
+    expected = np.stack(
+        [
+            denoise(
+                trajectory,
+                method="kernel_smoothing",
+                kernel="gaussian",
+                anchor_count=8,
+                bandwidth_multiplier=2.0,
+            )
+            for trajectory in x_batch
+        ],
+        axis=0,
+    )
 
     np.testing.assert_allclose(actual, expected, atol=1e-5, rtol=1e-5)
     np.testing.assert_allclose(di.decode(actual), actual, atol=1e-6, rtol=1e-6)
