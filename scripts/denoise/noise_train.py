@@ -121,12 +121,18 @@ cases = [
         "model": LTI,
         "trainer": StackedTrainer,
         "config": "noise_wf.yaml",
+    },
+    {
+        "name": "lti_denoise_cpp",
+        "model": LTI,
+        "trainer": StackedTrainer,
+        "config": "noise_cpp.yaml",
     }
 ]
-IDX = [0]
+IDX = [1]
 labels = [cases[i]["name"] for i in IDX]
 
-ifdat = 1
+ifdat = 0
 ifdst = 0
 iftrn = 1
 ifplt = 1
