@@ -2,10 +2,6 @@
 .VSCodeCounter
 .ruff_cache/
 .dymad/
-.ai-logs/
-.ai-runs/
-.ai-runtime/
-.ai-worktrees/
 **/__pycache__/
 **/*.log
 **/*.png
@@ -29,3 +25,6 @@ tests/*.npz
 *.MAT
 *.mp4
 *.viz
+
+# A-Dev artifacts
+.a-dev/
