@@ -69,7 +69,6 @@ If there are API errors such as some files not found, try deleting the auto-gene
 
 # TODO notes
 
-- Variable length data (Data class does allow this, but collate and training need to adapt)
 - Update the aircraft example
 - Update the double pendulum example
 
