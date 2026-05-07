@@ -2,6 +2,7 @@ data:
   path: './data/sa.npz'
   n_samples: 500
   n_steps: 81
+  split_seed: 7
   double_precision: true
 
 transform_x:
