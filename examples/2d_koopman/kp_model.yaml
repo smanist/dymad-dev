@@ -8,8 +8,26 @@ transform_x:
   type: "scaler"
   mode: "std"
 
+transform_u:
+  type: "identity"
+
 split:
   train_frac: 0.75
 
 dataloader:
   batch_size: 256
+
+model:
+  name: 'kp_model'
+  encoder_layers: 0
+  processor_layers: 1
+  decoder_layers: 0
+  hidden_dimension: 64
+  activation: "tanh"
+  weight_init: "xavier_uniform"
+
+criterion:
+  dynamics:
+    weight: 1.0
+  recon:
+    weight: 1.0

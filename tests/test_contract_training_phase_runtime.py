@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -880,6 +881,94 @@ training:
     assert "chop_mode" not in config["phases"][0]
     assert config["phases"][1]["n_epochs"] == 900
     assert config["phases"][1]["chop_mode"] == "initial"
+
+
+def test_load_config_koopman_example_phase_overrides_survive_shared_config():
+    config_path = Path(__file__).resolve().parents[1] / "examples" / "2d_koopman" / "kp_model.yaml"
+
+    sequential = load_config(
+        str(config_path),
+        config_mod={
+            "phases": [
+                {
+                    "type": "optimizer",
+                    "trainer": "Weak",
+                    "n_epochs": 500,
+                    "save_interval": 20,
+                    "load_checkpoint": False,
+                    "learning_rate": 5e-3,
+                    "decay_rate": 0.999,
+                    "weak_form_params": {"N": 13, "dN": 2, "ordpol": 2, "ordint": 2},
+                },
+                {
+                    "type": "optimizer",
+                    "trainer": "NODE",
+                    "n_epochs": 500,
+                    "save_interval": 20,
+                    "load_checkpoint": False,
+                    "learning_rate": 5e-3,
+                    "decay_rate": 0.999,
+                    "sweep_lengths": [100, 200],
+                    "sweep_epoch_step": 20,
+                    "ode_method": "dopri5",
+                    "ode_args": {"rtol": 1.0e-7, "atol": 1.0e-9},
+                },
+            ]
+        },
+    )
+
+    assert "training" not in sequential
+    assert sequential["phases"][0]["n_epochs"] == 500
+    assert sequential["phases"][0]["learning_rate"] == pytest.approx(5e-3)
+    assert sequential["phases"][1]["n_epochs"] == 500
+    assert sequential["phases"][1]["learning_rate"] == pytest.approx(5e-3)
+
+    accelerated = load_config(
+        str(config_path),
+        config_mod={
+            "phases": [
+                {"type": "linear_solve", "method": "full"},
+                {
+                    "repeat": {
+                        "times": 3,
+                        "phases": [
+                            {
+                                "type": "optimizer",
+                                "trainer": "NODE",
+                                "n_epochs": 100,
+                                "save_interval": 20,
+                                "load_checkpoint": False,
+                                "learning_rate": 5e-3,
+                                "decay_rate": 0.999,
+                                "sweep_lengths": [100, 200],
+                                "sweep_epoch_step": 20,
+                                "ode_method": "dopri5",
+                                "ode_args": {"rtol": 1.0e-7, "atol": 1.0e-9},
+                            },
+                            {"type": "linear_solve", "method": "full"},
+                        ],
+                    }
+                },
+                {
+                    "type": "optimizer",
+                    "trainer": "NODE",
+                    "n_epochs": 1200,
+                    "save_interval": 20,
+                    "load_checkpoint": False,
+                    "learning_rate": 5e-3,
+                    "decay_rate": 0.999,
+                    "sweep_lengths": [100, 200],
+                    "sweep_epoch_step": 20,
+                    "ode_method": "dopri5",
+                    "ode_args": {"rtol": 1.0e-7, "atol": 1.0e-9},
+                },
+            ]
+        },
+    )
+
+    assert "training" not in accelerated
+    assert accelerated["phases"][2]["n_epochs"] == 1200
+    assert accelerated["phases"][2]["learning_rate"] == pytest.approx(5e-3)
 
 
 def test_run_cv_single_uses_trainer_run_with_typed_context(monkeypatch):
