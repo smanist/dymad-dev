@@ -1,7 +1,6 @@
 import logging
 import os
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from dymad.models import KBF, LDM
@@ -12,6 +11,7 @@ logging.basicConfig(level=logging.INFO)
 
 B = 128
 N = 501
+DATA_PATH = "./data/dp_data.npz"
 t_grid = np.linspace(0, 5, N)
 
 
@@ -46,21 +46,36 @@ def g(t, x, u):
     return x
 
 
+def describe_model(model):
+    model_spec = getattr(model, "model_spec", None)
+    if model_spec is not None and getattr(model_spec, "name", None):
+        return model_spec.name
+    return getattr(model, "__name__", model.__class__.__name__)
+
+
+def ensure_dataset(path=DATA_PATH):
+    if os.path.exists(path):
+        return
+    logging.info("Generating double pendulum dataset at %s", path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    sampler = TrajectorySampler(f, g, config="double_pendulum_data.yaml")
+    ts, xs, us, ys = sampler.sample(t_grid, batch=B)
+    np.savez_compressed(path, t=ts, x=ys, u=us)
+
+
 ifdat = 0  # Generate data
 ifchk = 0  # Check Data
 iftrn = 1  # Train model
 
 if ifdat:
-    os.makedirs("./data", exist_ok=True)
-    sampler = TrajectorySampler(f, g, config="double_pendulum_data.yaml")
-    ts, xs, us, ys = sampler.sample(t_grid, batch=B)
-    np.savez_compressed("./data/dp_data.npz", t=ts, x=ys, u=us)
+    ensure_dataset()
 
 if ifchk:
     import matplotlib.pyplot as plt
 
     fig, axs = plt.subplots(4, 4, figsize=(20, 20))
-    data = np.load("./data/dp_data.npz")
+    ensure_dataset()
+    data = np.load(DATA_PATH)
     t = data["t"]
     x = data["x"]
 
@@ -77,6 +92,7 @@ if ifchk:
 
 case = 0
 if iftrn:
+    ensure_dataset()
     cases = [
         {"model": LDM, "trainer": NODETrainer, "config": "dp_ldm_node.yaml"},
         {"model": LDM, "trainer": WeakFormTrainer, "config": "dp_ldm_wf.yaml"},
@@ -89,7 +105,10 @@ if iftrn:
     config_path = cases[case]["config"]
     setup_logging(config_path, mode="info", prefix="./logs")
     logging.info(
-        f"Starting Training : {Model.__name__} with {Trainer.__name__} using config {config_path}"
+        "Starting Training : %s with %s using config %s",
+        describe_model(Model),
+        Trainer.__name__,
+        config_path,
     )
     trainer = Trainer(config_path, Model)
     trainer.train()

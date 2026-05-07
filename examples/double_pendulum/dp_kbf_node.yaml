@@ -3,6 +3,7 @@ data:
   n_samples: 128
   n_steps: 501
   double_precision: false
+  split_seed: 7
 
 transform_x:
   type: "identity"
@@ -28,18 +29,21 @@ model:
   input_order: "cubic"
   autoencoder_type: "smp"
 
-training:
-  n_epochs: 500
-  save_interval: 10
-  load_checkpoint: false
-  learning_rate: 5e-2
-  decay_rate: 0.999
-  reconstruction_weight: 0.0
-  dynamics_weight: 1.0 
-  sweep_lengths: [50, 100, 150, 200, 250, 300] 
-  sweep_tolerances: [1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5]  
-  sweep_epoch_step: 100  
-  ode_method: 'dopri5' 
-  ode_args:
-    rtol: 1.e-6  
-    atol: 1.e-8  
+phases:
+  - type: optimizer
+    name: node
+    trainer: NODE
+    n_epochs: 500
+    save_interval: 10
+    load_checkpoint: false
+    learning_rate: 5e-2
+    decay_rate: 0.999
+    reconstruction_weight: 0.0
+    dynamics_weight: 1.0
+    sweep_lengths: [50, 100, 150, 200, 250, 300]
+    sweep_tolerances: [1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5]
+    sweep_epoch_step: 100
+    ode_method: 'dopri5'
+    ode_args:
+      rtol: 1.e-6
+      atol: 1.e-8
