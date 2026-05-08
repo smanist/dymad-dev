@@ -1,8 +1,8 @@
 data:
   path: './data/ltg.npz'
-  n_samples: 32
+  n_samples: 128
   n_steps: 501
-  double_precision: true
+  double_precision: false
 
 transform_x:
   type: "identity"
@@ -14,16 +14,16 @@ split:
   train_frac: 0.75
 
 dataloader:
-  batch_size: 4
+  batch_size: 64
 
 model:
   name: 'ltg_kbf_wf'
   encoder_layers: 1
   decoder_layers: 1
   hidden_dimension: 32
-  koopman_dimension: 4
+  koopman_dimension: 3
   const_term: true
-  autoencoder_type: "smp"
+  autoencoder_type: "cat"
   gcl: "sage"
   activation: "none"
   weight_init: "xavier_uniform"
@@ -36,12 +36,10 @@ criterion:
     weight: 1.0
 
 training:
-  n_epochs: 200
-  save_interval: 20
+  n_epochs: 500
+  save_interval: 10
   load_checkpoint: false
-  learning_rate: 1e-2
-  reconstruction_weight: 1.0
-  dynamics_weight: 1.0 
+  learning_rate: 5e-3
   weak_form_params:
     N: 13
     dN: 2
