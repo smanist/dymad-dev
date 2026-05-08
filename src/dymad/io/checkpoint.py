@@ -624,26 +624,76 @@ def load_model(
 def _prepare_visualize_model_input(
     input_data: dict[str, Any],
 ) -> dict:
+    # torchview renders the concrete input tensors alongside the module graph.
+    # Collapse checkpoint prediction payloads to one representative sample/step so
+    # the visualization emphasizes model structure instead of batch, horizon, and
+    # padded graph-topology details.
+    def _take_first_batch_item(payload: Any) -> Any:
+        if isinstance(payload, torch.Tensor) and payload.ndim >= 2:
+            return payload[0]
+        return payload
+
+    def _take_first_value(payload: Any) -> Any:
+        if isinstance(payload, torch.Tensor) and payload.ndim >= 1:
+            return payload[0]
+        return payload
+
+    def _take_first_step(payload: Any) -> Any:
+        if isinstance(payload, torch.Tensor) and payload.ndim >= 2:
+            return payload[0]
+        return payload
+
+    def _coarsen_graph_payload(payload: Any, *, squeeze_vector: bool = False) -> Any:
+        if payload is None:
+            return None
+        if isinstance(payload, torch.Tensor) and getattr(payload, "is_nested", False):
+            values = payload.unbind()
+            return _coarsen_graph_payload(
+                values[0] if values else None, squeeze_vector=squeeze_vector
+            )
+        if isinstance(payload, tuple):
+            if (
+                len(payload) == 2
+                and all(isinstance(item, torch.Tensor) for item in payload)
+                and cast(torch.Tensor, payload[1]).ndim == 1
+            ):
+                values = cast(torch.Tensor, payload[0])
+                offsets = cast(torch.Tensor, payload[1])
+                if offsets.numel() >= 2:
+                    return _coarsen_graph_payload(
+                        values[offsets[0] : offsets[1]],
+                        squeeze_vector=squeeze_vector,
+                    )
+            if not payload:
+                return payload
+            return _coarsen_graph_payload(payload[0], squeeze_vector=squeeze_vector)
+        if isinstance(payload, list):
+            if not payload:
+                return payload
+            return _coarsen_graph_payload(payload[0], squeeze_vector=squeeze_vector)
+        if isinstance(payload, torch.Tensor):
+            if payload.ndim >= 4:
+                return _coarsen_graph_payload(payload[0, 0], squeeze_vector=squeeze_vector)
+            if payload.ndim == 3:
+                return _coarsen_graph_payload(payload[0], squeeze_vector=squeeze_vector)
+            if squeeze_vector and payload.ndim == 2:
+                if payload.shape[-1] == 1:
+                    return payload.squeeze(-1)
+                return payload[0]
+        return payload
+
     prepared = dict(input_data)
-
-    t = prepared.get("t")
-    if isinstance(t, torch.Tensor):
-        if t.ndim >= 2:
-            prepared["t"] = t[:, :1]
-        elif t.ndim == 1 and t.numel() > 1:
-            prepared["t"] = t[:1]
-
-    u = prepared.get("u")
-    if isinstance(u, torch.Tensor):
-        if u.ndim >= 3:
-            prepared["u"] = u[:, :1, ...]
-        elif u.ndim == 2 and u.shape[0] > 1:
-            prepared["u"] = u[:1, ...]
+    x_payload = prepared.get("x")
+    prepared["x"] = _take_first_batch_item(x_payload)
+    # A 1D `p` is the shared-parameter-vector form across regular and graph
+    # prediction helpers, even when its length happens to match the source batch.
+    # Only trim an explicit batch axis from higher-rank param payloads.
+    prepared["p"] = _take_first_batch_item(prepared.get("p"))
+    prepared["t"] = _take_first_value(_take_first_batch_item(prepared.get("t")))
+    prepared["u"] = _take_first_step(_take_first_batch_item(prepared.get("u")))
 
     for key in ("ei", "ew", "ea"):
-        payload = prepared.get(key)
-        if isinstance(payload, torch.Tensor) and getattr(payload, "is_nested", False):
-            prepared[key] = [item for item in payload.unbind()]
+        prepared[key] = _coarsen_graph_payload(prepared.get(key), squeeze_vector=(key == "ew"))
 
     return prepared
 
