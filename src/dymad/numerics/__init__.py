@@ -27,7 +27,7 @@ from dymad.numerics.manifold import (
 )
 from dymad.numerics.spectrum import generate_coef, rational_kernel
 from dymad.numerics.time_int import fe_step, rk4_step
-from dymad.numerics.weak import generate_weak_weights
+from dymad.numerics.weak import generate_discrete_weak_weights, generate_weak_weights
 
 __all__ = [
     "central_diff",
@@ -41,6 +41,7 @@ __all__ = [
     "disc2cont",
     "denoise",
     "denoising_metrics",
+    "generate_discrete_weak_weights",
     "DM",
     "DMF",
     "eig_low_rank",

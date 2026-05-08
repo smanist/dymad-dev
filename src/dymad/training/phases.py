@@ -16,7 +16,12 @@ from torch.utils.data import DataLoader
 from dymad.core import GraphSeries, GraphTrainerBatch, RegularSeries, RegularTrainerBatch
 from dymad.core.transform_builder import build_transform_module
 from dymad.losses import LOSS_MAP
-from dymad.numerics import denoise, denoising_metrics, generate_weak_weights
+from dymad.numerics import (
+    denoise,
+    denoising_metrics,
+    generate_discrete_weak_weights,
+    generate_weak_weights,
+)
 from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_runtime
 from dymad.training.execution_services import ExecutionServices
 from dymad.training.ls_update import LSUpdater, _comp_linear_eval_ct, _comp_linear_eval_dt
@@ -1262,6 +1267,33 @@ class NodeOptimizerPhase(BaseOptimizerPhase):
 
 
 class WeakFormOptimizerPhase(BaseOptimizerPhase):
+    def __init__(
+        self,
+        *,
+        spec: PhaseSpec,
+        config: dict[str, Any],
+        model_class: type,
+        dtype: torch.dtype,
+        execution_services: ExecutionServices,
+    ):
+        super().__init__(
+            spec=spec,
+            config=config,
+            model_class=model_class,
+            dtype=dtype,
+            execution_services=execution_services,
+        )
+        self._validate_discrete_weight_normalization()
+
+    def _validate_discrete_weight_normalization(self) -> None:
+        params = cast(OptimizerPhaseSpec, self.spec).config.get("weak_form_params", {})
+        normalization = params.get("discrete_weight_normalization", "l2")
+        if normalization not in {"l2", "l1", "none"}:
+            raise PhaseSpecValidationError(
+                "Weak phase weak_form_params.discrete_weight_normalization must be one of "
+                "'l2', 'l1', or 'none'."
+            )
+
     def _customize_optimizer_artifact(
         self,
         optimizer_state: OptimizerStateArtifact,
@@ -1272,14 +1304,34 @@ class WeakFormOptimizerPhase(BaseOptimizerPhase):
         params = self.spec.config["weak_form_params"]
         dtype = next(model.parameters()).dtype
         train_md = _require_metadata(phase_context.train_md)
-        C, D = generate_weak_weights(
-            dt=train_md["dt_and_n_steps"][0][0],
-            n_integration_points=params["N"],
-            poly_order=params["ordpol"],
-            int_rule_order=params["ordint"],
-        )
-        optimizer_state._weak_C = torch.tensor(C.T, dtype=dtype, device=self.device)
-        optimizer_state._weak_D = torch.tensor(D.T, dtype=dtype, device=self.device)
+        dt = float(train_md["dt_and_n_steps"][0][0])
+        if getattr(model, "CONT", True):
+            C, D = generate_weak_weights(
+                dt=dt,
+                n_integration_points=params["N"],
+                poly_order=params["ordpol"],
+                int_rule_order=params["ordint"],
+            )
+            optimizer_state._weak_C = torch.tensor(C.T, dtype=dtype, device=self.device)
+            optimizer_state._weak_D = torch.tensor(D.T, dtype=dtype, device=self.device)
+        else:
+            n_steps = [int(item[1]) for item in train_md["dt_and_n_steps"]]
+            required_steps = int(params["N"]) + 1
+            if n_steps and min(n_steps) < required_steps:
+                raise PhaseSpecValidationError(
+                    "Discrete Weak phase requires at least "
+                    f"{required_steps} time samples when weak_form_params.N={params['N']} "
+                    "residual weights are requested."
+                )
+            W = generate_discrete_weak_weights(
+                dt=dt,
+                n_integration_points=params["N"],
+                poly_order=params["ordpol"],
+                int_rule_order=params["ordint"],
+                normalization=params.get("discrete_weight_normalization", "l2"),
+            )
+            optimizer_state._weak_C = None
+            optimizer_state._weak_D = torch.tensor(W.T, dtype=dtype, device=self.device)
         optimizer_state._weak_N = params["N"]
         optimizer_state._weak_dN = params["dN"]
 
@@ -1303,12 +1355,36 @@ class WeakFormOptimizerPhase(BaseOptimizerPhase):
         runtime_batch = batch_any.to(self.device)
         runtime = cast(Any, batch_to_runtime(runtime_batch))
         latent = cast(Any, model).encoder(runtime)
-        latent_dot = cast(Any, model).dynamics(latent, runtime)
         x_hat = cast(Any, model).decoder(latent, runtime)
-        z_windows = latent.unfold(1, optimizer_state._weak_N, optimizer_state._weak_dN)
-        z_dot_windows = latent_dot.unfold(1, optimizer_state._weak_N, optimizer_state._weak_dN)
-        true_weak = z_windows @ optimizer_state._weak_C
-        pred_weak = z_dot_windows @ optimizer_state._weak_D
+        weak_n = optimizer_state._weak_N
+        weak_dn = optimizer_state._weak_dN
+        weak_d = optimizer_state._weak_D
+        if weak_n is None or weak_dn is None or weak_d is None:
+            raise ValueError("Weak-form weights are not initialized.")
+
+        if getattr(model, "CONT", True):
+            weak_c = optimizer_state._weak_C
+            if weak_c is None:
+                raise ValueError("Continuous weak-form weights are not initialized.")
+            latent_dot = cast(Any, model).dynamics(latent, runtime)
+            z_windows = latent.unfold(1, weak_n, weak_dn)
+            z_dot_windows = latent_dot.unfold(1, weak_n, weak_dn)
+            true_weak = z_windows @ weak_c
+            pred_weak = z_dot_windows @ weak_d
+        else:
+            if latent.size(1) < weak_n + 1:
+                raise PhaseSpecValidationError(
+                    "Discrete Weak phase requires at least "
+                    f"{weak_n + 1} time samples when weak_form_params.N={weak_n} "
+                    "residual weights are requested."
+                )
+            latent_next = cast(Any, model).dynamics(latent, runtime)[:, :-1, :]
+            target_latent = latent[:, 1:, :].detach()
+            pred_windows = latent_next.unfold(1, weak_n, weak_dn)
+            true_windows = target_latent.unfold(1, weak_n, weak_dn)
+            pred_weak = pred_windows @ weak_d
+            true_weak = true_windows @ weak_d
+
         losses = [optimizer_state.criteria[0](pred_weak, true_weak)]
         losses.extend(
             self._additional_criteria_evaluation(

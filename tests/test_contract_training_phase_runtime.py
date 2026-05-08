@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -8,7 +9,7 @@ from scipy.signal import savgol_filter
 
 import dymad.training.phases as phases_module
 from dymad.core import GraphSeries, RegularSeries, RegularTrainerBatch
-from dymad.numerics import denoise
+from dymad.numerics import denoise, generate_discrete_weak_weights
 from dymad.training import driver
 from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import (
@@ -1394,6 +1395,277 @@ def test_one_step_optimizer_phase_detaches_first_order_continuous_targets_for_tr
     assert targets.requires_grad is False
     assert actual_grad is not None
     assert actual_grad.item() == pytest.approx(expected_grad.item())
+
+
+def test_weak_form_optimizer_phase_uses_discrete_projected_residuals():
+    class _DiscreteWeakModel(torch.nn.Module):
+        CONT = False
+
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(2.0))
+
+        def encoder(self, runtime):
+            return runtime.x
+
+        def dynamics(self, z, runtime):
+            return self.weight * z
+
+        def decoder(self, z, runtime):
+            return z
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(
+            name="weak",
+            trainer="Weak",
+            config={"weak_form_params": {"N": 3, "dN": 1, "ordpol": 1, "ordint": 1}},
+        ),
+        config=config,
+        model_class=_DiscreteWeakModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _DiscreteWeakModel()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        criteria=[torch.nn.MSELoss(), torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+    )
+    phase._customize_optimizer_artifact(
+        optimizer_state,
+        model,
+        PhaseContext(train_md={"dt_and_n_steps": [(1.0, 4)]}),
+        logging.getLogger("test.weak.discrete"),
+    )
+    series = RegularSeries(
+        time=torch.tensor([0.0, 1.0, 2.0, 3.0]),
+        state=torch.tensor([[1.0], [2.0], [4.0], [8.0]]),
+        control=None,
+        meta={},
+    )
+    batch = RegularTrainerBatch.collate_series([series])
+
+    losses = phase._compute_losses(model, optimizer_state, batch, "dopri5", {})
+
+    assert losses[0].item() == pytest.approx(0.0)
+
+
+def test_weak_form_optimizer_phase_matches_expected_discrete_projected_loss():
+    class _DiscreteWeakModel(torch.nn.Module):
+        CONT = False
+
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+        def encoder(self, runtime):
+            return runtime.x
+
+        def dynamics(self, z, runtime):
+            return self.weight * z
+
+        def decoder(self, z, runtime):
+            return z
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(
+            name="weak",
+            trainer="Weak",
+            config={"weak_form_params": {"N": 3, "dN": 1, "ordpol": 1, "ordint": 1}},
+        ),
+        config=config,
+        model_class=_DiscreteWeakModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _DiscreteWeakModel()
+    criterion = torch.nn.MSELoss()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        criteria=[criterion, torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+    )
+    phase._customize_optimizer_artifact(
+        optimizer_state,
+        model,
+        PhaseContext(train_md={"dt_and_n_steps": [(1.0, 4)]}),
+        logging.getLogger("test.weak.discrete"),
+    )
+    series = RegularSeries(
+        time=torch.tensor([0.0, 1.0, 2.0, 3.0]),
+        state=torch.tensor([[1.0], [2.0], [4.0], [8.0]]),
+        control=None,
+        meta={},
+    )
+    batch = RegularTrainerBatch.collate_series([series])
+
+    loss = phase._compute_losses(model, optimizer_state, batch, "dopri5", {})[0]
+    weights = torch.tensor(
+        generate_discrete_weak_weights(1.0, 3, poly_order=1, int_rule_order=1),
+        dtype=torch.float32,
+    )
+    projected_pred = weights @ torch.tensor([1.0, 2.0, 4.0], dtype=torch.float32)
+    projected_true = weights @ torch.tensor([2.0, 4.0, 8.0], dtype=torch.float32)
+    expected = criterion(projected_pred, projected_true)
+
+    assert loss.item() == pytest.approx(expected.item())
+
+
+def test_weak_form_optimizer_phase_detaches_discrete_targets_for_trainable_encoder():
+    class _DiscreteEncoderWeakModel(torch.nn.Module):
+        CONT = False
+
+        def __init__(self):
+            super().__init__()
+            self.encoder_scale = torch.nn.Parameter(torch.tensor(2.0))
+            self.prediction_scale = torch.nn.Parameter(torch.tensor(0.5))
+
+        def encoder(self, runtime):
+            return self.encoder_scale * runtime.x
+
+        def dynamics(self, z, runtime):
+            return self.prediction_scale * z
+
+        def decoder(self, z, runtime):
+            return z
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(
+            name="weak",
+            trainer="Weak",
+            config={"weak_form_params": {"N": 3, "dN": 1, "ordpol": 1, "ordint": 1}},
+        ),
+        config=config,
+        model_class=_DiscreteEncoderWeakModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _DiscreteEncoderWeakModel()
+    criterion = torch.nn.MSELoss()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        criteria=[criterion, torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+    )
+    phase._customize_optimizer_artifact(
+        optimizer_state,
+        model,
+        PhaseContext(train_md={"dt_and_n_steps": [(1.0, 5)]}),
+        logging.getLogger("test.weak.discrete"),
+    )
+    series = RegularSeries(
+        time=torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0]),
+        state=torch.tensor([[1.0], [2.0], [4.0], [8.0], [16.0]]),
+        control=None,
+        meta={},
+    )
+    batch = RegularTrainerBatch.collate_series([series])
+
+    loss = phase._compute_losses(model, optimizer_state, batch, "dopri5", {})[0]
+    actual_grad = torch.autograd.grad(loss, model.encoder_scale)[0]
+
+    runtime = phases_module.batch_to_runtime(batch.to(phase.device))
+    latent = model.encoder(runtime)
+    projected_pred = model.dynamics(latent, runtime)[:, :-1, :].unfold(1, 3, 1) @ cast(
+        torch.Tensor, optimizer_state._weak_D
+    )
+    projected_target = latent[:, 1:, :].unfold(1, 3, 1) @ cast(
+        torch.Tensor, optimizer_state._weak_D
+    )
+    expected_loss = criterion(projected_pred, projected_target.detach())
+    expected_grad = torch.autograd.grad(expected_loss, model.encoder_scale)[0]
+
+    assert projected_target.requires_grad is True
+    assert actual_grad is not None
+    assert actual_grad.item() == pytest.approx(expected_grad.item())
+
+
+def test_weak_form_optimizer_phase_rejects_invalid_discrete_weight_normalization():
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+
+    with pytest.raises(
+        PhaseSpecValidationError,
+        match="weak_form_params.discrete_weight_normalization must be one of 'l2', 'l1', or 'none'",
+    ):
+        build_phase(
+            OptimizerPhaseSpec(
+                name="weak",
+                trainer="Weak",
+                config={
+                    "weak_form_params": {
+                        "N": 2,
+                        "dN": 1,
+                        "ordpol": 1,
+                        "ordint": 1,
+                        "discrete_weight_normalization": "bad",
+                    }
+                },
+            ),
+            config=config,
+            model_class=object,
+            dtype=torch.float32,
+            execution_services=execution_services,
+        )
+
+
+def test_weak_form_optimizer_phase_rejects_too_short_discrete_trajectories():
+    class _DiscreteWeakModel(torch.nn.Module):
+        CONT = False
+
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+        def encoder(self, runtime):
+            return runtime.x
+
+        def dynamics(self, z, runtime):
+            return self.weight * z
+
+        def decoder(self, z, runtime):
+            return z
+
+    config = {"model": {"name": "demo"}, "phases": []}
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(
+            name="weak",
+            trainer="Weak",
+            config={"weak_form_params": {"N": 3, "dN": 1, "ordpol": 1, "ordint": 1}},
+        ),
+        config=config,
+        model_class=_DiscreteWeakModel,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    model = _DiscreteWeakModel()
+    optimizer_state = OptimizerStateArtifact(
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        criteria=[torch.nn.MSELoss(), torch.nn.MSELoss()],
+        criteria_weights=[1.0],
+        criteria_names=["dynamics", "mse"],
+    )
+
+    with pytest.raises(
+        PhaseSpecValidationError,
+        match="Discrete Weak phase requires at least 4 time samples when weak_form_params.N=3 residual weights are requested",
+    ):
+        phase._customize_optimizer_artifact(
+            optimizer_state,
+            model,
+            PhaseContext(train_md={"dt_and_n_steps": [(1.0, 3)]}),
+            logging.getLogger("test.weak.discrete"),
+        )
 
 
 def test_select_best_cv_result_uses_goal_and_tie_breakers() -> None:

@@ -1,6 +1,6 @@
 import numpy as np
 
-from dymad.numerics.weak import generate_weak_weights
+from dymad.numerics.weak import generate_discrete_weak_weights, generate_weak_weights
 
 ref = [
     ([1.1692428919931415], [1.1656849312730149]),
@@ -28,3 +28,17 @@ def test_weak_form():
 
         assert np.allclose(C.dot(y), ref[_o - 1][0]), f"Weak weights failed for order {_o}: C*y"
         assert np.allclose(D.dot(dy), ref[_o - 1][1]), f"Weak weights failed for order {_o}: D*dy"
+
+
+def test_discrete_weak_weights_have_expected_shape_and_l2_row_norms():
+    W = generate_discrete_weak_weights(0.1, 7, poly_order=3, int_rule_order=2)
+
+    assert W.shape == (3, 7)
+    assert np.allclose(np.linalg.norm(W, axis=1), np.ones(3))
+
+
+def test_discrete_weak_weights_none_matches_raw_non_derivative_weights():
+    _, D = generate_weak_weights(0.1, 7, 3, 2)
+    W = generate_discrete_weak_weights(0.1, 7, poly_order=3, int_rule_order=2, normalization="none")
+
+    assert np.allclose(W, D)
