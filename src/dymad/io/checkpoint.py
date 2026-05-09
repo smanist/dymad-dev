@@ -1,6 +1,7 @@
 import copy
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from os import PathLike
@@ -624,28 +625,152 @@ def load_model(
 def _prepare_visualize_model_input(
     input_data: dict[str, Any],
 ) -> dict:
+    # torchview renders the concrete input tensors alongside the module graph.
+    # Collapse checkpoint prediction payloads to one representative sample/step so
+    # the visualization emphasizes model structure instead of batch, horizon, and
+    # padded graph-topology details.
+    def _take_first_batch_item(payload: Any) -> Any:
+        if isinstance(payload, torch.Tensor) and payload.ndim >= 2:
+            return payload[0]
+        return payload
+
+    def _take_first_value(payload: Any) -> Any:
+        if isinstance(payload, torch.Tensor) and payload.ndim >= 1:
+            return payload[0]
+        return payload
+
+    def _take_first_step(payload: Any) -> Any:
+        if isinstance(payload, torch.Tensor) and payload.ndim >= 2:
+            return payload[0]
+        return payload
+
+    def _coarsen_graph_payload(payload: Any, *, squeeze_vector: bool = False) -> Any:
+        if payload is None:
+            return None
+        if isinstance(payload, torch.Tensor) and getattr(payload, "is_nested", False):
+            values = payload.unbind()
+            return _coarsen_graph_payload(
+                values[0] if values else None, squeeze_vector=squeeze_vector
+            )
+        if isinstance(payload, tuple):
+            if (
+                len(payload) == 2
+                and all(isinstance(item, torch.Tensor) for item in payload)
+                and cast(torch.Tensor, payload[1]).ndim == 1
+            ):
+                values = cast(torch.Tensor, payload[0])
+                offsets = cast(torch.Tensor, payload[1])
+                if offsets.numel() >= 2:
+                    return _coarsen_graph_payload(
+                        values[offsets[0] : offsets[1]],
+                        squeeze_vector=squeeze_vector,
+                    )
+            if not payload:
+                return payload
+            return _coarsen_graph_payload(payload[0], squeeze_vector=squeeze_vector)
+        if isinstance(payload, list):
+            if not payload:
+                return payload
+            return _coarsen_graph_payload(payload[0], squeeze_vector=squeeze_vector)
+        if isinstance(payload, torch.Tensor):
+            if payload.ndim >= 4:
+                return _coarsen_graph_payload(payload[0, 0], squeeze_vector=squeeze_vector)
+            if payload.ndim == 3:
+                return _coarsen_graph_payload(payload[0], squeeze_vector=squeeze_vector)
+            if squeeze_vector and payload.ndim == 2:
+                if payload.shape[-1] == 1:
+                    return payload.squeeze(-1)
+                return payload[0]
+        return payload
+
     prepared = dict(input_data)
-
-    t = prepared.get("t")
-    if isinstance(t, torch.Tensor):
-        if t.ndim >= 2:
-            prepared["t"] = t[:, :1]
-        elif t.ndim == 1 and t.numel() > 1:
-            prepared["t"] = t[:1]
-
-    u = prepared.get("u")
-    if isinstance(u, torch.Tensor):
-        if u.ndim >= 3:
-            prepared["u"] = u[:, :1, ...]
-        elif u.ndim == 2 and u.shape[0] > 1:
-            prepared["u"] = u[:1, ...]
+    x_payload = prepared.get("x")
+    prepared["x"] = _take_first_batch_item(x_payload)
+    # A 1D `p` is the shared-parameter-vector form across regular and graph
+    # prediction helpers, even when its length happens to match the source batch.
+    # Only trim an explicit batch axis from higher-rank param payloads.
+    prepared["p"] = _take_first_batch_item(prepared.get("p"))
+    prepared["t"] = _take_first_value(_take_first_batch_item(prepared.get("t")))
+    prepared["u"] = _take_first_step(_take_first_batch_item(prepared.get("u")))
 
     for key in ("ei", "ew", "ea"):
-        payload = prepared.get(key)
-        if isinstance(payload, torch.Tensor) and getattr(payload, "is_nested", False):
-            prepared[key] = [item for item in payload.unbind()]
+        prepared[key] = _coarsen_graph_payload(prepared.get(key), squeeze_vector=(key == "ew"))
 
     return prepared
+
+
+_VISUAL_GRAPH_NODE_RE = re.compile(r"^\s*(\d+)\s+\[")
+_VISUAL_GRAPH_EDGE_RE = re.compile(r"^\s*(\d+)\s*->\s*(\d+)\b")
+
+
+def _visual_graph_node_id(statement: str) -> int | None:
+    match = _VISUAL_GRAPH_NODE_RE.match(statement)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _visual_graph_edge_node_ids(statement: str) -> tuple[int, int] | None:
+    match = _VISUAL_GRAPH_EDGE_RE.match(statement)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _output_path_visual_node_ids(model_graph: Any) -> set[int]:
+    reverse_edges: dict[str, set[str]] = {}
+    node_names: dict[str, str] = {}
+    for tail, head in model_graph.edge_list:
+        tail_id = str(tail.node_id)
+        head_id = str(head.node_id)
+        node_names[tail_id] = str(tail.name)
+        node_names[head_id] = str(head.name)
+        reverse_edges.setdefault(head_id, set()).add(tail_id)
+
+    id_dict = cast(dict[str, int], model_graph.id_dict)
+    output_node_ids = [
+        node_id
+        for node_id, name in node_names.items()
+        if name == "output-tensor" and node_id in id_dict
+    ]
+    if not output_node_ids:
+        return set(id_dict.values())
+
+    keep_node_ids: set[str] = set()
+    pending = list(output_node_ids)
+    while pending:
+        node_id = pending.pop()
+        if node_id in keep_node_ids:
+            continue
+        keep_node_ids.add(node_id)
+        pending.extend(reverse_edges.get(node_id, ()))
+
+    return {id_dict[node_id] for node_id in keep_node_ids if node_id in id_dict}
+
+
+def _prune_visual_graph_to_output_paths(model_graph: Any) -> None:
+    keep_ids = _output_path_visual_node_ids(model_graph)
+    if not keep_ids:
+        return
+
+    pruned_body = []
+    for statement in model_graph.visual_graph.body:
+        node_id = _visual_graph_node_id(statement)
+        if node_id is not None:
+            if node_id in keep_ids:
+                pruned_body.append(statement)
+            continue
+
+        edge_ids = _visual_graph_edge_node_ids(statement)
+        if edge_ids is not None:
+            if edge_ids[0] in keep_ids and edge_ids[1] in keep_ids:
+                pruned_body.append(statement)
+            continue
+
+        pruned_body.append(statement)
+
+    model_graph.visual_graph.body = pruned_body
+    model_graph.resize_graph()
 
 
 def visualize_model(
@@ -657,6 +782,7 @@ def visualize_model(
     depth=1,
     device="cpu",
     ifsave=False,
+    show_all_paths=False,
 ):
     try:
         from torchview import draw_graph
@@ -699,6 +825,8 @@ def visualize_model(
     input_data = _prepare_visualize_model_input(input_data)
 
     model_graph = draw_graph(model, input_data=input_data, depth=depth, device=device)
+    if not show_all_paths:
+        _prune_visual_graph_to_output_paths(model_graph)
 
     if ifsave:
         if checkpoint_path is None:
