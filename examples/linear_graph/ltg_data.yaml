@@ -5,6 +5,20 @@ dims:
   inputs: 1
   observations: 2
 
+control:
+  kind: sine
+  params:
+    num_components: 2
+    freq_range:
+      - 0.5
+      - 2.0
+    amp_range:
+      - 0.2
+      - 1.0
+    phase_range:
+      - 0
+      - 360
+
 x0:
   kind: uniform
   params:
