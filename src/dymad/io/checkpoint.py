@@ -1,6 +1,7 @@
 import copy
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from os import PathLike
@@ -698,6 +699,80 @@ def _prepare_visualize_model_input(
     return prepared
 
 
+_VISUAL_GRAPH_NODE_RE = re.compile(r"^\s*(\d+)\s+\[")
+_VISUAL_GRAPH_EDGE_RE = re.compile(r"^\s*(\d+)\s*->\s*(\d+)\b")
+
+
+def _visual_graph_node_id(statement: str) -> int | None:
+    match = _VISUAL_GRAPH_NODE_RE.match(statement)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _visual_graph_edge_node_ids(statement: str) -> tuple[int, int] | None:
+    match = _VISUAL_GRAPH_EDGE_RE.match(statement)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _output_path_visual_node_ids(model_graph: Any) -> set[int]:
+    reverse_edges: dict[str, set[str]] = {}
+    node_names: dict[str, str] = {}
+    for tail, head in model_graph.edge_list:
+        tail_id = str(tail.node_id)
+        head_id = str(head.node_id)
+        node_names[tail_id] = str(tail.name)
+        node_names[head_id] = str(head.name)
+        reverse_edges.setdefault(head_id, set()).add(tail_id)
+
+    id_dict = cast(dict[str, int], model_graph.id_dict)
+    output_node_ids = [
+        node_id
+        for node_id, name in node_names.items()
+        if name == "output-tensor" and node_id in id_dict
+    ]
+    if not output_node_ids:
+        return set(id_dict.values())
+
+    keep_node_ids: set[str] = set()
+    pending = list(output_node_ids)
+    while pending:
+        node_id = pending.pop()
+        if node_id in keep_node_ids:
+            continue
+        keep_node_ids.add(node_id)
+        pending.extend(reverse_edges.get(node_id, ()))
+
+    return {id_dict[node_id] for node_id in keep_node_ids if node_id in id_dict}
+
+
+def _prune_visual_graph_to_output_paths(model_graph: Any) -> None:
+    keep_ids = _output_path_visual_node_ids(model_graph)
+    if not keep_ids:
+        return
+
+    pruned_body = []
+    for statement in model_graph.visual_graph.body:
+        node_id = _visual_graph_node_id(statement)
+        if node_id is not None:
+            if node_id in keep_ids:
+                pruned_body.append(statement)
+            continue
+
+        edge_ids = _visual_graph_edge_node_ids(statement)
+        if edge_ids is not None:
+            if edge_ids[0] in keep_ids and edge_ids[1] in keep_ids:
+                pruned_body.append(statement)
+            continue
+
+        pruned_body.append(statement)
+
+    model_graph.visual_graph.body = pruned_body
+    model_graph.resize_graph()
+
+
 def visualize_model(
     mdl_class=None,
     checkpoint_path=None,
@@ -707,6 +782,7 @@ def visualize_model(
     depth=1,
     device="cpu",
     ifsave=False,
+    show_all_paths=False,
 ):
     try:
         from torchview import draw_graph
@@ -749,6 +825,8 @@ def visualize_model(
     input_data = _prepare_visualize_model_input(input_data)
 
     model_graph = draw_graph(model, input_data=input_data, depth=depth, device=device)
+    if not show_all_paths:
+        _prune_visual_graph_to_output_paths(model_graph)
 
     if ifsave:
         if checkpoint_path is None:

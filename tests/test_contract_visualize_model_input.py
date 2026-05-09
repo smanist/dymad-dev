@@ -1,6 +1,112 @@
+import sys
+from types import ModuleType
+
 import torch
 
-from dymad.io.checkpoint import _prepare_visualize_model_input
+import dymad.io.checkpoint as checkpoint_module
+from dymad.io.checkpoint import (
+    _prepare_visualize_model_input,
+    _prune_visual_graph_to_output_paths,
+    visualize_model,
+)
+
+
+class _FakeVisualGraph:
+    def __init__(self) -> None:
+        self.body = [
+            "\t0 [label=<input-tensor> fillcolor=lightyellow]\n",
+            "\t1 [label=<input-tensor> fillcolor=lightyellow]\n",
+            "\t2 [label=<Sub> fillcolor=darkseagreen1]\n",
+            "\t3 [label=<output-tensor> fillcolor=lightyellow]\n",
+            "\t4 [label=<Other> fillcolor=darkseagreen1]\n",
+            "\t0 -> 2\n",
+            "\t1 -> 4\n",
+            "\t2 -> 3\n",
+        ]
+
+
+class _FakeNode:
+    def __init__(self, node_id: str, name: str) -> None:
+        self.node_id = node_id
+        self.name = name
+
+
+class _FakeModelGraph:
+    def __init__(self) -> None:
+        input_a = _FakeNode("input_a", "input-tensor")
+        input_b = _FakeNode("input_b", "input-tensor")
+        output_subgraph = _FakeNode("output_subgraph", "Sub")
+        output = _FakeNode("output", "output-tensor")
+        unused_subgraph = _FakeNode("unused_subgraph", "Other")
+        self.edge_list = [
+            (input_a, output_subgraph),
+            (input_b, unused_subgraph),
+            (output_subgraph, output),
+        ]
+        self.id_dict = {
+            "input_a": 0,
+            "input_b": 1,
+            "output_subgraph": 2,
+            "output": 3,
+            "unused_subgraph": 4,
+        }
+        self.visual_graph = _FakeVisualGraph()
+        self.resize_called = False
+
+    def resize_graph(self) -> None:
+        self.resize_called = True
+
+
+def test_prune_visual_graph_to_output_paths_drops_non_output_branches():
+    graph = _FakeModelGraph()
+
+    _prune_visual_graph_to_output_paths(graph)
+
+    graph_source = "".join(graph.visual_graph.body)
+    assert "Other" not in graph_source
+    assert "\t1 [" not in graph_source
+    assert "1 -> 4" not in graph_source
+    assert "Sub" in graph_source
+    assert "output-tensor" in graph_source
+    assert "0 -> 2" in graph_source
+    assert "2 -> 3" in graph_source
+    assert graph.resize_called is True
+
+
+def test_visualize_model_skips_output_path_pruning_when_show_all_paths(monkeypatch):
+    graph = _FakeModelGraph()
+    calls = {"prune": 0}
+
+    def fake_draw_graph(*args, **kwargs):
+        return graph
+
+    def fake_prune(model_graph):
+        calls["prune"] += 1
+        _prune_visual_graph_to_output_paths(model_graph)
+
+    fake_torchview = ModuleType("torchview")
+    fake_torchview.draw_graph = fake_draw_graph  # type: ignore[attr-defined]
+    monkeypatch.setattr(checkpoint_module, "_prune_visual_graph_to_output_paths", fake_prune)
+    monkeypatch.setitem(sys.modules, "torchview", fake_torchview)
+
+    visual_graph = visualize_model(
+        model=object(),
+        prd_func=lambda *args, **kwargs: {
+            "t": torch.tensor([0.0]),
+            "x": torch.tensor([[1.0]]),
+            "u": None,
+            "p": None,
+            "ei": None,
+            "ew": None,
+            "ea": None,
+        },
+        ref_data={},
+        show_all_paths=True,
+    )
+
+    assert visual_graph is graph.visual_graph
+    assert calls["prune"] == 0
+    assert "Other" in "".join(graph.visual_graph.body)
 
 
 def test_prepare_visualize_model_input_reduces_batched_prediction_payload():
