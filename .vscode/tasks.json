@@ -1,0 +1,92 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Issues (a-dev)",
+            "type": "shell",
+            "command": "a-dev list --open-issues",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "group": "a-dev"
+            }
+        },
+        {
+            "label": "PRs (a-dev)",
+            "type": "shell",
+            "command": "a-dev list --open-prs",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "group": "a-dev"
+            }
+        },
+        {
+            "label": "Create issue (a-dev)",
+            "type": "shell",
+            "command": "a-dev create --input-editor",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Kanban (a-dev)",
+            "type": "shell",
+            "command": "a-dev kanban && code --reuse-window .a-dev/kanban.md",
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        },
+        {
+            "label": "Start a-dev",
+            "dependsOrder": "parallel",
+            "dependsOn": [
+                "Issues (a-dev)",
+                "PRs (a-dev)",
+                "Kanban (a-dev)"
+            ],
+            "problemMatcher": [],
+            "runOptions": {
+                "runOn": "folderOpen"
+            }
+        },
+        {
+            "label": "Daemon (a-dev)",
+            "type": "shell",
+            "command": "a-dev ${input:aDevMode}",
+            "problemMatcher": [],
+            "presentation": {
+                "panel": "dedicated",
+                "clear": true
+            },
+            "runOptions": {
+                "reevaluateOnRerun": true
+            }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "aDevMode",
+            "type": "pickString",
+            "description": "Select daemon mode",
+            "options": ["status", "start", "stop", "run-once"],
+            "default": "status"
+        }
+    ]
+}
