@@ -41,6 +41,7 @@ Explore More
    :maxdepth: 2
 
    getting_started
+   scripts_guide
    architecture
    feature-placement
    algorithm-integration-guide
