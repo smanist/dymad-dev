@@ -38,16 +38,11 @@ Explore More
 ------------
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    getting_started
-   architecture
-   feature-placement
-   algorithm-integration-guide
-   scratch-scripting
-   example-script-pattern
    roadmap
    examples
-   examples_and_scripts
    theory
    api_ref
+   developer
