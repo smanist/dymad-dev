@@ -48,5 +48,6 @@ Explore More
    example-script-pattern
    roadmap
    examples
+   examples_and_scripts
    theory
    api_ref
