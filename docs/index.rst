@@ -41,6 +41,7 @@ Explore More
    :maxdepth: 2
 
    getting_started
+   examples_and_scripts
    architecture
    feature-placement
    algorithm-integration-guide
