@@ -1,7 +1,7 @@
 # Codex Instructions
 
-Read [docs/architecture.md](docs/architecture.md) and
-[docs/feature-placement.md](docs/feature-placement.md)
+Read [docs/developer/architecture.md](docs/developer/architecture.md) and
+[docs/developer/feature-placement.md](docs/developer/feature-placement.md)
 before broad repo spelunking. They are the fastest path to the current boundaries and feature
 ownership.
 
@@ -17,14 +17,14 @@ Repo fast map:
 Script example rule:
 
 - For temporary developer-facing exploration that should not modify the repo, read
-  [docs/scratch-scripting.md](docs/scratch-scripting.md). Scratch scripts should live outside
-  repo-tracked paths and write artifacts under their scratch folder unless explicitly instructed
-  otherwise.
+  [docs/developer/scratch-scripting.md](docs/developer/scratch-scripting.md). Scratch scripts
+  should live outside repo-tracked paths and write artifacts under their scratch folder unless
+  explicitly instructed otherwise.
 - Before adding a new runnable example under `scripts/`, read
-  [docs/example-script-pattern.md](docs/example-script-pattern.md). Both documented patterns are
-  valid: use the old inline if-block style for developer-facing examples that intentionally expose
-  the execution details, or the `*_cli.py` scaffold plus `scripts/cli_helpers.py` for user-facing
-  examples that should be runnable without script edits.
+  [docs/developer/example-script-pattern.md](docs/developer/example-script-pattern.md). Both
+  documented patterns are valid: use the old inline if-block style for developer-facing examples
+  that intentionally expose the execution details, or the `*_cli.py` scaffold plus
+  `scripts/cli_helpers.py` for user-facing examples that should be runnable without script edits.
 
 Test naming rule:
 
@@ -58,8 +58,8 @@ Documentation maintenance:
 
 - If your change affects package ownership, MCP tool surfaces, registry/compiler behavior,
   checkpoint layering, persisted handle types, or the recommended place to add features, review
-  and update [docs/architecture.md](docs/architecture.md) and
-  [docs/feature-placement.md](docs/feature-placement.md) in the
+  and update [docs/developer/architecture.md](docs/developer/architecture.md) and
+  [docs/developer/feature-placement.md](docs/developer/feature-placement.md) in the
   same change.
 - Do not leave architecture docs describing the pre-change state after moving boundaries or adding
   new workflows.

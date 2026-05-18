@@ -1,6 +1,9 @@
 Examples
 ========
 
+The notebook gallery is the guided tutorial surface. For broader runnable coverage in
+``scripts/``, see :doc:`Examples and Scripts <examples_and_scripts>`.
+
 .. toctree::
    :maxdepth: 2
    :caption: Notebook Gallery
@@ -24,3 +27,4 @@ Examples
    examples/vortex/part3
    examples/simple_pendulum/part1
    examples/simple_pendulum/part2
+   examples/denoise/main
