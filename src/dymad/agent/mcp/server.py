@@ -184,6 +184,15 @@ def build_server(
                 predict_kwargs=predict_kwargs,
             )
 
+        if not include_user:
+
+            @server.tool(annotations=read_only)
+            def list_evaluation_capabilities(
+                dataset_handle: str | None = None,
+            ) -> dict[str, Any]:
+                """List supported evaluation workflows and accepted metric/plot parameters."""
+                return tools.list_evaluation_capabilities(dataset_handle=dataset_handle)
+
         @server.tool(annotations=read_only)
         def list_model_capabilities() -> dict[str, Any]:
             """List supported model families and implementation variants."""

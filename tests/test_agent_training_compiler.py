@@ -350,6 +350,8 @@ def test_compile_training_request_rejects_runtime_owned_override_paths(tmp_path)
         )
 
     assert exc_info.value.field_path == ("overrides", "model", "name")
+    assert "data.path" in str(exc_info.value)
+    assert "model.name" in str(exc_info.value)
 
 
 def test_compile_training_request_rejects_unsupported_override_paths(tmp_path) -> None:

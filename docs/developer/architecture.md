@@ -129,6 +129,7 @@ Developer mode keeps the raw and compatibility-oriented path available:
 - `describe_training_run`
 - `read_training_run_log`
 - `evaluate_model`
+- `list_evaluation_capabilities`
 - `list_model_capabilities`
 - `resolve_model_capability`
 - `list_profile_capabilities`

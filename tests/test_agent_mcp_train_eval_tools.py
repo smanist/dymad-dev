@@ -348,6 +348,31 @@ def test_evaluate_model_regular_writes_metrics_and_plot(tmp_path, monkeypatch) -
     assert result["evaluation_summary"]["kind"] == "evaluation"
 
 
+def test_evaluate_model_rejects_unsupported_metric_with_supported_metrics(tmp_path) -> None:
+    dataset_path = tmp_path / "test.npz"
+    _write_regular_dataset(dataset_path, with_control=False)
+
+    tools = DemoTools(context=build_default_context(artifact_root=tmp_path / "artifacts"))
+    dataset_handle = tools.register_dataset_file(path=str(dataset_path))["data"]["summary"][
+        "handle"
+    ]
+    checkpoint_summary = tools.register_checkpoint(
+        model_ref="dymad.models.collections:KBF",
+        checkpoint_path=str(tmp_path / "fake.pt"),
+    )
+
+    response = tools.evaluate_model(
+        checkpoint_handle=checkpoint_summary["data"]["summary"]["handle"],
+        test_dataset_handle=dataset_handle,
+        metric="rollout",
+        artifact_root=str(tmp_path / "evals"),
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["type"] == "ValueError"
+    assert "rollout_rmse" in response["error"]["message"]
+
+
 def test_evaluate_model_passes_active_context_to_loader(tmp_path, monkeypatch) -> None:
     dataset_path = tmp_path / "test.npz"
     _write_regular_dataset(dataset_path, with_control=False)

@@ -71,13 +71,21 @@ def _is_non_empty_dotted_key(value: object) -> bool:
     return all(part != "" for part in value.split("."))
 
 
+def _runtime_owned_override_message(path: str) -> str:
+    owned_paths = ", ".join(RUNTIME_OWNED_OVERRIDE_PATHS)
+    return (
+        f"overrides.{path} is runtime-owned and cannot be set by the caller. "
+        f"Runtime-owned override paths: {owned_paths}"
+    )
+
+
 def _validate_override_path(path: tuple[str, ...]) -> None:
     path_str = ".".join(path)
     if len(path) == 1:
         key = path[0]
         if path_str in RUNTIME_OWNED_OVERRIDE_PATHS:
             _raise_invalid(
-                f"overrides.{key} is runtime-owned and cannot be set by the caller",
+                _runtime_owned_override_message(key),
                 field_path=("overrides", key),
             )
         if key not in ALLOWED_TOP_LEVEL_OVERRIDE_KEYS and key != "data":
@@ -87,7 +95,7 @@ def _validate_override_path(path: tuple[str, ...]) -> None:
             )
     if path_str in RUNTIME_OWNED_OVERRIDE_PATHS:
         _raise_invalid(
-            f"overrides.{'.'.join(path)} is runtime-owned and cannot be set by the caller",
+            _runtime_owned_override_message(path_str),
             field_path=("overrides",) + path,
         )
     if path[:1] == ("data",) and len(path) == 2 and path[1] not in ALLOWED_DATA_OVERRIDE_KEYS:
@@ -97,7 +105,7 @@ def _validate_override_path(path: tuple[str, ...]) -> None:
         )
     if path[:1] == ("model",) and len(path) == 2 and path[1] in RUNTIME_OWNED_MODEL_KEYS:
         _raise_invalid(
-            f"overrides.model.{path[1]} is runtime-owned and cannot be set by the caller",
+            _runtime_owned_override_message(path_str),
             field_path=("overrides",) + path,
         )
 

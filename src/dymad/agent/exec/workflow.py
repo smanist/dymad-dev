@@ -761,7 +761,11 @@ class CompatibilityExecutor:
         predict_kwargs: dict[str, Any] | None = None,
     ) -> EvaluateModelResult:
         if metric not in SUPPORTED_EVALUATION_METRICS:
-            raise ValueError(f"unsupported evaluation metric: {metric}")
+            supported = ", ".join(SUPPORTED_EVALUATION_METRICS)
+            raise ValueError(
+                f"unsupported evaluation metric: {metric}. Supported evaluation metrics: "
+                f"{supported}"
+            )
         checkpoint = self.facade.get_checkpoint(checkpoint_handle)
         dataset = self.facade.get_dataset(test_dataset_handle)
         model = _resolve_model_ref(checkpoint.model_ref)

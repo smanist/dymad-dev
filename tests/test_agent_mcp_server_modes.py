@@ -40,7 +40,9 @@ def test_build_server_user_mode_registers_only_high_level_tools(monkeypatch, tmp
     assert "start_model_training" not in server.tools
 
 
-def test_build_server_developer_mode_registers_only_raw_tools(monkeypatch, tmp_path) -> None:
+def test_build_server_developer_mode_registers_raw_tools_and_evaluation_discovery(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setitem(sys.modules, "fastmcp", types.SimpleNamespace(FastMCP=FakeFastMCP))
 
     server = build_server(
@@ -53,7 +55,7 @@ def test_build_server_developer_mode_registers_only_raw_tools(monkeypatch, tmp_p
     assert "describe_training_run" in server.tools
     assert "read_training_run_log" in server.tools
     assert "start_model_training" in server.tools
-    assert "list_evaluation_capabilities" not in server.tools
+    assert "list_evaluation_capabilities" in server.tools
     assert "compile_training_request" not in server.tools
     assert "compile_analysis_request" not in server.tools
 
