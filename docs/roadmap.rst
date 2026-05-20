@@ -14,12 +14,16 @@ Highlights include:
 7. `Learning vector fields of differential equations on manifolds with geometrically constrained operator-valued kernels <https://openreview.net/pdf?id=OwpLQrpdwE>`_ By Huang, D., He, H., Harlim, J. and Li, Y.
 8. `Learning solution operator of dynamical systems with diffusion maps kernel ridge regression <https://arxiv.org/abs/2512.17203>`_ By Song, J., Huang, D. and Harlim, J.
 
+Furthermore, we include an agentic interface (agentic skills, Model Context Protocols, Command Line Interface) for users to build their own workflows in an auditable and reproducible manner.
+
 What Problems are we solving?
 -----------------------------
 
 Overall, we are interested in dynamical systems of the following form,
 
 .. math::
+    :nowrap:
+
     \begin{align*}
     \dot{z} &= f(z, u, t) \\
     x &= g(z, u, t)
@@ -107,6 +111,8 @@ Modeling
 We formulate the learning problem as a differentially constrained optimization problem,
 
 .. math::
+    :nowrap:
+
     \begin{align*}
     \min_{\theta} &\quad \int_{t_1}^{t_N} \lVert x-\hat{x} \rVert^2 dt + \mathcal{R}(\theta) \\
     \mathrm{s.t.} &\quad z = h(x, u, t; \theta) \\
@@ -143,6 +149,8 @@ The optimization problem can be solved using various methods, some of which we (
 Alternatively, we can discretize the system, and learn the discrete-time dynamics directly,
 
 .. math::
+    :nowrap:
+
     \begin{align*}
     z_k &= h(x_k, u_k, t_k; \theta) \\
     z_{k+1} &= f(z_k, u_k, t_k; \theta) \\

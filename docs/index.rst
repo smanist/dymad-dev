@@ -1,7 +1,7 @@
 Dynamics Modeling and Analysis with Data (DyMAD)
 ================================================
 
-DyMAD aims to provide a lightweight and user-friendly toolkit for modeling and analyzing dynamical systems using data-driven approaches.
+DyMAD aims to provide a lightweight and user-friendly toolkit for modeling and analyzing dynamical systems using data-driven approaches, plus an agentic interface for users to interact with the package and build their own workflows.
 
 Currently, we have implemented the following features:
 
@@ -14,12 +14,15 @@ Currently, we have implemented the following features:
    * Neural-ODE-based optimizer
    * Weak-form optimizer
    * Linear preconditioners
+   * Hyperparameter tuning tools
 - Spectral analysis based on Koopman theory
    * Eigenvalues and eigenfunctions
    * Spectrum and pseudospectrum
 - Miscellaneous utilities, including
    * Samplers for inputs and initial conditions
    * Visualization tools
+
+Plus the agentic interface for all the above features.
 
 It is still far from complete, see our :doc:`Roadmap <roadmap>` for more details.
 

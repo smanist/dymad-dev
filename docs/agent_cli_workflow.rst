@@ -4,13 +4,16 @@ Agent and CLI Workflow
 DyMAD has two user-facing ways to run the same maintained training and evaluation workflow:
 
 - The DyMAD agent interface is conversational. It translates user requests into structured MCP
+  (Model Context Protocol)
   calls, compiles the request against the registry, launches training, and reports artifacts.
-- The ``dymad`` package CLI is file-based. It accepts a YAML config, writes a run manifest, and
+- The ``dymad`` package CLI (Command Line Interface) is file-based. It accepts a YAML config,
+  writes a run manifest, and
   makes the run easy to audit, rerun, or share.
 
 Both paths use the same registry, compiler, executor, artifact store, and checkpoint boundary. The
 agent is usually the fastest way to explore; the CLI is the stable way to preserve and rerun the
-result.
+result.  What the agent explored can be exported to an equivalent CLI config, for subsequent
+auditing, edits, and reruns.
 
 Start With A Dataset
 --------------------
@@ -22,12 +25,11 @@ Put the file in a working folder. For example:
 
 .. code-block:: text
 
-   lti-agent-demo/
-   `-- lti.npz
+   lti-agent-demo/lti.npz
 
 The dataset is an ``.npz`` time-series file with arrays compatible with the regular DyMAD training
 workflow. It is intentionally small enough for examples and smoke tests, but the same flow applies
-to your own ``.npz`` datasets.
+to your own datasets.
 
 Typical Conversational Prompts
 ------------------------------
@@ -69,7 +71,7 @@ Improve one-step performance:
    report the before/after metrics.
 
 If a request mentions a detail that is not a valid user-mode override for the selected model or
-dataset kind, the agent should inspect the capability description and either translate it to a
+dataset kind, the agent would inspect the capability description and either translate it to a
 supported override or ask for clarification. For example, graph model requests can include
 ``autoencoder_type: cat``; a regular LTI run uses the regular ``lti`` capability and its supported
 model fields.
@@ -125,7 +127,7 @@ record the paths.
 Package CLI Reference
 ---------------------
 
-The CLI gives the same workflow a reproducible file interface. A minimal config for the sample
+The CLI gives the same workflow a reproducible file interface. A minimal example config for the sample
 dataset is:
 
 .. code-block:: yaml
@@ -155,7 +157,11 @@ dataset is:
      plot_selection: median
      max_plots: 1
 
-Save this as ``lti_weak.cli.yaml`` next to ``lti.npz``. Then run:
+The agent would produce a similar config as part of compiling the request, which will appear next
+to the dataset file. The user can edit the config
+to adjust parameters, add sweep settings, or change the evaluation metric. Either use the agent to
+generate the config or start from this template, then run the CLI commands to execute the workflow.
+Specifically, suppose the file is ``lti_weak.cli.yaml``, next to ``lti.npz``. Then run:
 
 .. code-block:: bash
 
@@ -183,29 +189,13 @@ Common commands:
 - ``dymad report --run RUN_DIR --json`` summarizes the run, checkpoint, metrics, evaluations, and
   artifacts.
 
-Trainer Variants In CLI Config
-------------------------------
+Overrides In CLI Config
+-----------------------
 
-To compare trainers, keep the dataset and model fixed, then change only ``run.name`` and
-``overrides.phases``.
+There are default options in CLI configs, but the user can override them by editing the config
+(or ask the agent to do so).  Most edits are made to the ``overrides`` section.
 
-Weak-form phase:
-
-.. code-block:: yaml
-
-   overrides:
-     phases:
-       - trainer: Weak
-         name: weak
-         n_epochs: 25
-         learning_rate: 0.005
-         weak_form_params:
-           N: 13
-           dN: 2
-           ordpol: 2
-           ordint: 2
-
-One-step phase:
+For example, to change to a one-step trainer:
 
 .. code-block:: yaml
 
@@ -216,18 +206,7 @@ One-step phase:
          n_epochs: 25
          learning_rate: 0.005
 
-NODE phase:
-
-.. code-block:: yaml
-
-   overrides:
-     phases:
-       - trainer: NODE
-         name: node
-         n_epochs: 25
-         learning_rate: 0.005
-
-Small sweep for tuning:
+To add a small sweep for tuning:
 
 .. code-block:: yaml
 
@@ -240,6 +219,9 @@ Small sweep for tuning:
        selection:
          goal: minimize
          tie_breakers: [std_metric, combo_index]
+
+For users, the detailed syntax for overrides can be explored in :doc:`Examples <examples>`.
+
 
 Auditability And Reproducibility
 --------------------------------
@@ -261,17 +243,19 @@ Token Usage: Agent Versus Starting From Scratch
 -----------------------------------------------
 
 The exact token count depends on the model, dataset, number of tuning iterations, and how much log
-or artifact content is summarized. As a practical estimate:
+or artifact content is summarized. These ranges are practical planning estimates, not hard limits.
 
-- Using the DyMAD agent for the prompt-driven workflow often takes a few thousand to low tens of
-  thousands of tokens. Most of the work is registry inspection, request compilation, status
-  polling, metric summaries, and concise artifact reporting.
-- Writing a bespoke training script from scratch commonly takes several times more interaction
-  budget: the agent must inspect APIs, write data loading, choose model classes, assemble trainer
-  configs, debug shape/config errors, add evaluation code, and then explain how to reproduce the
-  run.
+- DyMAD agent over the maintained MCP/CLI workflow, **3k-15k** tokens: inspect the DyMAD
+  registry, translate the prompt into supported training overrides, compile the request, launch and
+  poll the run, evaluate the checkpoint, summarize metrics, and point to persisted artifacts.
+- DyMAD-specific code written from package APIs, **15k-50k** tokens: inspect DyMAD modules and
+  examples, write dataset loading and config assembly code, choose model/trainer APIs, debug shape
+  and config errors, add evaluation and plotting, then document how to rerun the result.
+- Bare-scratch implementation with standard packages only, **50k-150k+** tokens: design the model
+  and training loop directly in PyTorch/NumPy, implement batching, losses,
+  training logic, checkpointing, evaluation metrics, plotting, reproducibility controls, and enough
+  validation to trust the result.
 
-For established DyMAD workflows, the agent/MCP/CLI path is usually more token-efficient because the
-stable registry and compiler replace large amounts of exploratory code generation. For new
-algorithms or unsupported workflows, the advantage narrows because the agent must design and test
-new package behavior rather than assemble an existing capability.
+For established DyMAD workflows, the maintained agent/MCP/CLI path is usually more token-efficient
+because registry metadata, request compilation, artifact storage, and evaluation are already part of
+the system. The advantage narrows when the request requires new algorithms or unsupported behavior.
