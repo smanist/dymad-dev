@@ -81,7 +81,7 @@ def copy_extra_files(extras):
 html_extra_path = ["extra_files"]
 
 extra_file_list = [
-    "examples/1d_oscillator/data/lti.npz",
+    "docs/fixtures/1d_oscillator/lti.npz",
     "examples/1d_oscillator/lti_kbf_cv.yaml",
 ]
 copy_extra_files(extra_file_list)
