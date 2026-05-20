@@ -5,6 +5,7 @@ from dymad.agent.registry.evaluations import (
     SUPPORTED_EVALUATION_METRICS,
     list_evaluation_capabilities,
 )
+from dymad.agent.registry.losses import LossCapability, list_loss_capabilities
 from dymad.agent.registry.models import list_model_capabilities, resolve_model_capability
 from dymad.agent.registry.training_schema import (
     describe_training_capability,
@@ -42,6 +43,7 @@ __all__ = [
     "AnalysisSupportLevel",
     "DatasetKind",
     "EvaluationCapability",
+    "LossCapability",
     "ModelCapability",
     "ModelVariantCapability",
     "TrainingCapabilityExample",
@@ -55,6 +57,7 @@ __all__ = [
     "describe_training_capability",
     "list_analysis_capabilities",
     "list_evaluation_capabilities",
+    "list_loss_capabilities",
     "list_model_capabilities",
     "list_profile_capabilities",
     "list_training_phase_entry_schemas",

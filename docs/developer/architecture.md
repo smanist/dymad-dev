@@ -24,6 +24,7 @@ Maintenance rule:
 | Area | Owns |
 | --- | --- |
 | `src/dymad/agent/mcp` | MCP-facing tool adapters and server assembly |
+| `src/dymad/agent/app` | transport-neutral app services shared by user-facing adapters |
 | `src/dymad/agent/registry` | user-facing capability metadata, profiles, schemas, supported analyses/evaluations |
 | `src/dymad/agent/compiler` | typed request validation and compilation into persisted requests |
 | `src/dymad/agent/exec` | workflow orchestration and compatibility execution |
@@ -38,11 +39,21 @@ Maintenance rule:
 
 ## Layer Stack
 
-Current user-facing stack:
+Current user-facing stacks:
 
 ```text
 MCP server
   -> user_tools / developer_tools
+  -> app services where transport-neutral workflow assembly is shared
+  -> registry + compiler
+  -> CompatibilityExecutor
+  -> FacadeOperations
+  -> ObjectStore / FilesystemArtifactStore
+  -> legacy runtime/training/checkpoint/analysis code
+
+dymad CLI
+  -> cli.py argument adapter
+  -> agent/app path-first workflow service
   -> registry + compiler
   -> CompatibilityExecutor
   -> FacadeOperations
@@ -55,8 +66,22 @@ Important distinction:
 - `server.py` only registers tools and mode splits.
 - `user_tools.py` is the high-level surface.
 - `demo_tools.py` plus `developer_tools.py` expose the raw/developer surface.
+- `cli.py` is the package-level path-first user interface; it should stay thin and delegate
+  workflow assembly to `agent/app`.
 - `CompatibilityExecutor` still owns orchestration, but some compatibility flows intentionally
   materialize through legacy `io/*` code instead of fully executor-native implementations.
+
+## User Transports
+
+DyMAD now has two user-facing transports over the same registry/compiler/executor/facade/store
+boundary:
+
+- MCP user mode is structured and handle-first. It assumes dataset handles already exist and keeps
+  `{"ok": ..., "data": ...}` envelopes.
+- The `dymad` CLI is path-first and reproducibility-focused. It loads YAML configs, registers
+  dataset paths through the facade, compiles through the user-mode training compiler, launches the
+  same async worker, and writes `dymad-run.json` under the run directory so later CLI commands can
+  recover handles and store location.
 
 ## MCP Surfaces
 
@@ -127,6 +152,18 @@ register_dataset_file
   -> start_training_run
   -> describe_training_run / read_training_run_log
   -> evaluate_checkpoint
+```
+
+CLI training enters the same path after resolving files from a YAML config:
+
+```text
+dymad train --config config.yaml --out runs/foo
+  -> agent/app CLI workflow service
+  -> register_dataset_file for train/valid/test paths
+  -> compile_training_request
+  -> start_training_run
+  -> describe_training_run / read_training_run_log
+  -> evaluate_checkpoint via dymad eval
 ```
 
 Compilation resolves:

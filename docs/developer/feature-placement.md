@@ -21,6 +21,7 @@ Maintenance rule:
 | You are adding | Primary files/packages | Notes |
 | --- | --- | --- |
 | A new MCP tool that exposes an existing workflow | `src/dymad/agent/mcp/user_tools.py` or `src/dymad/agent/mcp/demo_tools.py`, then `src/dymad/agent/mcp/server.py` | Keep business logic out of `server.py`; it should register tools, not implement them |
+| A new package CLI command that exposes an existing user workflow | `src/dymad/cli.py` for argument parsing and `src/dymad/agent/app/*` for shared path/config workflow assembly | Keep `cli.py` thin; use registry/compiler/executor/facade/store boundaries instead of routing directly to trainers |
 | A new user-mode training capability or model family choice | `src/dymad/agent/registry/models.py`, `src/dymad/agent/registry/workflows.py`, `src/dymad/agent/registry/training_schema.py` | Add stable keys, summaries, dataset compatibility, allowed overrides, CV support metadata, translation guidance, constraint notes, and examples |
 | A new user-mode request field or override validation rule | `src/dymad/agent/compiler/training.py`, `src/dymad/agent/compiler/schemas.py`, maybe `src/dymad/agent/registry/training_schema.py` | Compiler owns validation and normalization of user input, including `overrides.cv` sweep/search/bounds/selection config and profile-default phase preservation |
 | A new analysis workflow | `src/dymad/agent/registry/analyses.py`, `src/dymad/agent/compiler/analysis.py`, `src/dymad/agent/exec/workflow.py` | Registry declares the workflow, compiler validates inputs, executor runs it |
@@ -51,6 +52,8 @@ After the decision table identifies the likely owner, use this map to read the f
 ## Rules of Thumb
 
 - If the change introduces a new stable user-facing key, start in `agent/registry/*`.
+- If the change turns file paths or CLI config into a workflow request, put the path/config
+  adaptation in `agent/app/*`, then call the same compiler/executor path as MCP user mode.
 - If the change teaches clients how to translate natural language into a user-mode request, put
   that guidance in `agent/registry/*`, not in MCP adapters or runtime code.
 - If the change validates or normalizes user input, start in `agent/compiler/*`.
@@ -62,6 +65,8 @@ After the decision table identifies the likely owner, use this map to read the f
 ## Common Mistakes
 
 - Putting workflow logic directly in `src/dymad/agent/mcp/server.py`
+- Routing package CLI configs directly into trainers instead of through `agent/app`, compiler, and
+  executor boundaries
 - Adding user-mode string parsing to `demo_tools.py` instead of `compiler/*`
 - Adding registry-style metadata ad hoc inside executor methods
 - Adding persistence behavior directly in executor methods instead of the store/facade layer
@@ -72,6 +77,7 @@ After the decision table identifies the likely owner, use this map to read the f
 | Change type | Start with these tests |
 | --- | --- |
 | MCP mode/tool registration | `tests/test_mcp_server_modes.py`, `tests/test_demo_tools.py`, `tests/test_mcp_user_tools.py` |
+| Package CLI commands and path-first user workflows | `tests/test_agent_cli.py` |
 | Training capability/compiler changes | `tests/test_training_compiler.py`, `tests/test_compiled_training_requests.py`, `tests/test_agent_registry.py` |
 | Analysis workflow changes | `tests/test_analysis_workflows.py` |
 | Persisted handle/store/facade changes | `tests/test_boundary_persistence.py`, `tests/test_checkpoint_e2e_layering.py` |
