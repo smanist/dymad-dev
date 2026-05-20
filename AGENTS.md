@@ -51,6 +51,27 @@ Test naming rule:
 - Pytest collection enforces these prefixes in `tests/conftest.py`; do not introduce new
   `test_*.py` files outside these categories.
 
+Targeted regression test rule:
+
+- After any code edit, run targeted pytest tests that match the touched behavior before finishing.
+  This is required in addition to static checks.
+- Select tests by behavior and layer, not only by filename. Examples:
+  - Agent, MCP, CLI, registry, compiler, executor, store, or facade edits: run the relevant
+    `tests/test_agent_*` and `tests/test_contract_*` files, plus any focused cross-transport tests.
+  - Models, training runtime, phase pipeline, checkpoint loading, core runtime, adapters, or public
+    package boundary edits: run the closest `tests/test_contract_*`, `tests/test_workflow_*`, or
+    `tests/test_agent_*` files that exercise that path.
+  - Numerics, solvers, transforms, denoising, sampling, graph, spectrum, or low-level utilities:
+    run the nearest deterministic `tests/test_assert_*` or `tests/test_contract_*` files.
+  - Runnable scripts, CLI examples, or end-to-end workflows: run the matching
+    `tests/test_workflow_*` or `tests/test_slow_*` tests when they are the maintained regression
+    surface.
+- If a relevant targeted pytest would be unusually expensive or requires unavailable external
+  resources, run the nearest cheaper deterministic coverage first and clearly report the skipped
+  test, why it was skipped, and the exact command the user or CI should run.
+- Do not report code edits as complete after only `make check` when meaningful targeted pytest
+  coverage exists for the behavior changed.
+
 Placement rules:
 
 - New MCP tool exposure belongs in `src/dymad/agent/mcp/*`; keep `server.py` focused on tool
