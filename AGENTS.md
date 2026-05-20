@@ -26,6 +26,15 @@ Script example rule:
   that intentionally expose the execution details, or the `*_cli.py` scaffold plus
   `scripts/cli_helpers.py` for user-facing examples that should be runnable without script edits.
 
+DyMAD skill maintenance rule:
+
+- When editing the DyMAD train/eval Codex skill, edit the repo source under
+  `skills/dymad-train-eval-workflow/` first. Do not directly edit the installed copy under
+  `$CODEX_HOME/skills` or `~/.codex/skills`.
+- After changing the repo skill source, install it with `make install-dymad-skill`. Use
+  `make check-dymad-skill-install` when you need to verify that the installed copy matches the
+  repo source.
+
 Test naming rule:
 
 - New pytest files in `tests/` must use one of exactly five prefixes:
