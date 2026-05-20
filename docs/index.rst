@@ -41,6 +41,7 @@ Explore More
    :maxdepth: 1
 
    getting_started
+   agent_cli_workflow
    roadmap
    examples
    theory
