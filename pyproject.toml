@@ -34,7 +34,7 @@ dev = [
 ]
 docs = [
   # keep this list short; matches docs/requirements.txt
-  "sphinx>=7",
+  "sphinx>=7,<9",
   "furo",
   "myst-parser",            # optional: Markdown support
   "myst-nb>=1.0",
