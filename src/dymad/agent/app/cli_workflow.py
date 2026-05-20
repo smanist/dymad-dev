@@ -348,10 +348,10 @@ class CLIWorkflowService:
         self,
         *,
         config_path: str | Path,
-        run_dir: str | Path,
+        run_dir: str | Path | None = None,
     ) -> dict[str, Any]:
         loaded = self.load_config(config_path)
-        resolved_run_dir = Path(run_dir).expanduser().resolve()
+        resolved_run_dir = self._resolve_run_dir(loaded, run_dir=run_dir)
         run_name = resolved_run_dir.name
         if not run_name:
             raise CLIWorkflowError("--out must name a run directory")
@@ -395,6 +395,19 @@ class CLIWorkflowService:
             "started": started,
             "manifest_path": str(resolved_run_dir / MANIFEST_FILENAME),
         }
+
+    def _resolve_run_dir(
+        self,
+        loaded: LoadedCLIConfig,
+        *,
+        run_dir: str | Path | None,
+    ) -> Path:
+        if run_dir is not None:
+            return Path(run_dir).expanduser().resolve()
+        configured = loaded.normalized_config.get("run", {}).get("name")
+        if not isinstance(configured, str) or not configured:
+            raise CLIWorkflowError("--out is required when run.name is not set")
+        return (Path(loaded.source_config_path).parent / configured).resolve()
 
     def status(self, *, run_dir: str | Path) -> dict[str, Any]:
         resolved_run_dir = Path(run_dir).expanduser().resolve()

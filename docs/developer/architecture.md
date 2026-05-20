@@ -81,7 +81,9 @@ boundary:
 - The `dymad` CLI is path-first and reproducibility-focused. It loads YAML configs, registers
   dataset paths through the facade, compiles through the user-mode training compiler, launches the
   same async worker, and writes `dymad-run.json` under the run directory so later CLI commands can
-  recover handles and store location.
+  recover handles and store location. `dymad train --config ...` can derive the run directory from
+  the config file's directory plus `run.name`; `--out` remains available to choose and validate an
+  explicit run directory.
 
 ## MCP Surfaces
 
@@ -158,7 +160,7 @@ register_dataset_file
 CLI training enters the same path after resolving files from a YAML config:
 
 ```text
-dymad train --config config.yaml --out runs/foo
+dymad train --config config.yaml [--out runs/foo]
   -> agent/app CLI workflow service
   -> register_dataset_file for train/valid/test paths
   -> compile_training_request

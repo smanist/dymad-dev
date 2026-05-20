@@ -123,7 +123,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     train_parser = subparsers.add_parser("train", help="start a user-mode training run")
     train_parser.add_argument("--config", required=True)
-    train_parser.add_argument("--out", required=True)
+    train_parser.add_argument(
+        "--out",
+        help="run directory; defaults to CONFIG's directory plus run.name when run.name is set",
+    )
     train_parser.add_argument("--detach", action="store_true")
     _add_json_flag(train_parser)
 
@@ -179,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "train":
             result = service.train(config_path=args.config, run_dir=args.out)
+            run_dir = result["manifest"]["run_dir"]
             if args.detach:
                 if args.json:
                     _print_json(result)
@@ -190,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
 
             final = service.wait_for_training(
-                run_dir=args.out,
+                run_dir=run_dir,
                 stream=None if args.json else sys.stdout,
             )
             if args.json:

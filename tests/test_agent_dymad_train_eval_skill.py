@@ -34,6 +34,7 @@ def test_dymad_train_eval_skill_staging_files_exist() -> None:
     assert "read_training_run_log" in skill_body
     assert "evaluate_checkpoint" in skill_body
     assert "dymad config validate CONFIG --out RUN_DIR" in skill_body
+    assert "dymad train --config CONFIG [--out RUN_DIR]" in skill_body
     assert "Export Reproducible CLI Run" in skill_body
     assert "dymad-run.json" in skill_body
     assert "overrides.cv" in skill_body

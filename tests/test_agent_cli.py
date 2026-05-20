@@ -156,6 +156,41 @@ def test_cli_train_detach_writes_manifest_and_run_local_store(tmp_path, monkeypa
     _wait_for_manifest_status(run_dir)
 
 
+def test_cli_train_defaults_out_to_config_directory_and_run_name(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    _configure_worker_bootstrap(monkeypatch)
+    dataset_path = tmp_path / "train.npz"
+    config_path = tmp_path / "named.cli.yaml"
+    run_dir = tmp_path / "from_config_name"
+    _write_regular_dataset(dataset_path, with_control=False)
+    _write_cli_config(config_path, train_path=dataset_path, run_name=run_dir.name)
+
+    code = main(["train", "--config", str(config_path), "--detach"])
+
+    output = capsys.readouterr()
+    manifest_path = run_dir / MANIFEST_FILENAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert code == 0
+    assert str(run_dir.resolve()) in output.out
+    assert manifest["run_dir"] == str(run_dir.resolve())
+    assert manifest["normalized_config"]["run"]["name"] == run_dir.name
+    _wait_for_manifest_status(run_dir)
+
+
+def test_cli_train_without_out_requires_run_name(tmp_path, capsys) -> None:
+    dataset_path = tmp_path / "train.npz"
+    config_path = tmp_path / "unnamed.cli.yaml"
+    _write_regular_dataset(dataset_path, with_control=False)
+    _write_cli_config(config_path, train_path=dataset_path)
+
+    code = main(["train", "--config", str(config_path), "--detach"])
+
+    output = capsys.readouterr()
+    assert code == 1
+    assert "--out is required when run.name is not set" in output.err
+
+
 def test_cli_status_log_and_report_recover_from_manifest(tmp_path, monkeypatch, capsys) -> None:
     _configure_worker_bootstrap(monkeypatch)
     dataset_path = tmp_path / "train.npz"

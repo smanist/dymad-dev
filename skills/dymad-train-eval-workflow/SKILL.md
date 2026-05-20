@@ -32,7 +32,7 @@ MCP tools:
 
 CLI commands for exported reruns:
 - `dymad config validate CONFIG --out RUN_DIR`
-- `dymad train --config CONFIG --out RUN_DIR`
+- `dymad train --config CONFIG [--out RUN_DIR]`
 - `dymad status --run RUN_DIR`
 - `dymad log --run RUN_DIR`
 - `dymad eval --run RUN_DIR`
@@ -70,10 +70,11 @@ auditability or reproducibility, or when dataset paths were provided as files:
    - translated `overrides`
    - `run.name`, `run.seed`, `run.device`, `run.max_workers` when used
    - `evaluation.metric`, `plot_selection`, `max_plots`, `predict_kwargs` when used
-2. Choose an output run directory matching `run.name`, for example `runs/foo`.
-3. Validate the exported config with `dymad config validate CONFIG --out RUN_DIR`.
+2. Set `run.name` to the intended run directory name, for example `foo` for `runs/foo`.
+3. Validate the exported config with `dymad config validate CONFIG --out RUN_DIR` when checking an explicit output directory, or `dymad config validate CONFIG` when relying on `run.name`.
 4. Tell the user the rerun commands:
-   - `dymad train --config CONFIG --out RUN_DIR`
+   - `dymad train --config CONFIG` if `run.name` is set and the run directory should live next to the config file
+   - `dymad train --config CONFIG --out RUN_DIR` if using an explicit output directory
    - `dymad eval --run RUN_DIR`
    - `dymad report --run RUN_DIR`
 5. Explain that the rerun will create new handles/checkpoints but should reproduce the same user-mode request.
