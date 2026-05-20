@@ -45,7 +45,7 @@ CLI commands for exported reruns:
 3. Use `list_training_capabilities` if you need to confirm which model families support the dataset kind.
 4. Pick the stable `model_key` from the requested DyMAD model family.
 5. Call `describe_training_capability` for that `model_key` and dataset kind before translating any nontrivial training request.
-6. Translate the user's natural-language modeling request into `compile_training_request.overrides` using `translation_guidance`, `constraint_notes`, `phase_entry_schemas`, `cv_schema`, and `examples`. Before compiling, compare overrides against `runtime_owned_override_paths`, `allowed_override_top_level_keys`, `allowed_data_override_keys`, and `runtime_owned_model_keys`.
+6. Translate the user's natural-language modeling request into `compile_training_request.overrides` using `translation_guidance`, `constraint_notes`, `phase_entry_schemas`, `cv_schema`, and `examples`. For requests to tune, optimize, search, sweep, compare, or find the best hyperparameters, prefer the advertised `cv_schema` and encode the search under `overrides.cv` before considering direct config edits. Before compiling, compare overrides against `runtime_owned_override_paths`, `allowed_override_top_level_keys`, `allowed_data_override_keys`, and `runtime_owned_model_keys`.
 7. Call `compile_training_request`.
 8. If validation fails because overrides contain runtime-owned fields, remove all runtime-owned fields in the same repair pass before retrying once. If validation fails for any other issue directly addressed by surfaced constraints or the error message, repair once and retry. Do not inspect package code to infer phase/config shape.
 9. Call `start_training_run`.
@@ -92,7 +92,11 @@ as user-mode CLI configs unless they can be represented as `model_key` plus allo
 - For staged training, translate the requested trainer order into `overrides.phases` in the same order.
 - For ordered optimizer sequences, support any mix of `Linear`, `Weak`, and `NODE` named by the user.
 - Prefer minimal optimizer entries such as `{"trainer": "Linear"}`, `{"trainer": "Weak"}`, or `{"trainer": "NODE"}` unless the user asks for per-phase hyperparameters.
-- For hyperparameter sweeps, encode the request as `overrides.cv.param_grid` and only use `overrides.cv.metric` when the user names a specific selection metric.
+- For requests to tune, optimize, search, sweep, compare, or find the best hyperparameters, first call `describe_training_capability`; when `cv_schema.supported` is true, prefer `compile_training_request.overrides.cv` over editing YAML configs or manually running repeated cases.
+- Use `overrides.cv.param_grid` for explicit candidate sweeps, with optional `overrides.cv.search.mode="grid"` for clarity, and only set `overrides.cv.metric` when the user names a specific selection metric.
+- Use `overrides.cv.search.mode="nelder_mead_like"` with `overrides.cv.search.bounds` for bounded continuous or integer searches; include `parity` for integer-valued fields only when needed.
+- Use `overrides.cv.selection` when the user asks how to choose the best model or gives tie-breaking preferences.
+- Modify YAML configs directly only when the user explicitly asks for config edits, the requested parameter cannot be represented by allowed user-mode overrides, MCP tools or dataset handles are unavailable, or you are exporting a reproducible CLI config after the MCP run.
 - Treat `describe_training_capability` as the authoritative contract for allowed overrides, phase schema, CV sweep support, translation guidance, and surfaced constraints.
 - Treat `list_evaluation_capabilities` as the authoritative contract for supported evaluation metric names. Do not guess metric keys or inspect code to infer them.
 - If no metric is named, use `parameter_schema.metric.default` when present, otherwise use the only advertised supported metric.
