@@ -298,7 +298,7 @@ def make_krr(
     type: str,
     kernel: dict[str, Any] | list[dict[str, Any]],
     ridge_init=0,
-    jitter=1e-10,
+    jitter=0.0,
     dtype=None,
     device=None,
 ) -> nn.Module:

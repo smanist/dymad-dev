@@ -29,7 +29,7 @@ class KRRBase(nn.Module):
         self,
         kernel: KernelAbstract | nn.ModuleList,
         ridge_init: float | list[float] = 0,
-        jitter: float = 1e-10,
+        jitter: float = 0.0,
         device: torch.device | str | None = None,
     ):
         super().__init__()
@@ -117,7 +117,7 @@ class KRRMultiOutputShared(KRRBase):
         self,
         kernel: KernelAbstract,
         ridge_init: float = 0,
-        jitter: float = 1e-10,
+        jitter: float = 0.0,
         device: torch.device | str | None = None,
     ):
         assert not kernel.is_operator_valued, "kernel should be scalar-valued."
@@ -177,7 +177,7 @@ class KRRMultiOutputIndep(KRRBase):
         self,
         kernel: nn.ModuleList,
         ridge_init: float | list[float] = 0,
-        jitter: float = 1e-10,
+        jitter: float = 0.0,
         device: torch.device | str | None = None,
     ):
         assert isinstance(kernel, nn.ModuleList), "kernel should be a ModuleList of kernels."
@@ -260,7 +260,7 @@ class KRROperatorValued(KRRBase):
         self,
         kernel: KernelAbstract,
         ridge_init: float = 0,
-        jitter: float = 1e-10,
+        jitter: float = 0.0,
         device: torch.device | str | None = None,
     ):
         assert kernel.is_operator_valued, "kernel must be operator-valued."
@@ -333,7 +333,7 @@ class KRRTangent(KRRBase):
         self,
         kernel: KernelOpTangent,
         ridge_init: float = 0,
-        jitter: float = 1e-10,
+        jitter: float = 0.0,
         device: torch.device | str | None = None,
     ):
         assert isinstance(kernel, KernelOpTangent), "kernel must be KernelOpTangent."

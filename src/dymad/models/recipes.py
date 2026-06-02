@@ -227,7 +227,7 @@ class CD_KM(ComposedDynamics):
             "type": model_config.get("type", "share"),
             "kernel": model_config.get("kernel", None),
             "ridge_init": model_config.get("ridge_init", 1e-10),
-            "jitter": model_config.get("jitter", 1e-12),
+            "jitter": model_config.get("jitter", 0.0),
             "dtype": dtype,
             "device": device,
         }

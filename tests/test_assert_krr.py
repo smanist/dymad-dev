@@ -73,6 +73,13 @@ opt_opva2 = {
 opts = [opt_share, opt_indp1, opt_indp2, opt_opva1, opt_opva2]
 
 
+def test_make_krr_defaults_to_zero_jitter():
+    for opt in [opt_share, opt_indp1, opt_opva1]:
+        cfg = copy.deepcopy(opt)
+        cfg.pop("jitter", None)
+        assert make_krr(**cfg).jitter == 0.0
+
+
 def run_krr():
     prds = []
     for opt in opts:
