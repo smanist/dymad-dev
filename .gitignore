@@ -16,6 +16,7 @@ examples/**/*.npz
 examples/**/*.pkl
 scripts/**/*.npz
 scripts/**/*.pkl
+scripts/tuning_convergence/runs
 tests/ker_model/*.npz
 tests/ker_model/*/*.npz
 tests/results/*.npz
