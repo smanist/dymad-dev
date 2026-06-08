@@ -22,6 +22,8 @@ Maintenance rule:
 | --- | --- | --- |
 | A new MCP tool that exposes an existing workflow | `src/dymad/agent/mcp/user_tools.py` or `src/dymad/agent/mcp/demo_tools.py`, then `src/dymad/agent/mcp/server.py` | Keep business logic out of `server.py`; it should register tools, not implement them |
 | A new package CLI command that exposes an existing user workflow | `src/dymad/cli.py` for argument parsing and `src/dymad/agent/app/*` for shared path/config workflow assembly | Keep `cli.py` thin; use registry/compiler/executor/facade/store boundaries instead of routing directly to trainers |
+| A new standalone hyperparameter search primitive or tuning artifact behavior | `src/dymad/tuning/*` | Keep it evaluator-driven and independent of trainer, MCP, and CLI assumptions; trainer CV can adapt to it |
+| A new standalone convergence-study primitive, aggregation, rate-fit, or diagnostic behavior | `src/dymad/studies/convergence/*` | Keep study orchestration independent of MCP/CLI exposure; user-facing exposure would be a later registry/compiler/executor change |
 | A new user-mode training capability or model family choice | `src/dymad/agent/registry/models.py`, `src/dymad/agent/registry/workflows.py`, `src/dymad/agent/registry/training_schema.py` | Add stable keys, summaries, dataset compatibility, allowed overrides, CV support metadata, translation guidance, constraint notes, and examples |
 | A new user-mode request field or override validation rule | `src/dymad/agent/compiler/training.py`, `src/dymad/agent/compiler/schemas.py`, maybe `src/dymad/agent/registry/training_schema.py` | Compiler owns validation and normalization of user input, including `overrides.cv` sweep/search/bounds/selection config and profile-default phase preservation |
 | A new analysis workflow | `src/dymad/agent/registry/analyses.py`, `src/dymad/agent/compiler/analysis.py`, `src/dymad/agent/exec/workflow.py` | Registry declares the workflow, compiler validates inputs, executor runs it |
@@ -60,6 +62,8 @@ After the decision table identifies the likely owner, use this map to read the f
 - If the change coordinates multiple steps, start in `agent/exec/*`.
 - If the change stores something under a handle, start in `agent/store/*` and `agent/facade/*`.
 - If the change is model/math/runtime behavior, it probably does not belong in `agent/*`.
+- If the change is generic hyperparameter search or convergence-study machinery, it belongs in
+  `tuning/*` or `studies/convergence/*`; only transport exposure belongs in `agent/*`.
 - If you need to touch `server.py`, you usually also need to touch a tool adapter first.
 
 ## Common Mistakes

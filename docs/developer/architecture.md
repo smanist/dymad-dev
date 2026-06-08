@@ -31,6 +31,8 @@ Maintenance rule:
 | `src/dymad/agent/facade` | stable typed boundary over persisted objects |
 | `src/dymad/agent/store` | in-memory/filesystem-backed artifact records and handle persistence |
 | `src/dymad/models` | model families, collections, typed model specs, rollout helpers |
+| `src/dymad/tuning` | standalone evaluator-driven hyperparameter search, parameter-domain projection, selection, and tuning artifacts |
+| `src/dymad/studies/convergence` | standalone convergence-study orchestration, trial aggregation, rate fitting, diagnostics, and study artifacts |
 | `src/dymad/training` | training runtime, phases, trainers, execution helpers |
 | `src/dymad/io` | checkpoint loading, trajectory/data managers, legacy public runtime entrypoints |
 | `src/dymad/core` | typed runtime/series/transform building blocks |
@@ -70,6 +72,9 @@ Important distinction:
   workflow assembly to `agent/app`.
 - `CompatibilityExecutor` still owns orchestration, but some compatibility flows intentionally
   materialize through legacy `io/*` code instead of fully executor-native implementations.
+- Standalone tuning and convergence-study implementations live outside `agent/*`. If they are later
+  exposed through CLI or MCP, route that exposure through the registry/compiler/executor boundaries
+  without moving the core search or study logic into adapters.
 
 ## User Transports
 

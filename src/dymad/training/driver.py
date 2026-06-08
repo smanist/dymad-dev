@@ -24,6 +24,7 @@ from dymad.training.helper import (
 )
 from dymad.training.phase_runtime import PhaseContext, build_initial_trainer_state
 from dymad.training.trainer_run import TrainerRun
+from dymad.tuning import TuningEvaluation, TuningResult, write_tuning_artifacts
 from dymad.utils import load_config, plot_cv_results
 
 TrajectoryManagerLike = TrajectoryManager | TrajectoryManagerGraph
@@ -363,6 +364,12 @@ class DriverBase:
             best_idx=best_idx,
         )
         self.cv_logger.info(f"Saved CV results to {file_name}")
+        self._write_cv_tuning_artifacts(
+            best_idx=best_idx,
+            best_result=best_result,
+            all_results=all_results,
+            selection_combo_indices=selection_combo_indices,
+        )
         plot_cv_results(file_name, ifclose=True, prefix=self.results_prefix)
         self.cv_logger.info(f"Saved CV plot to {self.results_prefix}/cv_results.png")
 
@@ -382,6 +389,67 @@ class DriverBase:
             self.cv_logger.removeHandler(handler)
 
         return best_idx, best_result, all_results
+
+    def _write_cv_tuning_artifacts(
+        self,
+        *,
+        best_idx: int,
+        best_result: CVResult,
+        all_results: Sequence[CVResult],
+        selection_combo_indices: Sequence[int] | None,
+    ) -> None:
+        evaluations: list[TuningEvaluation] = []
+        for index, result in enumerate(all_results):
+            combo_index = (
+                int(selection_combo_indices[index])
+                if selection_combo_indices is not None and index < len(selection_combo_indices)
+                else index
+            )
+            evaluations.append(
+                TuningEvaluation(
+                    params=dict(result.params),
+                    phase=str(self.cv_search_mode),
+                    index=combo_index,
+                    metric_value=float(result.mean_metric),
+                    status="ok",
+                    elapsed_seconds=0.0,
+                    boundary_hit=self._combo_hits_boundary(result.params),
+                    extra_metrics={
+                        "std_metric": float(result.std_metric),
+                        "fold_metrics": list(result.fold_metrics),
+                        "checkpoint_paths": list(result.checkpoint_paths),
+                    },
+                )
+            )
+        result = TuningResult(
+            selected_params=dict(best_result.params),
+            selected_metric=float(best_result.mean_metric),
+            evaluations=evaluations,
+            failures=[item for item in evaluations if item.boundary_hit],
+            candidate_plan={
+                "source": "trainer_cv",
+                "search_mode": self.cv_search_mode,
+                "param_grid": self.param_grid,
+                "bounds": self.cv_search_bounds,
+                "evaluated_count": len(evaluations),
+                "best_idx": best_idx,
+            },
+            policy={
+                "metric_name": self.metric,
+                "goal": self.cv_selection_goal,
+                "selection_tie_breakers": list(self.cv_selection_tie_breakers),
+            },
+        )
+        write_tuning_artifacts(result, f"{self.results_prefix}/{self.base_name}_tuning")
+
+    def _combo_hits_boundary(self, combo: dict[str, Any]) -> bool:
+        for spec in self.cv_search_bound_specs:
+            if spec.key not in combo:
+                continue
+            value = float(combo[spec.key])
+            if np.isclose(value, spec.lower) or np.isclose(value, spec.upper):
+                return True
+        return False
 
     # --------------------
     # Helper functions

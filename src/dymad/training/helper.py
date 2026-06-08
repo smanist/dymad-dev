@@ -1,9 +1,10 @@
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from itertools import product
 from typing import Any
 
 import numpy as np
+
+import dymad.tuning as _tuning
 
 
 @dataclass
@@ -21,28 +22,26 @@ class CVResult:
 
 def aggregate_cv_results(results: list[dict[str, Any]]):
     """
-    The results are potentially from concurrent runs, and each is in the format of
+    Aggregate concrete fold results into CVResult objects by combo index.
 
-    {'combo_idx', 'fold_idx', 'combo', 'metric_value', 'model_prefix'}
-
-    This function aggregates them into CVResult objects by collecting fold results for each combo_idx.
+    The input rows are produced by ``run_cv_single`` and contain ``combo_idx``,
+    ``fold_idx``, ``combo``, ``metric_value``, and ``model_prefix``.
     """
     tmp = [res["combo_idx"] for res in results]
     max_combo_idx, min_combo_idx = max(tmp), min(tmp)
-    tmp = [[[], [], []] for _ in range(max_combo_idx - min_combo_idx + 1)]
+    grouped = [[[], [], []] for _ in range(max_combo_idx - min_combo_idx + 1)]
     for res in results:
         c_idx = res["combo_idx"] - min_combo_idx
-        tmp[c_idx][0].append(res["combo"])
-        tmp[c_idx][1].append(res["metric_value"])
-        tmp[c_idx][2].append(res["model_prefix"])
+        grouped[c_idx][0].append(res["combo"])
+        grouped[c_idx][1].append(res["metric_value"])
+        grouped[c_idx][2].append(res["model_prefix"])
 
     cv_results = []
-    for combos, metrics, paths in tmp:
+    for combos, metrics, paths in grouped:
         assert len(set(tuple(sorted(c.items())) for c in combos)) == 1, (
             "Inconsistent combos for same combo_idx"
         )
         cv_results.append(CVResult(params=combos[0], fold_metrics=metrics, checkpoint_paths=paths))
-
     return cv_results
 
 
@@ -67,16 +66,6 @@ def select_best_cv_result(
 ) -> int:
     """
     Return the selected best CV-result index using explicit selection rules.
-
-    Supported goals:
-      - minimize: lower mean metric is better
-      - maximize: higher mean metric is better
-
-    Supported tie breakers (applied in order):
-      - std_metric: lower std is better
-      - param_l1: lower numeric L1 score of tuned params is better
-      - combo_index: lower candidate index is better. Uses `combo_indices` when provided;
-        otherwise uses the cv_results list position.
     """
     if not cv_results:
         raise ValueError("cv_results must be non-empty")
@@ -108,98 +97,7 @@ def select_best_cv_result(
 
 
 def iter_param_grid(param_grid: dict[str, Iterable[Any]]):
-    """
-    param_grid: dict mapping dotted keys to iterables.
-    Yields dicts mapping dotted keys -> single value.
-    """
-    keys = list(param_grid.keys())
-    values_lists = []
-    for k in keys:
-        val = param_grid[k]
-        if isinstance(val, list):
-            values_lists.append(val)
-        elif isinstance(val, tuple):
-            if val[0] == "linspace":
-                values_lists.append(np.linspace(*val[1]).tolist())
-            elif val[0] == "logspace":
-                values_lists.append(np.logspace(*val[1]).tolist())
-            else:
-                raise ValueError(f"Unknown param grid specifier: {val}")
-        else:
-            raise ValueError(f"Param grid values must be lists or tuples, got {type(val)}")
-    for values in product(*values_lists):
-        yield dict(zip(keys, values, strict=False))
-
-
-def _combo_numeric_matrix(combos: Sequence[dict[str, Any]]) -> np.ndarray | None:
-    if not combos:
-        return np.zeros((0, 0), dtype=float)
-
-    key_order = tuple(sorted(combos[0]))
-    vectors: list[list[float]] = []
-    for combo in combos:
-        if tuple(sorted(combo)) != key_order:
-            return None
-        row: list[float] = []
-        for key in key_order:
-            value = combo[key]
-            if isinstance(value, bool):
-                row.append(float(value))
-                continue
-            if isinstance(value, (int, float, np.integer, np.floating)):
-                row.append(float(value))
-                continue
-            return None
-        vectors.append(row)
-    return np.asarray(vectors, dtype=float)
-
-
-def _normalize_vectors(vectors: np.ndarray) -> np.ndarray:
-    if vectors.size == 0:
-        return vectors.copy()
-    mins = np.min(vectors, axis=0)
-    spans = np.ptp(vectors, axis=0)
-    spans = np.where(spans == 0.0, 1.0, spans)
-    return (vectors - mins) / spans
-
-
-def _initial_simplex_indices(vectors: np.ndarray, *, simplex_size: int) -> list[int]:
-    n_candidates = vectors.shape[0]
-    if simplex_size >= n_candidates:
-        return list(range(n_candidates))
-
-    selected = [0]
-    while len(selected) < simplex_size:
-        best_idx = None
-        best_distance = -1.0
-        for index in range(n_candidates):
-            if index in selected:
-                continue
-            min_distance = min(
-                float(np.linalg.norm(vectors[index] - vectors[current])) for current in selected
-            )
-            if min_distance > best_distance:
-                best_distance = min_distance
-                best_idx = index
-        if best_idx is None:
-            break
-        selected.append(best_idx)
-    return selected
-
-
-def _nearest_candidate_index(
-    target: np.ndarray, vectors: np.ndarray, *, excluded: set[int]
-) -> int | None:
-    best_idx = None
-    best_distance = float("inf")
-    for index in range(vectors.shape[0]):
-        if index in excluded:
-            continue
-        distance = float(np.linalg.norm(vectors[index] - target))
-        if distance < best_distance:
-            best_distance = distance
-            best_idx = index
-    return best_idx
+    return _tuning.iter_param_grid(param_grid)
 
 
 def nelder_mead_like_search_indices(
@@ -213,137 +111,16 @@ def nelder_mead_like_search_indices(
     contraction: float = 0.5,
     shrink: float = 0.5,
 ) -> list[int]:
-    """
-    Evaluate combo candidates through a discrete Nelder-Mead-like search path.
-
-    Returns the ordered list of evaluated combo indices. If candidate values are non-numeric
-    (or key structure is inconsistent), the function deterministically falls back to evaluating
-    the full grid order.
-    """
-    if goal not in {"minimize", "maximize"}:
-        raise ValueError("goal must be either 'minimize' or 'maximize'")
-    if max_iterations is not None and max_iterations <= 0:
-        raise ValueError("max_iterations must be a positive integer when provided")
-    if not combos:
-        return []
-
-    evaluated_order: list[int] = []
-    score_cache: dict[int, float] = {}
-
-    def _objective(metric: float) -> float:
-        return metric if goal == "minimize" else -metric
-
-    def _ensure_score(index: int) -> float:
-        if index not in score_cache:
-            metric = float(evaluate_index(index))
-            score_cache[index] = _objective(metric)
-            evaluated_order.append(index)
-        return score_cache[index]
-
-    vectors = _combo_numeric_matrix(combos)
-    if vectors is None:
-        for index in range(len(combos)):
-            _ensure_score(index)
-        return evaluated_order
-    vectors = _normalize_vectors(vectors)
-
-    simplex_size = min(vectors.shape[1] + 1, len(combos))
-    simplex = _initial_simplex_indices(vectors, simplex_size=simplex_size)
-    for index in simplex:
-        _ensure_score(index)
-
-    if len(score_cache) == len(combos):
-        return evaluated_order
-
-    iteration_budget = max_iterations if max_iterations is not None else len(combos)
-    for _ in range(iteration_budget):
-        simplex = sorted(simplex, key=_ensure_score)
-        best = simplex[0]
-        worst = simplex[-1]
-        second_worst = simplex[-2] if len(simplex) > 1 else worst
-        centroid = (
-            np.mean(vectors[simplex[:-1]], axis=0) if len(simplex) > 1 else vectors[best].copy()
-        )
-
-        best_score = _ensure_score(best)
-        worst_score = _ensure_score(worst)
-        second_worst_score = _ensure_score(second_worst)
-
-        reflected = centroid + reflection * (centroid - vectors[worst])
-        reflected_idx = _nearest_candidate_index(reflected, vectors, excluded=set(score_cache))
-        if reflected_idx is None:
-            break
-        reflected_score = _ensure_score(reflected_idx)
-
-        if reflected_score < best_score:
-            expanded = centroid + expansion * (vectors[reflected_idx] - centroid)
-            expanded_idx = _nearest_candidate_index(expanded, vectors, excluded=set(score_cache))
-            if expanded_idx is not None:
-                expanded_score = _ensure_score(expanded_idx)
-                simplex[-1] = expanded_idx if expanded_score < reflected_score else reflected_idx
-            else:
-                simplex[-1] = reflected_idx
-            if len(score_cache) == len(combos):
-                break
-            continue
-
-        if reflected_score < second_worst_score:
-            simplex[-1] = reflected_idx
-            if len(score_cache) == len(combos):
-                break
-            continue
-
-        if reflected_score < worst_score:
-            contracted = centroid + contraction * (vectors[reflected_idx] - centroid)
-        else:
-            contracted = centroid + contraction * (vectors[worst] - centroid)
-        contracted_idx = _nearest_candidate_index(contracted, vectors, excluded=set(score_cache))
-        if contracted_idx is not None:
-            contracted_score = _ensure_score(contracted_idx)
-            if contracted_score < min(worst_score, reflected_score):
-                simplex[-1] = contracted_idx
-                if len(score_cache) == len(combos):
-                    break
-                continue
-
-        shrunk_simplex = [best]
-        for vertex in simplex[1:]:
-            shrink_target = vectors[best] + shrink * (vectors[vertex] - vectors[best])
-            shrink_idx = _nearest_candidate_index(shrink_target, vectors, excluded=set(score_cache))
-            if shrink_idx is None:
-                continue
-            _ensure_score(shrink_idx)
-            shrunk_simplex.append(shrink_idx)
-
-        if len(shrunk_simplex) <= 1:
-            break
-
-        for index in simplex:
-            if len(shrunk_simplex) >= simplex_size:
-                break
-            if index not in shrunk_simplex:
-                shrunk_simplex.append(index)
-        simplex = shrunk_simplex[:simplex_size]
-
-        if len(score_cache) == len(combos):
-            break
-
-    return evaluated_order
-
-
-def _unit_point_key(point: np.ndarray) -> tuple[float, ...]:
-    clipped = np.clip(np.asarray(point, dtype=float), 0.0, 1.0)
-    return tuple(float(value) for value in np.round(clipped, decimals=12))
-
-
-def _initial_bounded_simplex(dim: int) -> list[np.ndarray]:
-    base = np.full(dim, 0.5, dtype=float)
-    simplex = [base]
-    for axis in range(dim):
-        vertex = base.copy()
-        vertex[axis] = 1.0
-        simplex.append(vertex)
-    return simplex
+    return _tuning.nelder_mead_like_search_indices(
+        combos,
+        evaluate_index=evaluate_index,
+        goal=goal,
+        max_iterations=max_iterations,
+        reflection=reflection,
+        expansion=expansion,
+        contraction=contraction,
+        shrink=shrink,
+    )
 
 
 def bounded_nelder_mead_search_points(
@@ -358,102 +135,17 @@ def bounded_nelder_mead_search_points(
     contraction: float = 0.5,
     shrink: float = 0.5,
 ) -> list[np.ndarray]:
-    """
-    Evaluate points through a bounded Nelder-Mead search in a continuous box domain.
-
-    Returns the ordered list of unique denormalized points that were evaluated.
-    """
-    if goal not in {"minimize", "maximize"}:
-        raise ValueError("goal must be either 'minimize' or 'maximize'")
-    if max_iterations is not None and max_iterations <= 0:
-        raise ValueError("max_iterations must be a positive integer when provided")
-
-    lower = np.asarray(lower_bounds, dtype=float)
-    upper = np.asarray(upper_bounds, dtype=float)
-    if lower.ndim != 1 or upper.ndim != 1 or lower.shape != upper.shape:
-        raise ValueError("lower_bounds and upper_bounds must be 1D arrays with matching shapes")
-    if lower.size == 0:
-        return []
-    if not np.all(np.isfinite(lower)) or not np.all(np.isfinite(upper)):
-        raise ValueError("bounds must be finite")
-    if np.any(lower >= upper):
-        raise ValueError(
-            "each lower bound must be strictly less than the corresponding upper bound"
-        )
-    if not isinstance(reflection, (int, float)) or float(reflection) <= 0.0:
-        raise ValueError("reflection must be a positive number")
-    if not isinstance(expansion, (int, float)) or float(expansion) <= 1.0:
-        raise ValueError("expansion must be greater than 1")
-    if not isinstance(contraction, (int, float)) or not (0.0 < float(contraction) < 1.0):
-        raise ValueError("contraction must be in (0, 1)")
-    if not isinstance(shrink, (int, float)) or not (0.0 < float(shrink) < 1.0):
-        raise ValueError("shrink must be in (0, 1)")
-
-    span = upper - lower
-    evaluated_points: list[np.ndarray] = []
-    score_cache: dict[tuple[float, ...], float] = {}
-
-    def _objective(metric: float) -> float:
-        return metric if goal == "minimize" else -metric
-
-    def _clip_unit(point: np.ndarray) -> np.ndarray:
-        return np.clip(np.asarray(point, dtype=float), 0.0, 1.0)
-
-    def _denormalize(unit_point: np.ndarray) -> np.ndarray:
-        return lower + _clip_unit(unit_point) * span
-
-    def _ensure_score(unit_point: np.ndarray) -> float:
-        key = _unit_point_key(unit_point)
-        if key not in score_cache:
-            denormalized = _denormalize(np.asarray(key, dtype=float))
-            metric = float(evaluate_point(denormalized.copy()))
-            score_cache[key] = _objective(metric)
-            evaluated_points.append(denormalized)
-        return score_cache[key]
-
-    dim = lower.size
-    simplex = _initial_bounded_simplex(dim)
-
-    for vertex in simplex:
-        _ensure_score(vertex)
-
-    iteration_budget = max_iterations if max_iterations is not None else max(20, 8 * dim)
-    for _ in range(iteration_budget):
-        simplex = sorted(simplex, key=_ensure_score)
-        best = simplex[0]
-        worst = simplex[-1]
-        second_worst = simplex[-2] if len(simplex) > 1 else worst
-        centroid = np.mean(simplex[:-1], axis=0) if len(simplex) > 1 else best.copy()
-
-        best_score = _ensure_score(best)
-        worst_score = _ensure_score(worst)
-        second_worst_score = _ensure_score(second_worst)
-
-        reflected = _clip_unit(centroid + reflection * (centroid - worst))
-        reflected_score = _ensure_score(reflected)
-
-        if reflected_score < best_score:
-            expanded = _clip_unit(centroid + expansion * (reflected - centroid))
-            expanded_score = _ensure_score(expanded)
-            simplex[-1] = expanded if expanded_score < reflected_score else reflected
-            continue
-
-        if reflected_score < second_worst_score:
-            simplex[-1] = reflected
-            continue
-
-        if reflected_score < worst_score:
-            contracted = _clip_unit(centroid + contraction * (reflected - centroid))
-        else:
-            contracted = _clip_unit(centroid + contraction * (worst - centroid))
-        contracted_score = _ensure_score(contracted)
-        if contracted_score < min(worst_score, reflected_score):
-            simplex[-1] = contracted
-            continue
-
-        simplex = [best] + [_clip_unit(best + shrink * (vertex - best)) for vertex in simplex[1:]]
-
-    return evaluated_points
+    return _tuning.bounded_nelder_mead_search_points(
+        lower_bounds=lower_bounds,
+        upper_bounds=upper_bounds,
+        evaluate_point=evaluate_point,
+        goal=goal,
+        max_iterations=max_iterations,
+        reflection=reflection,
+        expansion=expansion,
+        contraction=contraction,
+        shrink=shrink,
+    )
 
 
 def get_by_dotted_key(d: dict[str, Any], dotted_key: str) -> Any:

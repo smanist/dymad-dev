@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 
@@ -1636,6 +1637,11 @@ cv:
     assert evaluated_dims == [0, 1, 2, 3, 4]
     assert len(all_results) == 5
     assert best_result.params["model.koopman_dimension"] == 2
+    tuning_dir = tmp_path / "demo" / "demo_tuning"
+    assert (tuning_dir / "tuning_result.json").is_file()
+    assert (tuning_dir / "tuning_evaluations.csv").is_file()
+    payload = json.loads((tuning_dir / "tuning_result.json").read_text(encoding="utf-8"))
+    assert payload["selected_params"]["model.koopman_dimension"] == 2
 
 
 def test_single_split_driver_uses_configured_split_seed(monkeypatch, tmp_path) -> None:
