@@ -23,6 +23,7 @@ from dymad.studies.convergence import (
     run_convergence_study,
 )
 
+# fmt: off
 OUTPUT_DIR = Path('./runs')
 LEVELS = (32, 64)
 TRIALS = (0,)
@@ -36,6 +37,7 @@ SEED = 0
 ifrun = 1
 ifplt = 1
 ifprd = 1
+# fmt: on
 
 
 def set_seed(seed: int) -> None:

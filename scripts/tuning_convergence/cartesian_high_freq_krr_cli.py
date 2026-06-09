@@ -5,7 +5,6 @@ import math
 import os
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +23,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.cli_helpers import set_seed
 
+from dymad.io import Split
 from dymad.modules import make_krr
 from dymad.studies.convergence import (
     ConvergenceEvaluationContext,
@@ -37,61 +37,6 @@ from dymad.tuning import ParameterSpec, TuningSpec
 BASE_DIR = Path(__file__).resolve().parent
 CASE_NAME = "cartesian_high_freq"
 METHODS = ("rbf_krr", "dm_krr")
-
-
-@dataclass(frozen=True)
-class Normalizer:
-    mean: np.ndarray
-    std: np.ndarray
-
-    @classmethod
-    def fit(cls, values: np.ndarray) -> Normalizer:
-        mean = values.mean(axis=0, keepdims=True)
-        std = values.std(axis=0, keepdims=True)
-        std = np.where(std < 1e-14, 1.0, std)
-        return cls(mean, std)
-
-    def transform(self, values: np.ndarray) -> np.ndarray:
-        return (values - self.mean) / self.std
-
-    def inverse(self, values: np.ndarray) -> np.ndarray:
-        return values * self.std + self.mean
-
-
-@dataclass(frozen=True)
-class Split:
-    x_train_raw: np.ndarray
-    y_train_raw: np.ndarray
-    x_val_raw: np.ndarray
-    y_val_raw: np.ndarray
-    x_test_raw: np.ndarray
-    y_test_raw: np.ndarray
-    x_norm: Normalizer
-    y_norm: Normalizer
-
-    @property
-    def x_train(self) -> np.ndarray:
-        return self.x_norm.transform(self.x_train_raw)
-
-    @property
-    def y_train(self) -> np.ndarray:
-        return self.y_norm.transform(self.y_train_raw)
-
-    @property
-    def x_val(self) -> np.ndarray:
-        return self.x_norm.transform(self.x_val_raw)
-
-    @property
-    def y_val(self) -> np.ndarray:
-        return self.y_norm.transform(self.y_val_raw)
-
-    @property
-    def x_test(self) -> np.ndarray:
-        return self.x_norm.transform(self.x_test_raw)
-
-    @property
-    def y_test(self) -> np.ndarray:
-        return self.y_norm.transform(self.y_test_raw)
 
 
 def unit_disk_sample(n_samples: int, rng: np.random.Generator) -> np.ndarray:
@@ -115,15 +60,13 @@ def make_split(n_train: int, n_val: int, n_test: int, seed: int) -> Split:
     y_train = label_values(x_train)
     y_val = label_values(x_val)
     y_test = label_values(x_test)
-    return Split(
-        x_train_raw=x_train,
-        y_train_raw=y_train,
-        x_val_raw=x_val,
-        y_val_raw=y_val,
-        x_test_raw=x_test,
-        y_test_raw=y_test,
-        x_norm=Normalizer.fit(x_train),
-        y_norm=Normalizer.fit(y_train),
+    return Split.from_arrays(
+        x_train=x_train,
+        y_train=y_train,
+        x_val=x_val,
+        y_val=y_val,
+        x_test=x_test,
+        y_test=y_test,
     )
 
 
@@ -187,7 +130,7 @@ def fit_and_score(
         "train_residual": train_residual,
     }
     if y_test_pred is not None:
-        y_test_physical_pred = split.y_norm.inverse(y_test_pred)
+        y_test_physical_pred = split.inverse_y(y_test_pred)
         row.update(
             {
                 "error": rmse(split.y_test, y_test_pred),
@@ -273,7 +216,7 @@ def plot_truth_vs_prediction(context: MedianPlotContext, split: Split) -> None:
     with torch.no_grad():
         y_pred_norm = model(torch.as_tensor(split.x_test, dtype=torch.float64)).cpu().numpy()
     truth = split.y_test_raw.reshape(-1)
-    pred = split.y_norm.inverse(y_pred_norm).reshape(-1)
+    pred = split.inverse_y(y_pred_norm).reshape(-1)
     abs_error = np.abs(truth - pred)
     color_max = max(float(np.max(np.abs(truth))), float(np.max(np.abs(pred))), 1e-12)
 
