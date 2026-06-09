@@ -1,4 +1,5 @@
 import json
+import time
 
 from dymad.studies.convergence import (
     ConvergenceStudySpec,
@@ -92,6 +93,45 @@ def test_convergence_study_per_trial_tuning_saves_each_tuning(tmp_path) -> None:
 
     assert len(result.tuning_results) == 4
     assert len(list((tmp_path / "tuning").glob("*/tuning_result.json"))) == 4
+
+
+def test_convergence_study_supports_parallel_workers(tmp_path) -> None:
+    tuning_spec = TuningSpec(
+        parameters=(ParameterSpec("alpha", bounds=(0, 3), value_kind="int"),),
+        initial_budget=4,
+    )
+    spec = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1, 2),
+        trials=2,
+        metrics=("error",),
+        tuning_policy=TuningPolicy(mode="per_trial", specs={"m": tuning_spec}),
+        artifact_dir=tmp_path,
+    )
+
+    def tune_eval(method, refinement, trial, params):
+        time.sleep(0.005)
+        return float((params["alpha"] - int(trial)) ** 2)
+
+    def evaluate(context):
+        time.sleep(0.005)
+        return {"error": float(context.params["alpha"]) + 1.0 / float(context.refinement)}
+
+    result = run_convergence_study(
+        spec,
+        evaluate,
+        tuning_evaluator=tune_eval,
+        max_workers=2,
+        tuning_max_workers=2,
+    )
+
+    assert [(row["refinement"], row["trial"]) for row in result.raw_rows] == [
+        (1, 0),
+        (1, 1),
+        (2, 0),
+        (2, 1),
+    ]
+    assert len(result.tuning_results) == 4
 
 
 def test_convergence_study_writes_supplied_median_prediction_plots(tmp_path) -> None:

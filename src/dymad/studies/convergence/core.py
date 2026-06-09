@@ -5,6 +5,7 @@ import json
 import math
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -120,10 +121,18 @@ def run_convergence_study(
     *,
     tuning_evaluator: TuningEvaluator | None = None,
     median_plotter: MedianPlotter | None = None,
+    max_workers: int = 1,
+    tuning_max_workers: int | None = None,
 ) -> ConvergenceStudyResult:
+    if max_workers <= 0:
+        raise ValueError("max_workers must be positive")
+    if tuning_max_workers is None:
+        tuning_max_workers = max_workers
+    if tuning_max_workers <= 0:
+        raise ValueError("tuning_max_workers must be positive")
     tuning_cache: dict[tuple[Any, ...], TuningResult] = {}
-    raw_rows: list[dict[str, Any]] = []
     tuning_results: dict[str, TuningResult] = {}
+    contexts: list[ConvergenceEvaluationContext] = []
 
     artifact_dir = Path(spec.artifact_dir) if spec.artifact_dir is not None else None
     if artifact_dir is not None:
@@ -139,6 +148,7 @@ def run_convergence_study(
                     trial,
                     tuning_evaluator=tuning_evaluator,
                     cache=tuning_cache,
+                    max_workers=tuning_max_workers,
                 )
                 tuning_key = _tuning_artifact_key(
                     spec.tuning_policy.mode, method, refinement, trial
@@ -158,27 +168,14 @@ def run_convergence_study(
                 context = ConvergenceEvaluationContext(
                     method, refinement, trial, params, tuning_result
                 )
-                try:
-                    metrics = dict(evaluator(context))
-                    status = str(metrics.pop("status", "ok"))
-                    failure_reason = (
-                        str(metrics.pop("failure_reason", "")) if status != "ok" else ""
-                    )
-                except Exception as exc:  # noqa: BLE001 - failed trials are study artifacts.
-                    metrics = {}
-                    status = "failed"
-                    failure_reason = f"{type(exc).__name__}: {exc}"
-                row = {
-                    "method": method,
-                    "refinement": refinement,
-                    "trial": trial,
-                    "status": status,
-                    "failure_reason": failure_reason,
-                    "params": dict(params),
-                }
-                for metric in spec.metrics:
-                    row[metric] = metrics.get(metric, math.nan)
-                raw_rows.append(row)
+                contexts.append(context)
+
+    raw_rows = _evaluate_study_contexts(
+        contexts,
+        metrics=spec.metrics,
+        evaluator=evaluator,
+        max_workers=max_workers,
+    )
 
     metric_values = _metric_values(raw_rows, spec.metrics)
     trial_statistics = aggregate_trials(
@@ -238,6 +235,7 @@ def _resolve_tuning(
     *,
     tuning_evaluator: TuningEvaluator | None,
     cache: dict[tuple[Any, ...], TuningResult],
+    max_workers: int,
 ) -> TuningResult | None:
     policy = spec.tuning_policy
     if policy.mode == "none":
@@ -270,7 +268,7 @@ def _resolve_tuning(
         def objective(params: dict[str, Any]) -> float | Mapping[str, Any]:
             return tuning_evaluator(method, tuning_refinement, tuning_trial, params)
 
-        cache[key] = tune(policy.specs[method], objective)
+        cache[key] = tune(policy.specs[method], objective, max_workers=max_workers)
     return cache[key]
 
 
@@ -283,6 +281,50 @@ def _recorded_params_result(params: dict[str, Any], policy: dict[str, Any]) -> T
         candidate_plan={"strategy": "none", "candidates": []},
         policy=policy,
     )
+
+
+def _evaluate_study_contexts(
+    contexts: Sequence[ConvergenceEvaluationContext],
+    *,
+    metrics: Sequence[str],
+    evaluator: StudyEvaluator,
+    max_workers: int,
+) -> list[dict[str, Any]]:
+    if max_workers > 1 and len(contexts) > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            return list(
+                executor.map(
+                    lambda context: _evaluate_study_context(context, metrics, evaluator),
+                    contexts,
+                )
+            )
+    return [_evaluate_study_context(context, metrics, evaluator) for context in contexts]
+
+
+def _evaluate_study_context(
+    context: ConvergenceEvaluationContext,
+    metrics: Sequence[str],
+    evaluator: StudyEvaluator,
+) -> dict[str, Any]:
+    try:
+        metric_values = dict(evaluator(context))
+        status = str(metric_values.pop("status", "ok"))
+        failure_reason = str(metric_values.pop("failure_reason", "")) if status != "ok" else ""
+    except Exception as exc:  # noqa: BLE001 - failed trials are study artifacts.
+        metric_values = {}
+        status = "failed"
+        failure_reason = f"{type(exc).__name__}: {exc}"
+    row = {
+        "method": context.method,
+        "refinement": context.refinement,
+        "trial": context.trial,
+        "status": status,
+        "failure_reason": failure_reason,
+        "params": dict(context.params),
+    }
+    for metric in metrics:
+        row[metric] = metric_values.get(metric, math.nan)
+    return row
 
 
 def _trials_for_level(spec: ConvergenceStudySpec, level_index: int) -> tuple[int | str, ...]:

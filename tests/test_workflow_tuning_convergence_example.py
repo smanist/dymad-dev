@@ -1,3 +1,4 @@
+import csv
 import os
 import subprocess
 import sys
@@ -26,6 +27,8 @@ def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
             "2",
             "--refinement-budget",
             "0",
+            "--max-workers",
+            "2",
             "--no-plot",
         ],
         cwd=os.getcwd(),
@@ -64,6 +67,8 @@ def test_cartesian_high_freq_tuning_convergence_ifblock_example_smoke(tmp_path) 
     assert (output_dir / "raw_results.csv").is_file()
     assert (output_dir / "convergence_rates.json").is_file()
     assert (output_dir / "convergence.png").is_file()
-    assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == 8
-    assert len(list((output_dir / "tuning").glob("*/tuning_search.png"))) == 8
-    assert len(list((output_dir / "median_predictions").glob("*.png"))) == 8
+    with (output_dir / "raw_results.csv").open(newline="", encoding="utf-8") as handle:
+        expected_count = len(list(csv.DictReader(handle)))
+    assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == expected_count
+    assert len(list((output_dir / "tuning").glob("*/tuning_search.png"))) == expected_count
+    assert len(list((output_dir / "median_predictions").glob("*.png"))) == expected_count

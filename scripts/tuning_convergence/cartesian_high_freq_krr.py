@@ -29,10 +29,11 @@ LEVELS = (32, 64, 128)
 TRIALS = 1
 N_VAL = 32
 N_TEST = 128
-INITIAL_BUDGET = 5
+INITIAL_BUDGET = (5, 5)
 REFINEMENT_BUDGET = 0
 TUNING_POLICY = "per_trial"
 SEED = 0
+MAX_WORKERS = 2
 
 ifrun = 1
 ifplt = 1
@@ -106,6 +107,8 @@ if ifrun:
         study_eval,
         tuning_evaluator=tune_eval,
         median_plotter=median_plotter if ifprd else None,
+        max_workers=MAX_WORKERS,
+        tuning_max_workers=MAX_WORKERS,
     )
     print(f"Wrote convergence artifacts to {OUTPUT_DIR}")
     if result.diagnostics:

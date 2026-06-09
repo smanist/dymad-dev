@@ -1,6 +1,8 @@
 import csv
 import json
+import time
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
@@ -11,9 +13,11 @@ from dymad.tuning import (
     TuningSpec,
     bounded_nelder_mead_search_points,
     initial_search_plan,
+    plot_tuning_search,
     tune,
     write_tuning_artifacts,
 )
+from dymad.utils.plot import plot_search_results
 
 
 def test_parameter_spec_projects_log_int_step_parity_and_values() -> None:
@@ -67,6 +71,23 @@ def test_initial_search_plan_accepts_per_parameter_grid_budget() -> None:
     assert len(plan["candidates"]) == 12
     assert len({candidate["a"] for candidate in plan["candidates"]}) == 3
     assert len({candidate["b"] for candidate in plan["candidates"]}) == 4
+
+
+def test_tune_supports_parallel_initial_evaluations() -> None:
+    spec = TuningSpec(
+        parameters=(ParameterSpec("x", bounds=(0, 3), value_kind="int"),),
+        initial_budget=4,
+    )
+
+    def evaluate(params):
+        time.sleep(0.005)
+        return float((params["x"] - 2) ** 2)
+
+    result = tune(spec, evaluate, max_workers=2)
+
+    assert result.selected_params == {"x": 2}
+    assert [item.index for item in result.evaluations] == [0, 1, 2, 3]
+    assert all(item.status == "ok" for item in result.evaluations)
 
 
 def test_bounded_nelder_mead_search_points_respects_bounds() -> None:
@@ -153,3 +174,50 @@ def test_tuning_artifact_plots_2d_and_3d_searches(tmp_path) -> None:
 
     assert (tmp_path / "two_dim" / "tuning_search.png").is_file()
     assert (tmp_path / "three_dim" / "tuning_search.png").is_file()
+
+
+def test_tuning_plot_passes_log_axis_scale_to_shared_renderer(monkeypatch, tmp_path) -> None:
+    captured = {}
+
+    def fake_plot_search_results(*args, **kwargs):
+        captured["axis_scales"] = kwargs["axis_scales"]
+
+    import dymad.utils.plot as plot_module
+
+    monkeypatch.setattr(plot_module, "plot_search_results", fake_plot_search_results)
+    result = TuningResult(
+        selected_params={"alpha": 1e-2, "beta": 0.5},
+        selected_metric=0.1,
+        evaluations=[
+            TuningEvaluation({"alpha": 1e-4, "beta": 0.0}, "initial", 0, 1.0, "ok", 0.0),
+            TuningEvaluation({"alpha": 1e-2, "beta": 0.5}, "initial", 1, 0.1, "ok", 0.0),
+            TuningEvaluation({"alpha": 1e2, "beta": 1.0}, "initial", 2, 2.0, "ok", 0.0),
+        ],
+        failures=[],
+        candidate_plan={
+            "parameter_domains": [
+                {"name": "alpha", "scale": "log"},
+                {"name": "beta", "scale": "linear"},
+            ]
+        },
+    )
+
+    plot_tuning_search(result, tmp_path / "ignored.png")
+
+    assert captured["axis_scales"] == ["log", "linear"]
+
+
+def test_shared_search_plot_applies_log_parameter_axis() -> None:
+    fig, ax = plot_search_results(
+        np.array([1e-4, 1e-2, 1.0]),
+        np.array([1.0, 0.5, 0.25]),
+        key_labels=["alpha"],
+        metric_name="metric",
+        best_idx=2,
+        mode="1d",
+        ifclose=False,
+        axis_scales=["log"],
+    )
+
+    assert ax.get_xscale() == "log"
+    plt.close(fig)

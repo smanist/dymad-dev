@@ -6,6 +6,7 @@ import math
 import random
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from itertools import product
 from pathlib import Path
@@ -214,17 +215,55 @@ def initial_search_plan(spec: TuningSpec) -> dict[str, Any]:
     }
 
 
-def tune(spec: TuningSpec, evaluator: MetricEvaluator) -> TuningResult:
+def tune(spec: TuningSpec, evaluator: MetricEvaluator, *, max_workers: int = 1) -> TuningResult:
+    if max_workers <= 0:
+        raise ValueError("max_workers must be positive")
     plan = initial_search_plan(spec)
     evaluations: list[TuningEvaluation] = []
-    failures: list[TuningEvaluation] = []
     cache: dict[tuple[tuple[str, Any], ...], TuningEvaluation] = {}
 
-    def evaluate(params: dict[str, Any], phase: str, index: int) -> TuningEvaluation:
-        projected = {
+    def project(params: dict[str, Any]) -> dict[str, Any]:
+        return {
             parameter.name: parameter.project(params[parameter.name])
             for parameter in spec.parameters
         }
+
+    def run_projected(projected: dict[str, Any], phase: str, index: int) -> TuningEvaluation:
+        started = time.perf_counter()
+        try:
+            raw = evaluator(dict(projected))
+            if isinstance(raw, Mapping):
+                metric = float(
+                    raw.get(spec.metric_name, raw.get("metric_value", raw.get("metric")))
+                )
+                extra = {str(k): v for k, v in raw.items() if k != spec.metric_name}
+            else:
+                metric = float(raw)
+                extra = {}
+            return TuningEvaluation(
+                params=dict(projected),
+                phase=phase,
+                index=index,
+                metric_value=metric,
+                status="ok",
+                elapsed_seconds=time.perf_counter() - started,
+                boundary_hit=_any_boundary_hit(spec.parameters, projected),
+                extra_metrics=extra,
+            )
+        except Exception as exc:  # noqa: BLE001 - failed candidates are tuning artifacts.
+            return TuningEvaluation(
+                params=dict(projected),
+                phase=phase,
+                index=index,
+                metric_value=math.inf if spec.goal == "minimize" else -math.inf,
+                status="failed",
+                elapsed_seconds=time.perf_counter() - started,
+                boundary_hit=_any_boundary_hit(spec.parameters, projected),
+                failure_reason=f"{type(exc).__name__}: {exc}",
+            )
+
+    def evaluate(params: dict[str, Any], phase: str, index: int) -> TuningEvaluation:
+        projected = project(params)
         key = _params_key(projected)
         if key in cache:
             cached = cache[key]
@@ -242,49 +281,35 @@ def tune(spec: TuningSpec, evaluator: MetricEvaluator) -> TuningResult:
             )
             evaluations.append(item)
             return item
-        started = time.perf_counter()
-        try:
-            raw = evaluator(dict(projected))
-            if isinstance(raw, Mapping):
-                metric = float(
-                    raw.get(spec.metric_name, raw.get("metric_value", raw.get("metric")))
-                )
-                extra = {str(k): v for k, v in raw.items() if k != spec.metric_name}
-            else:
-                metric = float(raw)
-                extra = {}
-            item = TuningEvaluation(
-                params=dict(projected),
-                phase=phase,
-                index=index,
-                metric_value=metric,
-                status="ok",
-                elapsed_seconds=time.perf_counter() - started,
-                boundary_hit=_any_boundary_hit(spec.parameters, projected),
-                extra_metrics=extra,
-            )
-        except Exception as exc:  # noqa: BLE001 - failed candidates are tuning artifacts.
-            item = TuningEvaluation(
-                params=dict(projected),
-                phase=phase,
-                index=index,
-                metric_value=math.inf if spec.goal == "minimize" else -math.inf,
-                status="failed",
-                elapsed_seconds=time.perf_counter() - started,
-                boundary_hit=_any_boundary_hit(spec.parameters, projected),
-                failure_reason=f"{type(exc).__name__}: {exc}",
-            )
-            failures.append(item)
+        item = run_projected(projected, phase, index)
         evaluations.append(item)
         cache[key] = item
         return item
 
-    for index, candidate in enumerate(plan["candidates"]):
-        evaluate(candidate, "initial", index)
+    if max_workers > 1 and len(plan["candidates"]) > 1:
+        _evaluate_initial_candidates_parallel(
+            candidates=plan["candidates"],
+            phase="initial",
+            project=project,
+            run_projected=run_projected,
+            evaluations=evaluations,
+            cache=cache,
+            max_workers=max_workers,
+        )
+    else:
+        for index, candidate in enumerate(plan["candidates"]):
+            evaluate(candidate, "initial", index)
 
     ok = [item for item in evaluations if item.status == "ok" and math.isfinite(item.metric_value)]
     if not ok:
-        return TuningResult({}, math.inf, evaluations, failures, plan, _policy_from_spec(spec))
+        return TuningResult(
+            {},
+            math.inf,
+            evaluations,
+            [item for item in evaluations if item.status != "ok" or item.boundary_hit],
+            plan,
+            _policy_from_spec(spec),
+        )
 
     best = ok[select_best_evaluation(ok, goal=spec.goal, tie_breakers=spec.selection_tie_breakers)]
     if spec.refinement_strategy == "nelder_mead_like" and spec.refinement_budget > 0:
@@ -364,6 +389,53 @@ def select_best_evaluation(
         return tuple(parts)
 
     return min(range(len(evaluations)), key=lambda index: key(index, evaluations[index]))
+
+
+def _evaluate_initial_candidates_parallel(
+    *,
+    candidates: Sequence[dict[str, Any]],
+    phase: str,
+    project: Callable[[dict[str, Any]], dict[str, Any]],
+    run_projected: Callable[[dict[str, Any], str, int], TuningEvaluation],
+    evaluations: list[TuningEvaluation],
+    cache: dict[tuple[tuple[str, Any], ...], TuningEvaluation],
+    max_workers: int,
+) -> None:
+    projected_by_index = [project(candidate) for candidate in candidates]
+    first_index_by_key: dict[tuple[tuple[str, Any], ...], int] = {}
+    for index, projected in enumerate(projected_by_index):
+        first_index_by_key.setdefault(_params_key(projected), index)
+    first_indexes = sorted(set(first_index_by_key.values()))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_by_index = {
+            index: executor.submit(run_projected, projected_by_index[index], phase, index)
+            for index in first_indexes
+        }
+        first_results = {index: future_by_index[index].result() for index in first_indexes}
+
+    result_by_key = {
+        _params_key(first_results[index].params): first_results[index] for index in first_indexes
+    }
+    for index, projected in enumerate(projected_by_index):
+        key = _params_key(projected)
+        first_result = result_by_key[key]
+        if first_index_by_key[key] == index:
+            item = first_result
+        else:
+            item = TuningEvaluation(
+                params=dict(first_result.params),
+                phase=phase,
+                index=index,
+                metric_value=first_result.metric_value,
+                status=first_result.status,
+                elapsed_seconds=0.0,
+                cache_hit=True,
+                boundary_hit=first_result.boundary_hit,
+                failure_reason=first_result.failure_reason,
+                extra_metrics=dict(first_result.extra_metrics),
+            )
+        evaluations.append(item)
+        cache[key] = first_result
 
 
 def nelder_mead_like_search_indices(
@@ -624,6 +696,7 @@ def plot_tuning_search(result: TuningResult, output_path: str | Path) -> Path | 
         output_path=path,
         ifclose=True,
         value_scale=value_scale,
+        axis_scales=_plot_axis_scales(result, names if mode != "history" else []),
     )
     return path
 
@@ -690,6 +763,14 @@ def _plot_axis_values(
         labels = sorted({str(value) for value in raw_values})
         positions = {label: float(index) for index, label in enumerate(labels)}
         return np.asarray([positions[str(value)] for value in raw_values], dtype=float), labels
+
+
+def _plot_axis_scales(result: TuningResult, parameter_names: Sequence[str]) -> list[str]:
+    scale_by_name = {}
+    for domain in result.candidate_plan.get("parameter_domains", []):
+        if isinstance(domain, Mapping) and isinstance(domain.get("name"), str):
+            scale_by_name[str(domain["name"])] = str(domain.get("scale", "linear"))
+    return [scale_by_name.get(name, "linear") for name in parameter_names]
 
 
 def _selected_evaluation_index(

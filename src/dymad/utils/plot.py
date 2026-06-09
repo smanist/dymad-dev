@@ -471,6 +471,7 @@ def plot_search_results(
     output_path=None,
     ifclose=True,
     value_scale="log",
+    axis_scales=None,
 ):
     """
     Plot hyperparameter-search results from already-collected arrays.
@@ -481,6 +482,7 @@ def plot_search_results(
         stds = np.zeros_like(means)
     else:
         stds = np.asarray(stds, dtype=float)
+    axis_scales = list(axis_scales) if axis_scales is not None else []
     if mode is None:
         if params.ndim == 1:
             mode = "1d"
@@ -499,6 +501,7 @@ def plot_search_results(
         ax.plot(params[best_idx], means[best_idx], "rs", label=best_label, markersize=8)
         if value_scale == "log" and np.all(means > 0.0):
             ax.set_yscale(value_scale)
+        _apply_search_axis_scale(ax, "x", params, axis_scales, 0)
         ax.set_xticks(params)
         ax.set_xlabel(key_labels[0])
         ax.set_ylabel(metric_name)
@@ -523,6 +526,8 @@ def plot_search_results(
         if value_scale == "log" and np.all(means > 0.0) and means.max() > means.min():
             sc.set_norm(colors.LogNorm(vmin=means.min(), vmax=means.max()))
         cbar.set_label(f"Mean {metric_name}")
+        _apply_search_axis_scale(ax, "x", params[:, 0], axis_scales, 0)
+        _apply_search_axis_scale(ax, "y", params[:, 1], axis_scales, 1)
         ax.set_xticks(np.unique(params[:, 0]))
         ax.set_yticks(np.unique(params[:, 1]))
         ax.set_xlabel(key_labels[0])
@@ -550,6 +555,9 @@ def plot_search_results(
         ax3d.set_xticks(np.unique(params[:, 0]))
         ax3d.set_yticks(np.unique(params[:, 1]))
         ax3d.set_zticks(np.unique(params[:, 2]))
+        _apply_search_axis_scale(ax3d, "x", params[:, 0], axis_scales, 0)
+        _apply_search_axis_scale(ax3d, "y", params[:, 1], axis_scales, 1)
+        _apply_search_axis_scale(ax3d, "z", params[:, 2], axis_scales, 2)
         ax3d.set_xlabel(key_labels[0])
         ax3d.set_ylabel(key_labels[1])
         ax3d.set_zlabel(key_labels[2])
@@ -588,6 +596,20 @@ def plot_search_results(
         plt.close()
 
     return fig, ax
+
+
+def _apply_search_axis_scale(ax, axis, values, axis_scales, index):
+    if index >= len(axis_scales) or axis_scales[index] != "log":
+        return
+    values = np.asarray(values, dtype=float)
+    if not np.all(values > 0.0):
+        return
+    if axis == "x":
+        ax.set_xscale("log")
+    elif axis == "y":
+        ax.set_yscale("log")
+    elif axis == "z":
+        ax.set_zscale("log")
 
 
 def plot_cv_results(cv_file, keys=None, ifclose=True, prefix=".", value_scale="log"):

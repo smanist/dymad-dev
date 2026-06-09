@@ -201,6 +201,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--refinement-budget", type=int, default=0)
     parser.add_argument("--tuning-policy", choices=("per_trial", "per_level"), default="per_trial")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--max-workers", type=int, default=1)
     parser.add_argument("--no-plot", action="store_true")
     parser.add_argument("--no-prediction-plots", action="store_true")
     return parser.parse_args()
@@ -336,6 +337,8 @@ def main() -> int:
         study_eval,
         tuning_evaluator=tune_eval,
         median_plotter=None if args.no_prediction_plots else median_plotter,
+        max_workers=args.max_workers,
+        tuning_max_workers=args.max_workers,
     )
     if not args.no_plot:
         make_plot(result, output_dir)
