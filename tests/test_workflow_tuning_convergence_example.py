@@ -17,7 +17,7 @@ def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
             "--levels",
             "8,10",
             "--trials",
-            "0",
+            "1",
             "--n-val",
             "8",
             "--n-test",
@@ -64,6 +64,6 @@ def test_cartesian_high_freq_tuning_convergence_ifblock_example_smoke(tmp_path) 
     assert (output_dir / "raw_results.csv").is_file()
     assert (output_dir / "convergence_rates.json").is_file()
     assert (output_dir / "convergence.png").is_file()
-    assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == 4
-    assert len(list((output_dir / "tuning").glob("*/tuning_search.png"))) == 4
-    assert len(list((output_dir / "median_predictions").glob("*.png"))) == 4
+    assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == 8
+    assert len(list((output_dir / "tuning").glob("*/tuning_search.png"))) == 8
+    assert len(list((output_dir / "median_predictions").glob("*.png"))) == 8

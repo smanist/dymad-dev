@@ -141,7 +141,9 @@ def fit_and_score(
     return row
 
 
-def tuning_spec(metric_name: str, initial_budget: int, refinement_budget: int) -> TuningSpec:
+def tuning_spec(
+    metric_name: str, initial_budget: int | tuple[int, ...], refinement_budget: int
+) -> TuningSpec:
     return TuningSpec(
         parameters=(
             ParameterSpec("bandwidth_init", bounds=(1e-4, 1e2), scale="log"),
@@ -160,6 +162,13 @@ def parse_int_list(text: str) -> tuple[int, ...]:
     return tuple(int(item) for item in text.split(",") if item.strip())
 
 
+def parse_int_or_tuple(text: str) -> int | tuple[int, ...]:
+    values = parse_int_list(text)
+    if not values:
+        raise argparse.ArgumentTypeError("value must be a positive integer or comma list")
+    return values[0] if len(values) == 1 else values
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -169,10 +178,26 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--workdir", type=Path, default=BASE_DIR / "cartesian_high_freq_study")
     parser.add_argument("--levels", default="32,64", help="Comma-separated training sizes.")
-    parser.add_argument("--trials", default="0", help="Comma-separated trial seeds.")
+    parser.add_argument(
+        "--trials",
+        type=parse_int_or_tuple,
+        default=1,
+        help=(
+            "Trial count. Use N for N trials at every level, or n1,n2,... for "
+            "level-specific trial counts."
+        ),
+    )
     parser.add_argument("--n-val", type=int, default=32)
     parser.add_argument("--n-test", type=int, default=128)
-    parser.add_argument("--initial-budget", type=int, default=5)
+    parser.add_argument(
+        "--initial-budget",
+        type=parse_int_or_tuple,
+        default=5,
+        help=(
+            "Initial search budget. Use N for total candidates, or n1,n2,... for "
+            "per-parameter grid counts."
+        ),
+    )
     parser.add_argument("--refinement-budget", type=int, default=0)
     parser.add_argument("--tuning-policy", choices=("per_trial", "per_level"), default="per_trial")
     parser.add_argument("--seed", type=int, default=0)
@@ -256,7 +281,7 @@ def main() -> int:
     output_dir = args.workdir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     levels = parse_int_list(args.levels)
-    trials = parse_int_list(args.trials)
+    trials = args.trials
     split_cache: dict[tuple[int, int], Split] = {}
 
     def split_for(refinement: int | float | str, trial: int | str) -> Split:

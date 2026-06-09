@@ -51,6 +51,24 @@ def test_initial_search_plan_uses_budgeted_grid_and_random_defaults() -> None:
     assert len(random_plan["candidates"]) == 6
 
 
+def test_initial_search_plan_accepts_per_parameter_grid_budget() -> None:
+    spec = TuningSpec(
+        parameters=(
+            ParameterSpec("a", bounds=(0.0, 1.0)),
+            ParameterSpec("b", bounds=(0.0, 1.0)),
+        ),
+        initial_budget=(3, 4),
+        initial_strategy="grid",
+    )
+
+    plan = initial_search_plan(spec)
+
+    assert plan["initial_budget_mode"] == "per_parameter"
+    assert len(plan["candidates"]) == 12
+    assert len({candidate["a"] for candidate in plan["candidates"]}) == 3
+    assert len({candidate["b"] for candidate in plan["candidates"]}) == 4
+
+
 def test_bounded_nelder_mead_search_points_respects_bounds() -> None:
     target = np.array([0.25, 0.75], dtype=float)
 

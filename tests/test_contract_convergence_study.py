@@ -34,6 +34,40 @@ def test_convergence_study_runs_fixed_policy_and_writes_artifacts(tmp_path) -> N
     assert (tmp_path / "tuning" / "m__none" / "tuning_result.json").is_file()
 
 
+def test_convergence_study_accepts_trial_counts() -> None:
+    uniform = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(8, 16),
+        trials=2,
+        metrics=("error",),
+    )
+    per_level = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(8, 16),
+        trials=(1, 3),
+        metrics=("error",),
+    )
+
+    def evaluate(context):
+        return {"error": float(context.trial) + 1.0 / float(context.refinement)}
+
+    uniform_result = run_convergence_study(uniform, evaluate)
+    per_level_result = run_convergence_study(per_level, evaluate)
+
+    assert [(row["refinement"], row["trial"]) for row in uniform_result.raw_rows] == [
+        (8, 0),
+        (8, 1),
+        (16, 0),
+        (16, 1),
+    ]
+    assert [(row["refinement"], row["trial"]) for row in per_level_result.raw_rows] == [
+        (8, 0),
+        (16, 0),
+        (16, 1),
+        (16, 2),
+    ]
+
+
 def test_convergence_study_per_trial_tuning_saves_each_tuning(tmp_path) -> None:
     tuning_spec = TuningSpec(
         parameters=(ParameterSpec("alpha", bounds=(0, 4), value_kind="int"),),

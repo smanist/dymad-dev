@@ -33,7 +33,7 @@ class TuningPolicy:
 class ConvergenceStudySpec:
     methods: tuple[str, ...]
     refinement_levels: tuple[float | int | str, ...]
-    trials: tuple[int | str, ...]
+    trials: int | tuple[int | str, ...]
     metrics: tuple[str, ...]
     tuning_policy: TuningPolicy = field(default_factory=TuningPolicy)
     fit_window: tuple[float | int | str, ...] | None = None
@@ -48,8 +48,16 @@ class ConvergenceStudySpec:
             raise ValueError("ConvergenceStudySpec.methods must be non-empty")
         if not self.refinement_levels:
             raise ValueError("ConvergenceStudySpec.refinement_levels must be non-empty")
-        if not self.trials:
+        if isinstance(self.trials, int):
+            if self.trials <= 0:
+                raise ValueError("ConvergenceStudySpec.trials must be positive")
+        elif not self.trials:
             raise ValueError("ConvergenceStudySpec.trials must be non-empty")
+        elif _looks_like_trial_count_tuple(self.trials):
+            if len(self.trials) != len(self.refinement_levels):
+                raise ValueError(
+                    "ConvergenceStudySpec.trials count tuple length must match refinement_levels"
+                )
         if not self.metrics:
             raise ValueError("ConvergenceStudySpec.metrics must be non-empty")
         if self.primary_metric is not None and self.primary_metric not in self.metrics:
@@ -122,8 +130,8 @@ def run_convergence_study(
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
     for method in spec.methods:
-        for refinement in spec.refinement_levels:
-            for trial in spec.trials:
+        for level_index, refinement in enumerate(spec.refinement_levels):
+            for trial in _trials_for_level(spec, level_index):
                 tuning_result = _resolve_tuning(
                     spec,
                     method,
@@ -257,7 +265,7 @@ def _resolve_tuning(
         raise AssertionError(f"unsupported policy {policy.mode}")
     if key not in cache:
         tuning_refinement = key[2]
-        tuning_trial = trial if policy.mode == "per_trial" else spec.trials[0]
+        tuning_trial = trial
 
         def objective(params: dict[str, Any]) -> float | Mapping[str, Any]:
             return tuning_evaluator(method, tuning_refinement, tuning_trial, params)
@@ -275,6 +283,19 @@ def _recorded_params_result(params: dict[str, Any], policy: dict[str, Any]) -> T
         candidate_plan={"strategy": "none", "candidates": []},
         policy=policy,
     )
+
+
+def _trials_for_level(spec: ConvergenceStudySpec, level_index: int) -> tuple[int | str, ...]:
+    trials = spec.trials
+    if isinstance(trials, int):
+        return tuple(range(trials))
+    if _looks_like_trial_count_tuple(trials):
+        return tuple(range(int(trials[level_index])))
+    return trials
+
+
+def _looks_like_trial_count_tuple(trials: tuple[int | str, ...]) -> bool:
+    return all(isinstance(item, int) and item > 0 for item in trials)
 
 
 def aggregate_trials(

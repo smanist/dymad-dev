@@ -25,8 +25,8 @@ from dymad.studies.convergence import (
 
 # fmt: off
 OUTPUT_DIR = Path('./runs')
-LEVELS = (32, 64)
-TRIALS = (0,)
+LEVELS = (32, 64, 128)
+TRIALS = 1
 N_VAL = 32
 N_TEST = 128
 INITIAL_BUDGET = 5

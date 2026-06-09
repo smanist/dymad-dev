@@ -122,7 +122,7 @@ class TuningSpec:
     parameters: tuple[ParameterSpec, ...]
     metric_name: str = "metric"
     goal: str = "minimize"
-    initial_budget: int = 1
+    initial_budget: int | tuple[int, ...] = 1
     initial_strategy: str = "auto"
     refinement_strategy: str | None = None
     refinement_budget: int = 0
@@ -135,8 +135,7 @@ class TuningSpec:
             raise ValueError("TuningSpec.parameters must be non-empty")
         if self.goal not in {"minimize", "maximize"}:
             raise ValueError("TuningSpec.goal must be minimize or maximize")
-        if self.initial_budget <= 0:
-            raise ValueError("TuningSpec.initial_budget must be positive")
+        _validate_initial_budget(self.initial_budget, len(self.parameters))
         if self.initial_strategy not in {"auto", "grid", "random"}:
             raise ValueError("TuningSpec.initial_strategy must be auto, grid, or random")
         if self.refinement_strategy not in {None, "nelder_mead_like"}:
@@ -193,14 +192,18 @@ def initial_search_plan(spec: TuningSpec) -> dict[str, Any]:
     strategy = spec.initial_strategy
     if strategy == "auto":
         strategy = "grid" if len(spec.parameters) <= 3 else "random"
+    budget_total = _initial_budget_total(spec.initial_budget)
     candidates = (
         _grid_candidates(spec.parameters, spec.initial_budget)
         if strategy == "grid"
-        else _random_candidates(spec.parameters, spec.initial_budget, spec.seed)
+        else _random_candidates(spec.parameters, budget_total, spec.seed)
     )
     return {
         "strategy": strategy,
         "initial_budget": spec.initial_budget,
+        "initial_budget_mode": "per_parameter"
+        if isinstance(spec.initial_budget, tuple)
+        else "total",
         "candidate_count": len(candidates),
         "parameter_domains": [parameter.domain_summary() for parameter in spec.parameters],
         "candidates": candidates,
@@ -702,7 +705,26 @@ def _selected_evaluation_index(
     )
 
 
-def _grid_candidates(parameters: Sequence[ParameterSpec], budget: int) -> list[dict[str, Any]]:
+def _validate_initial_budget(budget: int | tuple[int, ...], parameter_count: int) -> None:
+    if isinstance(budget, tuple):
+        if len(budget) != parameter_count:
+            raise ValueError(
+                "TuningSpec.initial_budget tuple length must match number of parameters"
+            )
+        if any(int(value) <= 0 for value in budget):
+            raise ValueError("TuningSpec.initial_budget entries must be positive")
+        return
+    if int(budget) <= 0:
+        raise ValueError("TuningSpec.initial_budget must be positive")
+
+
+def _initial_budget_total(budget: int | tuple[int, ...]) -> int:
+    return math.prod(int(value) for value in budget) if isinstance(budget, tuple) else int(budget)
+
+
+def _grid_candidates(
+    parameters: Sequence[ParameterSpec], budget: int | tuple[int, ...]
+) -> list[dict[str, Any]]:
     counts = _grid_counts(parameters, budget)
     axes = [
         _values_for_parameter(parameter, count)
@@ -712,10 +734,16 @@ def _grid_candidates(parameters: Sequence[ParameterSpec], budget: int) -> list[d
         {parameter.name: value for parameter, value in zip(parameters, values, strict=True)}
         for values in product(*axes)
     ]
-    return candidates[:budget]
+    return candidates if isinstance(budget, tuple) else candidates[: int(budget)]
 
 
-def _grid_counts(parameters: Sequence[ParameterSpec], budget: int) -> list[int]:
+def _grid_counts(parameters: Sequence[ParameterSpec], budget: int | tuple[int, ...]) -> list[int]:
+    if isinstance(budget, tuple):
+        return [
+            min(int(count), _axis_limit(parameter, int(count)))
+            for parameter, count in zip(parameters, budget, strict=True)
+        ]
+    budget = int(budget)
     counts = [1] * len(parameters)
     limits = [_axis_limit(parameter, budget) for parameter in parameters]
     while math.prod(counts) < budget:
