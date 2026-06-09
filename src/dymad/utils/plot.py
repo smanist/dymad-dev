@@ -458,43 +458,47 @@ def _resolve_cv_results_path(cv_file):
     return candidates[0]
 
 
-def plot_cv_results(cv_file, keys=None, ifclose=True, prefix=".", value_scale="log"):
+def plot_search_results(
+    params,
+    means,
+    *,
+    key_labels,
+    metric_name,
+    best_idx,
+    stds=None,
+    mode=None,
+    title="Hyperparameter Search",
+    output_path=None,
+    ifclose=True,
+    value_scale="log",
+):
     """
-    Plot cross-validation results.
-
-    Args:
-        cv_results (list): List of CVResult objects.
-        metric_name (str): Name of the metric to plot.
-        ifclose (bool): Whether to close the plot after saving.
-        prefix (str): Directory prefix for saving the plot.
+    Plot hyperparameter-search results from already-collected arrays.
     """
-    if keys is None:
-        params, metrics, metric_name, best_idx = _collect_cv_results(cv_file, [])
-        params = np.arange(len(metrics))
-        mode = "1d"
-        key_labels = ["Hyperparameter Index"]
-    elif len(keys) < 4:
-        params, metrics, metric_name, best_idx = _collect_cv_results(cv_file, keys)
-        if len(keys) == 1:
-            params = params.flatten()
-            mode = "1d"
-        elif len(keys) == 2:
-            mode = "2d"
-        elif len(keys) == 3:
-            mode = "3d"
-        key_labels = [_k.split(".")[-1] for _k in keys]
+    params = np.asarray(params)
+    means = np.asarray(means, dtype=float)
+    if stds is None:
+        stds = np.zeros_like(means)
     else:
-        raise ValueError("Can only plot up to 3 hyperparameters at once.  Try keys=None.")
-    best_label = f"Best: {metric_name} = {metrics[best_idx, 0]:.3e} ± {metrics[best_idx, 1]:.3e}"
+        stds = np.asarray(stds, dtype=float)
+    if mode is None:
+        if params.ndim == 1:
+            mode = "1d"
+        elif params.ndim == 2 and params.shape[1] == 2:
+            mode = "2d"
+        elif params.ndim == 2 and params.shape[1] == 3:
+            mode = "3d"
+        else:
+            mode = "history"
+    best_label = f"Best: {metric_name} = {means[best_idx]:.3e} ± {stds[best_idx]:.3e}"
 
-    means = metrics[:, 0]
-    stds = metrics[:, 1]
     if mode == "1d":
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.plot(params, means, "ko", markerfacecolor="none", label="Mean", markersize=8)
         ax.errorbar(params, means, yerr=stds, fmt="o", color="black", capsize=5, label="Std Dev")
         ax.plot(params[best_idx], means[best_idx], "rs", label=best_label, markersize=8)
-        ax.set_yscale(value_scale)
+        if value_scale == "log" and np.all(means > 0.0):
+            ax.set_yscale(value_scale)
         ax.set_xticks(params)
         ax.set_xlabel(key_labels[0])
         ax.set_ylabel(metric_name)
@@ -516,7 +520,7 @@ def plot_cv_results(cv_file, keys=None, ifclose=True, prefix=".", value_scale="l
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.1)
         cbar = fig.colorbar(sc, cax=cax)
-        if value_scale == "log":
+        if value_scale == "log" and np.all(means > 0.0) and means.max() > means.min():
             sc.set_norm(colors.LogNorm(vmin=means.min(), vmax=means.max()))
         cbar.set_label(f"Mean {metric_name}")
         ax.set_xticks(np.unique(params[:, 0]))
@@ -550,23 +554,84 @@ def plot_cv_results(cv_file, keys=None, ifclose=True, prefix=".", value_scale="l
         ax3d.set_ylabel(key_labels[1])
         ax3d.set_zlabel(key_labels[2])
         ax3d.legend()
-    ax.set_title(f"Cross-Validation Results - Metric: {metric_name}")
+
+    elif mode == "history":
+        fig, ax = plt.subplots(figsize=(8, 6))
+        indices = np.arange(len(means))
+        ax.plot(indices, means, "ko-", markerfacecolor="none", label="Mean", markersize=6)
+        ax.plot(indices[best_idx], means[best_idx], "rs", label=best_label, markersize=8)
+        if value_scale == "log" and np.all(means > 0.0):
+            ax.set_yscale(value_scale)
+        ax.set_xlabel("Evaluation Index")
+        ax.set_ylabel(metric_name)
+        ax.legend()
+    else:
+        raise ValueError(f"Unsupported search-results plot mode: {mode}")
+
+    ax.set_title(title)
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    if prefix != ".":
-        os.makedirs(prefix, exist_ok=True)
-    plt.savefig(
-        f"{prefix}/cv_results.png",
-        dpi=150,
-        bbox_inches="tight",
-        facecolor="white",
-        edgecolor="none",
-    )
+    if output_path is not None:
+        output_path = os.fspath(output_path)
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        plt.savefig(
+            output_path,
+            dpi=150,
+            bbox_inches="tight",
+            facecolor="white",
+            edgecolor="none",
+        )
     if ifclose:
         plt.close()
 
     return fig, ax
+
+
+def plot_cv_results(cv_file, keys=None, ifclose=True, prefix=".", value_scale="log"):
+    """
+    Plot cross-validation results.
+
+    Args:
+        cv_results (list): List of CVResult objects.
+        metric_name (str): Name of the metric to plot.
+        ifclose (bool): Whether to close the plot after saving.
+        prefix (str): Directory prefix for saving the plot.
+    """
+    if keys is None:
+        params, metrics, metric_name, best_idx = _collect_cv_results(cv_file, [])
+        params = np.arange(len(metrics))
+        mode = "1d"
+        key_labels = ["Hyperparameter Index"]
+    elif len(keys) < 4:
+        params, metrics, metric_name, best_idx = _collect_cv_results(cv_file, keys)
+        if len(keys) == 1:
+            params = params.flatten()
+            mode = "1d"
+        elif len(keys) == 2:
+            mode = "2d"
+        elif len(keys) == 3:
+            mode = "3d"
+        key_labels = [_k.split(".")[-1] for _k in keys]
+    else:
+        raise ValueError("Can only plot up to 3 hyperparameters at once.  Try keys=None.")
+    means = metrics[:, 0]
+    stds = metrics[:, 1]
+    return plot_search_results(
+        params,
+        means,
+        key_labels=key_labels,
+        metric_name=metric_name,
+        best_idx=best_idx,
+        stds=stds,
+        mode=mode,
+        title=f"Cross-Validation Results - Metric: {metric_name}",
+        output_path=f"{prefix}/cv_results.png",
+        ifclose=ifclose,
+        value_scale=value_scale,
+    )
 
 
 def _collect_cv_results(cv_file, keys):

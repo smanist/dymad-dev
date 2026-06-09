@@ -66,6 +66,19 @@ class ConvergenceEvaluationContext:
 
 
 @dataclass
+class MedianPlotContext:
+    method: str
+    refinement: float | int | str
+    trial: int | str
+    params: dict[str, Any]
+    metric_name: str
+    metric_value: float
+    raw_row: dict[str, Any]
+    output_path: Path
+    tuning_result: TuningResult | None = None
+
+
+@dataclass
 class Diagnostic:
     kind: str
     severity: str
@@ -83,12 +96,14 @@ class ConvergenceStudyResult:
     convergence_rates: list[dict[str, Any]]
     diagnostics: list[Diagnostic]
     tuning_results: dict[str, TuningResult]
+    median_plot_paths: dict[str, str] = field(default_factory=dict)
 
 
 StudyEvaluator = Callable[[ConvergenceEvaluationContext], Mapping[str, Any]]
 TuningEvaluator = Callable[
     [str, float | int | str, int | str, dict[str, Any]], float | Mapping[str, Any]
 ]
+MedianPlotter = Callable[[MedianPlotContext], None]
 
 
 def run_convergence_study(
@@ -96,6 +111,7 @@ def run_convergence_study(
     evaluator: StudyEvaluator,
     *,
     tuning_evaluator: TuningEvaluator | None = None,
+    median_plotter: MedianPlotter | None = None,
 ) -> ConvergenceStudyResult:
     tuning_cache: dict[tuple[Any, ...], TuningResult] = {}
     raw_rows: list[dict[str, Any]] = []
@@ -172,6 +188,16 @@ def run_convergence_study(
         window=list(spec.fit_window) if spec.fit_window is not None else None,
         loglog=True,
     )
+    median_plot_paths: dict[str, str] = {}
+    plot_diagnostics: list[Diagnostic] = []
+    if artifact_dir is not None and median_plotter is not None:
+        median_plot_paths, plot_diagnostics = _write_median_prediction_plots(
+            artifact_dir,
+            spec,
+            raw_rows=raw_rows,
+            tuning_results=tuning_results,
+            median_plotter=median_plotter,
+        )
     diagnostics = diagnose_convergence(
         spec,
         raw_rows=raw_rows,
@@ -180,6 +206,7 @@ def run_convergence_study(
         convergence_rates=convergence_rates,
         tuning_results=tuning_results,
     )
+    diagnostics.extend(plot_diagnostics)
     result = ConvergenceStudyResult(
         raw_rows=raw_rows,
         metric_values=metric_values,
@@ -188,6 +215,7 @@ def run_convergence_study(
         convergence_rates=convergence_rates,
         diagnostics=diagnostics,
         tuning_results=tuning_results,
+        median_plot_paths=median_plot_paths,
     )
     if artifact_dir is not None:
         _write_study_artifacts(artifact_dir, result)
@@ -469,6 +497,82 @@ def _metric_values(
     return rows
 
 
+def _write_median_prediction_plots(
+    root: Path,
+    spec: ConvergenceStudySpec,
+    *,
+    raw_rows: Sequence[Mapping[str, Any]],
+    tuning_results: Mapping[str, TuningResult],
+    median_plotter: MedianPlotter,
+) -> tuple[dict[str, str], list[Diagnostic]]:
+    primary_metric = spec.primary_metric or spec.metrics[0]
+    grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = defaultdict(list)
+    for row in raw_rows:
+        if row.get("status") != "ok":
+            continue
+        try:
+            metric_value = float(row[primary_metric])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(metric_value):
+            continue
+        grouped[(str(row["method"]), str(row["refinement"]))].append(row)
+
+    paths: dict[str, str] = {}
+    diagnostics: list[Diagnostic] = []
+    output_root = root / "median_predictions"
+    output_root.mkdir(parents=True, exist_ok=True)
+    for _, rows in sorted(grouped.items()):
+        values = [float(row[primary_metric]) for row in rows]
+        median_value = float(np.median(np.asarray(values, dtype=float)))
+        selected = min(
+            rows,
+            key=lambda row: (
+                abs(float(row[primary_metric]) - median_value),
+                str(row.get("trial", "")),
+            ),
+        )
+        method = str(selected["method"])
+        refinement = selected["refinement"]
+        trial = selected["trial"]
+        plot_key = f"{_slug(method)}__level_{_slug(refinement)}"
+        output_path = output_root / f"{plot_key}.png"
+        params = dict(selected.get("params", {}))
+        tuning_key = _tuning_artifact_key(spec.tuning_policy.mode, method, refinement, trial)
+        context = MedianPlotContext(
+            method=method,
+            refinement=refinement,
+            trial=trial,
+            params=params,
+            metric_name=primary_metric,
+            metric_value=float(selected[primary_metric]),
+            raw_row=dict(selected),
+            output_path=output_path,
+            tuning_result=tuning_results.get(tuning_key),
+        )
+        try:
+            median_plotter(context)
+        except Exception as exc:  # noqa: BLE001 - plot failures are advisory artifacts.
+            diagnostics.append(
+                Diagnostic(
+                    "median_prediction_plot_failed",
+                    "warning",
+                    "Median truth-vs-prediction plot generation failed for one group.",
+                    "Inspect the supplied median_plotter and rerun plotting if needed.",
+                    {
+                        "method": method,
+                        "refinement": refinement,
+                        "trial": trial,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
+            )
+            continue
+        if output_path.exists():
+            paths[plot_key] = str(output_path.relative_to(root))
+    return paths, diagnostics
+
+
 def _write_study_artifacts(root: Path, result: ConvergenceStudyResult) -> None:
     _write_csv(root / "raw_results.csv", result.raw_rows)
     _write_csv(root / "metric_values.csv", result.metric_values)
@@ -483,6 +587,11 @@ def _write_study_artifacts(root: Path, result: ConvergenceStudyResult) -> None:
         json.dumps([_jsonable(asdict(item)) for item in result.diagnostics], indent=2) + "\n",
         encoding="utf-8",
     )
+    if result.median_plot_paths:
+        (root / "median_prediction_plots.json").write_text(
+            json.dumps(_jsonable(result.median_plot_paths), indent=2) + "\n",
+            encoding="utf-8",
+        )
 
 
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:

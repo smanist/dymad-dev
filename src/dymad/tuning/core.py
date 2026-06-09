@@ -552,7 +552,9 @@ def bounded_nelder_mead_search_points(
     return evaluated_points
 
 
-def write_tuning_artifacts(result: TuningResult, output_dir: str | Path) -> None:
+def write_tuning_artifacts(
+    result: TuningResult, output_dir: str | Path, *, plot: bool = True
+) -> None:
     root = Path(output_dir)
     root.mkdir(parents=True, exist_ok=True)
     result_payload = {
@@ -568,6 +570,59 @@ def write_tuning_artifacts(result: TuningResult, output_dir: str | Path) -> None
     _write_evaluations_csv(root / "tuning_evaluations.csv", result.evaluations)
     if result.failures:
         _write_evaluations_csv(root / "tuning_failures.csv", result.failures)
+    if plot:
+        try:
+            plot_tuning_search(result, root / "tuning_search.png")
+        except Exception as exc:  # noqa: BLE001 - plotting must not corrupt tuning artifacts.
+            (root / "tuning_plot_error.txt").write_text(
+                f"{type(exc).__name__}: {exc}\n",
+                encoding="utf-8",
+            )
+
+
+def plot_tuning_search(result: TuningResult, output_path: str | Path) -> Path | None:
+    """Plot standalone search history using the same visual conventions as CV plots."""
+    ok = [
+        item
+        for item in result.evaluations
+        if item.status == "ok" and math.isfinite(item.metric_value)
+    ]
+    if not ok:
+        return None
+    names = _plot_parameter_names(result, ok)
+    if not names:
+        return None
+
+    from dymad.utils.plot import plot_search_results
+
+    metric_values = np.asarray([item.metric_value for item in ok], dtype=float)
+    selected_index = _selected_evaluation_index(result, ok)
+    path = Path(output_path)
+    value_scale = "log" if np.all(metric_values > 0.0) else "linear"
+    if len(names) == 1:
+        params, _ = _plot_axis_values(ok, names[0])
+        mode = "1d"
+    elif len(names) == 2:
+        x_values, _ = _plot_axis_values(ok, names[0])
+        y_values, _ = _plot_axis_values(ok, names[1])
+        params = np.column_stack((x_values, y_values))
+        mode = "2d"
+    else:
+        params = np.arange(len(ok), dtype=float)
+        mode = "history"
+    plot_search_results(
+        params,
+        metric_values,
+        key_labels=names if mode != "history" else ["Evaluation Index"],
+        metric_name="evaluation metric",
+        best_idx=selected_index,
+        mode=mode,
+        title="Hyperparameter Search",
+        output_path=path,
+        ifclose=True,
+        value_scale=value_scale,
+    )
+    return path
 
 
 def _write_evaluations_csv(path: Path, evaluations: Sequence[TuningEvaluation]) -> None:
@@ -601,6 +656,50 @@ def _write_evaluations_csv(path: Path, evaluations: Sequence[TuningEvaluation]) 
                     "extra_metrics": json.dumps(_jsonable(item.extra_metrics), sort_keys=True),
                 }
             )
+
+
+def _plot_parameter_names(
+    result: TuningResult, evaluations: Sequence[TuningEvaluation]
+) -> list[str]:
+    names: list[str] = []
+    for domain in result.candidate_plan.get("parameter_domains", []):
+        if isinstance(domain, Mapping) and isinstance(domain.get("name"), str):
+            names.append(str(domain["name"]))
+    for item in evaluations:
+        for name in item.params:
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def _plot_axis_values(
+    evaluations: Sequence[TuningEvaluation], parameter_name: str
+) -> tuple[np.ndarray, list[str] | None]:
+    raw_values = [item.params.get(parameter_name) for item in evaluations]
+    try:
+        numeric_values = []
+        for value in raw_values:
+            if value is None:
+                raise TypeError("missing parameter value")
+            numeric_values.append(float(value))
+        return np.asarray(numeric_values, dtype=float), None
+    except (TypeError, ValueError):
+        labels = sorted({str(value) for value in raw_values})
+        positions = {label: float(index) for index, label in enumerate(labels)}
+        return np.asarray([positions[str(value)] for value in raw_values], dtype=float), labels
+
+
+def _selected_evaluation_index(
+    result: TuningResult, evaluations: Sequence[TuningEvaluation]
+) -> int:
+    selected_key = _params_key(result.selected_params)
+    for index, item in enumerate(evaluations):
+        if _params_key(item.params) == selected_key:
+            return index
+    return min(
+        range(len(evaluations)),
+        key=lambda index: abs(evaluations[index].metric_value - result.selected_metric),
+    )
 
 
 def _grid_candidates(parameters: Sequence[ParameterSpec], budget: int) -> list[dict[str, Any]]:

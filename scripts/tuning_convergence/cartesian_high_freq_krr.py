@@ -1,17 +1,24 @@
 from __future__ import annotations
 
-import os
 import random
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
-from cartesian_high_freq_krr_cli import METHODS, fit_and_score, make_plot, make_split, tuning_spec
+from cartesian_high_freq_krr_cli import (
+    METHODS,
+    fit_and_score,
+    make_plot,
+    make_split,
+    plot_truth_vs_prediction,
+    tuning_spec,
+)
 
 from dymad.studies.convergence import (
     ConvergenceEvaluationContext,
     ConvergenceStudySpec,
+    MedianPlotContext,
     TuningPolicy,
     run_convergence_study,
 )
@@ -24,10 +31,11 @@ N_TEST = 128
 INITIAL_BUDGET = 5
 REFINEMENT_BUDGET = 0
 TUNING_POLICY = "per_trial"
-SEED = int(os.environ.get("DYMAD_CARTESIAN_SEED", "0"))
+SEED = 0
 
 ifrun = 1
 ifplt = 1
+ifprd = 1
 
 
 def set_seed(seed: int) -> None:
@@ -39,11 +47,11 @@ def set_seed(seed: int) -> None:
 
 
 set_seed(SEED)
-split_cache = {}
-result = None
+split_cache: dict[tuple[int, int], Any] = {}
+result: Any | None = None
 
 
-def split_for(refinement: int | float | str, trial: int | str):
+def split_for(refinement: int | float | str, trial: int | str) -> Any:
     key = (int(refinement), int(trial))
     if key not in split_cache:
         split_cache[key] = make_split(int(refinement), N_VAL, N_TEST, int(trial))
@@ -72,6 +80,10 @@ def study_eval(context: ConvergenceEvaluationContext) -> dict[str, Any]:
     )
 
 
+def median_plotter(context: MedianPlotContext) -> None:
+    plot_truth_vs_prediction(context, split_for(context.refinement, context.trial))
+
+
 if ifrun:
     specs = {
         method: tuning_spec("validation_normalized_rmse", INITIAL_BUDGET, REFINEMENT_BUDGET)
@@ -87,7 +99,12 @@ if ifrun:
         artifact_dir=OUTPUT_DIR,
         primary_metric="error",
     )
-    result = run_convergence_study(study_spec, study_eval, tuning_evaluator=tune_eval)
+    result = run_convergence_study(
+        study_spec,
+        study_eval,
+        tuning_evaluator=tune_eval,
+        median_plotter=median_plotter if ifprd else None,
+    )
     print(f"Wrote convergence artifacts to {OUTPUT_DIR}")
     if result.diagnostics:
         print(f"Diagnostics: {len(result.diagnostics)} advisory item(s); see diagnostics.json")

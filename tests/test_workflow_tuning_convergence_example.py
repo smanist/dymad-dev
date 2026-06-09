@@ -33,43 +33,37 @@ def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
         text=True,
         capture_output=True,
         check=True,
-        timeout=60,
+        timeout=90,
     )
 
     assert "Wrote convergence artifacts" in result.stdout
     assert (output_dir / "raw_results.csv").is_file()
     assert (output_dir / "convergence_rates.json").is_file()
     assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == 4
+    assert len(list((output_dir / "tuning").glob("*/tuning_search.png"))) == 4
+    assert len(list((output_dir / "median_predictions").glob("*.png"))) == 4
 
 
 def test_cartesian_high_freq_tuning_convergence_ifblock_example_smoke(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    env.update(
-        {
-            "DYMAD_CARTESIAN_WORKDIR": str(tmp_path / "study_ifblocks"),
-            "DYMAD_CARTESIAN_LEVELS": "8,10",
-            "DYMAD_CARTESIAN_TRIALS": "0",
-            "DYMAD_CARTESIAN_N_VAL": "8",
-            "DYMAD_CARTESIAN_N_TEST": "16",
-            "DYMAD_CARTESIAN_INITIAL_BUDGET": "2",
-            "DYMAD_CARTESIAN_REFINEMENT_BUDGET": "0",
-            "DYMAD_CARTESIAN_IFPLT": "0",
-        }
-    )
-    output_dir = tmp_path / "study_ifblocks"
+    output_dir = tmp_path / "runs"
+    script_path = os.path.join(os.getcwd(), "scripts/tuning_convergence/cartesian_high_freq_krr.py")
 
     result = subprocess.run(
-        [sys.executable, "scripts/tuning_convergence/cartesian_high_freq_krr.py"],
-        cwd=os.getcwd(),
+        [sys.executable, script_path],
+        cwd=tmp_path,
         env=env,
         text=True,
         capture_output=True,
         check=True,
-        timeout=60,
+        timeout=120,
     )
 
     assert "Wrote convergence artifacts" in result.stdout
     assert (output_dir / "raw_results.csv").is_file()
     assert (output_dir / "convergence_rates.json").is_file()
+    assert (output_dir / "convergence.png").is_file()
     assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == 4
+    assert len(list((output_dir / "tuning").glob("*/tuning_search.png"))) == 4
+    assert len(list((output_dir / "median_predictions").glob("*.png"))) == 4

@@ -1,6 +1,11 @@
 import json
 
-from dymad.studies.convergence import ConvergenceStudySpec, TuningPolicy, run_convergence_study
+from dymad.studies.convergence import (
+    ConvergenceStudySpec,
+    MedianPlotContext,
+    TuningPolicy,
+    run_convergence_study,
+)
 from dymad.tuning import ParameterSpec, TuningSpec
 
 
@@ -53,6 +58,36 @@ def test_convergence_study_per_trial_tuning_saves_each_tuning(tmp_path) -> None:
 
     assert len(result.tuning_results) == 4
     assert len(list((tmp_path / "tuning").glob("*/tuning_result.json"))) == 4
+
+
+def test_convergence_study_writes_supplied_median_prediction_plots(tmp_path) -> None:
+    spec = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1, 2),
+        trials=(0, 1, 2),
+        metrics=("error",),
+        tuning_policy=TuningPolicy(mode="none", fixed_params={"m": {"alpha": 1.0}}),
+        artifact_dir=tmp_path,
+    )
+    plotted: list[tuple[str, int, int]] = []
+
+    def evaluate(context):
+        trial_factor = {0: 2.0, 1: 1.0, 2: 3.0}[int(context.trial)]
+        return {"error": trial_factor / float(context.refinement)}
+
+    def plotter(context: MedianPlotContext) -> None:
+        plotted.append((context.method, int(context.refinement), int(context.trial)))
+        context.output_path.write_bytes(b"plot")
+
+    result = run_convergence_study(spec, evaluate, median_plotter=plotter)
+
+    assert plotted == [("m", 1, 0), ("m", 2, 0)]
+    assert result.median_plot_paths == {
+        "m__level_1": "median_predictions/m__level_1.png",
+        "m__level_2": "median_predictions/m__level_2.png",
+    }
+    assert (tmp_path / "median_prediction_plots.json").is_file()
+    assert (tmp_path / "median_predictions" / "m__level_1.png").is_file()
 
 
 def test_convergence_study_per_level_and_reference_level_reuse(tmp_path) -> None:

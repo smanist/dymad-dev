@@ -8,6 +8,7 @@ from dymad.utils.plot import (
     plot_cv_results,
     plot_hist,
     plot_multi_trajs,
+    plot_search_results,
     plot_summary,
     plot_trajectory,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "plot_cv_results",
     "plot_hist",
     "plot_multi_trajs",
+    "plot_search_results",
     "plot_summary",
     "plot_trajectory",
     "setup_logging",

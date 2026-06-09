@@ -5,6 +5,7 @@ from dymad.studies.convergence.core import (
     ConvergenceStudyResult,
     ConvergenceStudySpec,
     Diagnostic,
+    MedianPlotContext,
     TuningPolicy,
     fit_convergence_rates,
     run_convergence_study,
@@ -16,6 +17,7 @@ __all__ = [
     "ConvergenceStudySpec",
     "Diagnostic",
     "fit_convergence_rates",
+    "MedianPlotContext",
     "run_convergence_study",
     "TuningPolicy",
 ]

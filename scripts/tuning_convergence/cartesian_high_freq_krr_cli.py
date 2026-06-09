@@ -28,6 +28,7 @@ from dymad.modules import make_krr
 from dymad.studies.convergence import (
     ConvergenceEvaluationContext,
     ConvergenceStudySpec,
+    MedianPlotContext,
     TuningPolicy,
     run_convergence_study,
 )
@@ -145,15 +146,7 @@ def rmse(truth: np.ndarray, pred: np.ndarray) -> float:
     return float(np.sqrt(np.mean((truth - pred) ** 2)))
 
 
-def fit_and_score(
-    method: str,
-    split: Split,
-    bandwidth_init: float,
-    ridge_init: float,
-    *,
-    include_test: bool,
-) -> dict[str, Any]:
-    started = time.perf_counter()
+def fit_model(method: str, split: Split, bandwidth_init: float, ridge_init: float) -> Any:
     model = make_krr(
         type="share",
         kernel=kernel_config(method, bandwidth_init),
@@ -163,6 +156,19 @@ def fit_and_score(
     )
     model.set_train_data(split.x_train, split.y_train)
     model.fit()
+    return model
+
+
+def fit_and_score(
+    method: str,
+    split: Split,
+    bandwidth_init: float,
+    ridge_init: float,
+    *,
+    include_test: bool,
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    model = fit_model(method, split, bandwidth_init, ridge_init)
     with torch.no_grad():
         y_val_pred = model(torch.as_tensor(split.x_val, dtype=torch.float64)).cpu().numpy()
         y_test_pred = (
@@ -228,6 +234,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tuning-policy", choices=("per_trial", "per_level"), default="per_trial")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--no-prediction-plots", action="store_true")
     return parser.parse_args()
 
 
@@ -253,6 +260,50 @@ def make_plot(result, output_dir: Path) -> None:
     ax.legend()
     fig.tight_layout()
     fig.savefig(output_dir / "convergence.png", dpi=160)
+    plt.close(fig)
+
+
+def plot_truth_vs_prediction(context: MedianPlotContext, split: Split) -> None:
+    model = fit_model(
+        context.method,
+        split,
+        float(context.params["bandwidth_init"]),
+        float(context.params["ridge_init"]),
+    )
+    with torch.no_grad():
+        y_pred_norm = model(torch.as_tensor(split.x_test, dtype=torch.float64)).cpu().numpy()
+    truth = split.y_test_raw.reshape(-1)
+    pred = split.y_norm.inverse(y_pred_norm).reshape(-1)
+    abs_error = np.abs(truth - pred)
+    color_max = max(float(np.max(np.abs(truth))), float(np.max(np.abs(pred))), 1e-12)
+
+    context.output_path.parent.mkdir(parents=True, exist_ok=True)
+    x_coord = split.x_test_raw[:, 0]
+    y_coord = split.x_test_raw[:, 1]
+    fig, axes = plt.subplots(1, 3, figsize=(10.8, 3.2), constrained_layout=True)
+    panels = (
+        ("truth", truth, "coolwarm", np.linspace(-color_max, color_max, 24)),
+        ("prediction", pred, "coolwarm", np.linspace(-color_max, color_max, 24)),
+        (
+            "absolute error",
+            abs_error,
+            "magma",
+            np.linspace(0.0, max(float(abs_error.max()), 1e-12), 24),
+        ),
+    )
+    for ax, (title, values, cmap, levels) in zip(axes, panels, strict=True):
+        contour = ax.tricontourf(x_coord, y_coord, values, levels=levels, cmap=cmap)
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_title(title)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        fig.colorbar(contour, ax=ax, fraction=0.046, pad=0.02)
+    fig.suptitle(
+        f"{context.method}, n_train={context.refinement}, "
+        f"trial={context.trial}, {context.metric_name}={context.metric_value:.3g}",
+        fontsize=10,
+    )
+    fig.savefig(context.output_path, dpi=160)
     plt.close(fig)
 
 
@@ -293,6 +344,9 @@ def main() -> int:
             include_test=True,
         )
 
+    def median_plotter(context: MedianPlotContext) -> None:
+        plot_truth_vs_prediction(context, split_for(context.refinement, context.trial))
+
     specs = {
         method: tuning_spec(
             "validation_normalized_rmse", args.initial_budget, args.refinement_budget
@@ -309,7 +363,12 @@ def main() -> int:
         artifact_dir=output_dir,
         primary_metric="error",
     )
-    result = run_convergence_study(study_spec, study_eval, tuning_evaluator=tune_eval)
+    result = run_convergence_study(
+        study_spec,
+        study_eval,
+        tuning_evaluator=tune_eval,
+        median_plotter=None if args.no_prediction_plots else median_plotter,
+    )
     if not args.no_plot:
         make_plot(result, output_dir)
     print(f"Wrote convergence artifacts to {output_dir}")

@@ -6,6 +6,8 @@ import pytest
 
 from dymad.tuning import (
     ParameterSpec,
+    TuningEvaluation,
+    TuningResult,
     TuningSpec,
     bounded_nelder_mead_search_points,
     initial_search_plan,
@@ -88,7 +90,48 @@ def test_tune_records_failures_and_artifacts(tmp_path) -> None:
     assert (tmp_path / "tuning_result.json").is_file()
     assert (tmp_path / "tuning_evaluations.csv").is_file()
     assert (tmp_path / "tuning_failures.csv").is_file()
+    assert (tmp_path / "tuning_search.png").is_file()
     assert json.loads((tmp_path / "tuning_result.json").read_text())["selected_params"] == {"x": 2}
     with (tmp_path / "tuning_evaluations.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert rows
+
+
+def test_tuning_artifact_plots_2d_and_3d_searches(tmp_path) -> None:
+    two_dim = TuningResult(
+        selected_params={"x": 0.5, "y": 0.25},
+        selected_metric=0.1,
+        evaluations=[
+            TuningEvaluation({"x": 0.1, "y": 0.2}, "initial", 0, 1.0, "ok", 0.0),
+            TuningEvaluation({"x": 0.5, "y": 0.25}, "initial", 1, 0.1, "ok", 0.0),
+        ],
+        failures=[],
+        candidate_plan={
+            "parameter_domains": [
+                {"name": "x", "scale": "linear"},
+                {"name": "y", "scale": "linear"},
+            ]
+        },
+    )
+    three_dim = TuningResult(
+        selected_params={"x": 0.5, "y": 0.25, "z": 2.0},
+        selected_metric=0.2,
+        evaluations=[
+            TuningEvaluation({"x": 0.1, "y": 0.2, "z": 1.0}, "initial", 0, 1.0, "ok", 0.0),
+            TuningEvaluation({"x": 0.5, "y": 0.25, "z": 2.0}, "initial", 1, 0.2, "ok", 0.0),
+        ],
+        failures=[],
+        candidate_plan={
+            "parameter_domains": [
+                {"name": "x", "scale": "linear"},
+                {"name": "y", "scale": "linear"},
+                {"name": "z", "scale": "linear"},
+            ]
+        },
+    )
+
+    write_tuning_artifacts(two_dim, tmp_path / "two_dim")
+    write_tuning_artifacts(three_dim, tmp_path / "three_dim")
+
+    assert (tmp_path / "two_dim" / "tuning_search.png").is_file()
+    assert (tmp_path / "three_dim" / "tuning_search.png").is_file()
