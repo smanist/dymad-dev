@@ -318,19 +318,21 @@ def tune(spec: TuningSpec, evaluator: MetricEvaluator, *, max_workers: int = 1) 
         ]
         if len(numeric_params) == len(spec.parameters):
             lower = [
-                float(parameter.bounds[0])
+                _parameter_search_lower_bound(parameter)
                 for parameter in spec.parameters
                 if parameter.bounds is not None
             ]
             upper = [
-                float(parameter.bounds[1])
+                _parameter_search_upper_bound(parameter)
                 for parameter in spec.parameters
                 if parameter.bounds is not None
             ]
 
             def _evaluate_point(point: np.ndarray) -> float:
                 params = {
-                    parameter.name: parameter.project(value)
+                    parameter.name: parameter.project(
+                        _parameter_value_from_search_coordinate(parameter, value)
+                    )
                     for parameter, value in zip(spec.parameters, point, strict=True)
                 }
                 return evaluate(params, "refinement", len(evaluations)).metric_value
@@ -834,6 +836,22 @@ def _grid_counts(parameters: Sequence[ParameterSpec], budget: int | tuple[int, .
         axis = min(expandable, key=lambda index: counts[index])
         counts[axis] += 1
     return counts
+
+
+def _parameter_search_lower_bound(parameter: ParameterSpec) -> float:
+    assert parameter.bounds is not None
+    lower = float(parameter.bounds[0])
+    return math.log(lower) if parameter.scale == "log" else lower
+
+
+def _parameter_search_upper_bound(parameter: ParameterSpec) -> float:
+    assert parameter.bounds is not None
+    upper = float(parameter.bounds[1])
+    return math.log(upper) if parameter.scale == "log" else upper
+
+
+def _parameter_value_from_search_coordinate(parameter: ParameterSpec, coordinate: float) -> float:
+    return math.exp(float(coordinate)) if parameter.scale == "log" else float(coordinate)
 
 
 def _values_for_parameter(parameter: ParameterSpec, count: int) -> list[Any]:

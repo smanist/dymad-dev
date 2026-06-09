@@ -28,7 +28,13 @@ from dymad.modules import make_krr
 from dymad.studies.convergence import (
     ConvergenceEvaluationContext,
     ConvergenceStudySpec,
+    HoldoutValidationPolicy,
+    KFoldValidationPolicy,
+    LevelSamplePlan,
     MedianPlotContext,
+    NestedResamplingPolicy,
+    TrainValidCountPolicy,
+    TuningEvaluationContext,
     TuningPolicy,
     run_convergence_study,
 )
@@ -68,6 +74,46 @@ def make_split(n_train: int, n_val: int, n_test: int, seed: int) -> Split:
         x_test=x_test,
         y_test=y_test,
     )
+
+
+def make_split_from_arrays(
+    *,
+    x_train: np.ndarray,
+    x_val: np.ndarray,
+    x_test: np.ndarray,
+) -> Split:
+    return Split.from_arrays(
+        x_train=x_train,
+        y_train=label_values(x_train),
+        x_val=x_val,
+        y_val=label_values(x_val),
+        x_test=x_test,
+        y_test=label_values(x_test),
+    )
+
+
+class NestedCartesianSamples:
+    def __init__(self, *, max_train: int, n_test: int, seed: int, trials: tuple[int | str, ...]):
+        test_rng = np.random.default_rng(1_000_000_007 + seed)
+        self.x_test = unit_disk_sample(n_test, test_rng)
+        self.x_dev_by_trial = {
+            trial: unit_disk_sample(max_train, np.random.default_rng(2_000_000_011 + seed + index))
+            for index, trial in enumerate(trials)
+        }
+
+    def split_for_fold(self, trial: int | str, fold) -> Split:
+        x_dev = self.x_dev_by_trial[trial]
+        return make_split_from_arrays(
+            x_train=x_dev[list(fold.train_indices)],
+            x_val=x_dev[list(fold.validation_indices)],
+            x_test=self.x_test,
+        )
+
+    def split_for_refit(self, trial: int | str, plan: LevelSamplePlan) -> Split:
+        x_dev = self.x_dev_by_trial[trial]
+        x_train = x_dev[list(plan.refit_indices)]
+        x_val = x_train[:1]
+        return make_split_from_arrays(x_train=x_train, x_val=x_val, x_test=self.x_test)
 
 
 def kernel_config(method: str, bandwidth_init: float) -> dict[str, Any]:
@@ -141,6 +187,36 @@ def fit_and_score(
     return row
 
 
+def fit_and_score_folds(
+    method: str,
+    samples: NestedCartesianSamples,
+    plan: LevelSamplePlan,
+    trial: int | str,
+    bandwidth_init: float,
+    ridge_init: float,
+) -> dict[str, Any]:
+    fold_rows = [
+        fit_and_score(
+            method,
+            samples.split_for_fold(trial, fold),
+            bandwidth_init,
+            ridge_init,
+            include_test=False,
+        )
+        for fold in plan.validation_folds
+    ]
+    values = np.asarray(
+        [float(row["validation_normalized_rmse"]) for row in fold_rows],
+        dtype=float,
+    )
+    return {
+        "validation_normalized_rmse": float(np.mean(values)),
+        "std_metric": float(np.std(values)),
+        "fold_metrics": values.tolist(),
+        "fit_seconds": float(sum(float(row["fit_seconds"]) for row in fold_rows)),
+    }
+
+
 def tuning_spec(
     metric_name: str, initial_budget: int | tuple[int, ...], refinement_budget: int
 ) -> TuningSpec:
@@ -190,6 +266,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-val", type=int, default=32)
     parser.add_argument("--n-test", type=int, default=128)
     parser.add_argument(
+        "--resampling-mode",
+        choices=("legacy", "nested-fixed-test"),
+        default="legacy",
+    )
+    parser.add_argument(
+        "--validation-mode",
+        choices=("holdout", "kfold", "train-valid-count"),
+        default="holdout",
+    )
+    parser.add_argument("--validation-fraction", type=float, default=0.25)
+    parser.add_argument("--validation-size", type=int, default=None)
+    parser.add_argument("--k-folds", type=int, default=4)
+    parser.add_argument("--pool-multiplier", type=int, default=1)
+    parser.add_argument(
+        "--confidence-band",
+        choices=("std", "stderr", "iqr", "q05_q95"),
+        default=None,
+    )
+    parser.add_argument(
         "--initial-budget",
         type=parse_int_or_tuple,
         default=5,
@@ -207,7 +302,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def make_plot(result, output_dir: Path) -> None:
+def make_plot(
+    result,
+    output_dir: Path,
+    *,
+    center: str = "mean",
+    band: str = "std",
+) -> None:
     by_method: dict[str, list[dict[str, Any]]] = {method: [] for method in METHODS}
     for row in result.convergence_summary:
         by_method[str(row["method"])].append(row)
@@ -217,9 +318,20 @@ def make_plot(result, output_dir: Path) -> None:
         if not rows:
             continue
         x = np.array([float(row["refinement"]) for row in rows])
-        y = np.array([float(row["mean"]) for row in rows])
-        yerr = np.array([float(row["std"]) for row in rows])
-        ax.errorbar(x, y, yerr=yerr, marker="o", capsize=3, label=method)
+        y = np.array([float(row[center]) for row in rows])
+        if band == "iqr":
+            lower = np.array([float(row["q25"]) for row in rows])
+            upper = np.array([float(row["q75"]) for row in rows])
+            ax.plot(x, y, marker="o", label=method)
+            ax.fill_between(x, lower, upper, alpha=0.18)
+        elif band == "q05_q95":
+            lower = np.array([float(row["q05"]) for row in rows])
+            upper = np.array([float(row["q95"]) for row in rows])
+            ax.plot(x, y, marker="o", label=method)
+            ax.fill_between(x, lower, upper, alpha=0.18)
+        else:
+            yerr = np.array([float(row[band]) for row in rows])
+            ax.errorbar(x, y, yerr=yerr, marker="o", capsize=3, label=method)
     ax.set_xscale("log", base=2)
     ax.set_yscale("log")
     ax.set_xlabel("n_train")
@@ -276,6 +388,38 @@ def plot_truth_vs_prediction(context: MedianPlotContext, split: Split) -> None:
     plt.close(fig)
 
 
+def _trial_ids_for_all_levels(
+    trials: int | tuple[int | str, ...], n_levels: int
+) -> tuple[int | str, ...]:
+    if isinstance(trials, int):
+        return tuple(range(trials))
+    if trials and all(isinstance(item, int) and item > 0 for item in trials):
+        return tuple(range(max(int(item) for item in trials[:n_levels])))
+    return trials
+
+
+def _nested_resampling_policy(
+    args: argparse.Namespace, *, max_level: int
+) -> NestedResamplingPolicy:
+    if args.validation_mode == "holdout":
+        validation = HoldoutValidationPolicy(validation_fraction=args.validation_fraction)
+    elif args.validation_mode == "kfold":
+        validation = KFoldValidationPolicy(k=args.k_folds)
+    else:
+        validation = TrainValidCountPolicy(
+            validation_fraction=None
+            if args.validation_size is not None
+            else args.validation_fraction,
+            validation_size=args.validation_size,
+        )
+    return NestedResamplingPolicy(
+        test_size=args.n_test,
+        validation=validation,
+        seed=args.seed,
+        dev_pool_size=max_level * args.pool_multiplier,
+    )
+
+
 def main() -> int:
     args = parse_args()
     set_seed(args.seed)
@@ -283,13 +427,35 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     levels = parse_int_list(args.levels)
     trials = args.trials
+    trial_ids = _trial_ids_for_all_levels(trials, len(levels))
     split_cache: dict[tuple[int, int], Split] = {}
+    max_level = max(levels)
+    nested_policy = (
+        _nested_resampling_policy(args, max_level=max_level)
+        if args.resampling_mode == "nested-fixed-test"
+        else None
+    )
+    nested_samples = (
+        NestedCartesianSamples(
+            max_train=nested_policy.dev_pool_size or max_level,
+            n_test=args.n_test,
+            seed=args.seed,
+            trials=trial_ids,
+        )
+        if nested_policy is not None
+        else None
+    )
 
     def split_for(refinement: int | float | str, trial: int | str) -> Split:
         key = (int(refinement), int(trial))
         if key not in split_cache:
             split_cache[key] = make_split(int(refinement), args.n_val, args.n_test, int(trial))
         return split_cache[key]
+
+    def split_for_context(context) -> Split:
+        if nested_samples is None or context.sample_plan is None:
+            return split_for(context.refinement, context.trial)
+        return nested_samples.split_for_refit(context.trial, context.sample_plan)
 
     def tune_eval(
         method: str, refinement: int | float | str, trial: int | str, params: dict[str, Any]
@@ -303,8 +469,20 @@ def main() -> int:
             include_test=False,
         )
 
+    def tune_context_eval(context: TuningEvaluationContext):
+        if nested_samples is None or context.sample_plan is None:
+            return tune_eval(context.method, context.refinement, context.trial, context.params)
+        return fit_and_score_folds(
+            context.method,
+            nested_samples,
+            context.sample_plan,
+            context.trial,
+            float(context.params["bandwidth_init"]),
+            float(context.params["ridge_init"]),
+        )
+
     def study_eval(context: ConvergenceEvaluationContext) -> dict[str, Any]:
-        split = split_for(context.refinement, context.trial)
+        split = split_for_context(context)
         return fit_and_score(
             context.method,
             split,
@@ -314,7 +492,7 @@ def main() -> int:
         )
 
     def median_plotter(context: MedianPlotContext) -> None:
-        plot_truth_vs_prediction(context, split_for(context.refinement, context.trial))
+        plot_truth_vs_prediction(context, split_for_context(context))
 
     specs = {
         method: tuning_spec(
@@ -331,17 +509,21 @@ def main() -> int:
         fit_window=levels,
         artifact_dir=output_dir,
         primary_metric="error",
+        resampling=nested_policy,
     )
     result = run_convergence_study(
         study_spec,
         study_eval,
-        tuning_evaluator=tune_eval,
+        tuning_evaluator=tune_eval if nested_policy is None else None,
+        tuning_context_evaluator=tune_context_eval if nested_policy is not None else None,
         median_plotter=None if args.no_prediction_plots else median_plotter,
         max_workers=args.max_workers,
         tuning_max_workers=args.max_workers,
     )
     if not args.no_plot:
-        make_plot(result, output_dir)
+        center = "median" if nested_policy is not None else "mean"
+        band = args.confidence_band or ("iqr" if nested_policy is not None else "std")
+        make_plot(result, output_dir, center=center, band=band)
     print(f"Wrote convergence artifacts to {output_dir}")
     if result.diagnostics:
         print(f"Diagnostics: {len(result.diagnostics)} advisory item(s); see diagnostics.json")

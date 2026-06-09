@@ -12,6 +12,11 @@ from typing import Any
 
 import numpy as np
 
+from dymad.studies.convergence.resampling import (
+    LevelSamplePlan,
+    NestedResamplingPolicy,
+    build_nested_trial_sample_plan,
+)
 from dymad.tuning import TuningResult, TuningSpec, tune, write_tuning_artifacts
 
 
@@ -43,6 +48,7 @@ class ConvergenceStudySpec:
     primary_metric: str | None = None
     high_variance_cv_threshold: float = 0.5
     low_r2_threshold: float = 0.9
+    resampling: NestedResamplingPolicy | None = None
 
     def __post_init__(self) -> None:
         if not self.methods:
@@ -72,6 +78,16 @@ class ConvergenceEvaluationContext:
     trial: int | str
     params: dict[str, Any]
     tuning_result: TuningResult | None = None
+    sample_plan: LevelSamplePlan | None = None
+
+
+@dataclass
+class TuningEvaluationContext:
+    method: str
+    refinement: float | int | str
+    trial: int | str
+    params: dict[str, Any]
+    sample_plan: LevelSamplePlan | None = None
 
 
 @dataclass
@@ -85,6 +101,7 @@ class MedianPlotContext:
     raw_row: dict[str, Any]
     output_path: Path
     tuning_result: TuningResult | None = None
+    sample_plan: LevelSamplePlan | None = None
 
 
 @dataclass
@@ -112,6 +129,7 @@ StudyEvaluator = Callable[[ConvergenceEvaluationContext], Mapping[str, Any]]
 TuningEvaluator = Callable[
     [str, float | int | str, int | str, dict[str, Any]], float | Mapping[str, Any]
 ]
+TuningContextEvaluator = Callable[[TuningEvaluationContext], float | Mapping[str, Any]]
 MedianPlotter = Callable[[MedianPlotContext], None]
 
 
@@ -120,6 +138,7 @@ def run_convergence_study(
     evaluator: StudyEvaluator,
     *,
     tuning_evaluator: TuningEvaluator | None = None,
+    tuning_context_evaluator: TuningContextEvaluator | None = None,
     median_plotter: MedianPlotter | None = None,
     max_workers: int = 1,
     tuning_max_workers: int | None = None,
@@ -133,6 +152,7 @@ def run_convergence_study(
     tuning_cache: dict[tuple[Any, ...], TuningResult] = {}
     tuning_results: dict[str, TuningResult] = {}
     contexts: list[ConvergenceEvaluationContext] = []
+    sample_plan_cache: dict[int | str, dict[int, LevelSamplePlan]] = {}
 
     artifact_dir = Path(spec.artifact_dir) if spec.artifact_dir is not None else None
     if artifact_dir is not None:
@@ -141,12 +161,26 @@ def run_convergence_study(
     for method in spec.methods:
         for level_index, refinement in enumerate(spec.refinement_levels):
             for trial in _trials_for_level(spec, level_index):
+                sample_plan = _sample_plan_for(
+                    spec,
+                    trial,
+                    refinement,
+                    sample_plan_cache,
+                )
+                tuning_sample_plan = _sample_plan_for(
+                    spec,
+                    trial,
+                    _tuning_refinement_for(spec, refinement),
+                    sample_plan_cache,
+                )
                 tuning_result = _resolve_tuning(
                     spec,
                     method,
                     refinement,
                     trial,
+                    sample_plan=tuning_sample_plan,
                     tuning_evaluator=tuning_evaluator,
+                    tuning_context_evaluator=tuning_context_evaluator,
                     cache=tuning_cache,
                     max_workers=tuning_max_workers,
                 )
@@ -166,7 +200,7 @@ def run_convergence_study(
                     else dict(spec.tuning_policy.fixed_params.get(method, {}))
                 )
                 context = ConvergenceEvaluationContext(
-                    method, refinement, trial, params, tuning_result
+                    method, refinement, trial, params, tuning_result, sample_plan
                 )
                 contexts.append(context)
 
@@ -200,6 +234,7 @@ def run_convergence_study(
             artifact_dir,
             spec,
             raw_rows=raw_rows,
+            contexts=contexts,
             tuning_results=tuning_results,
             median_plotter=median_plotter,
         )
@@ -233,7 +268,9 @@ def _resolve_tuning(
     refinement: float | int | str,
     trial: int | str,
     *,
+    sample_plan: LevelSamplePlan | None,
     tuning_evaluator: TuningEvaluator | None,
+    tuning_context_evaluator: TuningContextEvaluator | None,
     cache: dict[tuple[Any, ...], TuningResult],
     max_workers: int,
 ) -> TuningResult | None:
@@ -244,7 +281,7 @@ def _resolve_tuning(
     if policy.mode == "external":
         params = dict(policy.external_params.get(method, policy.fixed_params.get(method, {})))
         return _recorded_params_result(params, {"mode": "external", "method": method})
-    if tuning_evaluator is None:
+    if tuning_evaluator is None and tuning_context_evaluator is None:
         raise ValueError(f"tuning_evaluator is required for tuning policy {policy.mode!r}")
     if method not in policy.specs:
         raise ValueError(f"missing tuning spec for method {method!r}")
@@ -266,10 +303,51 @@ def _resolve_tuning(
         tuning_trial = trial
 
         def objective(params: dict[str, Any]) -> float | Mapping[str, Any]:
+            if tuning_context_evaluator is not None:
+                return tuning_context_evaluator(
+                    TuningEvaluationContext(
+                        method=method,
+                        refinement=tuning_refinement,
+                        trial=tuning_trial,
+                        params=params,
+                        sample_plan=sample_plan,
+                    )
+                )
+            assert tuning_evaluator is not None
             return tuning_evaluator(method, tuning_refinement, tuning_trial, params)
 
         cache[key] = tune(policy.specs[method], objective, max_workers=max_workers)
     return cache[key]
+
+
+def _sample_plan_for(
+    spec: ConvergenceStudySpec,
+    trial: int | str,
+    refinement: float | int | str,
+    cache: dict[int | str, dict[int, LevelSamplePlan]],
+) -> LevelSamplePlan | None:
+    if spec.resampling is None:
+        return None
+    if trial not in cache:
+        plan = build_nested_trial_sample_plan(
+            spec.resampling,
+            refinement_levels=spec.refinement_levels,
+            trial=trial,
+        )
+        cache[trial] = plan.levels
+    return cache[trial][int(float(refinement))]
+
+
+def _tuning_refinement_for(
+    spec: ConvergenceStudySpec, refinement: float | int | str
+) -> float | int | str:
+    if spec.tuning_policy.mode == "reference_level":
+        return (
+            spec.tuning_policy.reference_level
+            if spec.tuning_policy.reference_level is not None
+            else spec.refinement_levels[-1]
+        )
+    return refinement
 
 
 def _recorded_params_result(params: dict[str, Any], policy: dict[str, Any]) -> TuningResult:
@@ -373,6 +451,12 @@ def aggregate_trials(
                 "count": len(values),
                 "mean": mean,
                 "std": std,
+                "stderr": std / math.sqrt(len(values)) if values else math.nan,
+                "median": float(np.median(np.asarray(values, dtype=float))),
+                "q05": float(np.quantile(np.asarray(values, dtype=float), 0.05)),
+                "q25": float(np.quantile(np.asarray(values, dtype=float), 0.25)),
+                "q75": float(np.quantile(np.asarray(values, dtype=float), 0.75)),
+                "q95": float(np.quantile(np.asarray(values, dtype=float), 0.95)),
                 "min": min(values),
                 "max": max(values),
             }
@@ -565,6 +649,7 @@ def _write_median_prediction_plots(
     spec: ConvergenceStudySpec,
     *,
     raw_rows: Sequence[Mapping[str, Any]],
+    contexts: Sequence[ConvergenceEvaluationContext],
     tuning_results: Mapping[str, TuningResult],
     median_plotter: MedianPlotter,
 ) -> tuple[dict[str, str], list[Diagnostic]]:
@@ -585,6 +670,10 @@ def _write_median_prediction_plots(
     diagnostics: list[Diagnostic] = []
     output_root = root / "median_predictions"
     output_root.mkdir(parents=True, exist_ok=True)
+    sample_plans = {
+        (str(context.method), str(context.refinement), str(context.trial)): context.sample_plan
+        for context in contexts
+    }
     for _, rows in sorted(grouped.items()):
         values = [float(row[primary_metric]) for row in rows]
         median_value = float(np.median(np.asarray(values, dtype=float)))
@@ -612,6 +701,7 @@ def _write_median_prediction_plots(
             raw_row=dict(selected),
             output_path=output_path,
             tuning_result=tuning_results.get(tuning_key),
+            sample_plan=sample_plans.get((method, str(refinement), str(trial))),
         )
         try:
             median_plotter(context)

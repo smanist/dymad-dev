@@ -1,5 +1,6 @@
 import csv
 import json
+import math
 import time
 
 import matplotlib.pyplot as plt
@@ -88,6 +89,24 @@ def test_tune_supports_parallel_initial_evaluations() -> None:
     assert result.selected_params == {"x": 2}
     assert [item.index for item in result.evaluations] == [0, 1, 2, 3]
     assert all(item.status == "ok" for item in result.evaluations)
+
+
+def test_log_scale_nelder_mead_refinement_searches_in_log_coordinates() -> None:
+    target = 1e-2
+    spec = TuningSpec(
+        parameters=(ParameterSpec("alpha", bounds=(1e-4, 1e2), scale="log"),),
+        initial_budget=2,
+        refinement_strategy="nelder_mead_like",
+        refinement_budget=12,
+    )
+
+    def evaluate(params):
+        return float((math.log10(params["alpha"]) - math.log10(target)) ** 2)
+
+    result = tune(spec, evaluate)
+
+    assert result.selected_params["alpha"] == pytest.approx(target, rel=1e-3)
+    assert result.selected_metric < 1e-6
 
 
 def test_bounded_nelder_mead_search_points_respects_bounds() -> None:

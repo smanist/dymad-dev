@@ -3,8 +3,14 @@ import time
 
 from dymad.studies.convergence import (
     ConvergenceStudySpec,
+    HoldoutValidationPolicy,
+    KFoldValidationPolicy,
     MedianPlotContext,
+    NestedResamplingPolicy,
+    TrainValidCountPolicy,
+    TuningEvaluationContext,
     TuningPolicy,
+    build_nested_trial_sample_plan,
     run_convergence_study,
 )
 from dymad.tuning import ParameterSpec, TuningSpec
@@ -67,6 +73,124 @@ def test_convergence_study_accepts_trial_counts() -> None:
         (16, 1),
         (16, 2),
     ]
+
+
+def test_nested_resampling_fixed_test_nested_levels_holdout_and_kfold() -> None:
+    holdout_policy = NestedResamplingPolicy(
+        test_size=5,
+        validation=HoldoutValidationPolicy(validation_fraction=0.25),
+        seed=11,
+        dev_pool_size=36,
+    )
+    holdout = build_nested_trial_sample_plan(
+        holdout_policy,
+        refinement_levels=(8, 12),
+        trial=0,
+    )
+
+    assert holdout.test_indices == tuple(range(5))
+    assert len(holdout.dev_ordering) == 36
+    assert holdout.levels[8].pool_indices == holdout.dev_ordering[:8]
+    assert holdout.levels[12].pool_indices[:8] == holdout.levels[8].pool_indices
+    assert holdout.levels[8].refit_indices == holdout.levels[8].pool_indices
+    fold = holdout.levels[8].validation_folds[0]
+    assert len(fold.train_indices) == 6
+    assert len(fold.validation_indices) == 2
+    assert set(fold.train_indices).isdisjoint(fold.validation_indices)
+
+    kfold_policy = NestedResamplingPolicy(
+        test_size=5,
+        validation=KFoldValidationPolicy(k=4),
+        seed=11,
+    )
+    kfold = build_nested_trial_sample_plan(kfold_policy, refinement_levels=(8,), trial=0)
+    validation_indices = [
+        index for fold in kfold.levels[8].validation_folds for index in fold.validation_indices
+    ]
+
+    assert len(kfold.levels[8].validation_folds) == 4
+    assert sorted(validation_indices) == sorted(kfold.levels[8].pool_indices)
+
+
+def test_nested_resampling_train_valid_count_keeps_level_as_exact_train_count() -> None:
+    proportional = build_nested_trial_sample_plan(
+        NestedResamplingPolicy(
+            test_size=5,
+            validation=TrainValidCountPolicy(validation_fraction=0.25),
+            seed=11,
+            dev_pool_size=36,
+        ),
+        refinement_levels=(8, 12),
+        trial=0,
+    )
+    level = proportional.levels[8]
+    fold = level.validation_folds[0]
+
+    assert len(proportional.dev_ordering) == 36
+    assert len(level.pool_indices) == 10
+    assert len(fold.train_indices) == 8
+    assert len(fold.validation_indices) == 2
+    assert level.refit_indices == fold.train_indices
+    assert proportional.levels[12].pool_indices[:10] == level.pool_indices
+
+    fixed = build_nested_trial_sample_plan(
+        NestedResamplingPolicy(
+            test_size=5,
+            validation=TrainValidCountPolicy(validation_size=3),
+            seed=11,
+            dev_pool_size=36,
+        ),
+        refinement_levels=(8,),
+        trial=0,
+    )
+    fixed_fold = fixed.levels[8].validation_folds[0]
+
+    assert len(fixed.levels[8].pool_indices) == 11
+    assert len(fixed_fold.train_indices) == 8
+    assert len(fixed_fold.validation_indices) == 3
+    assert fixed.levels[8].refit_indices == fixed_fold.train_indices
+
+
+def test_convergence_study_passes_nested_sample_plan_to_tuning_and_final_eval() -> None:
+    tuning_spec = TuningSpec(
+        parameters=(ParameterSpec("alpha", values=(1.0, 2.0)),),
+        initial_budget=2,
+    )
+    spec = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(8, 12),
+        trials=2,
+        metrics=("error",),
+        tuning_policy=TuningPolicy(mode="per_trial", specs={"m": tuning_spec}),
+        resampling=NestedResamplingPolicy(
+            test_size=4,
+            validation=KFoldValidationPolicy(k=4),
+            seed=3,
+        ),
+    )
+    tuning_pool_lengths = []
+    final_pool_lengths = []
+
+    def tune_eval(context: TuningEvaluationContext):
+        assert context.sample_plan is not None
+        tuning_pool_lengths.append(len(context.sample_plan.pool_indices))
+        return {
+            "metric": float(context.params["alpha"]),
+            "std_metric": float(len(context.sample_plan.validation_folds)),
+        }
+
+    def evaluate(context):
+        assert context.sample_plan is not None
+        final_pool_lengths.append(len(context.sample_plan.refit_indices))
+        assert context.sample_plan.refit_indices == context.sample_plan.pool_indices
+        return {"error": 1.0 / len(context.sample_plan.refit_indices)}
+
+    result = run_convergence_study(spec, evaluate, tuning_context_evaluator=tune_eval)
+
+    assert sorted(set(tuning_pool_lengths)) == [8, 12]
+    assert final_pool_lengths == [8, 8, 12, 12]
+    assert result.trial_statistics[0]["median"] > 0.0
+    assert {"stderr", "q05", "q25", "q75", "q95"} <= set(result.trial_statistics[0])
 
 
 def test_convergence_study_per_trial_tuning_saves_each_tuning(tmp_path) -> None:
