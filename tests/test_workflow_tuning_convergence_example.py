@@ -7,14 +7,22 @@ import textwrap
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
-def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
+def _run_tuning_convergence_cli(
+    tmp_path: Path,
+    case_name: str,
+    extra_args: list[str],
+    *,
+    levels: str = "8,16",
+    n_val: int = 16,
+    n_test: int = 32,
+) -> tuple[Path, subprocess.CompletedProcess[str]]:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_root = tmp_path / "study"
+    output_root = tmp_path / case_name
     output_dir = output_root / "smooth_radial"
-
     result = subprocess.run(
         [
             sys.executable,
@@ -24,24 +32,19 @@ def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
             "--target",
             "smooth_radial",
             "--levels",
-            "8,10",
+            levels,
             "--trials",
             "1",
             "--n-val",
-            "8",
+            str(n_val),
             "--n-test",
-            "16",
-            "--resampling-mode",
-            "legacy",
-            "--validation-mode",
-            "holdout",
+            str(n_test),
             "--initial-budget",
             "2",
-            "--refinement-budget",
-            "0",
             "--max-workers",
             "2",
-            "--no-plot",
+            "--no-restart",
+            *extra_args,
         ],
         cwd=os.getcwd(),
         env=env,
@@ -50,16 +53,49 @@ def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
         check=True,
         timeout=90,
     )
+    return output_dir, result
 
-    assert "Wrote convergence artifacts" in result.stdout
+
+def _assert_tuning_run_artifacts(output_dir: Path, *, expected_runs: int) -> list[dict[str, str]]:
     assert (output_dir / "raw_results.csv").is_file()
     assert (output_dir / "convergence_rates.json").is_file()
-    assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == 4
-    assert len(list((output_dir / "tuning").glob("*/tuning_search.png"))) == 4
-    assert len(list((output_dir / "median_predictions").glob("*.png"))) == 4
+    assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == expected_runs
+    with (output_dir / "convergence_summary.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert {"median", "q25", "q75", "stderr"} <= set(rows[0])
+    return rows
 
 
-def test_cartesian_high_freq_requested_mode_targets() -> None:
+def test_cli_writes_complete_small_convergence_run_with_improving_error(tmp_path) -> None:
+    output_dir, result = _run_tuning_convergence_cli(
+        tmp_path,
+        "complete-study",
+        [
+            "--resampling-mode",
+            "legacy",
+            "--validation-mode",
+            "holdout",
+            "--refinement-budget",
+            "0",
+        ],
+        levels="8,16,32",
+        n_test=64,
+    )
+    assert "Wrote convergence artifacts" in result.stdout
+    rows = _assert_tuning_run_artifacts(output_dir, expected_runs=6)
+    assert (output_dir / "convergence.png").is_file()
+    assert len(list((output_dir / "tuning").glob("*/tuning_search.png"))) == 6
+    assert len(list((output_dir / "median_predictions").glob("*.png"))) == 6
+    for method in ("rbf_krr", "dm_krr"):
+        errors = {
+            int(row["refinement"]): float(row["median"])
+            for row in rows
+            if row["method"] == method and row["metric"] == "error"
+        }
+        assert errors[32] < errors[8]
+
+
+def test_target_registry_includes_requested_unit_disk_targets() -> None:
     sys.path.insert(0, str(Path(os.getcwd()) / "scripts/tuning_convergence"))
     from cartesian_high_freq_krr_targets import TARGETS
 
@@ -70,7 +106,7 @@ def test_cartesian_high_freq_requested_mode_targets() -> None:
         assert np.isfinite(values).all()
 
 
-def test_cartesian_high_freq_cli_defaults_match_reference(monkeypatch) -> None:
+def test_cli_defaults_match_ifblock_reference_configuration(monkeypatch) -> None:
     sys.path.insert(0, str(Path(os.getcwd()) / "scripts/tuning_convergence"))
     from cartesian_high_freq_krr_cli import config_from_args, parse_args
 
@@ -97,119 +133,86 @@ def test_cartesian_high_freq_cli_defaults_match_reference(monkeypatch) -> None:
     assert config.restart is True
 
 
-def test_cartesian_high_freq_tuning_convergence_nested_mode_smoke(tmp_path) -> None:
-    env = os.environ.copy()
-    env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_root = tmp_path / "nested-study"
-    output_dir = output_root / "oscillatory"
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "scripts/tuning_convergence/cartesian_high_freq_krr_cli.py",
-            "--workdir",
-            str(output_root),
-            "--target",
-            "oscillatory",
-            "--levels",
-            "8,10",
-            "--trials",
-            "1",
-            "--n-test",
-            "16",
-            "--initial-budget",
-            "2",
-            "--refinement-budget",
-            "0",
-            "--resampling-mode",
-            "nested-fixed-test",
-            "--validation-mode",
-            "kfold",
-            "--k-folds",
-            "2",
-            "--max-workers",
-            "1",
-            "--no-plot",
-        ],
-        cwd=os.getcwd(),
-        env=env,
-        text=True,
-        capture_output=True,
-        check=True,
-        timeout=90,
+@pytest.mark.parametrize(
+    ("case_name", "extra_args"),
+    [
+        pytest.param(
+            "nested-kfold-grid",
+            [
+                "--resampling-mode",
+                "nested-fixed-test",
+                "--validation-mode",
+                "kfold",
+                "--k-folds",
+                "2",
+                "--refinement-budget",
+                "0",
+                "--no-plot",
+            ],
+            id="nested-kfold-no-refinement",
+        ),
+        pytest.param(
+            "nested-train-valid-batch",
+            [
+                "--resampling-mode",
+                "nested-fixed-test",
+                "--validation-mode",
+                "train-valid-count",
+                "--validation-size",
+                "4",
+                "--pool-multiplier",
+                "2",
+                "--refinement-strategy",
+                "batch_pattern_search",
+                "--refinement-budget",
+                "2",
+                "--no-plot",
+                "--no-prediction-plots",
+            ],
+            id="nested-train-valid-batch-pattern",
+        ),
+        pytest.param(
+            "legacy-holdout-nelder",
+            [
+                "--resampling-mode",
+                "legacy",
+                "--validation-mode",
+                "holdout",
+                "--refinement-strategy",
+                "nelder_mead_like",
+                "--refinement-budget",
+                "2",
+                "--no-plot",
+                "--no-prediction-plots",
+            ],
+            id="legacy-holdout-nelder-mead",
+        ),
+    ],
+)
+def test_cli_runs_resampling_validation_and_refinement_mode_combinations(
+    tmp_path, case_name: str, extra_args: list[str]
+) -> None:
+    output_dir, result = _run_tuning_convergence_cli(
+        tmp_path,
+        case_name,
+        extra_args,
+        n_test=16,
     )
-
     assert "Wrote convergence artifacts" in result.stdout
-    assert (output_dir / "raw_results.csv").is_file()
-    assert (output_dir / "convergence_rates.json").is_file()
-    with (output_dir / "convergence_summary.csv").open(newline="", encoding="utf-8") as handle:
-        header = next(csv.reader(handle))
-    assert {"median", "q25", "q75", "stderr"} <= set(header)
-    assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == 4
-    assert len(list((output_dir / "median_predictions").glob("*.png"))) == 4
+    _assert_tuning_run_artifacts(output_dir, expected_runs=4)
 
 
-def test_cartesian_high_freq_tuning_convergence_train_valid_count_smoke(tmp_path) -> None:
+def test_ifblock_entrypoint_writes_tuning_and_prediction_artifacts(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_root = tmp_path / "train-valid-count-study"
-    output_dir = output_root / "oscillatory"
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "scripts/tuning_convergence/cartesian_high_freq_krr_cli.py",
-            "--workdir",
-            str(output_root),
-            "--target",
-            "oscillatory",
-            "--levels",
-            "8,10",
-            "--trials",
-            "1",
-            "--n-test",
-            "16",
-            "--initial-budget",
-            "2",
-            "--refinement-budget",
-            "0",
-            "--resampling-mode",
-            "nested-fixed-test",
-            "--validation-mode",
-            "train-valid-count",
-            "--validation-size",
-            "4",
-            "--pool-multiplier",
-            "2",
-            "--max-workers",
-            "1",
-            "--no-plot",
-            "--no-prediction-plots",
-        ],
-        cwd=os.getcwd(),
-        env=env,
-        text=True,
-        capture_output=True,
-        check=True,
-        timeout=90,
-    )
-
-    assert "Wrote convergence artifacts" in result.stdout
-    assert (output_dir / "raw_results.csv").is_file()
-    assert (output_dir / "convergence_rates.json").is_file()
-    assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == 4
-
-
-def test_cartesian_high_freq_tuning_convergence_ifblock_example_smoke(tmp_path) -> None:
-    env = os.environ.copy()
-    env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_dir = tmp_path / "runs" / "rbf_eigen_m2_k2"
+    output_dir = tmp_path / "runs" / "smooth_radial"
     script_path = os.path.join(os.getcwd(), "scripts/tuning_convergence/cartesian_high_freq_krr.py")
     script_dir = str(Path(script_path).parent)
     script_source = Path(script_path).read_text(encoding="utf-8")
     replacements = {
         "LEVELS = (512, 1024, 2048, 4096, 8192)": "LEVELS = (8, 10)",
         "LEVELS = (512, 1024, 2048, 4096)": "LEVELS = (8, 10)",
+        'TARGET_NAME = "rbf_eigen_m2_k2"': 'TARGET_NAME = "smooth_radial"',
         "TRIALS = 5": "TRIALS = 1",
         "N_VAL = 1024": "N_VAL = 8",
         "N_TEST = 4096": "N_TEST = 16",
