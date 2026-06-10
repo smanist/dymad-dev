@@ -3,6 +3,8 @@ import json
 import os
 import subprocess
 import sys
+import textwrap
+from pathlib import Path
 
 
 def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
@@ -148,25 +150,38 @@ def test_cartesian_high_freq_tuning_convergence_train_valid_count_smoke(tmp_path
 def test_cartesian_high_freq_tuning_convergence_ifblock_example_smoke(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    env.update(
-        {
-            "DYMAD_TUNING_LEVELS": "8,10",
-            "DYMAD_TUNING_TRIALS": "1",
-            "DYMAD_TUNING_N_VAL": "8",
-            "DYMAD_TUNING_N_TEST": "16",
-            "DYMAD_TUNING_INITIAL_BUDGET": "2",
-            "DYMAD_TUNING_REFINEMENT_BUDGET": "2",
-            "DYMAD_TUNING_MAX_WORKERS": "2",
-            "DYMAD_TUNING_RESAMPLING_MODE": "nested-fixed-test",
-            "DYMAD_TUNING_VALIDATION_MODE": "kfold",
-            "DYMAD_TUNING_K_FOLDS": "2",
-        }
-    )
     output_dir = tmp_path / "runs"
     script_path = os.path.join(os.getcwd(), "scripts/tuning_convergence/cartesian_high_freq_krr.py")
+    script_dir = str(Path(script_path).parent)
+    script_source = Path(script_path).read_text(encoding="utf-8")
+    replacements = {
+        "LEVELS = (512, 1024, 2048, 4096, 8192)": "LEVELS = (8, 10)",
+        "TRIALS = 5": "TRIALS = 1",
+        "N_VAL = 1024": "N_VAL = 8",
+        "N_TEST = 4096": "N_TEST = 16",
+        "INITIAL_BUDGET = (9, 9)": "INITIAL_BUDGET = 2",
+        'REFINEMENT_BUDGET = 64 if REFINEMENT_STRATEGY == "batch_pattern_search" else 20': (
+            "REFINEMENT_BUDGET = 2"
+        ),
+        "MAX_WORKERS = 4": "MAX_WORKERS = 2",
+        'VALIDATION_MODE = "train-valid-count"': 'VALIDATION_MODE = "kfold"',
+        "VALIDATION_SIZE = 1024": "VALIDATION_SIZE = None",
+        "K_FOLDS = 4": "K_FOLDS = 2",
+    }
+    for old, new in replacements.items():
+        assert old in script_source
+        script_source = script_source.replace(old, new)
+    command = textwrap.dedent(
+        f"""
+        import sys
+        sys.path.insert(0, {script_dir!r})
+        namespace = {{"__file__": {script_path!r}, "__name__": "__main__"}}
+        exec(compile({script_source!r}, {script_path!r}, "exec"), namespace)
+        """
+    )
 
     result = subprocess.run(
-        [sys.executable, script_path],
+        [sys.executable, "-c", command],
         cwd=tmp_path,
         env=env,
         text=True,

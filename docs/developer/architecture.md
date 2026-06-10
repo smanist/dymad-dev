@@ -32,7 +32,7 @@ Maintenance rule:
 | `src/dymad/agent/store` | in-memory/filesystem-backed artifact records and handle persistence |
 | `src/dymad/models` | model families, collections, typed model specs, rollout helpers |
 | `src/dymad/tuning` | standalone evaluator-driven hyperparameter search, parameter-domain projection, selection, and tuning artifacts |
-| `src/dymad/studies/convergence` | standalone convergence-study orchestration, trial aggregation, rate fitting, diagnostics, and study artifacts |
+| `src/dymad/studies/convergence` | standalone convergence-study orchestration, reusable synthetic-study adapters, trial aggregation, rate fitting, diagnostics, plotting helpers, and study artifacts |
 | `src/dymad/training` | training runtime, phases, trainers, execution helpers |
 | `src/dymad/io` | checkpoint loading, trajectory/data managers, legacy public runtime entrypoints |
 | `src/dymad/core` | typed runtime/series/transform building blocks |

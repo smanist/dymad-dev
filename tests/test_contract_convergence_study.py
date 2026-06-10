@@ -5,15 +5,21 @@ import numpy as np
 import pytest
 
 from dymad.studies.convergence import (
+    ArrayRegressionProblem,
+    ArrayRegressionStudyConfig,
     ConvergenceStudySpec,
+    CurveStyle,
     HoldoutValidationPolicy,
     KFoldValidationPolicy,
     MedianPlotContext,
+    NestedArraySamples,
     NestedResamplingPolicy,
     TrainValidCountPolicy,
     TuningEvaluationContext,
     TuningPolicy,
     build_nested_trial_sample_plan,
+    plot_convergence_summary,
+    run_array_regression_study,
     run_convergence_study,
 )
 from dymad.tuning import ParameterSpec, TuningSpec
@@ -42,6 +48,78 @@ def test_convergence_study_runs_fixed_policy_and_writes_artifacts(tmp_path) -> N
     assert (tmp_path / "convergence_rates.json").is_file()
     assert (tmp_path / "diagnostics.json").is_file()
     assert (tmp_path / "tuning" / "m__none" / "tuning_result.json").is_file()
+
+
+def test_array_regression_adapter_and_summary_plot_are_reusable(tmp_path) -> None:
+    def sample(n_samples: int, rng: np.random.Generator) -> np.ndarray:
+        return rng.random((n_samples, 1))
+
+    def target(points: np.ndarray) -> np.ndarray:
+        return points[:, :1]
+
+    def score(method, split, params, include_test):
+        val_pred = np.full_like(split.y_val, float(params.get("bias", 0.0)))
+        row = {"validation_normalized_rmse": float(np.sqrt(np.mean((split.y_val - val_pred) ** 2)))}
+        if include_test:
+            test_pred = np.full_like(split.y_test, float(params.get("bias", 0.0)))
+            row["error"] = float(np.sqrt(np.mean((split.y_test - test_pred) ** 2)))
+        return row
+
+    def score_folds(method, samples: NestedArraySamples, plan, trial, params):
+        rows = [
+            score(method, samples.split_for_fold(trial, fold), params, include_test=False)
+            for fold in plan.validation_folds
+        ]
+        return {
+            "validation_normalized_rmse": float(
+                np.mean([row["validation_normalized_rmse"] for row in rows])
+            )
+        }
+
+    def tuning_spec(metric_name, initial_budget, refinement_budget, refinement_strategy):
+        return TuningSpec(
+            parameters=(ParameterSpec("bias", bounds=(0.0, 1.0)),),
+            metric_name=metric_name,
+            initial_budget=1,
+        )
+
+    problem = ArrayRegressionProblem(
+        name="toy",
+        methods=("constant",),
+        sample=sample,
+        target=target,
+        fit_and_score=score,
+        fit_and_score_folds=score_folds,
+        tuning_spec=tuning_spec,
+        metrics=("error",),
+        primary_metric="error",
+    )
+    config = ArrayRegressionStudyConfig(
+        output_dir=tmp_path,
+        levels=(2, 4),
+        trials=2,
+        n_val=2,
+        n_test=3,
+        initial_budget=1,
+        refinement_budget=0,
+        tuning_policy="none",
+        plot=False,
+    )
+
+    result = run_array_regression_study(problem, config)
+    plot_convergence_summary(
+        result,
+        tmp_path / "summary.png",
+        methods=("constant",),
+        center="mean",
+        band="std",
+        xlabel="n_train",
+        ylabel="RMSE",
+        styles={"constant": CurveStyle(label="Constant baseline")},
+    )
+
+    assert len(result.raw_rows) == 4
+    assert (tmp_path / "summary.png").is_file()
 
 
 def test_convergence_restart_evaluates_only_missing_context_results(tmp_path) -> None:
