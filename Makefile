@@ -18,7 +18,7 @@ typecheck:
 check: lint format-check typecheck
 
 install-dymad-skill:
-	python scripts/install_dymad_train_eval_skill.py
+	python skills/install_dymad_skills.py
 
 check-dymad-skill-install:
-	python scripts/install_dymad_train_eval_skill.py --check
+	python skills/install_dymad_skills.py --check

@@ -1,0 +1,4 @@
+interface:
+  display_name: "DyMAD Tuning Convergence"
+  short_description: "Build reproducible tuning studies."
+  default_prompt: "Use $dymad-tuning-convergence-study to create a study-specific problem module, thin CLI wrapper, and small workflow smoke test using DyMAD tuning/convergence primitives without adding MCP exposure."

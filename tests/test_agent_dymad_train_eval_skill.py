@@ -7,10 +7,8 @@ from types import ModuleType
 
 
 def _load_installer() -> ModuleType:
-    script_path = (
-        Path(__file__).resolve().parents[1] / "scripts" / "install_dymad_train_eval_skill.py"
-    )
-    spec = importlib.util.spec_from_file_location("install_dymad_train_eval_skill", script_path)
+    script_path = Path(__file__).resolve().parents[1] / "skills" / "install_dymad_skills.py"
+    spec = importlib.util.spec_from_file_location("install_dymad_skills", script_path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -49,6 +47,23 @@ def test_dymad_train_eval_skill_staging_files_exist() -> None:
     assert "CLI config" in openai_yaml
 
 
+def test_dymad_tuning_convergence_skill_staging_files_exist() -> None:
+    skill_root = Path(__file__).resolve().parents[1] / "skills" / "dymad-tuning-convergence-study"
+    skill_body = (skill_root / "SKILL.md").read_text(encoding="utf-8")
+    openai_yaml = (skill_root / "agents" / "openai.yaml").read_text(encoding="utf-8")
+
+    assert "ArrayRegressionProblem" in skill_body
+    assert "ArrayRegressionStudyConfig" in skill_body
+    assert "run_array_regression_study" in skill_body
+    assert "ParameterSpec" in skill_body
+    assert "TuningSpec" in skill_body
+    assert "tests/test_workflow_<study>_tuning_convergence.py" in skill_body
+    assert "Wrote convergence artifacts" in skill_body
+    assert "do not add MCP exposure" in skill_body
+    assert "DyMAD Tuning Convergence" in openai_yaml
+    assert "$dymad-tuning-convergence-study" in openai_yaml
+
+
 def test_dymad_train_eval_skill_installer_copies_repo_skill_to_codex_home(tmp_path) -> None:
     installer = _load_installer()
 
@@ -62,6 +77,23 @@ def test_dymad_train_eval_skill_installer_copies_repo_skill_to_codex_home(tmp_pa
     ).read_text(encoding="utf-8")
     assert (installed_root / "agents" / "openai.yaml").is_file()
     assert installer.install_skill(codex_home=tmp_path, check=True).changed is False
+
+
+def test_dymad_skill_installer_copies_all_repo_skills_to_codex_home(tmp_path) -> None:
+    installer = _load_installer()
+
+    results = installer.install_repo_skills(codex_home=tmp_path)
+
+    assert {result.destination_dir.name for result in results} == set(installer.REPO_SKILL_NAMES)
+    for skill_name in installer.REPO_SKILL_NAMES:
+        installed_root = tmp_path / "skills" / skill_name
+        source_root = Path(__file__).resolve().parents[1] / "skills" / skill_name
+        assert (installed_root / "SKILL.md").read_text(encoding="utf-8") == (
+            source_root / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        assert (installed_root / "agents" / "openai.yaml").is_file()
+
+    assert not any(result.changed for result in installer.install_repo_skills(codex_home=tmp_path))
 
 
 def test_dymad_train_eval_skill_installer_check_detects_drift(tmp_path) -> None:
