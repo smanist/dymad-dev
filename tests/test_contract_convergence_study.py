@@ -1,6 +1,9 @@
 import json
 import time
 
+import numpy as np
+import pytest
+
 from dymad.studies.convergence import (
     ConvergenceStudySpec,
     HoldoutValidationPolicy,
@@ -39,6 +42,219 @@ def test_convergence_study_runs_fixed_policy_and_writes_artifacts(tmp_path) -> N
     assert (tmp_path / "convergence_rates.json").is_file()
     assert (tmp_path / "diagnostics.json").is_file()
     assert (tmp_path / "tuning" / "m__none" / "tuning_result.json").is_file()
+
+
+def test_convergence_restart_evaluates_only_missing_context_results(tmp_path) -> None:
+    spec = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1, 2),
+        trials=2,
+        metrics=("error",),
+        artifact_dir=tmp_path,
+    )
+
+    def evaluate(context):
+        return {"error": 10.0 * float(context.trial) + float(context.refinement)}
+
+    initial = run_convergence_study(spec, evaluate)
+    removed = sorted((tmp_path / "context_results").glob("*.json"))[-1]
+    removed_payload = json.loads(removed.read_text(encoding="utf-8"))
+    removed.unlink()
+    calls = []
+
+    def restart_evaluate(context):
+        calls.append((context.refinement, context.trial))
+        return {"error": 99.0}
+
+    restarted = run_convergence_study(spec, restart_evaluate, restart=True)
+
+    assert len(calls) == 1
+    assert calls == [(removed_payload["refinement"], removed_payload["trial"])]
+    assert len(restarted.raw_rows) == 4
+    preserved = [
+        row
+        for row in restarted.raw_rows
+        if (row["refinement"], row["trial"])
+        != (removed_payload["refinement"], removed_payload["trial"])
+    ]
+    assert [row["error"] for row in preserved] == [
+        row["error"]
+        for row in initial.raw_rows
+        if (row["refinement"], row["trial"])
+        != (removed_payload["refinement"], removed_payload["trial"])
+    ]
+
+
+def test_convergence_restart_extends_trials_without_rerunning_completed(tmp_path) -> None:
+    base = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1, 2),
+        trials=1,
+        metrics=("error",),
+        artifact_dir=tmp_path,
+    )
+    calls = []
+
+    def evaluate(context):
+        calls.append((context.refinement, context.trial))
+        return {"error": float(context.refinement)}
+
+    run_convergence_study(base, evaluate)
+    extended = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1, 2),
+        trials=2,
+        metrics=("error",),
+        artifact_dir=tmp_path,
+    )
+    calls.clear()
+
+    result = run_convergence_study(extended, evaluate, restart=True)
+
+    assert calls == [(1, 1), (2, 1)]
+    assert [(row["refinement"], row["trial"]) for row in result.raw_rows] == [
+        (1, 0),
+        (1, 1),
+        (2, 0),
+        (2, 1),
+    ]
+
+
+def test_convergence_restart_reuses_tuning_artifact_for_new_contexts(tmp_path) -> None:
+    tuning_spec = TuningSpec(
+        parameters=(ParameterSpec("alpha", bounds=(0, 2), value_kind="int"),),
+        initial_budget=3,
+    )
+    base = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1,),
+        trials=1,
+        metrics=("error",),
+        tuning_policy=TuningPolicy(mode="per_level", specs={"m": tuning_spec}),
+        artifact_dir=tmp_path,
+    )
+
+    def tune_eval(method, refinement, trial, params):
+        return float((params["alpha"] - 1) ** 2)
+
+    def evaluate(context):
+        return {"error": float(context.params["alpha"])}
+
+    run_convergence_study(base, evaluate, tuning_evaluator=tune_eval)
+    extended = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1,),
+        trials=2,
+        metrics=("error",),
+        tuning_policy=TuningPolicy(mode="per_level", specs={"m": tuning_spec}),
+        artifact_dir=tmp_path,
+    )
+
+    def fail_if_tuned(method, refinement, trial, params):
+        raise AssertionError("restart should load the saved per-level tuning artifact")
+
+    result = run_convergence_study(
+        extended,
+        evaluate,
+        tuning_evaluator=fail_if_tuned,
+        restart=True,
+    )
+
+    assert [row["params"] for row in result.raw_rows] == [{"alpha": 1}, {"alpha": 1}]
+
+
+def test_convergence_restart_extends_sample_plan_binary_ordering(tmp_path) -> None:
+    base = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1000,),
+        trials=1,
+        metrics=("error",),
+        artifact_dir=tmp_path,
+        resampling=NestedResamplingPolicy(
+            test_size=7,
+            validation=HoldoutValidationPolicy(validation_fraction=0.2),
+            seed=17,
+        ),
+    )
+
+    def evaluate(context):
+        assert context.sample_plan is not None
+        return {"error": 1.0 / len(context.sample_plan.pool_indices)}
+
+    run_convergence_study(base, evaluate)
+    with np.load(tmp_path / "sample_plans.npz") as payload:
+        old_ordering = tuple(int(value) for value in next(iter(payload.values())))
+
+    extended = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1000, 1200),
+        trials=1,
+        metrics=("error",),
+        artifact_dir=tmp_path,
+        resampling=NestedResamplingPolicy(
+            test_size=7,
+            validation=HoldoutValidationPolicy(validation_fraction=0.2),
+            seed=17,
+        ),
+    )
+
+    result = run_convergence_study(extended, evaluate, restart=True)
+
+    with np.load(tmp_path / "sample_plans.npz") as payload:
+        new_ordering = tuple(int(value) for value in next(iter(payload.values())))
+    manifest_text = (tmp_path / "convergence_restart.json").read_text(encoding="utf-8")
+
+    assert new_ordering[: len(old_ordering)] == old_ordering
+    assert len(new_ordering) >= 1200
+    assert len(manifest_text) < 1200
+    assert len(result.raw_rows) == 2
+
+
+def test_convergence_restart_rejects_incompatible_metrics(tmp_path) -> None:
+    spec = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1,),
+        trials=1,
+        metrics=("error",),
+        artifact_dir=tmp_path,
+    )
+    run_convergence_study(spec, lambda context: {"error": 1.0})
+    incompatible = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1,),
+        trials=1,
+        metrics=("loss",),
+        artifact_dir=tmp_path,
+    )
+
+    with pytest.raises(ValueError, match="not compatible"):
+        run_convergence_study(incompatible, lambda context: {"loss": 1.0}, restart=True)
+
+
+def test_convergence_parallel_restart_writes_context_results_and_ordered_csv(tmp_path) -> None:
+    spec = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(1, 2),
+        trials=2,
+        metrics=("error",),
+        artifact_dir=tmp_path,
+    )
+
+    def evaluate(context):
+        time.sleep(0.005)
+        return {"error": 10.0 * float(context.refinement) + float(context.trial)}
+
+    result = run_convergence_study(spec, evaluate, max_workers=2)
+
+    assert len(list((tmp_path / "context_results").glob("*.json"))) == 4
+    assert [(row["refinement"], row["trial"]) for row in result.raw_rows] == [
+        (1, 0),
+        (1, 1),
+        (2, 0),
+        (2, 1),
+    ]
+    raw_text = (tmp_path / "raw_results.csv").read_text(encoding="utf-8")
+    assert raw_text.index("1,0") < raw_text.index("2,0")
 
 
 def test_convergence_study_accepts_trial_counts() -> None:

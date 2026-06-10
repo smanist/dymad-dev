@@ -1,23 +1,33 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
+import uuid
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
 from dymad.studies.convergence.resampling import (
     LevelSamplePlan,
     NestedResamplingPolicy,
+    TrialSamplePlan,
     build_nested_trial_sample_plan,
+    build_nested_trial_sample_plan_from_ordering,
 )
-from dymad.tuning import TuningResult, TuningSpec, tune, write_tuning_artifacts
+from dymad.tuning import (
+    TuningResult,
+    TuningSpec,
+    read_tuning_artifacts,
+    tune,
+    write_tuning_artifacts,
+)
 
 
 @dataclass(frozen=True)
@@ -79,6 +89,7 @@ class ConvergenceEvaluationContext:
     params: dict[str, Any]
     tuning_result: TuningResult | None = None
     sample_plan: LevelSamplePlan | None = None
+    tuning_key: str | None = None
 
 
 @dataclass
@@ -142,6 +153,7 @@ def run_convergence_study(
     median_plotter: MedianPlotter | None = None,
     max_workers: int = 1,
     tuning_max_workers: int | None = None,
+    restart: bool = False,
 ) -> ConvergenceStudyResult:
     if max_workers <= 0:
         raise ValueError("max_workers must be positive")
@@ -149,43 +161,85 @@ def run_convergence_study(
         tuning_max_workers = max_workers
     if tuning_max_workers <= 0:
         raise ValueError("tuning_max_workers must be positive")
+    if restart and spec.artifact_dir is None:
+        raise ValueError("restart=True requires ConvergenceStudySpec.artifact_dir")
     tuning_cache: dict[tuple[Any, ...], TuningResult] = {}
     tuning_results: dict[str, TuningResult] = {}
     contexts: list[ConvergenceEvaluationContext] = []
-    sample_plan_cache: dict[int | str, dict[int, LevelSamplePlan]] = {}
+    pending_contexts: list[ConvergenceEvaluationContext] = []
+    sample_plan_cache: dict[int | str, TrialSamplePlan] = {}
 
     artifact_dir = Path(spec.artifact_dir) if spec.artifact_dir is not None else None
     if artifact_dir is not None:
         artifact_dir.mkdir(parents=True, exist_ok=True)
+    restart_state = _load_or_create_restart_state(spec, artifact_dir, restart=restart)
+    completed_rows = (
+        _load_context_results(artifact_dir, restart_state)
+        if restart and artifact_dir is not None and restart_state is not None
+        else {}
+    )
+    existing_orderings = (
+        _load_sample_plan_orderings(artifact_dir, restart_state)
+        if restart and artifact_dir is not None and restart_state is not None
+        else {}
+    )
 
     for method in spec.methods:
         for level_index, refinement in enumerate(spec.refinement_levels):
             for trial in _trials_for_level(spec, level_index):
+                context_key = _context_key(method, refinement, trial)
+                tuning_key = _tuning_artifact_key(
+                    spec.tuning_policy.mode, method, refinement, trial
+                )
+                if context_key in completed_rows:
+                    row = completed_rows[context_key]
+                    tuning_result = _try_read_tuning_result(artifact_dir, tuning_key)
+                    if tuning_result is not None:
+                        tuning_results.setdefault(tuning_key, tuning_result)
+                    context = ConvergenceEvaluationContext(
+                        method=method,
+                        refinement=refinement,
+                        trial=trial,
+                        params=dict(row.get("params", {})),
+                        tuning_result=tuning_result,
+                        sample_plan=_sample_plan_for(
+                            spec,
+                            trial,
+                            refinement,
+                            sample_plan_cache,
+                            existing_orderings=existing_orderings,
+                        ),
+                        tuning_key=tuning_key,
+                    )
+                    contexts.append(context)
+                    continue
                 sample_plan = _sample_plan_for(
                     spec,
                     trial,
                     refinement,
                     sample_plan_cache,
+                    existing_orderings=existing_orderings,
                 )
                 tuning_sample_plan = _sample_plan_for(
                     spec,
                     trial,
                     _tuning_refinement_for(spec, refinement),
                     sample_plan_cache,
+                    existing_orderings=existing_orderings,
                 )
                 tuning_result = _resolve_tuning(
                     spec,
                     method,
                     refinement,
                     trial,
+                    artifact_dir=artifact_dir,
+                    tuning_key=tuning_key,
+                    restart=restart,
                     sample_plan=tuning_sample_plan,
                     tuning_evaluator=tuning_evaluator,
                     tuning_context_evaluator=tuning_context_evaluator,
                     cache=tuning_cache,
                     max_workers=tuning_max_workers,
-                )
-                tuning_key = _tuning_artifact_key(
-                    spec.tuning_policy.mode, method, refinement, trial
                 )
                 if tuning_result is not None:
                     tuning_results.setdefault(tuning_key, tuning_result)
@@ -200,16 +254,36 @@ def run_convergence_study(
                     else dict(spec.tuning_policy.fixed_params.get(method, {}))
                 )
                 context = ConvergenceEvaluationContext(
-                    method, refinement, trial, params, tuning_result, sample_plan
+                    method, refinement, trial, params, tuning_result, sample_plan, tuning_key
                 )
                 contexts.append(context)
+                pending_contexts.append(context)
 
-    raw_rows = _evaluate_study_contexts(
-        contexts,
+    if artifact_dir is not None and restart_state is not None:
+        _write_restart_artifacts(artifact_dir, restart_state, sample_plan_cache)
+
+    def record_context_result(context: ConvergenceEvaluationContext, row: dict[str, Any]) -> None:
+        if artifact_dir is None or restart_state is None:
+            return
+        _write_context_result(artifact_dir, restart_state, context, row)
+
+    evaluated_rows = _evaluate_study_contexts(
+        pending_contexts,
         metrics=spec.metrics,
         evaluator=evaluator,
         max_workers=max_workers,
+        completed_callback=record_context_result,
     )
+    evaluated_by_key = {
+        _context_key(row["method"], row["refinement"], row["trial"]): row for row in evaluated_rows
+    }
+    raw_rows = []
+    for context in contexts:
+        key = _context_key(context.method, context.refinement, context.trial)
+        if key in completed_rows:
+            raw_rows.append(completed_rows[key])
+        else:
+            raw_rows.append(evaluated_by_key[key])
 
     metric_values = _metric_values(raw_rows, spec.metrics)
     trial_statistics = aggregate_trials(
@@ -268,6 +342,9 @@ def _resolve_tuning(
     refinement: float | int | str,
     trial: int | str,
     *,
+    artifact_dir: Path | None,
+    tuning_key: str,
+    restart: bool,
     sample_plan: LevelSamplePlan | None,
     tuning_evaluator: TuningEvaluator | None,
     tuning_context_evaluator: TuningContextEvaluator | None,
@@ -299,6 +376,11 @@ def _resolve_tuning(
     else:
         raise AssertionError(f"unsupported policy {policy.mode}")
     if key not in cache:
+        if restart:
+            tuning_result = _try_read_tuning_result(artifact_dir, tuning_key)
+            if tuning_result is not None:
+                cache[key] = tuning_result
+                return cache[key]
         tuning_refinement = key[2]
         tuning_trial = trial
 
@@ -324,18 +406,204 @@ def _sample_plan_for(
     spec: ConvergenceStudySpec,
     trial: int | str,
     refinement: float | int | str,
-    cache: dict[int | str, dict[int, LevelSamplePlan]],
+    cache: dict[int | str, TrialSamplePlan],
+    *,
+    existing_orderings: Mapping[str, tuple[int, ...]] | None = None,
 ) -> LevelSamplePlan | None:
     if spec.resampling is None:
         return None
     if trial not in cache:
-        plan = build_nested_trial_sample_plan(
-            spec.resampling,
-            refinement_levels=spec.refinement_levels,
-            trial=trial,
+        trial_key = _stable_json(trial)
+        if existing_orderings is not None and trial_key in existing_orderings:
+            plan = build_nested_trial_sample_plan_from_ordering(
+                spec.resampling,
+                refinement_levels=spec.refinement_levels,
+                trial=trial,
+                dev_ordering=existing_orderings[trial_key],
+            )
+        else:
+            plan = build_nested_trial_sample_plan(
+                spec.resampling,
+                refinement_levels=spec.refinement_levels,
+                trial=trial,
+            )
+        cache[trial] = plan
+    return cache[trial].levels[int(float(refinement))]
+
+
+def _load_or_create_restart_state(
+    spec: ConvergenceStudySpec, artifact_dir: Path | None, *, restart: bool
+) -> dict[str, Any] | None:
+    if artifact_dir is None:
+        return None
+    manifest_path = artifact_dir / "convergence_restart.json"
+    fingerprint = _restart_fingerprint(spec)
+    if restart and manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if int(manifest.get("schema_version", 0)) != 1:
+            raise ValueError("unsupported convergence restart manifest schema")
+        if manifest.get("compatible_fingerprint") != fingerprint:
+            raise ValueError("convergence restart artifacts are not compatible with this spec")
+        return manifest
+    return {
+        "schema_version": 1,
+        "run_id": uuid.uuid4().hex,
+        "compatible_fingerprint": fingerprint,
+        "context_results_dir": "context_results",
+        "sample_plan_path": "sample_plans.npz",
+        "test_size": spec.resampling.test_size if spec.resampling is not None else None,
+        "trial_plans": [],
+    }
+
+
+def _write_restart_artifacts(
+    artifact_dir: Path,
+    manifest: dict[str, Any],
+    sample_plan_cache: Mapping[int | str, TrialSamplePlan],
+) -> None:
+    manifest = dict(manifest)
+    manifest_path = artifact_dir / "convergence_restart.json"
+    sample_plan_path = artifact_dir / str(manifest["sample_plan_path"])
+    trial_plans = []
+    arrays: dict[str, np.ndarray] = {}
+    for trial, plan in sample_plan_cache.items():
+        array_key = _sample_plan_array_key(trial)
+        arrays[array_key] = np.asarray(plan.dev_ordering, dtype=np.int64)
+        trial_plans.append(
+            {
+                "trial": _jsonable(trial),
+                "array_key": array_key,
+                "length": len(plan.dev_ordering),
+            }
         )
-        cache[trial] = plan.levels
-    return cache[trial][int(float(refinement))]
+    manifest["trial_plans"] = trial_plans
+    manifest_path.write_text(
+        json.dumps(_jsonable(manifest), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    if arrays:
+        cast(Any, np.savez_compressed)(sample_plan_path, **arrays)
+
+
+def _load_sample_plan_orderings(
+    artifact_dir: Path | None, manifest: Mapping[str, Any] | None
+) -> dict[str, tuple[int, ...]]:
+    if artifact_dir is None or manifest is None:
+        return {}
+    sample_plan_path = artifact_dir / str(manifest.get("sample_plan_path", "sample_plans.npz"))
+    if not sample_plan_path.is_file():
+        return {}
+    orderings: dict[str, tuple[int, ...]] = {}
+    with np.load(sample_plan_path) as payload:
+        for item in manifest.get("trial_plans", []):
+            if not isinstance(item, Mapping):
+                continue
+            trial = item.get("trial")
+            array_key = str(item.get("array_key", ""))
+            if array_key in payload:
+                orderings[_stable_json(trial)] = tuple(int(value) for value in payload[array_key])
+    return orderings
+
+
+def _load_context_results(
+    artifact_dir: Path, manifest: Mapping[str, Any]
+) -> dict[str, dict[str, Any]]:
+    result_dir = artifact_dir / str(manifest.get("context_results_dir", "context_results"))
+    if not result_dir.is_dir():
+        return {}
+    rows = {}
+    run_id = str(manifest.get("run_id", ""))
+    fingerprint = str(manifest.get("compatible_fingerprint", ""))
+    for path in sorted(result_dir.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("run_id") != run_id:
+            continue
+        if payload.get("compatible_fingerprint") != fingerprint:
+            continue
+        row = dict(payload.get("row", {}))
+        context_key = str(payload.get("context_key", ""))
+        if context_key:
+            rows[context_key] = row
+    return rows
+
+
+def _write_context_result(
+    artifact_dir: Path,
+    manifest: Mapping[str, Any],
+    context: ConvergenceEvaluationContext,
+    row: Mapping[str, Any],
+) -> None:
+    result_dir = artifact_dir / str(manifest.get("context_results_dir", "context_results"))
+    result_dir.mkdir(parents=True, exist_ok=True)
+    context_key = _context_key(context.method, context.refinement, context.trial)
+    tuning_key = context.tuning_key or ""
+    payload = {
+        "schema_version": 1,
+        "run_id": manifest["run_id"],
+        "compatible_fingerprint": manifest["compatible_fingerprint"],
+        "context_key": context_key,
+        "method": context.method,
+        "refinement": context.refinement,
+        "trial": context.trial,
+        "tuning_key": tuning_key,
+        "row": dict(row),
+    }
+    path = (
+        result_dir / f"{_context_filename(context.method, context.refinement, context.trial)}.json"
+    )
+    path.write_text(
+        json.dumps(_jsonable(payload), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _try_read_tuning_result(artifact_dir: Path | None, tuning_key: str) -> TuningResult | None:
+    if artifact_dir is None:
+        return None
+    try:
+        return read_tuning_artifacts(artifact_dir / "tuning" / tuning_key)
+    except FileNotFoundError:
+        return None
+
+
+def _restart_fingerprint(spec: ConvergenceStudySpec) -> str:
+    payload = {
+        "methods": spec.methods,
+        "metrics": spec.metrics,
+        "primary_metric": spec.primary_metric,
+        "group_columns": spec.group_columns,
+        "tuning_policy": _tuning_policy_fingerprint_payload(spec.tuning_policy),
+        "resampling": asdict(spec.resampling) if spec.resampling is not None else None,
+    }
+    return hashlib.sha256(_stable_json(payload).encode("utf-8")).hexdigest()
+
+
+def _tuning_policy_fingerprint_payload(policy: TuningPolicy) -> dict[str, Any]:
+    return {
+        "mode": policy.mode,
+        "specs": {str(key): asdict(value) for key, value in policy.specs.items()},
+        "fixed_params": policy.fixed_params,
+        "external_params": policy.external_params,
+        "reference_level": policy.reference_level,
+    }
+
+
+def _context_key(method: str, refinement: float | int | str, trial: int | str) -> str:
+    return _stable_json({"method": method, "refinement": refinement, "trial": trial})
+
+
+def _context_filename(method: str, refinement: float | int | str, trial: int | str) -> str:
+    digest = hashlib.sha256(_context_key(method, refinement, trial).encode("utf-8")).hexdigest()
+    return digest[:24]
+
+
+def _sample_plan_array_key(trial: int | str) -> str:
+    digest = hashlib.sha256(_stable_json(trial).encode("utf-8")).hexdigest()
+    return f"trial_{digest[:24]}_dev_ordering"
+
+
+def _stable_json(value: Any) -> str:
+    return json.dumps(_jsonable(value), sort_keys=True, separators=(",", ":"))
 
 
 def _tuning_refinement_for(
@@ -367,16 +635,30 @@ def _evaluate_study_contexts(
     metrics: Sequence[str],
     evaluator: StudyEvaluator,
     max_workers: int,
+    completed_callback: Callable[[ConvergenceEvaluationContext, dict[str, Any]], None]
+    | None = None,
 ) -> list[dict[str, Any]]:
     if max_workers > 1 and len(contexts) > 1:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            return list(
-                executor.map(
-                    lambda context: _evaluate_study_context(context, metrics, evaluator),
-                    contexts,
-                )
-            )
-    return [_evaluate_study_context(context, metrics, evaluator) for context in contexts]
+            future_by_index = {
+                executor.submit(_evaluate_study_context, context, metrics, evaluator): index
+                for index, context in enumerate(contexts)
+            }
+            rows_by_index: dict[int, dict[str, Any]] = {}
+            for future in as_completed(future_by_index):
+                index = future_by_index[future]
+                row = future.result()
+                rows_by_index[index] = row
+                if completed_callback is not None:
+                    completed_callback(contexts[index], row)
+            return [rows_by_index[index] for index in range(len(contexts))]
+    rows = []
+    for context in contexts:
+        row = _evaluate_study_context(context, metrics, evaluator)
+        rows.append(row)
+        if completed_callback is not None:
+            completed_callback(context, row)
+    return rows
 
 
 def _evaluate_study_context(

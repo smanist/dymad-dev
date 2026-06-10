@@ -657,6 +657,31 @@ def write_tuning_artifacts(
             )
 
 
+def read_tuning_artifacts(output_dir: str | Path) -> TuningResult:
+    root = Path(output_dir)
+    result_path = root / "tuning_result.json"
+    evaluations_path = root / "tuning_evaluations.csv"
+    if not result_path.is_file() or not evaluations_path.is_file():
+        raise FileNotFoundError(f"incomplete tuning artifacts under {root}")
+
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    evaluations = _read_evaluations_csv(evaluations_path)
+    failures_path = root / "tuning_failures.csv"
+    failures = (
+        _read_evaluations_csv(failures_path)
+        if failures_path.is_file()
+        else [item for item in evaluations if item.status != "ok" or item.boundary_hit]
+    )
+    return TuningResult(
+        selected_params=dict(payload.get("selected_params", {})),
+        selected_metric=float(payload.get("selected_metric", math.nan)),
+        evaluations=evaluations,
+        failures=failures,
+        candidate_plan=dict(payload.get("candidate_plan", {})),
+        policy=dict(payload.get("policy", {})),
+    )
+
+
 def plot_tuning_search(result: TuningResult, output_path: str | Path) -> Path | None:
     """Plot standalone search history using the same visual conventions as CV plots."""
     ok = [
@@ -734,6 +759,43 @@ def _write_evaluations_csv(path: Path, evaluations: Sequence[TuningEvaluation]) 
                     "extra_metrics": json.dumps(_jsonable(item.extra_metrics), sort_keys=True),
                 }
             )
+
+
+def _read_evaluations_csv(path: Path) -> list[TuningEvaluation]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    evaluations = []
+    for row in rows:
+        evaluations.append(
+            TuningEvaluation(
+                params=json.loads(row.get("params") or "{}"),
+                phase=str(row.get("phase", "")),
+                index=int(row.get("index") or 0),
+                metric_value=_parse_float(row.get("metric_value", "nan")),
+                status=str(row.get("status", "")),
+                elapsed_seconds=_parse_float(row.get("elapsed_seconds", "0")),
+                cache_hit=_parse_bool(row.get("cache_hit", "false")),
+                boundary_hit=_parse_bool(row.get("boundary_hit", "false")),
+                failure_reason=row.get("failure_reason") or None,
+                extra_metrics=json.loads(row.get("extra_metrics") or "{}"),
+            )
+        )
+    return evaluations
+
+
+def _parse_bool(value: str | None) -> bool:
+    return str(value).strip().lower() == "true"
+
+
+def _parse_float(value: str | None) -> float:
+    text = str(value).strip().lower()
+    if text == "inf":
+        return math.inf
+    if text == "-inf":
+        return -math.inf
+    if text == "nan":
+        return math.nan
+    return float(text)
 
 
 def _plot_parameter_names(

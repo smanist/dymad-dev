@@ -15,6 +15,7 @@ from dymad.tuning import (
     bounded_nelder_mead_search_points,
     initial_search_plan,
     plot_tuning_search,
+    read_tuning_artifacts,
     tune,
     write_tuning_artifacts,
 )
@@ -153,6 +154,32 @@ def test_tune_records_failures_and_artifacts(tmp_path) -> None:
     with (tmp_path / "tuning_evaluations.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert rows
+
+
+def test_read_tuning_artifacts_reconstructs_written_result(tmp_path) -> None:
+    result = TuningResult(
+        selected_params={"x": 2},
+        selected_metric=0.0,
+        evaluations=[
+            TuningEvaluation({"x": 0}, "initial", 0, math.inf, "failed", 0.1, False, True, "bad"),
+            TuningEvaluation({"x": 2}, "initial", 1, 0.0, "ok", 0.2),
+        ],
+        failures=[
+            TuningEvaluation({"x": 0}, "initial", 0, math.inf, "failed", 0.1, False, True, "bad")
+        ],
+        candidate_plan={"strategy": "grid", "candidates": [{"x": 0}, {"x": 2}]},
+        policy={"goal": "minimize"},
+    )
+
+    write_tuning_artifacts(result, tmp_path, plot=False)
+    loaded = read_tuning_artifacts(tmp_path)
+
+    assert loaded.selected_params == {"x": 2}
+    assert loaded.selected_metric == pytest.approx(0.0)
+    assert [item.params for item in loaded.evaluations] == [{"x": 0}, {"x": 2}]
+    assert loaded.failures[0].failure_reason == "bad"
+    assert math.isinf(loaded.failures[0].metric_value)
+    assert loaded.candidate_plan["strategy"] == "grid"
 
 
 def test_tuning_artifact_plots_2d_and_3d_searches(tmp_path) -> None:

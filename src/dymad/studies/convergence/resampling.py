@@ -92,13 +92,31 @@ def build_nested_trial_sample_plan(
     trial: int | str,
 ) -> TrialSamplePlan:
     levels = tuple(_as_positive_int_level(level) for level in refinement_levels)
-    max_level = max(levels)
-    required_pool_size = _required_dev_pool_size(policy.validation, max_level)
-    dev_pool_size = policy.dev_pool_size or required_pool_size
-    if dev_pool_size < required_pool_size:
-        raise ValueError("dev_pool_size must cover the largest training level and validation split")
+    dev_pool_size = _dev_pool_size_for_policy(policy, levels)
     rng = np.random.default_rng(_trial_seed(policy.seed, trial))
     dev_ordering = tuple(int(item) for item in rng.permutation(dev_pool_size))
+    return build_nested_trial_sample_plan_from_ordering(
+        policy,
+        refinement_levels=refinement_levels,
+        trial=trial,
+        dev_ordering=dev_ordering,
+    )
+
+
+def build_nested_trial_sample_plan_from_ordering(
+    policy: NestedResamplingPolicy,
+    *,
+    refinement_levels: tuple[float | int | str, ...],
+    trial: int | str,
+    dev_ordering: tuple[int, ...],
+) -> TrialSamplePlan:
+    levels = tuple(_as_positive_int_level(level) for level in refinement_levels)
+    dev_ordering = extend_nested_trial_dev_ordering(
+        policy,
+        refinement_levels=refinement_levels,
+        trial=trial,
+        dev_ordering=dev_ordering,
+    )
     test_indices = tuple(range(policy.test_size))
     level_plans = {
         level: _build_level_sample_plan(
@@ -116,6 +134,25 @@ def build_nested_trial_sample_plan(
         dev_ordering=dev_ordering,
         levels=level_plans,
     )
+
+
+def extend_nested_trial_dev_ordering(
+    policy: NestedResamplingPolicy,
+    *,
+    refinement_levels: tuple[float | int | str, ...],
+    trial: int | str,
+    dev_ordering: tuple[int, ...],
+) -> tuple[int, ...]:
+    levels = tuple(_as_positive_int_level(level) for level in refinement_levels)
+    dev_pool_size = _dev_pool_size_for_policy(policy, levels)
+    if len(dev_ordering) >= dev_pool_size:
+        return tuple(int(item) for item in dev_ordering)
+
+    seen = {int(item) for item in dev_ordering}
+    rng = np.random.default_rng(_trial_seed(policy.seed, trial))
+    generated = tuple(int(item) for item in rng.permutation(dev_pool_size))
+    extension = tuple(item for item in generated if item not in seen)
+    return tuple(int(item) for item in dev_ordering) + extension
 
 
 def _build_level_sample_plan(
@@ -151,6 +188,15 @@ def _required_dev_pool_size(policy: ValidationPolicy, max_level: int) -> int:
     if isinstance(policy, TrainValidCountPolicy):
         return max_level + _validation_count(policy, max_level)
     return max_level
+
+
+def _dev_pool_size_for_policy(policy: NestedResamplingPolicy, levels: tuple[int, ...]) -> int:
+    max_level = max(levels)
+    required_pool_size = _required_dev_pool_size(policy.validation, max_level)
+    dev_pool_size = policy.dev_pool_size or required_pool_size
+    if dev_pool_size < required_pool_size:
+        raise ValueError("dev_pool_size must cover the largest training level and validation split")
+    return dev_pool_size
 
 
 def _level_pool_indices(
