@@ -27,6 +27,13 @@ def smooth_radial_values(points: np.ndarray) -> np.ndarray:
     return values.reshape(-1, 1)
 
 
+def localized_bump_values(points: np.ndarray) -> np.ndarray:
+    x = points[:, 0]
+    y = points[:, 1]
+    values = np.exp(-80.0 * ((x - 0.35) ** 2 + (y + 0.25) ** 2))
+    return values.reshape(-1, 1)
+
+
 def polar(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     radius = np.sqrt(np.sum(points * points, axis=1))
     theta = np.arctan2(points[:, 1], points[:, 0])
@@ -116,6 +123,7 @@ def rbf_eigen_m2_k2_values(points: np.ndarray) -> np.ndarray:
 
 TARGETS = {
     "laplace_neumann_m2_k2": laplace_neumann_m2_k2_values,
+    "localized_bump": localized_bump_values,
     "oscillatory": oscillatory_values,
     "rbf_eigen_m2_k2": rbf_eigen_m2_k2_values,
     "smooth_radial": smooth_radial_values,

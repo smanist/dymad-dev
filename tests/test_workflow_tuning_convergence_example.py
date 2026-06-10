@@ -64,7 +64,7 @@ def test_cartesian_high_freq_requested_mode_targets() -> None:
     from cartesian_high_freq_krr_targets import TARGETS
 
     points = np.asarray([[0.0, 0.0], [0.5, 0.0], [0.25, 0.25], [-0.4, 0.3]])
-    for target_name in ("laplace_neumann_m2_k2", "rbf_eigen_m2_k2"):
+    for target_name in ("laplace_neumann_m2_k2", "localized_bump", "rbf_eigen_m2_k2"):
         values = TARGETS[target_name](points)
         assert values.shape == (len(points), 1)
         assert np.isfinite(values).all()
