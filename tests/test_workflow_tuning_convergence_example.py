@@ -10,14 +10,17 @@ from pathlib import Path
 def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_dir = tmp_path / "study"
+    output_root = tmp_path / "study"
+    output_dir = output_root / "smooth_radial"
 
     result = subprocess.run(
         [
             sys.executable,
             "scripts/tuning_convergence/cartesian_high_freq_krr_cli.py",
             "--workdir",
-            str(output_dir),
+            str(output_root),
+            "--target",
+            "smooth_radial",
             "--levels",
             "8,10",
             "--trials",
@@ -53,14 +56,15 @@ def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
 def test_cartesian_high_freq_tuning_convergence_nested_mode_smoke(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_dir = tmp_path / "nested-study"
+    output_root = tmp_path / "nested-study"
+    output_dir = output_root / "label_values"
 
     result = subprocess.run(
         [
             sys.executable,
             "scripts/tuning_convergence/cartesian_high_freq_krr_cli.py",
             "--workdir",
-            str(output_dir),
+            str(output_root),
             "--levels",
             "8,10",
             "--trials",
@@ -102,14 +106,15 @@ def test_cartesian_high_freq_tuning_convergence_nested_mode_smoke(tmp_path) -> N
 def test_cartesian_high_freq_tuning_convergence_train_valid_count_smoke(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_dir = tmp_path / "train-valid-count-study"
+    output_root = tmp_path / "train-valid-count-study"
+    output_dir = output_root / "label_values"
 
     result = subprocess.run(
         [
             sys.executable,
             "scripts/tuning_convergence/cartesian_high_freq_krr_cli.py",
             "--workdir",
-            str(output_dir),
+            str(output_root),
             "--levels",
             "8,10",
             "--trials",
@@ -150,7 +155,7 @@ def test_cartesian_high_freq_tuning_convergence_train_valid_count_smoke(tmp_path
 def test_cartesian_high_freq_tuning_convergence_ifblock_example_smoke(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_dir = tmp_path / "runs"
+    output_dir = tmp_path / "runs" / "label_values"
     script_path = os.path.join(os.getcwd(), "scripts/tuning_convergence/cartesian_high_freq_krr.py")
     script_dir = str(Path(script_path).parent)
     script_source = Path(script_path).read_text(encoding="utf-8")

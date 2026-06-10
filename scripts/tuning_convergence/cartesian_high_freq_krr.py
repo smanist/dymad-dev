@@ -8,7 +8,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from cartesian_high_freq_krr_problem import make_convergence_plot, problem  # noqa: E402
+from cartesian_high_freq_krr_problem import make_convergence_plot, make_problem  # noqa: E402
+from cartesian_high_freq_krr_targets import TARGETS  # noqa: E402
 from scripts.cli_helpers import set_seed  # noqa: E402
 
 from dymad.studies.convergence import (  # noqa: E402
@@ -17,8 +18,11 @@ from dymad.studies.convergence import (  # noqa: E402
 )
 
 # fmt: off
-OUTPUT_DIR = Path("./runs")
-LEVELS = (512, 1024, 2048, 4096, 8192)
+TARGET_NAME = "smooth_radial"
+if TARGET_NAME == "oscillatory":
+    LEVELS = (512, 1024, 2048, 4096, 8192)
+else:
+    LEVELS = (512, 1024, 2048, 4096)
 TRIALS = 5
 N_VAL = 1024
 N_TEST = 4096
@@ -43,6 +47,9 @@ ifplt = 1
 ifprd = 1
 # fmt: on
 
+
+OUTPUT_DIR = Path("./runs") / TARGET_NAME
+problem = make_problem(TARGET_NAME, TARGETS[TARGET_NAME])
 
 config = ArrayRegressionStudyConfig(
     output_dir=OUTPUT_DIR,

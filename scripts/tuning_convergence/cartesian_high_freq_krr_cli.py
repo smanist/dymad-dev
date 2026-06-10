@@ -8,7 +8,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from cartesian_high_freq_krr_problem import make_convergence_plot, problem
+from cartesian_high_freq_krr_problem import make_convergence_plot, make_problem
+from cartesian_high_freq_krr_targets import DEFAULT_TARGET, TARGETS
 from scripts.cli_helpers import set_seed
 
 from dymad.studies.convergence import ArrayRegressionStudyConfig, run_array_regression_study
@@ -41,7 +42,13 @@ def parse_args() -> argparse.Namespace:
             "cartesian_high_freq unit-disk KRR case."
         )
     )
-    parser.add_argument("--workdir", type=Path, default=BASE_DIR / "cartesian_high_freq_study")
+    parser.add_argument(
+        "--workdir",
+        type=Path,
+        default=BASE_DIR / "cartesian_high_freq_study",
+        help="Root output directory. Artifacts are written under ROOT/TARGET.",
+    )
+    parser.add_argument("--target", choices=sorted(TARGETS), default=DEFAULT_TARGET)
     parser.add_argument("--levels", default="32,64", help="Comma-separated training sizes.")
     parser.add_argument(
         "--trials",
@@ -98,7 +105,7 @@ def parse_args() -> argparse.Namespace:
 
 def config_from_args(args: argparse.Namespace) -> ArrayRegressionStudyConfig:
     return ArrayRegressionStudyConfig(
-        output_dir=args.workdir,
+        output_dir=args.workdir / args.target,
         levels=parse_int_list(args.levels),
         trials=args.trials,
         n_val=args.n_val,
@@ -125,6 +132,7 @@ def main() -> int:
     args = parse_args()
     set_seed(args.seed)
     config = config_from_args(args)
+    problem = make_problem(args.target, TARGETS[args.target])
 
     result = run_array_regression_study(problem, config, make_plot=make_convergence_plot)
     print(f"Wrote convergence artifacts to {Path(config.output_dir).resolve()}")

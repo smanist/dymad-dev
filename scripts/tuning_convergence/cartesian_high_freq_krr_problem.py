@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -35,13 +36,6 @@ def unit_disk_sample(n_samples: int, rng: np.random.Generator) -> np.ndarray:
     radius = np.sqrt(rng.random(n_samples))
     theta = 2.0 * math.pi * rng.random(n_samples)
     return np.column_stack((radius * np.cos(theta), radius * np.sin(theta)))
-
-
-def label_values(points: np.ndarray) -> np.ndarray:
-    x = points[:, 0]
-    y = points[:, 1]
-    values = np.sin(18.0 * x + 11.0 * y) + 0.5 * np.cos(22.0 * x - 5.0 * y)
-    return values.reshape(-1, 1)
 
 
 def kernel_config(method: str, bandwidth_init: float) -> dict[str, Any]:
@@ -213,15 +207,18 @@ def plot_truth_vs_prediction(context: MedianPlotContext, split: Split) -> None:
     plt.close(fig)
 
 
-problem = ArrayRegressionProblem(
-    name=CASE_NAME,
-    methods=METHODS,
-    sample=unit_disk_sample,
-    target=label_values,
-    fit_and_score=fit_and_score,
-    fit_and_score_folds=fit_and_score_folds,
-    tuning_spec=tuning_spec,
-    metrics=("error", "test_physical_rmse", "test_normalized_max_abs", "fit_seconds"),
-    primary_metric="error",
-    prediction_plotter=plot_truth_vs_prediction,
-)
+def make_problem(
+    target_name: str, target: Callable[[np.ndarray], np.ndarray]
+) -> ArrayRegressionProblem:
+    return ArrayRegressionProblem(
+        name=f"{CASE_NAME}_{target_name}",
+        methods=METHODS,
+        sample=unit_disk_sample,
+        target=target,
+        fit_and_score=fit_and_score,
+        fit_and_score_folds=fit_and_score_folds,
+        tuning_spec=tuning_spec,
+        metrics=("error", "test_physical_rmse", "test_normalized_max_abs", "fit_seconds"),
+        primary_metric="error",
+        prediction_plotter=plot_truth_vs_prediction,
+    )
