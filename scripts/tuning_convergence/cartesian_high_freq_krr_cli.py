@@ -14,8 +14,6 @@ from scripts.cli_helpers import set_seed
 
 from dymad.studies.convergence import ArrayRegressionStudyConfig, run_array_regression_study
 
-BASE_DIR = Path(__file__).resolve().parent
-
 
 def parse_int_list(text: str) -> tuple[int, ...]:
     return tuple(int(item) for item in text.split(",") if item.strip())
@@ -35,6 +33,12 @@ def _parse_int_or_tuple_arg(text: str) -> int | tuple[int, ...]:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def default_levels_for_target(target: str) -> tuple[int, ...]:
+    if target == "oscillatory":
+        return (512, 1024, 2048, 4096, 8192)
+    return (512, 1024, 2048, 4096)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -45,36 +49,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--workdir",
         type=Path,
-        default=BASE_DIR / "cartesian_high_freq_study",
+        default=Path("./runs"),
         help="Root output directory. Artifacts are written under ROOT/TARGET.",
     )
     parser.add_argument("--target", choices=sorted(TARGETS), required=True)
-    parser.add_argument("--levels", default="32,64", help="Comma-separated training sizes.")
+    parser.add_argument("--levels", default=None, help="Comma-separated training sizes.")
     parser.add_argument(
         "--trials",
         type=_parse_int_or_tuple_arg,
-        default=1,
+        default=5,
         help=(
             "Trial count. Use N for N trials at every level, or n1,n2,... for "
             "level-specific trial counts."
         ),
     )
-    parser.add_argument("--n-val", type=int, default=32)
-    parser.add_argument("--n-test", type=int, default=128)
+    parser.add_argument("--n-val", type=int, default=1024)
+    parser.add_argument("--n-test", type=int, default=4096)
     parser.add_argument(
         "--resampling-mode",
         choices=("legacy", "nested-fixed-test"),
-        default="legacy",
+        default="nested-fixed-test",
     )
     parser.add_argument(
         "--validation-mode",
         choices=("holdout", "kfold", "train-valid-count"),
-        default="holdout",
+        default="train-valid-count",
     )
     parser.add_argument("--validation-fraction", type=float, default=0.25)
-    parser.add_argument("--validation-size", type=int, default=None)
+    parser.add_argument("--validation-size", type=int, default=1024)
     parser.add_argument("--k-folds", type=int, default=4)
-    parser.add_argument("--pool-multiplier", type=int, default=1)
+    parser.add_argument("--pool-multiplier", type=int, default=2)
     parser.add_argument(
         "--confidence-band",
         choices=("std", "stderr", "iqr", "q05_q95"),
@@ -83,21 +87,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--initial-budget",
         type=_parse_int_or_tuple_arg,
-        default=5,
+        default=(9, 9),
         help=(
             "Initial search budget. Use N for total candidates, or n1,n2,... for "
             "per-parameter grid counts."
         ),
     )
-    parser.add_argument("--refinement-budget", type=int, default=0)
+    parser.add_argument("--refinement-budget", type=int, default=64)
     parser.add_argument(
         "--refinement-strategy",
         choices=("nelder_mead_like", "batch_pattern_search"),
-        default=None,
+        default="batch_pattern_search",
     )
     parser.add_argument("--tuning-policy", choices=("per_trial", "per_level"), default="per_trial")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--max-workers", type=int, default=1)
+    parser.add_argument("--max-workers", type=int, default=4)
+    parser.add_argument("--restart", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--no-plot", action="store_true")
     parser.add_argument("--no-prediction-plots", action="store_true")
     return parser.parse_args()
@@ -106,7 +111,11 @@ def parse_args() -> argparse.Namespace:
 def config_from_args(args: argparse.Namespace) -> ArrayRegressionStudyConfig:
     return ArrayRegressionStudyConfig(
         output_dir=args.workdir / args.target,
-        levels=parse_int_list(args.levels),
+        levels=(
+            default_levels_for_target(args.target)
+            if args.levels is None
+            else parse_int_list(args.levels)
+        ),
         trials=args.trials,
         n_val=args.n_val,
         n_test=args.n_test,
@@ -123,6 +132,7 @@ def config_from_args(args: argparse.Namespace) -> ArrayRegressionStudyConfig:
         k_folds=args.k_folds,
         pool_multiplier=args.pool_multiplier,
         confidence_band=args.confidence_band,
+        restart=args.restart,
         plot=not args.no_plot,
         prediction_plots=not args.no_prediction_plots,
     )

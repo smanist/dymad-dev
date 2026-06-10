@@ -31,6 +31,10 @@ def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
             "8",
             "--n-test",
             "16",
+            "--resampling-mode",
+            "legacy",
+            "--validation-mode",
+            "holdout",
             "--initial-budget",
             "2",
             "--refinement-budget",
@@ -64,6 +68,33 @@ def test_cartesian_high_freq_requested_mode_targets() -> None:
         values = TARGETS[target_name](points)
         assert values.shape == (len(points), 1)
         assert np.isfinite(values).all()
+
+
+def test_cartesian_high_freq_cli_defaults_match_reference(monkeypatch) -> None:
+    sys.path.insert(0, str(Path(os.getcwd()) / "scripts/tuning_convergence"))
+    from cartesian_high_freq_krr_cli import config_from_args, parse_args
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["cartesian_high_freq_krr_cli.py", "--target", "rbf_eigen_m2_k2"],
+    )
+    config = config_from_args(parse_args())
+
+    assert config.output_dir == Path("runs") / "rbf_eigen_m2_k2"
+    assert config.levels == (512, 1024, 2048, 4096)
+    assert config.trials == 5
+    assert config.n_val == 1024
+    assert config.n_test == 4096
+    assert config.initial_budget == (9, 9)
+    assert config.refinement_strategy == "batch_pattern_search"
+    assert config.refinement_budget == 64
+    assert config.max_workers == 4
+    assert config.resampling_mode == "nested-fixed-test"
+    assert config.validation_mode == "train-valid-count"
+    assert config.validation_size == 1024
+    assert config.pool_multiplier == 2
+    assert config.restart is True
 
 
 def test_cartesian_high_freq_tuning_convergence_nested_mode_smoke(tmp_path) -> None:
@@ -172,12 +203,13 @@ def test_cartesian_high_freq_tuning_convergence_train_valid_count_smoke(tmp_path
 def test_cartesian_high_freq_tuning_convergence_ifblock_example_smoke(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_dir = tmp_path / "runs" / "smooth_radial"
+    output_dir = tmp_path / "runs" / "rbf_eigen_m2_k2"
     script_path = os.path.join(os.getcwd(), "scripts/tuning_convergence/cartesian_high_freq_krr.py")
     script_dir = str(Path(script_path).parent)
     script_source = Path(script_path).read_text(encoding="utf-8")
     replacements = {
         "LEVELS = (512, 1024, 2048, 4096, 8192)": "LEVELS = (8, 10)",
+        "LEVELS = (512, 1024, 2048, 4096)": "LEVELS = (8, 10)",
         "TRIALS = 5": "TRIALS = 1",
         "N_VAL = 1024": "N_VAL = 8",
         "N_TEST = 4096": "N_TEST = 16",
