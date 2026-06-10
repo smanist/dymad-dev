@@ -52,11 +52,6 @@ def _env_budget(name: str, default: int | tuple[int, ...]) -> int | tuple[int, .
     return values[0] if len(values) == 1 else values
 
 
-def _env_optional_int(name: str) -> int | None:
-    value = os.environ.get(name)
-    return None if value is None or value == "" else int(value)
-
-
 # fmt: off
 OUTPUT_DIR = Path(os.environ.get("DYMAD_TUNING_OUTPUT_DIR", "./runs"))
 LEVELS = _env_int_tuple("DYMAD_TUNING_LEVELS", (512, 1024, 2048, 4096))
@@ -67,11 +62,11 @@ INITIAL_BUDGET = _env_budget("DYMAD_TUNING_INITIAL_BUDGET", (9, 9))
 REFINEMENT_BUDGET = _env_int("DYMAD_TUNING_REFINEMENT_BUDGET", 20)
 TUNING_POLICY = os.environ.get("DYMAD_TUNING_POLICY", "per_trial")
 SEED = _env_int("DYMAD_TUNING_SEED", 0)
-MAX_WORKERS = _env_int("DYMAD_TUNING_MAX_WORKERS", 2)
-RESAMPLING_MODE = os.environ.get("DYMAD_TUNING_RESAMPLING_MODE", "legacy")
-VALIDATION_MODE = os.environ.get("DYMAD_TUNING_VALIDATION_MODE", "holdout")
+MAX_WORKERS = max(1, min(_env_int("DYMAD_TUNING_MAX_WORKERS", 8), 8))
+RESAMPLING_MODE = os.environ.get("DYMAD_TUNING_RESAMPLING_MODE", "nested-fixed-test")
+VALIDATION_MODE = os.environ.get("DYMAD_TUNING_VALIDATION_MODE", "train-valid-count")
 VALIDATION_FRACTION = float(os.environ.get("DYMAD_TUNING_VALIDATION_FRACTION", "0.25"))
-VALIDATION_SIZE = _env_optional_int("DYMAD_TUNING_VALIDATION_SIZE")
+VALIDATION_SIZE = _env_int("DYMAD_TUNING_VALIDATION_SIZE", 1024)
 K_FOLDS = _env_int("DYMAD_TUNING_K_FOLDS", 4)
 POOL_MULTIPLIER = _env_int("DYMAD_TUNING_POOL_MULTIPLIER", 1)
 CONFIDENCE_BAND = os.environ.get("DYMAD_TUNING_CONFIDENCE_BAND")
@@ -165,7 +160,7 @@ def nested_resampling_policy() -> NestedResamplingPolicy | None:
         test_size=N_TEST,
         validation=validation,
         seed=SEED,
-        dev_pool_size=max(LEVELS) * POOL_MULTIPLIER,
+        dev_pool_size=max(max(LEVELS) * POOL_MULTIPLIER, max(LEVELS) + VALIDATION_SIZE),
     )
 
 
