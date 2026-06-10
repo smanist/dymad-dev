@@ -12,6 +12,22 @@ study machinery but the study owns the scientific details. Prefer a package-prim
 Python implementation plus a thin per-study CLI; do not add MCP exposure unless the package already
 owns a named, serializable workflow.
 
+## Artifact Ignore Guard
+
+At the start of the task, check whether the repo has a git ignore file. If it does, make sure the
+study output tree ignores these intermediate artifact directories:
+
+```text
+context_results/
+median_predictions/
+tuning/
+```
+
+Prefer scoped patterns for the study output location, for example
+`scripts/tuning_convergence/**/tuning/`, instead of a bare `tuning/` pattern in repos that also
+contain source directories such as `src/dymad/tuning`. Add missing ignore entries before running or
+generating study artifacts.
+
 ## Required Repo Context
 
 Before adding or changing runnable scripts under `scripts/`, read:

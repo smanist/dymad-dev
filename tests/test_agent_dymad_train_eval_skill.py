@@ -59,6 +59,9 @@ def test_dymad_tuning_convergence_skill_staging_files_exist() -> None:
     assert "TuningSpec" in skill_body
     assert "tests/test_workflow_<study>_tuning_convergence.py" in skill_body
     assert "Wrote convergence artifacts" in skill_body
+    assert "context_results/" in skill_body
+    assert "median_predictions/" in skill_body
+    assert "tuning/" in skill_body
     assert "do not add MCP exposure" in skill_body
     assert "DyMAD Tuning Convergence" in openai_yaml
     assert "$dymad-tuning-convergence-study" in openai_yaml

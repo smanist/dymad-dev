@@ -17,6 +17,9 @@ examples/**/*.pkl
 scripts/**/*.npz
 scripts/**/*.pkl
 scripts/tuning_convergence/runs
+scripts/tuning_convergence/**/context_results/
+scripts/tuning_convergence/**/median_predictions/
+scripts/tuning_convergence/**/tuning/
 tests/ker_model/*.npz
 tests/ker_model/*/*.npz
 tests/results/*.npz
