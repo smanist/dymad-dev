@@ -33,45 +33,25 @@ from dymad.studies.convergence import (
 )
 
 
-def _env_int(name: str, default: int) -> int:
-    value = os.environ.get(name)
-    return default if value is None else int(value)
-
-
-def _env_int_tuple(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return tuple(int(item) for item in value.split(",") if item.strip())
-
-
-def _env_budget(name: str, default: int | tuple[int, ...]) -> int | tuple[int, ...]:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    values = tuple(int(item) for item in value.split(",") if item.strip())
-    return values[0] if len(values) == 1 else values
-
-
 # fmt: off
-OUTPUT_DIR = Path(os.environ.get("DYMAD_TUNING_OUTPUT_DIR", "./runs"))
-LEVELS = _env_int_tuple("DYMAD_TUNING_LEVELS", (512, 1024, 2048, 4096, 8192))
-TRIALS = _env_int("DYMAD_TUNING_TRIALS", 5)
-N_VAL = _env_int("DYMAD_TUNING_N_VAL", 1024)
-N_TEST = _env_int("DYMAD_TUNING_N_TEST", 4096)
-INITIAL_BUDGET = _env_budget("DYMAD_TUNING_INITIAL_BUDGET", (9, 9))
+OUTPUT_DIR = Path("./runs")
+LEVELS = (512, 1024, 2048, 4096, 8192)
+TRIALS = 5
+N_VAL = 1024
+N_TEST = 4096
+INITIAL_BUDGET = (9, 9)
 REFINEMENT_STRATEGY = "batch_pattern_search"
 REFINEMENT_BUDGET = 64 if REFINEMENT_STRATEGY == "batch_pattern_search" else 20
-TUNING_POLICY = os.environ.get("DYMAD_TUNING_POLICY", "per_trial")
-SEED = _env_int("DYMAD_TUNING_SEED", 0)
+TUNING_POLICY = "per_trial"
+SEED = 0
 MAX_WORKERS = 4
-RESAMPLING_MODE = os.environ.get("DYMAD_TUNING_RESAMPLING_MODE", "nested-fixed-test")
-VALIDATION_MODE = os.environ.get("DYMAD_TUNING_VALIDATION_MODE", "train-valid-count")
-VALIDATION_FRACTION = float(os.environ.get("DYMAD_TUNING_VALIDATION_FRACTION", "0.25"))
-VALIDATION_SIZE = _env_int("DYMAD_TUNING_VALIDATION_SIZE", 1024)
-K_FOLDS = _env_int("DYMAD_TUNING_K_FOLDS", 4)
-POOL_MULTIPLIER = _env_int("DYMAD_TUNING_POOL_MULTIPLIER", 2)
-CONFIDENCE_BAND = os.environ.get("DYMAD_TUNING_CONFIDENCE_BAND")
+RESAMPLING_MODE = "nested-fixed-test"
+VALIDATION_MODE = "train-valid-count"
+VALIDATION_FRACTION = 0.25
+VALIDATION_SIZE = 1024
+K_FOLDS = 4
+POOL_MULTIPLIER = 2
+CONFIDENCE_BAND = None
 
 RESTART = True
 
