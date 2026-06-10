@@ -150,6 +150,39 @@ def test_tune_supports_parallel_batch_pattern_search_refinement() -> None:
     assert any(item.phase == "refinement" for item in result.evaluations)
 
 
+def test_batch_pattern_search_refinement_starts_from_log_space_best_point() -> None:
+    target = {
+        "bandwidth_init": 0.5623413251903494,
+        "ridge_init": 1.3335214321633207e-14,
+    }
+    spec = TuningSpec(
+        parameters=(
+            ParameterSpec("bandwidth_init", bounds=(1e-4, 1e2), scale="log"),
+            ParameterSpec("ridge_init", bounds=(1e-16, 1e1), scale="log"),
+        ),
+        initial_budget=(9, 9),
+        refinement_strategy="batch_pattern_search",
+        refinement_budget=2,
+    )
+
+    def evaluate(params):
+        return float(
+            (math.log10(params["bandwidth_init"]) - math.log10(target["bandwidth_init"])) ** 2
+            + (math.log10(params["ridge_init"]) - math.log10(target["ridge_init"])) ** 2
+        )
+
+    result = tune(spec, evaluate, max_workers=2)
+    refinement = [item for item in result.evaluations if item.phase == "refinement"]
+
+    assert refinement
+    assert refinement[0].params["bandwidth_init"] == pytest.approx(target["bandwidth_init"])
+    assert refinement[0].params["ridge_init"] == pytest.approx(target["ridge_init"])
+    assert refinement[0].params["bandwidth_init"] != pytest.approx(1e-4)
+    assert refinement[0].params["ridge_init"] > 1e-15
+    assert refinement[1].params["bandwidth_init"] == pytest.approx(3.1622776601683813)
+    assert refinement[1].params["ridge_init"] == pytest.approx(target["ridge_init"])
+
+
 def test_tune_warns_when_refinement_strategy_mismatches_worker_count() -> None:
     def evaluate(params):
         return float((params["x"] - 0.5) ** 2)

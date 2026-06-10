@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import random
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -54,15 +55,16 @@ def _env_budget(name: str, default: int | tuple[int, ...]) -> int | tuple[int, .
 
 # fmt: off
 OUTPUT_DIR = Path(os.environ.get("DYMAD_TUNING_OUTPUT_DIR", "./runs"))
-LEVELS = _env_int_tuple("DYMAD_TUNING_LEVELS", (512, 1024, 2048, 4096))
+LEVELS = _env_int_tuple("DYMAD_TUNING_LEVELS", (512, 1024, 2048, 4096, 8192))
 TRIALS = _env_int("DYMAD_TUNING_TRIALS", 5)
 N_VAL = _env_int("DYMAD_TUNING_N_VAL", 1024)
 N_TEST = _env_int("DYMAD_TUNING_N_TEST", 4096)
 INITIAL_BUDGET = _env_budget("DYMAD_TUNING_INITIAL_BUDGET", (9, 9))
-REFINEMENT_BUDGET = _env_int("DYMAD_TUNING_REFINEMENT_BUDGET", 20)
+REFINEMENT_STRATEGY = "batch_pattern_search"
+REFINEMENT_BUDGET = 64 if REFINEMENT_STRATEGY == "batch_pattern_search" else 20
 TUNING_POLICY = os.environ.get("DYMAD_TUNING_POLICY", "per_trial")
 SEED = _env_int("DYMAD_TUNING_SEED", 0)
-MAX_WORKERS = max(1, min(_env_int("DYMAD_TUNING_MAX_WORKERS", 8), 8))
+MAX_WORKERS = 4
 RESAMPLING_MODE = os.environ.get("DYMAD_TUNING_RESAMPLING_MODE", "nested-fixed-test")
 VALIDATION_MODE = os.environ.get("DYMAD_TUNING_VALIDATION_MODE", "train-valid-count")
 VALIDATION_FRACTION = float(os.environ.get("DYMAD_TUNING_VALIDATION_FRACTION", "0.25"))
@@ -176,7 +178,10 @@ if ifrun:
             trials=tuple(range(TRIALS)) if isinstance(TRIALS, int) else TRIALS,
         )
     specs = {
-        method: tuning_spec("validation_normalized_rmse", INITIAL_BUDGET, REFINEMENT_BUDGET)
+        method: replace(
+            tuning_spec("validation_normalized_rmse", INITIAL_BUDGET, REFINEMENT_BUDGET),
+            refinement_strategy=REFINEMENT_STRATEGY if REFINEMENT_BUDGET > 0 else None,
+        )
         for method in METHODS
     }
     study_spec = ConvergenceStudySpec(
@@ -198,7 +203,7 @@ if ifrun:
         median_plotter=median_plotter if ifprd else None,
         max_workers=MAX_WORKERS,
         tuning_max_workers=MAX_WORKERS,
-        restart=RESTART
+        restart=RESTART,
     )
     print(f"Wrote convergence artifacts to {OUTPUT_DIR}")
     if result.diagnostics:

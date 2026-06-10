@@ -397,8 +397,9 @@ def tune(spec: TuningSpec, evaluator: MetricEvaluator, *, max_workers: int = 1) 
                     _parameter_search_coordinate_from_value(parameter, item.params[parameter.name])
                     for parameter in spec.parameters
                 ]
-                for item in ranked[: max(1, max_workers)]
+                for item in ranked[:1]
             ]
+            initial_step = _batch_pattern_initial_step(spec, plan)
 
             def _evaluate_points(points: Sequence[np.ndarray]) -> list[float]:
                 params_by_point = [
@@ -434,6 +435,7 @@ def tune(spec: TuningSpec, evaluator: MetricEvaluator, *, max_workers: int = 1) 
                 max_evaluations=spec.refinement_budget,
                 batch_size=max_workers,
                 initial_points=initial_points,
+                initial_step=initial_step,
             )
             ok = [
                 item
@@ -831,7 +833,7 @@ def batch_pattern_search_points(
 
     span = upper - lower
     budget = max_evaluations if max_evaluations is not None else max(20, 8 * lower.size)
-    unit_centers = _initial_pattern_centers(initial_points, dim=lower.size)
+    unit_centers = _initial_pattern_centers(initial_points, lower=lower, span=span)
     evaluated_points: list[np.ndarray] = []
     score_cache: dict[tuple[float, ...], float] = {}
     current_centers = unit_centers[: max(1, batch_size)]
@@ -878,8 +880,7 @@ def batch_pattern_search_points(
             score_cache[key] = _objective_score(float(metric), goal=goal)
             evaluated_points.append(point)
         best_keys = sorted(score_cache, key=lambda key: score_cache[key])
-        center_count = max(1, min(batch_size, len(best_keys)))
-        current_centers = [np.asarray(key, dtype=float) for key in best_keys[:center_count]]
+        current_centers = [np.asarray(best_keys[0], dtype=float)]
         current_best = best_keys[0]
         if (
             previous_best is not None
@@ -1216,6 +1217,14 @@ def _initial_budget_total(budget: int | tuple[int, ...]) -> int:
     return math.prod(int(value) for value in budget) if isinstance(budget, tuple) else int(budget)
 
 
+def _batch_pattern_initial_step(spec: TuningSpec, plan: Mapping[str, Any]) -> float:
+    if plan.get("strategy") != "grid":
+        return 0.25
+    counts = _grid_counts(spec.parameters, spec.initial_budget)
+    spacings = [1.0 / float(count - 1) for count in counts if count > 1]
+    return min(spacings) if spacings else 0.25
+
+
 def _grid_candidates(
     parameters: Sequence[ParameterSpec], budget: int | tuple[int, ...]
 ) -> list[dict[str, Any]]:
@@ -1533,13 +1542,21 @@ def _append_pattern_candidate(
 
 
 def _initial_pattern_centers(
-    initial_points: Sequence[Sequence[float]] | None, *, dim: int
+    initial_points: Sequence[Sequence[float]] | None,
+    *,
+    lower: np.ndarray,
+    span: np.ndarray,
 ) -> list[np.ndarray]:
     if initial_points:
-        centers = [_clip_unit(np.asarray(point, dtype=float)) for point in initial_points]
+        centers = []
+        for point in initial_points:
+            raw = np.asarray(point, dtype=float)
+            if raw.shape != lower.shape:
+                raise ValueError("initial_points must match lower_bounds and upper_bounds shape")
+            centers.append(_clip_unit((raw - lower) / span))
         if centers:
             return centers
-    return [np.full(dim, 0.5, dtype=float)]
+    return [np.full(lower.size, 0.5, dtype=float)]
 
 
 def _pattern_search_targets(center: np.ndarray, *, step: float) -> list[np.ndarray]:

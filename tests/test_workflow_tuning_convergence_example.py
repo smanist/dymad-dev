@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import subprocess
 import sys
@@ -154,8 +155,8 @@ def test_cartesian_high_freq_tuning_convergence_ifblock_example_smoke(tmp_path) 
             "DYMAD_TUNING_N_VAL": "8",
             "DYMAD_TUNING_N_TEST": "16",
             "DYMAD_TUNING_INITIAL_BUDGET": "2",
-            "DYMAD_TUNING_REFINEMENT_BUDGET": "0",
-            "DYMAD_TUNING_MAX_WORKERS": "1",
+            "DYMAD_TUNING_REFINEMENT_BUDGET": "2",
+            "DYMAD_TUNING_MAX_WORKERS": "2",
             "DYMAD_TUNING_RESAMPLING_MODE": "nested-fixed-test",
             "DYMAD_TUNING_VALIDATION_MODE": "kfold",
             "DYMAD_TUNING_K_FOLDS": "2",
@@ -180,6 +181,10 @@ def test_cartesian_high_freq_tuning_convergence_ifblock_example_smoke(tmp_path) 
     assert (output_dir / "convergence.png").is_file()
     with (output_dir / "raw_results.csv").open(newline="", encoding="utf-8") as handle:
         expected_count = len(list(csv.DictReader(handle)))
-    assert len(list((output_dir / "tuning").glob("*/tuning_result.json"))) == expected_count
+    tuning_results = list((output_dir / "tuning").glob("*/tuning_result.json"))
+    assert len(tuning_results) == expected_count
+    for tuning_result in tuning_results:
+        payload = json.loads(tuning_result.read_text(encoding="utf-8"))
+        assert payload["policy"]["refinement_strategy"] == "batch_pattern_search"
     assert len(list((output_dir / "tuning").glob("*/tuning_search.png"))) == expected_count
     assert len(list((output_dir / "median_predictions").glob("*.png"))) == expected_count
