@@ -9,7 +9,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from cartesian_high_freq_krr_problem import make_convergence_plot, make_problem
-from cartesian_high_freq_krr_targets import DEFAULT_TARGET, TARGETS
+from cartesian_high_freq_krr_targets import TARGETS
 from scripts.cli_helpers import set_seed
 
 from dymad.studies.convergence import ArrayRegressionStudyConfig, run_array_regression_study
@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
         default=BASE_DIR / "cartesian_high_freq_study",
         help="Root output directory. Artifacts are written under ROOT/TARGET.",
     )
-    parser.add_argument("--target", choices=sorted(TARGETS), default=DEFAULT_TARGET)
+    parser.add_argument("--target", choices=sorted(TARGETS), required=True)
     parser.add_argument("--levels", default="32,64", help="Comma-separated training sizes.")
     parser.add_argument(
         "--trials",

@@ -6,6 +6,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import numpy as np
+
 
 def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
     env = os.environ.copy()
@@ -53,11 +55,22 @@ def test_cartesian_high_freq_tuning_convergence_example_smoke(tmp_path) -> None:
     assert len(list((output_dir / "median_predictions").glob("*.png"))) == 4
 
 
+def test_cartesian_high_freq_requested_mode_targets() -> None:
+    sys.path.insert(0, str(Path(os.getcwd()) / "scripts/tuning_convergence"))
+    from cartesian_high_freq_krr_targets import TARGETS
+
+    points = np.asarray([[0.0, 0.0], [0.5, 0.0], [0.25, 0.25], [-0.4, 0.3]])
+    for target_name in ("laplace_neumann_m2_k2", "rbf_eigen_m2_k2"):
+        values = TARGETS[target_name](points)
+        assert values.shape == (len(points), 1)
+        assert np.isfinite(values).all()
+
+
 def test_cartesian_high_freq_tuning_convergence_nested_mode_smoke(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
     output_root = tmp_path / "nested-study"
-    output_dir = output_root / "label_values"
+    output_dir = output_root / "oscillatory"
 
     result = subprocess.run(
         [
@@ -65,6 +78,8 @@ def test_cartesian_high_freq_tuning_convergence_nested_mode_smoke(tmp_path) -> N
             "scripts/tuning_convergence/cartesian_high_freq_krr_cli.py",
             "--workdir",
             str(output_root),
+            "--target",
+            "oscillatory",
             "--levels",
             "8,10",
             "--trials",
@@ -107,7 +122,7 @@ def test_cartesian_high_freq_tuning_convergence_train_valid_count_smoke(tmp_path
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
     output_root = tmp_path / "train-valid-count-study"
-    output_dir = output_root / "label_values"
+    output_dir = output_root / "oscillatory"
 
     result = subprocess.run(
         [
@@ -115,6 +130,8 @@ def test_cartesian_high_freq_tuning_convergence_train_valid_count_smoke(tmp_path
             "scripts/tuning_convergence/cartesian_high_freq_krr_cli.py",
             "--workdir",
             str(output_root),
+            "--target",
+            "oscillatory",
             "--levels",
             "8,10",
             "--trials",
@@ -155,7 +172,7 @@ def test_cartesian_high_freq_tuning_convergence_train_valid_count_smoke(tmp_path
 def test_cartesian_high_freq_tuning_convergence_ifblock_example_smoke(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_dir = tmp_path / "runs" / "label_values"
+    output_dir = tmp_path / "runs" / "smooth_radial"
     script_path = os.path.join(os.getcwd(), "scripts/tuning_convergence/cartesian_high_freq_krr.py")
     script_dir = str(Path(script_path).parent)
     script_source = Path(script_path).read_text(encoding="utf-8")

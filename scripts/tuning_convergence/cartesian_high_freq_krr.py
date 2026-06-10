@@ -18,7 +18,9 @@ from dymad.studies.convergence import (  # noqa: E402
 )
 
 # fmt: off
-TARGET_NAME = "smooth_radial"
+# TARGET_NAME = "smooth_radial"
+# TARGET_NAME = "laplace_neumann_m2_k2"
+TARGET_NAME = "rbf_eigen_m2_k2"
 if TARGET_NAME == "oscillatory":
     LEVELS = (512, 1024, 2048, 4096, 8192)
 else:
