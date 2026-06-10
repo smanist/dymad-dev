@@ -68,8 +68,10 @@ VALIDATION_MODE = os.environ.get("DYMAD_TUNING_VALIDATION_MODE", "train-valid-co
 VALIDATION_FRACTION = float(os.environ.get("DYMAD_TUNING_VALIDATION_FRACTION", "0.25"))
 VALIDATION_SIZE = _env_int("DYMAD_TUNING_VALIDATION_SIZE", 1024)
 K_FOLDS = _env_int("DYMAD_TUNING_K_FOLDS", 4)
-POOL_MULTIPLIER = _env_int("DYMAD_TUNING_POOL_MULTIPLIER", 1)
+POOL_MULTIPLIER = _env_int("DYMAD_TUNING_POOL_MULTIPLIER", 2)
 CONFIDENCE_BAND = os.environ.get("DYMAD_TUNING_CONFIDENCE_BAND")
+
+RESTART = True
 
 ifrun = 1
 ifplt = 1
@@ -196,6 +198,7 @@ if ifrun:
         median_plotter=median_plotter if ifprd else None,
         max_workers=MAX_WORKERS,
         tuning_max_workers=MAX_WORKERS,
+        restart=RESTART
     )
     print(f"Wrote convergence artifacts to {OUTPUT_DIR}")
     if result.diagnostics:

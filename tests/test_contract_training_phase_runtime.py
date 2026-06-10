@@ -14,6 +14,7 @@ from dymad.training import driver
 from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import (
     CVResult,
+    batch_pattern_search_points,
     bounded_nelder_mead_search_points,
     nelder_mead_like_search_indices,
     select_best_cv_result,
@@ -1512,6 +1513,31 @@ def test_bounded_nelder_mead_search_points_respects_bounds() -> None:
     assert np.linalg.norm(best_point - target) <= 0.25
 
 
+def test_batch_pattern_search_points_respects_bounds_and_batches() -> None:
+    target = np.array([0.75, 0.25], dtype=float)
+    batch_lengths: list[int] = []
+
+    def _evaluate(points: list[np.ndarray]) -> list[float]:
+        batch_lengths.append(len(points))
+        return [float(np.sum((point - target) ** 2)) for point in points]
+
+    evaluated = batch_pattern_search_points(
+        lower_bounds=[0.0, 0.0],
+        upper_bounds=[1.0, 1.0],
+        evaluate_points=_evaluate,
+        max_evaluations=8,
+        batch_size=3,
+    )
+
+    assert evaluated
+    assert any(length > 1 for length in batch_lengths)
+    for point in evaluated:
+        assert np.all(point >= 0.0)
+        assert np.all(point <= 1.0)
+    best_point = min(evaluated, key=lambda point: float(np.sum((point - target) ** 2)))
+    assert np.linalg.norm(best_point - target) <= 0.25
+
+
 def test_single_split_driver_train_supports_nelder_mead_like_search(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -1788,6 +1814,132 @@ cv:
     assert all(9 <= weak_n <= 17 and weak_n % 2 == 1 for _, weak_n in evaluated_params)
     assert best_result.params["model.koopman_dimension"] == 2
     assert best_result.params["phases.0.weak_form_params.N"] == 11
+
+
+def test_single_split_driver_train_supports_bounded_batch_pattern_search(
+    monkeypatch, tmp_path
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+  koopman_dimension: 1
+training:
+  weak_form_params:
+    N: 13
+phases:
+  - trainer: Weak
+cv:
+  search:
+    mode: batch_pattern_search
+    bounds:
+      model.koopman_dimension: [0, 4]
+      training.weak_form_params.N:
+        lower: 9
+        upper: 17
+        parity: odd
+    max_iterations: 8
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+    monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+
+    evaluated_params: list[tuple[int, int]] = []
+
+    def _fake_run_cv_single(args):
+        koopman_dimension = int(args["combo"]["model.koopman_dimension"])
+        weak_n = int(args["combo"]["phases.0.weak_form_params.N"])
+        evaluated_params.append((koopman_dimension, weak_n))
+        model_prefix = f"{args['checkpoint_prefix']}/fake_{args['combo_idx']}_{args['fold_idx']}"
+        with open(f"{model_prefix}.pt", "wb") as handle:
+            handle.write(b"pt")
+        np.savez_compressed(
+            f"{model_prefix}_summary.npz",
+            koopman_dimension=np.array([koopman_dimension]),
+            weak_n=np.array([weak_n]),
+        )
+        return {
+            "combo_idx": args["combo_idx"],
+            "fold_idx": args["fold_idx"],
+            "combo": args["combo"],
+            "metric_value": float((koopman_dimension - 2) ** 2 + 0.01 * (weak_n - 11) ** 2),
+            "model_prefix": model_prefix,
+        }
+
+    monkeypatch.setattr(driver, "run_cv_single", _fake_run_cv_single)
+    monkeypatch.setattr(driver, "plot_cv_results", lambda *args, **kwargs: None)
+
+    with pytest.warns(RuntimeWarning, match="batch_pattern_search"):
+        trainer = driver.SingleSplitDriver(
+            config_path=str(config_path),
+            model_class=torch.nn.Module,
+            device=torch.device("cpu"),
+        )
+    _, best_result, all_results = trainer.train()
+
+    assert all_results
+    assert evaluated_params
+    assert all(0 <= koopman_dimension <= 4 for koopman_dimension, _ in evaluated_params)
+    assert all(9 <= weak_n <= 17 and weak_n % 2 == 1 for _, weak_n in evaluated_params)
+    assert best_result.params["model.koopman_dimension"] == 2
+    assert best_result.params["phases.0.weak_form_params.N"] == 11
+
+
+def test_single_split_driver_warns_for_parallel_nelder_mead_like_search(
+    monkeypatch, tmp_path
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+model:
+  name: demo
+phases:
+  - trainer: Linear
+cv:
+  param_grid:
+    model.koopman_dimension: [0, 1, 2]
+  search:
+    mode: nelder_mead_like
+    max_iterations: 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+    monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+
+    with pytest.warns(RuntimeWarning, match="nelder_mead_like"):
+        driver.SingleSplitDriver(
+            config_path=str(config_path),
+            model_class=torch.nn.Module,
+            device=torch.device("cpu"),
+            max_workers=2,
+        )
 
 
 def test_single_split_driver_bounded_nelder_mead_evaluates_integer_upper_endpoint(

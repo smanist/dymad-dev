@@ -182,11 +182,13 @@ Compilation resolves:
 - allowed user overrides
 - optional single-split CV sweep settings under `overrides.cv`, including:
   - `param_grid` candidate definitions for grid or legacy candidate-based adaptive search
-  - optional `search` policy whose `mode` selects the CV optimizer (`grid` or
-    `nelder_mead_like`) plus optimizer-specific config such as simplex-style coefficients; in
-    current runtime `nelder_mead_like` can either run a bounded continuous search over
-    `search.bounds` lower/upper pairs or, when bounds are omitted, the legacy adaptive path over
-    numeric single-split `param_grid` candidates
+  - optional `search` policy whose `mode` selects the CV optimizer (`grid`,
+    `nelder_mead_like`, or `batch_pattern_search`) plus optimizer-specific config such as
+    simplex-style coefficients; in current runtime `nelder_mead_like` can either run a bounded
+    continuous search over `search.bounds` lower/upper pairs or, when bounds are omitted, the
+    legacy adaptive path over numeric single-split `param_grid` candidates, while
+    `batch_pattern_search` evaluates bounded or numeric-grid pattern batches to keep parallel
+    workers busy during refinement
   - optional `selection` policy (`goal` plus ordered tie-breakers) for deterministic best-model
     choice
 - phase overrides normalized against matching profile defaults so trainer-specific phase config is

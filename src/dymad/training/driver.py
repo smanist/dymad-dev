@@ -1,6 +1,7 @@
 import copy
 import os
 import shutil
+import warnings
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from dymad.training.execution_services import ExecutionServices
 from dymad.training.helper import (
     CVResult,
     aggregate_cv_results,
+    batch_pattern_search_indices,
+    batch_pattern_search_points,
     bounded_nelder_mead_search_points,
     get_by_dotted_key,
     iter_param_grid,
@@ -173,6 +176,7 @@ class DriverBase:
 
     CV_SEARCH_HANDLERS: dict[str, str] = {
         "grid": "_execute_cv_search_grid",
+        "batch_pattern_search": "_execute_cv_search_batch_pattern_search",
         "nelder_mead_like": "_execute_cv_search_nelder_mead_like",
     }
 
@@ -219,9 +223,10 @@ class DriverBase:
             )
         bounds = search.get("bounds")
         if bounds is not None:
-            if self.cv_search_mode != "nelder_mead_like":
+            if self.cv_search_mode not in {"nelder_mead_like", "batch_pattern_search"}:
                 raise TypeError(
-                    "cv.search.bounds is only supported with cv.search.mode='nelder_mead_like'."
+                    "cv.search.bounds is only supported with cv.search.mode='nelder_mead_like' "
+                    "or 'batch_pattern_search'."
                 )
             if self.param_grid is not None:
                 raise TypeError(
@@ -255,6 +260,21 @@ class DriverBase:
         self.cv_search_expansion = float(expansion)
         self.cv_search_contraction = float(contraction)
         self.cv_search_shrink = float(shrink)
+
+        if self.cv_search_mode == "nelder_mead_like" and self.max_workers > 1:
+            warnings.warn(
+                "cv.search.mode='nelder_mead_like' is sequential; use "
+                "cv.search.mode='batch_pattern_search' to use parallel workers.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        if self.cv_search_mode == "batch_pattern_search" and self.max_workers == 1:
+            warnings.warn(
+                "cv.search.mode='batch_pattern_search' is intended for max_workers > 1; "
+                "with max_workers=1 it runs as sequential batched pattern search.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
         # Setup paths
         self.base_name = self.base_config["model"]["name"]
@@ -529,6 +549,43 @@ class DriverBase:
             return self._parallel_run(trial_args_list)
         return self._serial_run(trial_args_list)
 
+    def _run_indexed_combos(
+        self,
+        *,
+        indexed_combos: Sequence[tuple[int, dict[str, Any]]],
+        fold_specs: Sequence[tuple[int, dict[str, Any]]],
+    ) -> list[CVResult]:
+        trial_args_list = []
+        for combo_idx, combo in indexed_combos:
+            trial_args_list.extend(
+                self._trial_args_for_combo(
+                    combo_idx=combo_idx,
+                    combo=combo,
+                    fold_specs=fold_specs,
+                )
+            )
+        raw_results = (
+            self._parallel_trial_results(trial_args_list)
+            if self.max_workers > 1
+            else self._serial_trial_results(trial_args_list)
+        )
+        rows_by_combo: dict[int, list[dict[str, Any]]] = {
+            combo_idx: [] for combo_idx, _combo in indexed_combos
+        }
+        for row in raw_results:
+            rows_by_combo[int(row["combo_idx"])].append(row)
+        results: list[CVResult] = []
+        for combo_idx, combo in indexed_combos:
+            rows = sorted(rows_by_combo[combo_idx], key=lambda row: int(row["fold_idx"]))
+            results.append(
+                CVResult(
+                    params=dict(combo),
+                    fold_metrics=[float(row["metric_value"]) for row in rows],
+                    checkpoint_paths=[str(row["model_prefix"]) for row in rows],
+                )
+            )
+        return results
+
     def _execute_cv_search(
         self,
         *,
@@ -582,6 +639,122 @@ class DriverBase:
         return self._execute_cv_search_nelder_mead_like_param_grid(
             fold_specs=fold_specs,
             combo_offset=combo_offset,
+        )
+
+    def _execute_cv_search_batch_pattern_search(
+        self,
+        *,
+        fold_specs: Sequence[tuple[int, dict[str, Any]]],
+        combo_offset: int,
+        continue_training: bool,
+    ) -> CVSearchRunResult:
+        if continue_training:
+            raise ValueError(
+                "continue_training is not supported with cv.search.mode='batch_pattern_search'."
+            )
+        if self.cv_search_bounds is not None:
+            return self._execute_cv_search_batch_pattern_search_bounds(
+                fold_specs=fold_specs,
+                combo_offset=combo_offset,
+            )
+        return self._execute_cv_search_batch_pattern_search_param_grid(
+            fold_specs=fold_specs,
+            combo_offset=combo_offset,
+        )
+
+    def _execute_cv_search_batch_pattern_search_bounds(
+        self,
+        *,
+        fold_specs: Sequence[tuple[int, dict[str, Any]]],
+        combo_offset: int,
+    ) -> CVSearchRunResult:
+        bounded_combo_results: dict[tuple[tuple[str, Any], ...], CVResult] = {}
+        ordered_combo_keys: list[tuple[tuple[str, Any], ...]] = []
+
+        def _evaluate_points(points: Sequence[np.ndarray]) -> list[float]:
+            indexed_combos: list[tuple[int, dict[str, Any]]] = []
+            key_order: list[tuple[tuple[str, Any], ...]] = []
+            for point in points:
+                combo = self._bounded_search_combo(point)
+                combo_key = self._combo_key(combo)
+                if combo_key in bounded_combo_results or combo_key in key_order:
+                    continue
+                combo_idx = combo_offset + len(bounded_combo_results) + len(indexed_combos)
+                indexed_combos.append((combo_idx, combo))
+                key_order.append(combo_key)
+            if indexed_combos:
+                results = self._run_indexed_combos(
+                    indexed_combos=indexed_combos,
+                    fold_specs=fold_specs,
+                )
+                for combo_key, result in zip(key_order, results, strict=True):
+                    bounded_combo_results[combo_key] = result
+                    ordered_combo_keys.append(combo_key)
+            metrics: list[float] = []
+            for point in points:
+                combo_key = self._combo_key(self._bounded_search_combo(point))
+                metrics.append(bounded_combo_results[combo_key].mean_metric)
+            return metrics
+
+        evaluated_points = batch_pattern_search_points(
+            lower_bounds=[spec.lower for spec in self.cv_search_bound_specs],
+            upper_bounds=[spec.upper for spec in self.cv_search_bound_specs],
+            evaluate_points=_evaluate_points,
+            goal=self.cv_selection_goal,
+            max_evaluations=self.cv_search_max_iterations,
+            batch_size=self.max_workers,
+            step_shrink=self.cv_search_shrink,
+        )
+        all_results = [bounded_combo_results[key] for key in ordered_combo_keys]
+        self.cv_logger.info(
+            "Batch pattern search evaluated %d search points and %d unique parameter "
+            "combinations across %d dimensions.",
+            len(evaluated_points),
+            len(all_results),
+            len(self.cv_search_bound_specs),
+        )
+        return CVSearchRunResult(
+            all_results=all_results,
+            selection_combo_indices=list(range(combo_offset, combo_offset + len(all_results))),
+        )
+
+    def _execute_cv_search_batch_pattern_search_param_grid(
+        self,
+        *,
+        fold_specs: Sequence[tuple[int, dict[str, Any]]],
+        combo_offset: int,
+    ) -> CVSearchRunResult:
+        combos = self._materialize_param_grid_combos()
+        combo_results: dict[int, CVResult] = {}
+
+        def _evaluate_indices(indices: Sequence[int]) -> list[float]:
+            fresh = [index for index in indices if index not in combo_results]
+            if fresh:
+                indexed_combos = [(index + combo_offset, combos[index]) for index in fresh]
+                results = self._run_indexed_combos(
+                    indexed_combos=indexed_combos,
+                    fold_specs=fold_specs,
+                )
+                for index, result in zip(fresh, results, strict=True):
+                    combo_results[index] = result
+            return [combo_results[index].mean_metric for index in indices]
+
+        evaluated_indices = batch_pattern_search_indices(
+            combos,
+            evaluate_indices=_evaluate_indices,
+            goal=self.cv_selection_goal,
+            max_evaluations=self.cv_search_max_iterations,
+            batch_size=self.max_workers,
+            step_shrink=self.cv_search_shrink,
+        )
+        self.cv_logger.info(
+            "Batch pattern search evaluated %d/%d candidates.",
+            len(evaluated_indices),
+            len(combos),
+        )
+        return CVSearchRunResult(
+            all_results=[combo_results[index] for index in evaluated_indices],
+            selection_combo_indices=[index + combo_offset for index in evaluated_indices],
         )
 
     def _execute_cv_search_nelder_mead_like_bounds(
@@ -833,6 +1006,11 @@ class DriverBase:
         return tm
 
     def _parallel_run(self, trial_args_list: list[dict[str, Any]]) -> list[CVResult]:
+        return aggregate_cv_results(self._parallel_trial_results(trial_args_list))
+
+    def _parallel_trial_results(
+        self, trial_args_list: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         results = []
         with ProcessPoolExecutor(max_workers=self.max_workers) as ex:
             futures = [ex.submit(run_cv_single, args) for args in trial_args_list]
@@ -846,10 +1024,12 @@ class DriverBase:
                     f"{self.metric} = {res['metric_value']:.4e} "
                     f"Params {res['combo']}"
                 )
-        all_results = aggregate_cv_results(results)
-        return all_results
+        return results
 
     def _serial_run(self, trial_args_list: list[dict[str, Any]]) -> list[CVResult]:
+        return aggregate_cv_results(self._serial_trial_results(trial_args_list))
+
+    def _serial_trial_results(self, trial_args_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
         results = []
         for args in trial_args_list:
             res = run_cv_single(args)
@@ -860,8 +1040,7 @@ class DriverBase:
                 f"{self.metric} = {res['metric_value']:.4e} "
                 f"Params {res['combo']}"
             )
-        all_results = aggregate_cv_results(results)
-        return all_results
+        return results
 
 
 class KFoldDriver(DriverBase):

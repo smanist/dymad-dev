@@ -163,6 +163,40 @@ def test_convergence_restart_reuses_tuning_artifact_for_new_contexts(tmp_path) -
     assert [row["params"] for row in result.raw_rows] == [{"alpha": 1}, {"alpha": 1}]
 
 
+def test_convergence_interrupted_during_tuning_writes_restart_anchors(tmp_path) -> None:
+    tuning_spec = TuningSpec(
+        parameters=(ParameterSpec("alpha", bounds=(0, 2), value_kind="int"),),
+        initial_budget=3,
+    )
+    spec = ConvergenceStudySpec(
+        methods=("m",),
+        refinement_levels=(8,),
+        trials=1,
+        metrics=("error",),
+        tuning_policy=TuningPolicy(mode="per_trial", specs={"m": tuning_spec}),
+        artifact_dir=tmp_path,
+        resampling=NestedResamplingPolicy(
+            test_size=4,
+            validation=KFoldValidationPolicy(k=4),
+            seed=3,
+        ),
+    )
+
+    def interrupt_tuning(context: TuningEvaluationContext):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_convergence_study(
+            spec,
+            lambda context: {"error": 1.0},
+            tuning_context_evaluator=interrupt_tuning,
+        )
+
+    assert (tmp_path / "convergence_restart.json").is_file()
+    assert (tmp_path / "sample_plans.npz").is_file()
+    assert not (tmp_path / "context_results").exists()
+
+
 def test_convergence_restart_extends_sample_plan_binary_ordering(tmp_path) -> None:
     base = ConvergenceStudySpec(
         methods=("m",),

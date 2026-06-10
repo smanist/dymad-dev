@@ -5,6 +5,8 @@ from dymad.tuning.core import (
     TuningEvaluation,
     TuningResult,
     TuningSpec,
+    batch_pattern_search_indices,
+    batch_pattern_search_points,
     bounded_nelder_mead_search_points,
     initial_search_plan,
     iter_param_grid,
@@ -18,6 +20,8 @@ from dymad.tuning.core import (
 
 __all__ = [
     "bounded_nelder_mead_search_points",
+    "batch_pattern_search_indices",
+    "batch_pattern_search_points",
     "initial_search_plan",
     "iter_param_grid",
     "nelder_mead_like_search_indices",

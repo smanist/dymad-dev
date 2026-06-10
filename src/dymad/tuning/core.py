@@ -5,6 +5,7 @@ import json
 import math
 import random
 import time
+import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -139,8 +140,11 @@ class TuningSpec:
         _validate_initial_budget(self.initial_budget, len(self.parameters))
         if self.initial_strategy not in {"auto", "grid", "random"}:
             raise ValueError("TuningSpec.initial_strategy must be auto, grid, or random")
-        if self.refinement_strategy not in {None, "nelder_mead_like"}:
-            raise ValueError("TuningSpec.refinement_strategy must be None or nelder_mead_like")
+        if self.refinement_strategy not in {None, "nelder_mead_like", "batch_pattern_search"}:
+            raise ValueError(
+                "TuningSpec.refinement_strategy must be None, nelder_mead_like, "
+                "or batch_pattern_search"
+            )
         if self.refinement_budget < 0:
             raise ValueError("TuningSpec.refinement_budget must be non-negative")
 
@@ -313,6 +317,13 @@ def tune(spec: TuningSpec, evaluator: MetricEvaluator, *, max_workers: int = 1) 
 
     best = ok[select_best_evaluation(ok, goal=spec.goal, tie_breakers=spec.selection_tie_breakers)]
     if spec.refinement_strategy == "nelder_mead_like" and spec.refinement_budget > 0:
+        if max_workers > 1:
+            warnings.warn(
+                "refinement_strategy='nelder_mead_like' is sequential; use "
+                "refinement_strategy='batch_pattern_search' to use parallel workers.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         numeric_params = [
             parameter for parameter in spec.parameters if parameter.bounds is not None
         ]
@@ -343,6 +354,86 @@ def tune(spec: TuningSpec, evaluator: MetricEvaluator, *, max_workers: int = 1) 
                 evaluate_point=_evaluate_point,
                 goal=spec.goal,
                 max_iterations=spec.refinement_budget,
+            )
+            ok = [
+                item
+                for item in evaluations
+                if item.status == "ok" and math.isfinite(item.metric_value)
+            ]
+            best = ok[
+                select_best_evaluation(ok, goal=spec.goal, tie_breakers=spec.selection_tie_breakers)
+            ]
+    elif spec.refinement_strategy == "batch_pattern_search" and spec.refinement_budget > 0:
+        if max_workers == 1:
+            warnings.warn(
+                "refinement_strategy='batch_pattern_search' is intended for max_workers > 1; "
+                "with max_workers=1 it runs as sequential batched pattern search.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        numeric_params = [
+            parameter for parameter in spec.parameters if parameter.bounds is not None
+        ]
+        if len(numeric_params) == len(spec.parameters):
+            lower = [
+                _parameter_search_lower_bound(parameter)
+                for parameter in spec.parameters
+                if parameter.bounds is not None
+            ]
+            upper = [
+                _parameter_search_upper_bound(parameter)
+                for parameter in spec.parameters
+                if parameter.bounds is not None
+            ]
+            ranked = sorted(
+                ok,
+                key=lambda item: (
+                    _objective_score(item.metric_value, goal=spec.goal),
+                    item.index,
+                ),
+            )
+            initial_points = [
+                [
+                    _parameter_search_coordinate_from_value(parameter, item.params[parameter.name])
+                    for parameter in spec.parameters
+                ]
+                for item in ranked[: max(1, max_workers)]
+            ]
+
+            def _evaluate_points(points: Sequence[np.ndarray]) -> list[float]:
+                params_by_point = [
+                    {
+                        parameter.name: parameter.project(
+                            _parameter_value_from_search_coordinate(parameter, value)
+                        )
+                        for parameter, value in zip(spec.parameters, point, strict=True)
+                    }
+                    for point in points
+                ]
+                if max_workers > 1 and len(params_by_point) > 1:
+                    items = _evaluate_projected_candidates_parallel(
+                        projected_candidates=params_by_point,
+                        phase="refinement",
+                        start_index=len(evaluations),
+                        run_projected=run_projected,
+                        evaluations=evaluations,
+                        cache=cache,
+                        max_workers=max_workers,
+                    )
+                    return [item.metric_value for item in items]
+                return [
+                    evaluate(params, "refinement", len(evaluations)).metric_value
+                    for params in params_by_point
+                ]
+
+            batch_pattern_search_points(
+                lower_bounds=lower,
+                upper_bounds=upper,
+                evaluate_points=_evaluate_points,
+                goal=spec.goal,
+                max_evaluations=spec.refinement_budget,
+                batch_size=max_workers,
+                initial_points=initial_points,
             )
             ok = [
                 item
@@ -438,6 +529,78 @@ def _evaluate_initial_candidates_parallel(
             )
         evaluations.append(item)
         cache[key] = first_result
+
+
+def _evaluate_projected_candidates_parallel(
+    *,
+    projected_candidates: Sequence[dict[str, Any]],
+    phase: str,
+    start_index: int,
+    run_projected: Callable[[dict[str, Any], str, int], TuningEvaluation],
+    evaluations: list[TuningEvaluation],
+    cache: dict[tuple[tuple[str, Any], ...], TuningEvaluation],
+    max_workers: int,
+) -> list[TuningEvaluation]:
+    first_index_by_key: dict[tuple[tuple[str, Any], ...], int] = {}
+    for offset, projected in enumerate(projected_candidates):
+        key = _params_key(projected)
+        if key not in cache:
+            first_index_by_key.setdefault(key, offset)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_by_offset = {
+            offset: executor.submit(
+                run_projected,
+                projected_candidates[offset],
+                phase,
+                start_index + offset,
+            )
+            for offset in sorted(first_index_by_key.values())
+        }
+        first_results = {offset: future_by_offset[offset].result() for offset in future_by_offset}
+
+    result_by_key = {
+        _params_key(projected_candidates[offset]): first_results[offset] for offset in first_results
+    }
+    batch_items: list[TuningEvaluation] = []
+    for offset, projected in enumerate(projected_candidates):
+        key = _params_key(projected)
+        if key in cache:
+            source = cache[key]
+            item = TuningEvaluation(
+                params=dict(source.params),
+                phase=phase,
+                index=start_index + offset,
+                metric_value=source.metric_value,
+                status=source.status,
+                elapsed_seconds=0.0,
+                cache_hit=True,
+                boundary_hit=source.boundary_hit,
+                failure_reason=source.failure_reason,
+                extra_metrics=dict(source.extra_metrics),
+            )
+        else:
+            first_offset = first_index_by_key[key]
+            source = result_by_key[key]
+            if first_offset == offset:
+                item = source
+            else:
+                item = TuningEvaluation(
+                    params=dict(source.params),
+                    phase=phase,
+                    index=start_index + offset,
+                    metric_value=source.metric_value,
+                    status=source.status,
+                    elapsed_seconds=0.0,
+                    cache_hit=True,
+                    boundary_hit=source.boundary_hit,
+                    failure_reason=source.failure_reason,
+                    extra_metrics=dict(source.extra_metrics),
+                )
+            cache[key] = source
+        evaluations.append(item)
+        batch_items.append(item)
+    return batch_items
 
 
 def nelder_mead_like_search_indices(
@@ -543,6 +706,192 @@ def nelder_mead_like_search_indices(
         if len(score_cache) == len(combos):
             break
     return evaluated_order
+
+
+def batch_pattern_search_indices(
+    combos: Sequence[dict[str, Any]],
+    *,
+    evaluate_indices: Callable[[Sequence[int]], Sequence[float]],
+    goal: str = "minimize",
+    max_evaluations: int | None = None,
+    batch_size: int = 1,
+    initial_step: float = 0.25,
+    step_shrink: float = 0.5,
+) -> list[int]:
+    if goal not in {"minimize", "maximize"}:
+        raise ValueError("goal must be either 'minimize' or 'maximize'")
+    if max_evaluations is not None and max_evaluations <= 0:
+        raise ValueError("max_evaluations must be a positive integer when provided")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    if initial_step <= 0.0:
+        raise ValueError("initial_step must be positive")
+    if not 0.0 < step_shrink < 1.0:
+        raise ValueError("step_shrink must be in (0, 1)")
+    if not combos:
+        return []
+
+    vectors = _combo_numeric_matrix(combos)
+    if vectors is None:
+        budget = len(combos) if max_evaluations is None else min(max_evaluations, len(combos))
+        return _evaluate_index_batch(
+            list(range(budget)),
+            evaluate_indices=evaluate_indices,
+            score_cache={},
+            evaluated_order=[],
+            goal=goal,
+        )
+
+    vectors = _normalize_vectors(vectors)
+    center = np.full(vectors.shape[1], 0.5, dtype=float)
+    first_index = _nearest_candidate_index(center, vectors, excluded=set())
+    if first_index is None:
+        return []
+
+    budget = max_evaluations if max_evaluations is not None else len(combos)
+    budget = min(budget, len(combos))
+    evaluated_order: list[int] = []
+    score_cache: dict[int, float] = {}
+    current_best = first_index
+    step = initial_step
+
+    while len(score_cache) < budget:
+        pending: list[int] = []
+        if current_best not in score_cache:
+            pending.append(current_best)
+        excluded = set(score_cache) | set(pending)
+        for target in _pattern_search_targets(vectors[current_best], step=step):
+            if len(score_cache) + len(pending) >= budget or len(pending) >= batch_size:
+                break
+            index = _nearest_candidate_index(target, vectors, excluded=excluded)
+            if index is None:
+                continue
+            pending.append(index)
+            excluded.add(index)
+        if not pending:
+            step *= step_shrink
+            if step <= 1e-12:
+                break
+            continue
+        previous_best = _best_index(score_cache, goal=goal) if score_cache else None
+        _evaluate_index_batch(
+            pending,
+            evaluate_indices=evaluate_indices,
+            score_cache=score_cache,
+            evaluated_order=evaluated_order,
+            goal=goal,
+        )
+        current_best = _best_index(score_cache, goal=goal)
+        if (
+            previous_best is not None
+            and current_best == previous_best
+            and not _has_new_pattern_index(
+                vectors[current_best],
+                vectors=vectors,
+                step=step,
+                score_cache=score_cache,
+            )
+        ):
+            step *= step_shrink
+    return evaluated_order
+
+
+def batch_pattern_search_points(
+    *,
+    lower_bounds: Sequence[float],
+    upper_bounds: Sequence[float],
+    evaluate_points: Callable[[Sequence[np.ndarray]], Sequence[float]],
+    goal: str = "minimize",
+    max_evaluations: int | None = None,
+    batch_size: int = 1,
+    initial_points: Sequence[Sequence[float]] | None = None,
+    initial_step: float = 0.25,
+    step_shrink: float = 0.5,
+) -> list[np.ndarray]:
+    if goal not in {"minimize", "maximize"}:
+        raise ValueError("goal must be either 'minimize' or 'maximize'")
+    if max_evaluations is not None and max_evaluations <= 0:
+        raise ValueError("max_evaluations must be a positive integer when provided")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    if initial_step <= 0.0:
+        raise ValueError("initial_step must be positive")
+    if not 0.0 < step_shrink < 1.0:
+        raise ValueError("step_shrink must be in (0, 1)")
+    lower = np.asarray(lower_bounds, dtype=float)
+    upper = np.asarray(upper_bounds, dtype=float)
+    if lower.ndim != 1 or upper.ndim != 1 or lower.shape != upper.shape:
+        raise ValueError("lower_bounds and upper_bounds must be 1D arrays with matching shapes")
+    if lower.size == 0:
+        return []
+    if np.any(lower >= upper):
+        raise ValueError(
+            "each lower bound must be strictly less than the corresponding upper bound"
+        )
+
+    span = upper - lower
+    budget = max_evaluations if max_evaluations is not None else max(20, 8 * lower.size)
+    unit_centers = _initial_pattern_centers(initial_points, dim=lower.size)
+    evaluated_points: list[np.ndarray] = []
+    score_cache: dict[tuple[float, ...], float] = {}
+    current_centers = unit_centers[: max(1, batch_size)]
+    step = initial_step
+
+    def denormalize(unit_point: np.ndarray) -> np.ndarray:
+        return lower + _clip_unit(unit_point) * span
+
+    while len(score_cache) < budget:
+        pending_keys: list[tuple[float, ...]] = []
+        for center in current_centers:
+            if len(score_cache) + len(pending_keys) >= budget or len(pending_keys) >= batch_size:
+                break
+            _append_pattern_candidate(
+                pending_keys,
+                _unit_key(center),
+                score_cache=score_cache,
+            )
+        for center in current_centers:
+            if len(score_cache) + len(pending_keys) >= budget or len(pending_keys) >= batch_size:
+                break
+            for target in _pattern_search_targets(center, step=step):
+                if (
+                    len(score_cache) + len(pending_keys) >= budget
+                    or len(pending_keys) >= batch_size
+                ):
+                    break
+                _append_pattern_candidate(
+                    pending_keys,
+                    _unit_key(target),
+                    score_cache=score_cache,
+                )
+        if not pending_keys:
+            step *= step_shrink
+            if step <= 1e-12:
+                break
+            continue
+        previous_best = _best_point_key(score_cache, goal=goal) if score_cache else None
+        points = [denormalize(np.asarray(key, dtype=float)) for key in pending_keys]
+        scores = evaluate_points([point.copy() for point in points])
+        if len(scores) != len(points):
+            raise ValueError("evaluate_points must return one score per input point")
+        for key, point, metric in zip(pending_keys, points, scores, strict=True):
+            score_cache[key] = _objective_score(float(metric), goal=goal)
+            evaluated_points.append(point)
+        best_keys = sorted(score_cache, key=lambda key: score_cache[key])
+        center_count = max(1, min(batch_size, len(best_keys)))
+        current_centers = [np.asarray(key, dtype=float) for key in best_keys[:center_count]]
+        current_best = best_keys[0]
+        if (
+            previous_best is not None
+            and current_best == previous_best
+            and not _has_new_pattern_point(
+                np.asarray(current_best, dtype=float),
+                step=step,
+                score_cache=score_cache,
+            )
+        ):
+            step *= step_shrink
+    return evaluated_points
 
 
 def bounded_nelder_mead_search_points(
@@ -916,6 +1265,11 @@ def _parameter_value_from_search_coordinate(parameter: ParameterSpec, coordinate
     return math.exp(float(coordinate)) if parameter.scale == "log" else float(coordinate)
 
 
+def _parameter_search_coordinate_from_value(parameter: ParameterSpec, value: Any) -> float:
+    numeric = float(value)
+    return math.log(numeric) if parameter.scale == "log" else numeric
+
+
 def _values_for_parameter(parameter: ParameterSpec, count: int) -> list[Any]:
     if parameter.values is not None:
         return list(parameter.values[:count])
@@ -1154,6 +1508,114 @@ def _normalize_vectors(vectors: np.ndarray) -> np.ndarray:
     spans = np.ptp(vectors, axis=0)
     spans = np.where(spans == 0.0, 1.0, spans)
     return (vectors - mins) / spans
+
+
+def _objective_score(metric: float, *, goal: str) -> float:
+    return metric if goal == "minimize" else -metric
+
+
+def _clip_unit(point: np.ndarray) -> np.ndarray:
+    return np.clip(np.asarray(point, dtype=float), 0.0, 1.0)
+
+
+def _unit_key(point: np.ndarray) -> tuple[float, ...]:
+    return tuple(float(value) for value in np.round(_clip_unit(point), decimals=12))
+
+
+def _append_pattern_candidate(
+    pending_keys: list[tuple[float, ...]],
+    key: tuple[float, ...],
+    *,
+    score_cache: Mapping[tuple[float, ...], float],
+) -> None:
+    if key not in score_cache and key not in pending_keys:
+        pending_keys.append(key)
+
+
+def _initial_pattern_centers(
+    initial_points: Sequence[Sequence[float]] | None, *, dim: int
+) -> list[np.ndarray]:
+    if initial_points:
+        centers = [_clip_unit(np.asarray(point, dtype=float)) for point in initial_points]
+        if centers:
+            return centers
+    return [np.full(dim, 0.5, dtype=float)]
+
+
+def _pattern_search_targets(center: np.ndarray, *, step: float) -> list[np.ndarray]:
+    dim = center.size
+    targets: list[np.ndarray] = []
+    for axis in range(dim):
+        plus = center.copy()
+        plus[axis] += step
+        targets.append(_clip_unit(plus))
+        minus = center.copy()
+        minus[axis] -= step
+        targets.append(_clip_unit(minus))
+    if dim > 1:
+        diagonal = np.full(dim, step / math.sqrt(dim), dtype=float)
+        targets.append(_clip_unit(center + diagonal))
+        targets.append(_clip_unit(center - diagonal))
+    return targets
+
+
+def _evaluate_index_batch(
+    indices: Sequence[int],
+    *,
+    evaluate_indices: Callable[[Sequence[int]], Sequence[float]],
+    score_cache: dict[int, float],
+    evaluated_order: list[int],
+    goal: str,
+) -> list[int]:
+    fresh = [index for index in indices if index not in score_cache]
+    if not fresh:
+        return []
+    metrics = evaluate_indices(fresh)
+    if len(metrics) != len(fresh):
+        raise ValueError("evaluate_indices must return one score per input index")
+    for index, metric in zip(fresh, metrics, strict=True):
+        score_cache[index] = _objective_score(float(metric), goal=goal)
+        evaluated_order.append(index)
+    return fresh
+
+
+def _has_new_pattern_index(
+    center: np.ndarray,
+    *,
+    vectors: np.ndarray,
+    step: float,
+    score_cache: Mapping[int, float],
+) -> bool:
+    excluded = set(score_cache)
+    for target in _pattern_search_targets(center, step=step):
+        index = _nearest_candidate_index(target, vectors, excluded=excluded)
+        if index is not None:
+            return True
+    return False
+
+
+def _has_new_pattern_point(
+    center: np.ndarray,
+    *,
+    step: float,
+    score_cache: Mapping[tuple[float, ...], float],
+) -> bool:
+    for target in _pattern_search_targets(center, step=step):
+        if _unit_key(target) not in score_cache:
+            return True
+    return False
+
+
+def _best_index(score_cache: Mapping[int, float], *, goal: str) -> int:
+    del goal
+    return min(score_cache, key=lambda index: score_cache[index])
+
+
+def _best_point_key(
+    score_cache: Mapping[tuple[float, ...], float], *, goal: str
+) -> tuple[float, ...]:
+    del goal
+    return min(score_cache, key=lambda key: score_cache[key])
 
 
 def _initial_simplex_indices(vectors: np.ndarray, *, simplex_size: int) -> list[int]:

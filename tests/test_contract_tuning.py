@@ -12,6 +12,7 @@ from dymad.tuning import (
     TuningEvaluation,
     TuningResult,
     TuningSpec,
+    batch_pattern_search_points,
     bounded_nelder_mead_search_points,
     initial_search_plan,
     plot_tuning_search,
@@ -108,6 +109,74 @@ def test_log_scale_nelder_mead_refinement_searches_in_log_coordinates() -> None:
 
     assert result.selected_params["alpha"] == pytest.approx(target, rel=1e-3)
     assert result.selected_metric < 1e-6
+
+
+def test_batch_pattern_search_points_evaluates_refinement_batches() -> None:
+    target = np.array([0.75, 0.25], dtype=float)
+    batch_lengths: list[int] = []
+
+    def evaluate(points):
+        batch_lengths.append(len(points))
+        return [float(np.sum((point - target) ** 2)) for point in points]
+
+    evaluated = batch_pattern_search_points(
+        lower_bounds=[0.0, 0.0],
+        upper_bounds=[1.0, 1.0],
+        evaluate_points=evaluate,
+        max_evaluations=8,
+        batch_size=3,
+    )
+
+    assert evaluated
+    assert any(length > 1 for length in batch_lengths)
+    best_point = min(evaluated, key=lambda point: np.sum((point - target) ** 2))
+    assert np.linalg.norm(best_point - target) <= 0.25
+
+
+def test_tune_supports_parallel_batch_pattern_search_refinement() -> None:
+    spec = TuningSpec(
+        parameters=(ParameterSpec("x", bounds=(0.0, 1.0)),),
+        initial_budget=2,
+        refinement_strategy="batch_pattern_search",
+        refinement_budget=8,
+    )
+
+    def evaluate(params):
+        return float((params["x"] - 0.75) ** 2)
+
+    result = tune(spec, evaluate, max_workers=2)
+
+    assert result.selected_params["x"] == pytest.approx(0.75, abs=0.15)
+    assert any(item.phase == "refinement" for item in result.evaluations)
+
+
+def test_tune_warns_when_refinement_strategy_mismatches_worker_count() -> None:
+    def evaluate(params):
+        return float((params["x"] - 0.5) ** 2)
+
+    with pytest.warns(RuntimeWarning, match="nelder_mead_like"):
+        tune(
+            TuningSpec(
+                parameters=(ParameterSpec("x", bounds=(0.0, 1.0)),),
+                initial_budget=2,
+                refinement_strategy="nelder_mead_like",
+                refinement_budget=1,
+            ),
+            evaluate,
+            max_workers=2,
+        )
+
+    with pytest.warns(RuntimeWarning, match="batch_pattern_search"):
+        tune(
+            TuningSpec(
+                parameters=(ParameterSpec("x", bounds=(0.0, 1.0)),),
+                initial_budget=2,
+                refinement_strategy="batch_pattern_search",
+                refinement_budget=1,
+            ),
+            evaluate,
+            max_workers=1,
+        )
 
 
 def test_bounded_nelder_mead_search_points_respects_bounds() -> None:

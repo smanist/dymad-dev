@@ -184,6 +184,12 @@ def run_convergence_study(
         else {}
     )
 
+    def persist_restart_state() -> None:
+        if artifact_dir is not None and restart_state is not None:
+            _write_restart_artifacts(artifact_dir, restart_state, sample_plan_cache)
+
+    persist_restart_state()
+
     for method in spec.methods:
         for level_index, refinement in enumerate(spec.refinement_levels):
             for trial in _trials_for_level(spec, level_index):
@@ -212,6 +218,7 @@ def run_convergence_study(
                         tuning_key=tuning_key,
                     )
                     contexts.append(context)
+                    persist_restart_state()
                     continue
                 sample_plan = _sample_plan_for(
                     spec,
@@ -227,6 +234,7 @@ def run_convergence_study(
                     sample_plan_cache,
                     existing_orderings=existing_orderings,
                 )
+                persist_restart_state()
                 tuning_result = _resolve_tuning(
                     spec,
                     method,

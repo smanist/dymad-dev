@@ -139,7 +139,7 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
             "contraction",
             "shrink",
         ),
-        "mode_options": ("grid", "nelder_mead_like"),
+        "mode_options": ("grid", "nelder_mead_like", "batch_pattern_search"),
         "default_mode": "grid",
     }
     assert detail.cv_schema.selection_schema == {
@@ -156,7 +156,7 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
         "true k-fold cross-validation.",
         "cv.search.mode selects the CV optimizer. Grid search operates on cv.param_grid; "
-        "Nelder-Mead-like search operates on cv.search.bounds when provided.",
+        "Nelder-Mead-like and batch pattern search operate on cv.search.bounds when provided.",
         "The best parameter combination is selected by cv.selection (default: minimize mean "
         "metric, then std_metric, then combo_index).",
         "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
@@ -166,6 +166,9 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "may also specify parity='odd' or 'even'. Without bounds, it falls back to the legacy "
         "adaptive path over numeric param_grid values; non-numeric values fall back to grid "
         "order.",
+        "cv.search.mode='batch_pattern_search' runs a bounded batched pattern search over "
+        "cv.search.bounds or a batched adaptive walk over numeric param_grid values; use it with "
+        "run.max_workers > 1 to keep parallel workers busy during refinement.",
     )
     assert detail.translation_guidance == (
         "For any ordered trainer names mentioned by the user, emit one overrides.phases "
@@ -177,6 +180,9 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "provide lower/upper bounds in overrides.cv.search.bounds, optionally adding "
         "parity='odd' or 'even' for integer-valued fields. If bounds are omitted, the runtime "
         "uses the legacy adaptive walk over param_grid candidates.",
+        "For parallel refinement requests, prefer overrides.cv.search.mode='batch_pattern_search' "
+        "with run.max_workers greater than 1; it uses cv.search.max_iterations as an evaluation "
+        "budget.",
         "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
         "Supported optimizer trainer names are Linear, OneStep, Weak, and NODE.",
         "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "

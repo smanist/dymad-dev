@@ -103,10 +103,16 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
     )
     assert (
         detail["data"]["detail"]["translation_guidance"][3]
-        == "Use overrides.cv.selection to control model choice policy (goal and tie_breakers)."
+        == "For parallel refinement requests, prefer "
+        "overrides.cv.search.mode='batch_pattern_search' with run.max_workers greater than 1; "
+        "it uses cv.search.max_iterations as an evaluation budget."
     )
     assert (
         detail["data"]["detail"]["translation_guidance"][4]
+        == "Use overrides.cv.selection to control model choice policy (goal and tie_breakers)."
+    )
+    assert (
+        detail["data"]["detail"]["translation_guidance"][5]
         == "Supported optimizer trainer names are Linear, OneStep, Weak, and NODE."
     )
     assert detail["data"]["detail"]["cv_schema"] == {
@@ -125,7 +131,7 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
                 "contraction",
                 "shrink",
             ],
-            "mode_options": ["grid", "nelder_mead_like"],
+            "mode_options": ["grid", "nelder_mead_like", "batch_pattern_search"],
             "default_mode": "grid",
         },
         "selection_schema": {
@@ -139,7 +145,7 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
             "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is "
             "not true k-fold cross-validation.",
             "cv.search.mode selects the CV optimizer. Grid search operates on cv.param_grid; "
-            "Nelder-Mead-like search operates on cv.search.bounds when provided.",
+            "Nelder-Mead-like and batch pattern search operate on cv.search.bounds when provided.",
             "The best parameter combination is selected by cv.selection (default: minimize mean "
             "metric, then std_metric, then combo_index).",
             "Param-grid dotted keys may target either explicit phases.* paths or legacy "
@@ -149,6 +155,9 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
             "integer-valued bounds may also specify parity='odd' or 'even'. Without bounds, "
             "it falls back to the legacy adaptive path over numeric param_grid values; "
             "non-numeric values fall back to grid order.",
+            "cv.search.mode='batch_pattern_search' runs a bounded batched pattern search over "
+            "cv.search.bounds or a batched adaptive walk over numeric param_grid values; use it "
+            "with run.max_workers > 1 to keep parallel workers busy during refinement.",
         ],
     }
     assert (

@@ -123,6 +123,52 @@ def nelder_mead_like_search_indices(
     )
 
 
+def batch_pattern_search_indices(
+    combos: Sequence[dict[str, Any]],
+    *,
+    evaluate_indices: Callable[[Sequence[int]], Sequence[float]],
+    goal: str = "minimize",
+    max_evaluations: int | None = None,
+    batch_size: int = 1,
+    initial_step: float = 0.25,
+    step_shrink: float = 0.5,
+) -> list[int]:
+    return _tuning.batch_pattern_search_indices(
+        combos,
+        evaluate_indices=evaluate_indices,
+        goal=goal,
+        max_evaluations=max_evaluations,
+        batch_size=batch_size,
+        initial_step=initial_step,
+        step_shrink=step_shrink,
+    )
+
+
+def batch_pattern_search_points(
+    *,
+    lower_bounds: Sequence[float],
+    upper_bounds: Sequence[float],
+    evaluate_points: Callable[[Sequence[np.ndarray]], Sequence[float]],
+    goal: str = "minimize",
+    max_evaluations: int | None = None,
+    batch_size: int = 1,
+    initial_points: Sequence[Sequence[float]] | None = None,
+    initial_step: float = 0.25,
+    step_shrink: float = 0.5,
+) -> list[np.ndarray]:
+    return _tuning.batch_pattern_search_points(
+        lower_bounds=lower_bounds,
+        upper_bounds=upper_bounds,
+        evaluate_points=evaluate_points,
+        goal=goal,
+        max_evaluations=max_evaluations,
+        batch_size=batch_size,
+        initial_points=initial_points,
+        initial_step=initial_step,
+        step_shrink=step_shrink,
+    )
+
+
 def bounded_nelder_mead_search_points(
     *,
     lower_bounds: Sequence[float],
