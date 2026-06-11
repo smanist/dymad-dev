@@ -62,6 +62,10 @@ def test_dymad_tuning_convergence_skill_staging_files_exist() -> None:
     assert "context_results/" in skill_body
     assert "median_predictions/" in skill_body
     assert "tuning/" in skill_body
+    assert "prediction_plotter" in skill_body
+    assert "truth on the test/sample points" in skill_body
+    assert "white" in skill_body
+    assert "zero error" in skill_body
     assert "do not add MCP exposure" in skill_body
     assert "DyMAD Tuning Convergence" in openai_yaml
     assert "$dymad-tuning-convergence-study" in openai_yaml

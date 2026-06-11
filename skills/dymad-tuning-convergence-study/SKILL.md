@@ -81,11 +81,26 @@ In `<study>_problem.py`:
 4. Implement `fit_and_score_folds(...)` when nested validation or k-fold tuning is supported.
 5. Implement `tuning_spec(metric_name, initial_budget, refinement_budget, refinement_strategy)`.
 6. Include a primary metric that exists in final evaluation rows, commonly `"error"`.
-7. Add optional convergence and prediction plotters only when useful and keep them noninteractive
-   with an Agg backend for testability.
+7. Implement prediction plotting by default unless the user asks to skip it, and keep all plotting
+   noninteractive with an Agg backend for testability.
 
 Make tests cheap by ensuring the study can run with tiny levels, one trial, and a tiny tuning
 budget.
+
+## Prediction Plotting
+
+Default to adding a `prediction_plotter(context: MedianPlotContext, split: Split) -> None` helper
+and pass it into `ArrayRegressionProblem`. Use `context.method` and `context.params` to fit or load
+the typical selected model for the given refinement level, then plot:
+
+1. truth on the test/sample points
+2. prediction on the same points
+3. error on the same points
+
+For 2D function studies, use a contour-style plot when the samples support it. Keep truth and
+prediction on comparable color limits. For the error contour, use a colormap/norm where white
+corresponds to exactly zero error; for signed error, use a diverging map centered at zero, and for
+absolute error use a sequential map whose zero/low endpoint is white.
 
 ## CLI Wrapper Checklist
 
