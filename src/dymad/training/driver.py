@@ -5,6 +5,7 @@ import warnings
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from threading import Lock
 from typing import Any, cast
 
 import numpy as np
@@ -21,6 +22,7 @@ from dymad.training.helper import (
     bounded_nelder_mead_search_points,
     get_by_dotted_key,
     iter_param_grid,
+    multi_start_bounded_nelder_mead_search_points,
     nelder_mead_like_search_indices,
     select_best_cv_result,
     set_by_dotted_key,
@@ -177,6 +179,7 @@ class DriverBase:
     CV_SEARCH_HANDLERS: dict[str, str] = {
         "grid": "_execute_cv_search_grid",
         "batch_pattern_search": "_execute_cv_search_batch_pattern_search",
+        "multi_start_nelder_mead": "_execute_cv_search_multi_start_nelder_mead",
         "nelder_mead_like": "_execute_cv_search_nelder_mead_like",
     }
 
@@ -223,10 +226,14 @@ class DriverBase:
             )
         bounds = search.get("bounds")
         if bounds is not None:
-            if self.cv_search_mode not in {"nelder_mead_like", "batch_pattern_search"}:
+            if self.cv_search_mode not in {
+                "nelder_mead_like",
+                "batch_pattern_search",
+                "multi_start_nelder_mead",
+            }:
                 raise TypeError(
                     "cv.search.bounds is only supported with cv.search.mode='nelder_mead_like' "
-                    "or 'batch_pattern_search'."
+                    "'batch_pattern_search', or 'multi_start_nelder_mead'."
                 )
             if self.param_grid is not None:
                 raise TypeError(
@@ -234,6 +241,8 @@ class DriverBase:
                 )
             if not isinstance(bounds, dict) or not bounds:
                 raise TypeError("cv.search.bounds must be a non-empty mapping when provided.")
+        elif self.cv_search_mode == "multi_start_nelder_mead":
+            raise TypeError("cv.search.mode='multi_start_nelder_mead' requires cv.search.bounds.")
         self.cv_search_bounds = cast(dict[str, Any] | None, bounds)
 
         max_iterations = search.get("max_iterations")
@@ -809,6 +818,90 @@ class DriverBase:
         return CVSearchRunResult(
             all_results=all_results,
             selection_combo_indices=list(range(combo_offset, combo_offset + len(all_results))),
+        )
+
+    def _execute_cv_search_multi_start_nelder_mead(
+        self,
+        *,
+        fold_specs: Sequence[tuple[int, dict[str, Any]]],
+        combo_offset: int,
+        continue_training: bool,
+    ) -> CVSearchRunResult:
+        if continue_training:
+            raise ValueError(
+                "continue_training is not supported with cv.search.mode='multi_start_nelder_mead'."
+            )
+        if self.cv_search_bounds is None:
+            raise ValueError("cv.search.mode='multi_start_nelder_mead' requires cv.search.bounds.")
+        return self._execute_cv_search_multi_start_nelder_mead_bounds(
+            fold_specs=fold_specs,
+            combo_offset=combo_offset,
+        )
+
+    def _execute_cv_search_multi_start_nelder_mead_bounds(
+        self,
+        *,
+        fold_specs: Sequence[tuple[int, dict[str, Any]]],
+        combo_offset: int,
+    ) -> CVSearchRunResult:
+        if len(fold_specs) != 1:
+            raise ValueError(
+                "cv.search.bounds with cv.search.mode='multi_start_nelder_mead' is only "
+                "supported for single-split CV."
+            )
+
+        records: list[tuple[int, CVResult]] = []
+        records_lock = Lock()
+        next_combo_idx = combo_offset
+
+        def _evaluate_point(point: np.ndarray) -> float:
+            nonlocal next_combo_idx
+            combo = self._bounded_search_combo(point)
+            with records_lock:
+                combo_idx = next_combo_idx
+                next_combo_idx += 1
+            results = self._serial_run(
+                self._trial_args_for_combo(
+                    combo_idx=combo_idx,
+                    combo=combo,
+                    fold_specs=fold_specs,
+                )
+            )
+            if len(results) != 1:
+                raise RuntimeError(
+                    f"Expected one aggregated CVResult for combo {combo_idx}, got {len(results)}."
+                )
+            result = results[0]
+            with records_lock:
+                records.append((combo_idx, result))
+            return result.mean_metric
+
+        evaluated_points = multi_start_bounded_nelder_mead_search_points(
+            lower_bounds=[spec.lower for spec in self.cv_search_bound_specs],
+            upper_bounds=[spec.upper for spec in self.cv_search_bound_specs],
+            evaluate_point=_evaluate_point,
+            goal=self.cv_selection_goal,
+            max_iterations=self.cv_search_max_iterations,
+            num_simplices=self.max_workers,
+            max_workers=self.max_workers,
+            seed=int(self.base_config.get("seed", 0)),
+            reflection=self.cv_search_reflection,
+            expansion=self.cv_search_expansion,
+            contraction=self.cv_search_contraction,
+            shrink=self.cv_search_shrink,
+        )
+        records = sorted(records, key=lambda item: item[0])
+        self.cv_logger.info(
+            "Multi-start Nelder-Mead search evaluated %d search points and %d parameter "
+            "combinations across %d dimensions using %d Sobol-started simplices.",
+            len(evaluated_points),
+            len(records),
+            len(self.cv_search_bound_specs),
+            min(self.max_workers, self.cv_search_max_iterations or self.max_workers),
+        )
+        return CVSearchRunResult(
+            all_results=[result for _combo_idx, result in records],
+            selection_combo_indices=[combo_idx for combo_idx, _result in records],
         )
 
     def _execute_cv_search_nelder_mead_like_param_grid(

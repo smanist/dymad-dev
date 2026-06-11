@@ -16,6 +16,7 @@ from dymad.training.helper import (
     CVResult,
     batch_pattern_search_points,
     bounded_nelder_mead_search_points,
+    multi_start_bounded_nelder_mead_search_points,
     nelder_mead_like_search_indices,
     select_best_cv_result,
 )
@@ -1538,6 +1539,30 @@ def test_batch_pattern_search_points_respects_bounds_and_batches() -> None:
     assert np.linalg.norm(best_point - target) <= 0.25
 
 
+def test_multi_start_bounded_nelder_mead_search_points_respects_bounds() -> None:
+    target = np.array([0.75, 0.25], dtype=float)
+
+    def _evaluate(point: np.ndarray) -> float:
+        return float(np.sum((point - target) ** 2))
+
+    evaluated = multi_start_bounded_nelder_mead_search_points(
+        lower_bounds=[0.0, 0.0],
+        upper_bounds=[1.0, 1.0],
+        evaluate_point=_evaluate,
+        max_iterations=8,
+        num_simplices=4,
+        max_workers=2,
+        seed=5,
+    )
+
+    assert evaluated
+    for point in evaluated:
+        assert np.all(point >= 0.0)
+        assert np.all(point <= 1.0)
+    best_point = min(evaluated, key=_evaluate)
+    assert np.linalg.norm(best_point - target) <= 0.35
+
+
 def test_single_split_driver_train_supports_nelder_mead_like_search(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -1897,6 +1922,89 @@ cv:
     assert all(9 <= weak_n <= 17 and weak_n % 2 == 1 for _, weak_n in evaluated_params)
     assert best_result.params["model.koopman_dimension"] == 2
     assert best_result.params["phases.0.weak_form_params.N"] == 11
+
+
+def test_single_split_driver_train_supports_multi_start_nelder_mead_search(
+    monkeypatch, tmp_path
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+seed: 3
+model:
+  name: demo
+  koopman_dimension: 1
+training:
+  weak_form_params:
+    N: 13
+phases:
+  - trainer: Weak
+cv:
+  search:
+    mode: multi_start_nelder_mead
+    bounds:
+      model.koopman_dimension: [0, 4]
+      training.weak_form_params.N:
+        lower: 9
+        upper: 17
+        parity: odd
+    max_iterations: 16
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class _FakeTrainSet:
+        dtype = torch.float32
+
+    def _fake_init_trajectory_managers(self):
+        self.train_sets = [_FakeTrainSet()]
+        self.valid_sets = [_FakeTrainSet()]
+
+    monkeypatch.setattr(
+        driver.SingleSplitDriver,
+        "_init_trajectory_managers",
+        _fake_init_trajectory_managers,
+    )
+    monkeypatch.setattr(driver.SingleSplitDriver, "_init_fold_split", lambda self: None)
+
+    evaluated_params: list[tuple[int, int]] = []
+
+    def _fake_run_cv_single(args):
+        koopman_dimension = int(args["combo"]["model.koopman_dimension"])
+        weak_n = int(args["combo"]["phases.0.weak_form_params.N"])
+        evaluated_params.append((koopman_dimension, weak_n))
+        model_prefix = f"{args['checkpoint_prefix']}/fake_{args['combo_idx']}_{args['fold_idx']}"
+        with open(f"{model_prefix}.pt", "wb") as handle:
+            handle.write(b"pt")
+        np.savez_compressed(
+            f"{model_prefix}_summary.npz",
+            koopman_dimension=np.array([koopman_dimension]),
+            weak_n=np.array([weak_n]),
+        )
+        return {
+            "combo_idx": args["combo_idx"],
+            "fold_idx": args["fold_idx"],
+            "combo": args["combo"],
+            "metric_value": float((koopman_dimension - 2) ** 2 + 0.01 * (weak_n - 11) ** 2),
+            "model_prefix": model_prefix,
+        }
+
+    monkeypatch.setattr(driver, "run_cv_single", _fake_run_cv_single)
+    monkeypatch.setattr(driver, "plot_cv_results", lambda *args, **kwargs: None)
+
+    trainer = driver.SingleSplitDriver(
+        config_path=str(config_path),
+        model_class=torch.nn.Module,
+        device=torch.device("cpu"),
+        max_workers=4,
+    )
+    _, best_result, all_results = trainer.train()
+
+    assert all_results
+    assert evaluated_params
+    assert all(0 <= koopman_dimension <= 4 for koopman_dimension, _ in evaluated_params)
+    assert all(9 <= weak_n <= 17 and weak_n % 2 == 1 for _, weak_n in evaluated_params)
+    assert best_result.mean_metric == min(result.mean_metric for result in all_results)
 
 
 def test_single_split_driver_warns_for_parallel_nelder_mead_like_search(

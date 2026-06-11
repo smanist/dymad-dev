@@ -194,6 +194,39 @@ def bounded_nelder_mead_search_points(
     )
 
 
+def multi_start_bounded_nelder_mead_search_points(
+    *,
+    lower_bounds: Sequence[float],
+    upper_bounds: Sequence[float],
+    evaluate_point: Callable[[np.ndarray], float],
+    goal: str = "minimize",
+    max_iterations: int | None = None,
+    num_simplices: int = 1,
+    max_workers: int = 1,
+    seed: int = 0,
+    simplex_scale: float = 0.2,
+    reflection: float = 1.0,
+    expansion: float = 2.0,
+    contraction: float = 0.5,
+    shrink: float = 0.5,
+) -> list[np.ndarray]:
+    return _tuning.multi_start_bounded_nelder_mead_search_points(
+        lower_bounds=lower_bounds,
+        upper_bounds=upper_bounds,
+        evaluate_point=evaluate_point,
+        goal=goal,
+        max_iterations=max_iterations,
+        num_simplices=num_simplices,
+        max_workers=max_workers,
+        seed=seed,
+        simplex_scale=simplex_scale,
+        reflection=reflection,
+        expansion=expansion,
+        contraction=contraction,
+        shrink=shrink,
+    )
+
+
 def get_by_dotted_key(d: dict[str, Any], dotted_key: str) -> Any:
     """
     Read nested dict/list paths for dotted keys such as 'a.b.c' or 'phases.0.n_epochs'.

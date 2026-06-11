@@ -139,7 +139,12 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
             "contraction",
             "shrink",
         ),
-        "mode_options": ("grid", "nelder_mead_like", "batch_pattern_search"),
+        "mode_options": (
+            "grid",
+            "nelder_mead_like",
+            "batch_pattern_search",
+            "multi_start_nelder_mead",
+        ),
         "default_mode": "grid",
     }
     assert detail.cv_schema.selection_schema == {
@@ -156,7 +161,8 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
         "true k-fold cross-validation.",
         "cv.search.mode selects the CV optimizer. Grid search operates on cv.param_grid; "
-        "Nelder-Mead-like and batch pattern search operate on cv.search.bounds when provided.",
+        "Nelder-Mead-like, batch pattern search, and multi-start Nelder-Mead operate on "
+        "cv.search.bounds when provided.",
         "The best parameter combination is selected by cv.selection (default: minimize mean "
         "metric, then std_metric, then combo_index).",
         "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
@@ -169,6 +175,9 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "cv.search.mode='batch_pattern_search' runs a bounded batched pattern search over "
         "cv.search.bounds or a batched adaptive walk over numeric param_grid values; use it with "
         "run.max_workers > 1 to keep parallel workers busy during refinement.",
+        "cv.search.mode='multi_start_nelder_mead' runs Sobol-started bounded Nelder-Mead "
+        "simplices over cv.search.bounds; run.max_workers controls the number of simplices, and "
+        "cv.search.max_iterations is divided across those simplices as the total iteration budget.",
     )
     assert detail.translation_guidance == (
         "For any ordered trainer names mentioned by the user, emit one overrides.phases "
@@ -183,6 +192,9 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "For parallel refinement requests, prefer overrides.cv.search.mode='batch_pattern_search' "
         "with run.max_workers greater than 1; it uses cv.search.max_iterations as an evaluation "
         "budget.",
+        "For parallel multi-start Nelder-Mead requests, set "
+        "overrides.cv.search.mode='multi_start_nelder_mead', provide overrides.cv.search.bounds, "
+        "and set run.max_workers to the requested number of Sobol-started simplices.",
         "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
         "Supported optimizer trainer names are Linear, OneStep, Weak, and NODE.",
         "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
@@ -251,4 +263,17 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "This executes a bounded Nelder-Mead search over the provided lower/upper parameter "
         "ranges.",
     )
-    assert detail.examples[4].overrides["model"]["koopman_dimension"] == 2
+    assert detail.examples[4].overrides == {
+        "cv": {
+            "search": {
+                "mode": "multi_start_nelder_mead",
+                "bounds": {"model.koopman_dimension": [4, 8]},
+                "max_iterations": 80,
+            },
+            "selection": {
+                "goal": "minimize",
+                "tie_breakers": ["std_metric", "combo_index"],
+            },
+        }
+    }
+    assert detail.examples[5].overrides["model"]["koopman_dimension"] == 2

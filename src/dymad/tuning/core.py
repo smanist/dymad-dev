@@ -11,9 +11,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from itertools import product
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import numpy as np
+from scipy.stats import qmc
 
 MetricEvaluator = Callable[[dict[str, Any]], float | Mapping[str, Any]]
 
@@ -140,10 +142,15 @@ class TuningSpec:
         _validate_initial_budget(self.initial_budget, len(self.parameters))
         if self.initial_strategy not in {"auto", "grid", "random"}:
             raise ValueError("TuningSpec.initial_strategy must be auto, grid, or random")
-        if self.refinement_strategy not in {None, "nelder_mead_like", "batch_pattern_search"}:
+        if self.refinement_strategy not in {
+            None,
+            "nelder_mead_like",
+            "batch_pattern_search",
+            "multi_start_nelder_mead",
+        }:
             raise ValueError(
                 "TuningSpec.refinement_strategy must be None, nelder_mead_like, "
-                "or batch_pattern_search"
+                "batch_pattern_search, or multi_start_nelder_mead"
             )
         if self.refinement_budget < 0:
             raise ValueError("TuningSpec.refinement_budget must be non-negative")
@@ -437,6 +444,78 @@ def tune(spec: TuningSpec, evaluator: MetricEvaluator, *, max_workers: int = 1) 
                 initial_points=initial_points,
                 initial_step=initial_step,
             )
+            ok = [
+                item
+                for item in evaluations
+                if item.status == "ok" and math.isfinite(item.metric_value)
+            ]
+            best = ok[
+                select_best_evaluation(ok, goal=spec.goal, tie_breakers=spec.selection_tie_breakers)
+            ]
+    elif spec.refinement_strategy == "multi_start_nelder_mead" and spec.refinement_budget > 0:
+        numeric_params = [
+            parameter for parameter in spec.parameters if parameter.bounds is not None
+        ]
+        if len(numeric_params) == len(spec.parameters):
+            lower = [
+                _parameter_search_lower_bound(parameter)
+                for parameter in spec.parameters
+                if parameter.bounds is not None
+            ]
+            upper = [
+                _parameter_search_upper_bound(parameter)
+                for parameter in spec.parameters
+                if parameter.bounds is not None
+            ]
+            evaluation_lock = Lock()
+            next_refinement_index = len(evaluations)
+
+            def _evaluate_point(point: np.ndarray) -> float:
+                nonlocal next_refinement_index
+                params = {
+                    parameter.name: parameter.project(
+                        _parameter_value_from_search_coordinate(parameter, value)
+                    )
+                    for parameter, value in zip(spec.parameters, point, strict=True)
+                }
+                projected = project(params)
+                key = _params_key(projected)
+                with evaluation_lock:
+                    index = next_refinement_index
+                    next_refinement_index += 1
+                    cached = cache.get(key)
+                    if cached is not None:
+                        item = TuningEvaluation(
+                            params=dict(cached.params),
+                            phase="refinement",
+                            index=index,
+                            metric_value=cached.metric_value,
+                            status=cached.status,
+                            elapsed_seconds=0.0,
+                            cache_hit=True,
+                            boundary_hit=cached.boundary_hit,
+                            failure_reason=cached.failure_reason,
+                            extra_metrics=dict(cached.extra_metrics),
+                        )
+                        evaluations.append(item)
+                        return item.metric_value
+                item = run_projected(projected, "refinement", index)
+                with evaluation_lock:
+                    evaluations.append(item)
+                    cache.setdefault(key, item)
+                return item.metric_value
+
+            multi_start_bounded_nelder_mead_search_points(
+                lower_bounds=lower,
+                upper_bounds=upper,
+                evaluate_point=_evaluate_point,
+                goal=spec.goal,
+                max_iterations=spec.refinement_budget,
+                num_simplices=max_workers,
+                max_workers=max_workers,
+                seed=spec.seed,
+            )
+            evaluations.sort(key=lambda item: item.index)
             ok = [
                 item
                 for item in evaluations
@@ -922,60 +1001,155 @@ def bounded_nelder_mead_search_points(
             "each lower bound must be strictly less than the corresponding upper bound"
         )
     span = upper - lower
+    iteration_budget = max_iterations if max_iterations is not None else max(20, 8 * lower.size)
+    return _run_bounded_nelder_mead_unit_simplex(
+        simplex=_initial_bounded_simplex(lower.size),
+        lower=lower,
+        span=span,
+        evaluate_point=evaluate_point,
+        goal=goal,
+        max_iterations=iteration_budget,
+        reflection=reflection,
+        expansion=expansion,
+        contraction=contraction,
+        shrink=shrink,
+    )
+
+
+def multi_start_bounded_nelder_mead_search_points(
+    *,
+    lower_bounds: Sequence[float],
+    upper_bounds: Sequence[float],
+    evaluate_point: Callable[[np.ndarray], float],
+    goal: str = "minimize",
+    max_iterations: int | None = None,
+    num_simplices: int = 1,
+    max_workers: int = 1,
+    seed: int = 0,
+    simplex_scale: float = 0.2,
+    reflection: float = 1.0,
+    expansion: float = 2.0,
+    contraction: float = 0.5,
+    shrink: float = 0.5,
+) -> list[np.ndarray]:
+    if goal not in {"minimize", "maximize"}:
+        raise ValueError("goal must be either 'minimize' or 'maximize'")
+    if max_iterations is not None and max_iterations <= 0:
+        raise ValueError("max_iterations must be a positive integer when provided")
+    if num_simplices <= 0:
+        raise ValueError("num_simplices must be positive")
+    if max_workers <= 0:
+        raise ValueError("max_workers must be positive")
+    if simplex_scale <= 0.0:
+        raise ValueError("simplex_scale must be positive")
+    lower = np.asarray(lower_bounds, dtype=float)
+    upper = np.asarray(upper_bounds, dtype=float)
+    if lower.ndim != 1 or upper.ndim != 1 or lower.shape != upper.shape:
+        raise ValueError("lower_bounds and upper_bounds must be 1D arrays with matching shapes")
+    if lower.size == 0:
+        return []
+    if np.any(lower >= upper):
+        raise ValueError(
+            "each lower bound must be strictly less than the corresponding upper bound"
+        )
+    span = upper - lower
+    dim = lower.size
+    total_iterations = (
+        max(20, 8 * dim) * num_simplices if max_iterations is None else max_iterations
+    )
+    simplex_count = min(num_simplices, total_iterations)
+    iteration_budgets = _split_iteration_budget(total_iterations, simplex_count)
+    centers = _sobol_unit_centers(dim, simplex_count, seed=seed)
+    simplices = [
+        _initial_bounded_simplex_around_center(center, scale=simplex_scale) for center in centers
+    ]
+
+    def run_simplex(index: int) -> list[np.ndarray]:
+        return _run_bounded_nelder_mead_unit_simplex(
+            simplex=simplices[index],
+            lower=lower,
+            span=span,
+            evaluate_point=evaluate_point,
+            goal=goal,
+            max_iterations=iteration_budgets[index],
+            reflection=reflection,
+            expansion=expansion,
+            contraction=contraction,
+            shrink=shrink,
+        )
+
+    if max_workers > 1 and len(simplices) > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            traces = list(executor.map(run_simplex, range(len(simplices))))
+    else:
+        traces = [run_simplex(index) for index in range(len(simplices))]
+    return [point for trace in traces for point in trace]
+
+
+def _run_bounded_nelder_mead_unit_simplex(
+    *,
+    simplex: Sequence[np.ndarray],
+    lower: np.ndarray,
+    span: np.ndarray,
+    evaluate_point: Callable[[np.ndarray], float],
+    goal: str,
+    max_iterations: int,
+    reflection: float,
+    expansion: float,
+    contraction: float,
+    shrink: float,
+) -> list[np.ndarray]:
     evaluated_points: list[np.ndarray] = []
     score_cache: dict[tuple[float, ...], float] = {}
 
-    def objective(metric: float) -> float:
-        return metric if goal == "minimize" else -metric
-
-    def clip_unit(point: np.ndarray) -> np.ndarray:
-        return np.clip(np.asarray(point, dtype=float), 0.0, 1.0)
-
     def denormalize(unit_point: np.ndarray) -> np.ndarray:
-        return lower + clip_unit(unit_point) * span
+        return lower + _clip_unit(unit_point) * span
 
     def ensure_score(unit_point: np.ndarray) -> float:
-        key = tuple(float(value) for value in np.round(clip_unit(unit_point), decimals=12))
+        key = _unit_key(unit_point)
         if key not in score_cache:
             point = denormalize(np.asarray(key, dtype=float))
-            score_cache[key] = objective(float(evaluate_point(point.copy())))
+            score_cache[key] = _objective_score(float(evaluate_point(point.copy())), goal=goal)
             evaluated_points.append(point)
         return score_cache[key]
 
-    dim = lower.size
-    simplex = _initial_bounded_simplex(dim)
-    for vertex in simplex:
+    current_simplex = [_clip_unit(vertex) for vertex in simplex]
+    for vertex in current_simplex:
         ensure_score(vertex)
-    iteration_budget = max_iterations if max_iterations is not None else max(20, 8 * dim)
-    for _ in range(iteration_budget):
-        simplex = sorted(simplex, key=ensure_score)
-        best = simplex[0]
-        worst = simplex[-1]
-        second_worst = simplex[-2] if len(simplex) > 1 else worst
-        centroid = np.mean(simplex[:-1], axis=0) if len(simplex) > 1 else best.copy()
+    for _ in range(max_iterations):
+        current_simplex = sorted(current_simplex, key=ensure_score)
+        best = current_simplex[0]
+        worst = current_simplex[-1]
+        second_worst = current_simplex[-2] if len(current_simplex) > 1 else worst
+        centroid = (
+            np.mean(current_simplex[:-1], axis=0) if len(current_simplex) > 1 else best.copy()
+        )
         best_score = ensure_score(best)
         worst_score = ensure_score(worst)
         second_worst_score = ensure_score(second_worst)
-        reflected = clip_unit(centroid + reflection * (centroid - worst))
+        reflected = _clip_unit(centroid + reflection * (centroid - worst))
         reflected_score = ensure_score(reflected)
         if reflected_score < best_score:
-            expanded = clip_unit(centroid + expansion * (reflected - centroid))
+            expanded = _clip_unit(centroid + expansion * (reflected - centroid))
             expanded_score = ensure_score(expanded)
-            simplex[-1] = expanded if expanded_score < reflected_score else reflected
+            current_simplex[-1] = expanded if expanded_score < reflected_score else reflected
             continue
         if reflected_score < second_worst_score:
-            simplex[-1] = reflected
+            current_simplex[-1] = reflected
             continue
         contracted = (
-            clip_unit(centroid + contraction * (reflected - centroid))
+            _clip_unit(centroid + contraction * (reflected - centroid))
             if reflected_score < worst_score
-            else clip_unit(centroid + contraction * (worst - centroid))
+            else _clip_unit(centroid + contraction * (worst - centroid))
         )
         contracted_score = ensure_score(contracted)
         if contracted_score < min(worst_score, reflected_score):
-            simplex[-1] = contracted
+            current_simplex[-1] = contracted
             continue
-        simplex = [best] + [clip_unit(best + shrink * (vertex - best)) for vertex in simplex[1:]]
+        current_simplex = [
+            best,
+            *[_clip_unit(best + shrink * (vertex - best)) for vertex in current_simplex[1:]],
+        ]
     return evaluated_points
 
 
@@ -1681,6 +1855,38 @@ def _initial_bounded_simplex(dim: int) -> list[np.ndarray]:
         vertex[axis] = 1.0
         simplex.append(vertex)
     return simplex
+
+
+def _initial_bounded_simplex_around_center(center: np.ndarray, *, scale: float) -> list[np.ndarray]:
+    center = _clip_unit(center)
+    simplex = [center]
+    for axis in range(center.size):
+        vertex = center.copy()
+        direction = 1.0 if center[axis] <= 0.5 else -1.0
+        vertex[axis] += direction * scale
+        if not 0.0 <= vertex[axis] <= 1.0:
+            vertex[axis] = center[axis] - direction * scale
+        simplex.append(_clip_unit(vertex))
+    return simplex
+
+
+def _sobol_unit_centers(dim: int, count: int, *, seed: int) -> list[np.ndarray]:
+    if count <= 0:
+        return []
+    exponent = math.ceil(math.log2(count)) if count > 1 else 0
+    sampler = qmc.Sobol(d=dim, scramble=True, rng=np.random.default_rng(seed))
+    samples = sampler.random_base2(m=exponent)[:count]
+    return [np.asarray(sample, dtype=float) for sample in samples]
+
+
+def _split_iteration_budget(total_iterations: int, num_simplices: int) -> list[int]:
+    if total_iterations <= 0:
+        raise ValueError("total_iterations must be positive")
+    if num_simplices <= 0:
+        raise ValueError("num_simplices must be positive")
+    base = total_iterations // num_simplices
+    remainder = total_iterations % num_simplices
+    return [base + (1 if index < remainder else 0) for index in range(num_simplices)]
 
 
 def _format_float(value: float) -> str:

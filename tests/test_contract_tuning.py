@@ -15,6 +15,7 @@ from dymad.tuning import (
     batch_pattern_search_points,
     bounded_nelder_mead_search_points,
     initial_search_plan,
+    multi_start_bounded_nelder_mead_search_points,
     plot_tuning_search,
     read_tuning_artifacts,
     tune,
@@ -228,6 +229,47 @@ def test_bounded_nelder_mead_search_points_respects_bounds() -> None:
     assert evaluated
     assert all(np.all(point >= 0.0) and np.all(point <= 1.0) for point in evaluated)
     assert np.linalg.norm(min(evaluated, key=evaluate) - target) <= 0.25
+
+
+def test_multi_start_bounded_nelder_mead_uses_sobol_simplices_and_total_budget() -> None:
+    target = np.array([0.75, 0.25], dtype=float)
+
+    def evaluate(point: np.ndarray) -> float:
+        return float(np.sum((point - target) ** 2))
+
+    evaluated = multi_start_bounded_nelder_mead_search_points(
+        lower_bounds=[0.0, 0.0],
+        upper_bounds=[1.0, 1.0],
+        evaluate_point=evaluate,
+        max_iterations=8,
+        num_simplices=4,
+        max_workers=2,
+        seed=7,
+    )
+
+    assert evaluated
+    assert all(np.all(point >= 0.0) and np.all(point <= 1.0) for point in evaluated)
+    assert len(evaluated) >= 4 * 3
+    assert np.linalg.norm(min(evaluated, key=evaluate) - target) <= 0.35
+
+
+def test_tune_supports_parallel_multi_start_nelder_mead_refinement() -> None:
+    spec = TuningSpec(
+        parameters=(ParameterSpec("x", bounds=(0.0, 1.0)),),
+        initial_budget=2,
+        refinement_strategy="multi_start_nelder_mead",
+        refinement_budget=16,
+        seed=11,
+    )
+
+    def evaluate(params):
+        return float((params["x"] - 0.8) ** 2)
+
+    result = tune(spec, evaluate, max_workers=4)
+
+    assert result.selected_params["x"] == pytest.approx(0.8, abs=0.15)
+    assert any(item.phase == "refinement" for item in result.evaluations)
+    assert result.policy["refinement_strategy"] == "multi_start_nelder_mead"
 
 
 def test_tune_records_failures_and_artifacts(tmp_path) -> None:

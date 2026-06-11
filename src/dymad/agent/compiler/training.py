@@ -216,10 +216,14 @@ def _validate_cv_search_config(search_config: object) -> None:
 
     bounds = search_mapping.get("bounds")
     if bounds is not None:
-        if search_mapping["mode"] not in {"nelder_mead_like", "batch_pattern_search"}:
+        if search_mapping["mode"] not in {
+            "nelder_mead_like",
+            "batch_pattern_search",
+            "multi_start_nelder_mead",
+        }:
             _raise_invalid(
                 "overrides.cv.search.bounds requires overrides.cv.search.mode='nelder_mead_like' "
-                "or 'batch_pattern_search'",
+                "'batch_pattern_search', or 'multi_start_nelder_mead'",
                 field_path=("overrides", "cv", "search", "bounds"),
             )
         if not isinstance(bounds, dict) or not bounds:
@@ -235,6 +239,12 @@ def _validate_cv_search_config(search_config: object) -> None:
                 )
             _validate_override_path(tuple(key.split(".")))
             bounds[key] = _normalize_cv_search_bound_value(value, key=key)
+    elif search_mapping["mode"] == "multi_start_nelder_mead":
+        _raise_invalid(
+            "overrides.cv.search.mode='multi_start_nelder_mead' requires "
+            "overrides.cv.search.bounds",
+            field_path=("overrides", "cv", "search", "bounds"),
+        )
 
     max_iterations = search_mapping.get("max_iterations")
     if max_iterations is not None:

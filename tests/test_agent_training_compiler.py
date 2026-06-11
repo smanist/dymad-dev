@@ -281,6 +281,39 @@ def test_compile_training_request_accepts_bounded_batch_pattern_search_cv_metada
     }
 
 
+def test_compile_training_request_accepts_bounded_multi_start_nelder_mead_cv_metadata(
+    tmp_path,
+) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={
+                "cv": {
+                    "search": {
+                        "mode": "multi_start_nelder_mead",
+                        "bounds": {"model.koopman_dimension": [4, 8]},
+                        "max_iterations": 80,
+                    }
+                }
+            },
+            max_workers=4,
+        ),
+    )
+
+    assert compiled.effective_config["cv"]["search"]["mode"] == "multi_start_nelder_mead"
+    assert compiled.effective_config["cv"]["search"]["bounds"] == {
+        "model.koopman_dimension": [4, 8]
+    }
+    assert compiled.request.max_workers == 4
+
+
 def test_compile_training_request_accepts_parity_constrained_bounded_nelder_mead_cv_metadata(
     tmp_path,
 ) -> None:
@@ -554,6 +587,10 @@ def test_compile_training_request_rewrites_legacy_training_search_bounds_paths_w
                 }
             },
             ("overrides", "cv"),
+        ),
+        (
+            {"cv": {"search": {"mode": "multi_start_nelder_mead"}}},
+            ("overrides", "cv", "search", "bounds"),
         ),
         (
             {

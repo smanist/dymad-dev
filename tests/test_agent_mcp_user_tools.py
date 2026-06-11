@@ -109,10 +109,16 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
     )
     assert (
         detail["data"]["detail"]["translation_guidance"][4]
-        == "Use overrides.cv.selection to control model choice policy (goal and tie_breakers)."
+        == "For parallel multi-start Nelder-Mead requests, set "
+        "overrides.cv.search.mode='multi_start_nelder_mead', provide overrides.cv.search.bounds, "
+        "and set run.max_workers to the requested number of Sobol-started simplices."
     )
     assert (
         detail["data"]["detail"]["translation_guidance"][5]
+        == "Use overrides.cv.selection to control model choice policy (goal and tie_breakers)."
+    )
+    assert (
+        detail["data"]["detail"]["translation_guidance"][6]
         == "Supported optimizer trainer names are Linear, OneStep, Weak, and NODE."
     )
     assert detail["data"]["detail"]["cv_schema"] == {
@@ -131,7 +137,12 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
                 "contraction",
                 "shrink",
             ],
-            "mode_options": ["grid", "nelder_mead_like", "batch_pattern_search"],
+            "mode_options": [
+                "grid",
+                "nelder_mead_like",
+                "batch_pattern_search",
+                "multi_start_nelder_mead",
+            ],
             "default_mode": "grid",
         },
         "selection_schema": {
@@ -145,7 +156,8 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
             "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is "
             "not true k-fold cross-validation.",
             "cv.search.mode selects the CV optimizer. Grid search operates on cv.param_grid; "
-            "Nelder-Mead-like and batch pattern search operate on cv.search.bounds when provided.",
+            "Nelder-Mead-like, batch pattern search, and multi-start Nelder-Mead operate on "
+            "cv.search.bounds when provided.",
             "The best parameter combination is selected by cv.selection (default: minimize mean "
             "metric, then std_metric, then combo_index).",
             "Param-grid dotted keys may target either explicit phases.* paths or legacy "
@@ -158,6 +170,10 @@ def test_user_tools_compile_start_poll_and_evaluate_flow(tmp_path, monkeypatch) 
             "cv.search.mode='batch_pattern_search' runs a bounded batched pattern search over "
             "cv.search.bounds or a batched adaptive walk over numeric param_grid values; use it "
             "with run.max_workers > 1 to keep parallel workers busy during refinement.",
+            "cv.search.mode='multi_start_nelder_mead' runs Sobol-started bounded Nelder-Mead "
+            "simplices over cv.search.bounds; run.max_workers controls the number of simplices, "
+            "and cv.search.max_iterations is divided across those simplices as the total "
+            "iteration budget.",
         ],
     }
     assert (

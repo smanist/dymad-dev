@@ -96,7 +96,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--refinement-budget", type=int, default=64)
     parser.add_argument(
         "--refinement-strategy",
-        choices=("nelder_mead_like", "batch_pattern_search"),
+        choices=("nelder_mead_like", "batch_pattern_search", "multi_start_nelder_mead"),
         default="batch_pattern_search",
     )
     parser.add_argument("--tuning-policy", choices=("per_trial", "per_level"), default="per_trial")

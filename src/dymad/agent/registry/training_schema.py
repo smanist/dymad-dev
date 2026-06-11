@@ -46,7 +46,12 @@ CV_SEARCH_ALLOWED_KEYS: tuple[str, ...] = (
     "contraction",
     "shrink",
 )
-CV_SEARCH_MODE_OPTIONS: tuple[str, ...] = ("grid", "nelder_mead_like", "batch_pattern_search")
+CV_SEARCH_MODE_OPTIONS: tuple[str, ...] = (
+    "grid",
+    "nelder_mead_like",
+    "batch_pattern_search",
+    "multi_start_nelder_mead",
+)
 CV_DEFAULT_SEARCH_MODE = "grid"
 CV_SELECTION_ALLOWED_KEYS: tuple[str, ...] = ("goal", "tie_breakers")
 CV_SELECTION_GOAL_OPTIONS: tuple[str, ...] = ("minimize", "maximize")
@@ -57,7 +62,8 @@ CV_NOTES: tuple[str, ...] = (
     "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
     "true k-fold cross-validation.",
     "cv.search.mode selects the CV optimizer. Grid search operates on cv.param_grid; "
-    "Nelder-Mead-like and batch pattern search operate on cv.search.bounds when provided.",
+    "Nelder-Mead-like, batch pattern search, and multi-start Nelder-Mead operate on "
+    "cv.search.bounds when provided.",
     "The best parameter combination is selected by cv.selection (default: minimize mean metric, "
     "then std_metric, then combo_index).",
     "Param-grid dotted keys may target either explicit phases.* paths or legacy training.* "
@@ -69,6 +75,9 @@ CV_NOTES: tuple[str, ...] = (
     "cv.search.mode='batch_pattern_search' runs a bounded batched pattern search over "
     "cv.search.bounds or a batched adaptive walk over numeric param_grid values; use it with "
     "run.max_workers > 1 to keep parallel workers busy during refinement.",
+    "cv.search.mode='multi_start_nelder_mead' runs Sobol-started bounded Nelder-Mead "
+    "simplices over cv.search.bounds; run.max_workers controls the number of simplices, and "
+    "cv.search.max_iterations is divided across those simplices as the total iteration budget.",
 )
 AUTO_APPENDED_PHASES: tuple[str, ...] = (
     "analysis",
@@ -89,6 +98,9 @@ TRANSLATION_GUIDANCE: tuple[str, ...] = (
     "For parallel refinement requests, prefer overrides.cv.search.mode='batch_pattern_search' "
     "with run.max_workers greater than 1; it uses cv.search.max_iterations as an evaluation "
     "budget.",
+    "For parallel multi-start Nelder-Mead requests, set "
+    "overrides.cv.search.mode='multi_start_nelder_mead', provide overrides.cv.search.bounds, "
+    "and set run.max_workers to the requested number of Sobol-started simplices.",
     "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
     "Supported optimizer trainer names are Linear, OneStep, Weak, and NODE.",
     "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
@@ -297,6 +309,30 @@ def _examples() -> tuple[TrainingCapabilityExample, ...]:
             notes=(
                 "This executes a bounded Nelder-Mead search over the provided lower/upper "
                 "parameter ranges.",
+            ),
+        ),
+        TrainingCapabilityExample(
+            name="multi_start_nelder_mead_single_split_cv",
+            user_request=(
+                "Use parallel multi-start Nelder-Mead over Koopman dimensions 4 to 8 with "
+                "4 workers and a total refinement budget of 80 iterations."
+            ),
+            overrides={
+                "cv": {
+                    "search": {
+                        "mode": "multi_start_nelder_mead",
+                        "bounds": {"model.koopman_dimension": [4, 8]},
+                        "max_iterations": 80,
+                    },
+                    "selection": {
+                        "goal": "minimize",
+                        "tie_breakers": ["std_metric", "combo_index"],
+                    },
+                }
+            },
+            notes=(
+                "Set run.max_workers=4 alongside these overrides; the runtime initializes "
+                "4 Sobol-started simplices and runs 20 Nelder-Mead iterations per simplex.",
             ),
         ),
         TrainingCapabilityExample(

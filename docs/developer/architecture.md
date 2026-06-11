@@ -183,12 +183,14 @@ Compilation resolves:
 - optional single-split CV sweep settings under `overrides.cv`, including:
   - `param_grid` candidate definitions for grid or legacy candidate-based adaptive search
   - optional `search` policy whose `mode` selects the CV optimizer (`grid`,
-    `nelder_mead_like`, or `batch_pattern_search`) plus optimizer-specific config such as
-    simplex-style coefficients; in current runtime `nelder_mead_like` can either run a bounded
-    continuous search over `search.bounds` lower/upper pairs or, when bounds are omitted, the
-    legacy adaptive path over numeric single-split `param_grid` candidates, while
-    `batch_pattern_search` evaluates bounded or numeric-grid pattern batches to keep parallel
-    workers busy during refinement
+    `nelder_mead_like`, `batch_pattern_search`, or `multi_start_nelder_mead`) plus
+    optimizer-specific config such as simplex-style coefficients; in current runtime
+    `nelder_mead_like` can either run a bounded continuous search over `search.bounds`
+    lower/upper pairs or, when bounds are omitted, the legacy adaptive path over numeric
+    single-split `param_grid` candidates, while `batch_pattern_search` evaluates bounded or
+    numeric-grid pattern batches to keep parallel workers busy during refinement and
+    `multi_start_nelder_mead` runs Sobol-started bounded Nelder-Mead simplices with
+    `max_iterations` divided across `run.max_workers` simplices
   - optional `selection` policy (`goal` plus ordered tie-breakers) for deterministic best-model
     choice
 - phase overrides normalized against matching profile defaults so trainer-specific phase config is
