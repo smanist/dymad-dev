@@ -79,6 +79,24 @@ class KRRBase(nn.Module):
 
         self._on_set_train_data()  # hook for subclasses
 
+    def set_reference_data(self, X: torch.Tensor) -> None:
+        self.X_train = torch.as_tensor(X, dtype=self.dtype, device=self.device)
+        self.Y_train = None
+        self._residual = None
+
+        if isinstance(self.kernel, nn.ModuleList):
+            for k in self.kernel:
+                cast(KernelAbstract, k).set_reference_data(self.X_train)
+        else:
+            self.kernel.set_reference_data(self.X_train)
+
+        _swap_parameter_storage(self._Xref, self.X_train, requires_grad=False)
+        _swap_parameter_storage(
+            self._alphas,
+            torch.empty(0, dtype=self.dtype, device=self.device),
+            requires_grad=True,
+        )
+
     def _on_set_train_data(self) -> None:
         pass  # optional in subclasses
 
@@ -104,6 +122,39 @@ class KRRBase(nn.Module):
 
     def _predict_from_solution(self, Xnew: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
+
+    def _single_kernel(self) -> KernelAbstract:
+        if isinstance(self.kernel, nn.ModuleList):
+            raise TypeError("kernel_sections requires a single kernel, not a ModuleList.")
+        return self.kernel
+
+    def _require_reference_data(self) -> None:
+        if self._Xref.numel() == 0:
+            raise RuntimeError("Call set_reference_data or set_train_data before this operation.")
+
+    def kernel_sections(self, Xnew: torch.Tensor, *, mode: str = "kernel") -> torch.Tensor:
+        self._require_reference_data()
+        kernel = self._single_kernel()
+        X = torch.as_tensor(Xnew, dtype=self.dtype, device=self.device)
+        mode_key = mode.lower()
+        if mode_key == "kernel":
+            return kernel(X, self._Xref)
+        if mode_key == "markov":
+            if not hasattr(kernel, "markov_sections"):
+                raise TypeError("Kernel does not provide markov_sections.")
+            return cast(Any, kernel).markov_sections(X)
+        if mode_key == "density":
+            if not hasattr(kernel, "density_sections"):
+                raise TypeError("Kernel does not provide density_sections.")
+            return cast(Any, kernel).density_sections(X)
+        raise ValueError("mode must be one of 'kernel', 'markov', or 'density'.")
+
+    def reference_weights(self) -> torch.Tensor:
+        self._require_reference_data()
+        kernel = self._single_kernel()
+        if not hasattr(kernel, "volume_weights"):
+            raise TypeError("Kernel does not provide volume_weights.")
+        return cast(Any, kernel).volume_weights()
 
 
 class KRRMultiOutputShared(KRRBase):

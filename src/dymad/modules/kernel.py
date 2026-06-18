@@ -235,8 +235,32 @@ class KernelScDM(KernelScalarValued):
         eps_init: float | None = None,
         t_init: float = 1.0,
         dtype: torch.dtype | None = None,
+        *,
+        metric: str = "euclidean",
+        periodic_axes: tuple[int, ...] | None = None,
+        density_bandwidth_factor: float = 1.0,
     ):
         super().__init__(in_dim, dtype=dtype)
+        if metric not in {"euclidean", "periodic"}:
+            raise ValueError("metric must be either 'euclidean' or 'periodic'.")
+        if density_bandwidth_factor <= 0:
+            raise ValueError("density_bandwidth_factor must be positive.")
+        if periodic_axes is not None:
+            if not all(isinstance(axis, int) for axis in periodic_axes):
+                raise TypeError("periodic_axes entries must be integers.")
+            axes = tuple(periodic_axes)
+            if len(set(axes)) != len(axes):
+                raise ValueError("periodic_axes must not contain duplicates.")
+            if any(axis < 0 or axis >= self.in_dim for axis in axes):
+                raise ValueError(
+                    f"periodic_axes entries must be in [0, {self.in_dim}), got {axes}."
+                )
+        else:
+            axes = None
+        self.metric = metric
+        self.periodic_axes = axes
+        self.density_bandwidth_factor = float(density_bandwidth_factor)
+
         if eps_init is None:
             self._log_eps: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype))
         else:
@@ -252,9 +276,18 @@ class KernelScDM(KernelScalarValued):
         self._Dinv1: nn.Parameter = nn.Parameter(
             torch.empty(0, dtype=self.dtype), requires_grad=False
         )
+        self._q_ref: nn.Parameter = nn.Parameter(
+            torch.empty(0, dtype=self.dtype), requires_grad=False
+        )
+        self._q_density_ref: nn.Parameter = nn.Parameter(
+            torch.empty(0, dtype=self.dtype), requires_grad=False
+        )
 
     def __repr__(self) -> str:
-        return f"KernelScDM(in_dim={self.in_dim}, eps={self.eps}, t={self.t}, dtype={self.dtype})"
+        return (
+            f"KernelScDM(in_dim={self.in_dim}, eps={self.eps}, t={self.t}, "
+            f"metric={self.metric!r}, dtype={self.dtype})"
+        )
 
     @property
     def eps(self):  # eps > 0
@@ -264,11 +297,52 @@ class KernelScDM(KernelScalarValued):
     def t(self):  # t > 0
         return F.softplus(self._log_t)
 
+    @property
+    def density_eps(self) -> torch.Tensor:
+        return self.eps * self.density_bandwidth_factor
+
+    def _tiny(self, tensor: torch.Tensor) -> float:
+        return torch.finfo(tensor.dtype).tiny
+
+    def _floor_positive(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor.clamp_min(self._tiny(tensor))
+
+    def _periodic_axis_tuple(self) -> tuple[int, ...]:
+        if self.periodic_axes is None:
+            return tuple(range(self.in_dim))
+        return self.periodic_axes
+
+    def _squared_distances(self, X: torch.Tensor, Z: torch.Tensor) -> torch.Tensor:
+        if self.metric == "euclidean":
+            return torch.cdist(X, Z, p=2) ** 2
+
+        delta = torch.abs(X.unsqueeze(-2) - Z.unsqueeze(-3))
+        axes = self._periodic_axis_tuple()
+        if axes:
+            wrapped_delta = delta.clone()
+            axis_index = torch.tensor(axes, device=delta.device)
+            periodic_delta = torch.remainder(delta.index_select(-1, axis_index), 1.0)
+            periodic_delta = torch.minimum(periodic_delta, 1.0 - periodic_delta)
+            wrapped_delta.index_copy_(-1, axis_index, periodic_delta)
+            delta = wrapped_delta
+        return (delta**2).sum(dim=-1)
+
+    def raw_kernel(
+        self, X: torch.Tensor, Z: torch.Tensor | None = None, *, eps: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        if Z is None:
+            Z = X
+        if eps is None:
+            eps = self.eps
+        sq = self._squared_distances(X, Z)
+        return torch.exp(-sq / (4.0 * eps))
+
     def _rbf(self, X, Z):
-        # K_eps = exp(-||x-z||^2 / (4 eps))  (scaled so that bandwidth uses eps directly)
-        scale = (4.0 * self.eps).sqrt()
-        sq = scaled_cdist(X, Z, scale, 2) ** 2
-        return torch.exp(-sq)
+        return self.raw_kernel(X, Z)
+
+    def _require_reference_data(self) -> None:
+        if self._Xref.numel() == 0:
+            raise RuntimeError("Call set_reference_data before evaluating reference sections.")
 
     def set_reference_data(self, Xref: torch.Tensor) -> None:
         _swap_parameter_storage(self._Xref, Xref, requires_grad=False)
@@ -284,9 +358,67 @@ class KernelScDM(KernelScalarValued):
                 logger.info(f"Estimated epsilon: {self.eps}")
 
         W = self._rbf(Xref, Xref)
-        _swap_parameter_storage(self._D, W.sum(dim=-1) ** (-self.t))
+        q_ref = self._floor_positive(W.sum(dim=-1))
+        _swap_parameter_storage(self._q_ref, q_ref, requires_grad=False)
+        _swap_parameter_storage(self._D, q_ref ** (-self.t))
         W = self._D[..., None] * W * self._D[..., None, :]
-        _swap_parameter_storage(self._Dinv1, W.sum(dim=-1) ** (-0.5))
+        _swap_parameter_storage(self._Dinv1, self._floor_positive(W.sum(dim=-1)) ** (-0.5))
+
+        W_density = self.raw_kernel(Xref, Xref, eps=self.density_eps)
+        q_density_ref = self._floor_positive(W_density.sum(dim=-1))
+        _swap_parameter_storage(self._q_density_ref, q_density_ref, requires_grad=False)
+
+    def reference_row_sums(self, *, density_bandwidth: bool = False) -> torch.Tensor:
+        self._require_reference_data()
+        if density_bandwidth:
+            return self._q_density_ref
+        return self._q_ref
+
+    def row_sums(self, X: torch.Tensor, *, density_bandwidth: bool = False) -> torch.Tensor:
+        self._require_reference_data()
+        eps = self.density_eps if density_bandwidth else self.eps
+        return self._floor_positive(self.raw_kernel(X, self._Xref, eps=eps).sum(dim=-1))
+
+    def _as_alpha(
+        self, alpha: torch.Tensor | float | None, *, device: torch.device
+    ) -> torch.Tensor:
+        if alpha is None:
+            return self.t
+        return torch.as_tensor(alpha, dtype=self.dtype, device=device)
+
+    def markov_sections(
+        self, X: torch.Tensor, *, alpha: torch.Tensor | float | None = None
+    ) -> torch.Tensor:
+        self._require_reference_data()
+        alpha_tensor = self._as_alpha(alpha, device=X.device)
+        q_x = self.row_sums(X, density_bandwidth=True)
+        q_ref = self.reference_row_sums(density_bandwidth=True)
+        W = self.raw_kernel(X, self._Xref)
+        W = W / (q_x[..., None] ** alpha_tensor * q_ref**alpha_tensor)
+        return W / self._floor_positive(W.sum(dim=-1))[..., None]
+
+    def volume_weights(self) -> torch.Tensor:
+        self._require_reference_data()
+        q_ref = self.reference_row_sums(density_bandwidth=True)
+        weights = q_ref.reciprocal()
+        return weights / self._floor_positive(weights.sum())
+
+    def density_sections(
+        self, X: torch.Tensor, *, alpha: torch.Tensor | float | None = None
+    ) -> torch.Tensor:
+        P = self.markov_sections(X, alpha=alpha)
+        return P / self.volume_weights()
+
+    def heat_diagnostics(self) -> dict[str, torch.Tensor]:
+        self._require_reference_data()
+        return {
+            "eps": self.eps,
+            "density_eps": self.density_eps,
+            "q_ref": self.reference_row_sums(),
+            "q_density_ref": self.reference_row_sums(density_bandwidth=True),
+            "volume_weights": self.volume_weights(),
+            "t": self.t,
+        }
 
     def forward(self, X: torch.Tensor, Z: torch.Tensor | None = None):
         if Z is None:
@@ -300,9 +432,9 @@ class KernelScDM(KernelScalarValued):
             return W
 
         W = self._rbf(X, Z)
-        D = W.sum(dim=-1) ** (-self.t)
+        D = self._floor_positive(W.sum(dim=-1)) ** (-self.t)
         W = D[..., None] * W * self._D[..., None, :]
-        Dinv1 = W.sum(dim=-1) ** (-0.5)
+        Dinv1 = self._floor_positive(W.sum(dim=-1)) ** (-0.5)
         W = Dinv1[..., None] * W * self._Dinv1[..., None, :]
         return W
 
