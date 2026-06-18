@@ -102,10 +102,12 @@ def generate_data(root: Path, seed: int | None = None):
     print(f"Generated data: {root / 'data' / 'kp.npz'}")
 
 
-def train(selected):
+def train(selected, seed: int | None = None):
     for i in selected:
         opt = {"model": copy.deepcopy(mdl_kb), "training": copy.deepcopy(trn_opts[i])}
         opt["model"]["name"] = f"kp_dt{i + 1}"
+        if seed is not None:
+            opt.setdefault("data", {})["split_seed"] = seed
         trainer = NODETrainer("kp_model.yaml", DKBF, config_mod=opt)
         trainer.train()
 
@@ -152,7 +154,7 @@ def main():
     if args.data or (args.workdir is not None and not data_path.exists()):
         generate_data(root, args.seed)
     if not args.no_train:
-        train(selected)
+        train(selected, args.seed)
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:

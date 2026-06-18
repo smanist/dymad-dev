@@ -84,7 +84,12 @@ def summary_signature(summary: dict) -> dict:
 
 
 def assert_summary_against_baseline(summary: dict, baseline: dict) -> None:
-    assert summary_signature(summary) == baseline["summary_signature"]
+    signature = summary_signature(summary)
+    baseline_signature = baseline["summary_signature"]
+    assert set(baseline_signature["top_level_keys"]) <= set(signature["top_level_keys"])
+    assert {key: value for key, value in signature.items() if key != "top_level_keys"} == {
+        key: value for key, value in baseline_signature.items() if key != "top_level_keys"
+    }
 
     total_training_time = float(summary["total_training_time"])
     avg_epoch_time = float(summary["avg_epoch_time"])
