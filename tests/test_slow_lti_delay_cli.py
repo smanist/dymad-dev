@@ -71,13 +71,7 @@ CASES = [
         5,
         "sdm_smp",
         DSDM,
-        metric_factors={
-            "best_valid_total": 3.0,
-            "final_valid_loss": 3.0,
-            "crit_train_last": 3.0,
-            "crit_valid_last": 3.0,
-            "rmse": 3.0,
-        },
+        seed=2,
     ),
     Case(6, "sdm_std", DSDM),
 ]

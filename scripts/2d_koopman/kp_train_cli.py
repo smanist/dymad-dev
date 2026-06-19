@@ -147,11 +147,13 @@ def generate_data(root: Path, seed: int | None = None):
     print(f"Generated data: {root / 'data' / 'kp.npz'}")
 
 
-def train(selected):
+def train(selected, seed: int | None = None):
     for i in selected:
         mdl, MDL, Trainer, opt = cfgs[i]
         opt_local = copy.deepcopy(opt)
         opt_local["model"]["name"] = f"kp_{mdl}"
+        if seed is not None:
+            opt_local.setdefault("data", {})["split_seed"] = seed
         trainer = Trainer(config_path, MDL, config_mod=opt_local)
         trainer.train()
 
@@ -193,7 +195,7 @@ def main():
     if args.data or (args.workdir is not None and not data_path.exists()):
         generate_data(root, args.seed)
     if not args.no_train:
-        train(selected)
+        train(selected, args.seed)
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:

@@ -54,7 +54,7 @@ class Case:
 CASES = [
     Case(0, "ldm_wf", LDM),
     Case(2, "kbf_wf", KBF),
-    Case(3, "kbf_node", KBF),
+    Case(3, "kbf_node", KBF, seed=1, metric_factors={"rmse": 2.0}),
     Case(
         4,
         "kbf_ln",

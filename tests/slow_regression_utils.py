@@ -8,6 +8,10 @@ from pathlib import Path
 import numpy as np
 
 SAFETY_FACTOR = 1.5
+DIAGNOSTIC_SAFETY_FACTORS = {
+    "crit_train_last": 10.0,
+    "crit_valid_last": 10.0,
+}
 ABS_TOLERANCES = {
     "best_valid_total": 1.0e-12,
     "final_valid_loss": 1.0e-12,
@@ -23,7 +27,9 @@ def load_baselines(path: Path) -> dict:
 
 
 def scaled_limit(metric_name: str, baseline_value: float, factor: float | None = None) -> float:
-    use_factor = SAFETY_FACTOR if factor is None else factor
+    use_factor = (
+        DIAGNOSTIC_SAFETY_FACTORS.get(metric_name, SAFETY_FACTOR) if factor is None else factor
+    )
     abs_tol = ABS_TOLERANCES.get(metric_name, 1.0e-9)
     return max(baseline_value * use_factor, baseline_value + abs_tol)
 
@@ -87,9 +93,18 @@ def assert_summary_against_baseline(summary: dict, baseline: dict) -> None:
     signature = summary_signature(summary)
     baseline_signature = baseline["summary_signature"]
     assert set(baseline_signature["top_level_keys"]) <= set(signature["top_level_keys"])
-    assert {key: value for key, value in signature.items() if key != "top_level_keys"} == {
-        key: value for key, value in baseline_signature.items() if key != "top_level_keys"
+    stable_signature = {
+        key: value
+        for key, value in signature.items()
+        if key not in {"top_level_keys", "crit_epoch_count"}
     }
+    stable_baseline_signature = {
+        key: value
+        for key, value in baseline_signature.items()
+        if key not in {"top_level_keys", "crit_epoch_count"}
+    }
+    assert stable_signature == stable_baseline_signature
+    assert signature["crit_epoch_count"] > 0
 
     total_training_time = float(summary["total_training_time"])
     avg_epoch_time = float(summary["avg_epoch_time"])

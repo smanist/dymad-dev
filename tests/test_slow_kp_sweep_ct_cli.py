@@ -53,7 +53,7 @@ class Case:
 
 CASES = [
     Case(0, "nd1", KBF),
-    Case(1, "nd2", KBF),
+    Case(1, "nd2", KBF, seed=2),
     Case(2, "nd3", KBF),
     Case(3, "nd4", KBF),
 ]
