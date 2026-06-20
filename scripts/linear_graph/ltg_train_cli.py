@@ -122,10 +122,15 @@ def generate_data(root: Path, seed: int | None = None):
     print(f"Generated data: {out_path}")
 
 
-def train(selected: list[int], root: Path):
+def train(selected: list[int], root: Path, seed: int | None = None):
     for idx in selected:
         case = cases[idx]
-        trainer = case["trainer"](root / case["config"], case["model"])
+        config_mod = (
+            {"data": {"split_seed": seed}}
+            if seed is not None and case["trainer"] is not LinearTrainer
+            else None
+        )
+        trainer = case["trainer"](root / case["config"], case["model"], config_mod=config_mod)
         trainer.train()
 
 
@@ -181,7 +186,7 @@ def main():
     if args.data or (args.workdir is not None and not data_path.exists()):
         generate_data(root, args.seed)
     if not args.no_train:
-        train(selected, root)
+        train(selected, root, args.seed)
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:

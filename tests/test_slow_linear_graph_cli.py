@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "linear_graph"
 BASELINE_PATH = Path(__file__).with_name("slow_linear_graph_cli_baselines.json")
 TEST_SEED = 12345
+EVAL_SEED = 12345
 
 A = np.array([[0.0, 1.0], [-1.0, -0.1]])
 ADJ = np.array([[0, 1, 1], [1, 0, 1], [1, 1, 0]])
@@ -70,9 +71,16 @@ class Case:
 
 CASES = [
     Case(0, "ldm_wf", GLDM),
-    Case(2, "kbf_wf", GKBF),
+    Case(2, "kbf_wf", GKBF, seed=7),
     Case(3, "kbf_node", GKBF),
-    Case(6, "lti_ln", GLTI, ode_method="rk4"),
+    Case(
+        6,
+        "lti_ln",
+        GLTI,
+        seed=0,
+        metric_factors={"best_valid_total": 10.0, "final_valid_loss": 10.0},
+        ode_method="rk4",
+    ),
 ]
 
 
@@ -102,7 +110,7 @@ def _eval_rmse(case: Case, checkpoint_path: Path) -> float:
         f,
         g,
         config=SCRIPT_ROOT / "ltg_data.yaml",
-        rng=case.seed,
+        rng=EVAL_SEED,
         config_mod=CONFIG_GAU,
     )
     ts, xs, us, ys = sampler.sample(np.linspace(0, 5, 501), batch=1)

@@ -98,11 +98,13 @@ def stage_data(root: Path):
     print(f"Staged data under: {root / 'data'}")
 
 
-def train(selected: list[int], root: Path):
+def train(selected: list[int], root: Path, seed: int | None = None):
     for idx in selected:
         case = cases[idx]
         options = copy.deepcopy(case["options"])
         options["data"] = {"path": str(root / case["train_data"])}
+        if seed is not None:
+            options["data"]["split_seed"] = seed
         trainer = case["trainer"](root / case["config"], case["model"], config_mod=options)
         trainer.train()
 
@@ -160,7 +162,7 @@ def main():
     if args.data or (args.workdir is not None and not all(path.exists() for path in required)):
         stage_data(root)
     if not args.no_train:
-        train(selected, root)
+        train(selected, root, args.seed)
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:

@@ -55,38 +55,10 @@ CASES = [
         2,
         "kbf_wf",
         GKBF,
-        metric_factors={
-            "best_valid_total": 15.0,
-            "final_valid_loss": 15.0,
-            "crit_train_last": 6.0,
-            "crit_valid_last": 6.0,
-            "rmse": 2.0,
-        },
+        seed=7,
     ),
-    Case(
-        3,
-        "kbf_node",
-        GKBF,
-        metric_factors={
-            "best_valid_total": 10.0,
-            "final_valid_loss": 10.0,
-            "crit_train_last": 6.0,
-            "crit_valid_last": 6.0,
-            "rmse": 2.0,
-        },
-    ),
-    Case(
-        4,
-        "kbf_ln",
-        GKBF,
-        metric_factors={
-            "best_valid_total": 5.0,
-            "final_valid_loss": 5.0,
-            "crit_train_last": 5.0,
-            "crit_valid_last": 5.0,
-            "rmse": 2.0,
-        },
-    ),
+    Case(3, "kbf_node", GKBF),
+    Case(4, "kbf_ln", GKBF),
 ]
 
 

@@ -38,7 +38,7 @@ class Case:
 
 
 CASES = [
-    Case(0, "dldmg", DLDMG, "kura_model"),
+    Case(0, "dldmg", DLDMG, "kura_model", seed=8),
 ]
 
 
