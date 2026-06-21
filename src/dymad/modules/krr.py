@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from dymad.modules.helpers import _swap_parameter_storage
-from dymad.modules.kernel import KernelAbstract, KernelOpTangent
+from dymad.modules.kernel import KernelAbstract, KernelOpTangent, inv_softplus
 
 
 class KRRBase(nn.Module):
@@ -176,7 +176,7 @@ class KRRMultiOutputShared(KRRBase):
         super().__init__(kernel, ridge_init=ridge_init, jitter=jitter, device=device)
 
         self._ridge_unconstrained = nn.Parameter(
-            torch.tensor(ridge_init, dtype=self.dtype, device=self.device).log()
+            inv_softplus(ridge_init, self.dtype, device=self.device)
         )
 
     def __repr__(self) -> str:
@@ -260,12 +260,13 @@ class KRRMultiOutputIndep(KRRBase):
             if isinstance(self.ridge_init, (float, int)):
                 ridge_unconstrained = torch.full(
                     (self._Dy,), float(self.ridge_init), dtype=self.dtype, device=self.device
-                ).log()
+                )
             else:
                 assert len(self.ridge_init) == self._Dy
                 ridge_unconstrained = torch.tensor(
                     self.ridge_init, dtype=self.dtype, device=self.device
-                ).log()
+                )
+            ridge_unconstrained = inv_softplus(ridge_unconstrained, self.dtype, device=self.device)
             _swap_parameter_storage(
                 self._ridge_unconstrained, ridge_unconstrained, requires_grad=True
             )
@@ -319,7 +320,7 @@ class KRROperatorValued(KRRBase):
         super().__init__(kernel, ridge_init=ridge_init, jitter=jitter, device=device)
 
         self._ridge_unconstrained = nn.Parameter(
-            torch.tensor(ridge_init, dtype=self.dtype, device=self.device).log()
+            inv_softplus(ridge_init, self.dtype, device=self.device)
         )
 
     def __repr__(self) -> str:
@@ -392,7 +393,7 @@ class KRRTangent(KRRBase):
         super().__init__(kernel, ridge_init=ridge_init, jitter=jitter, device=device)
 
         self._ridge_unconstrained = nn.Parameter(
-            torch.tensor(ridge_init, dtype=self.dtype, device=self.device).log()
+            inv_softplus(ridge_init, self.dtype, device=self.device)
         )
 
     def __repr__(self) -> str:

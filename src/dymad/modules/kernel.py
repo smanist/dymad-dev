@@ -36,9 +36,14 @@ def scaled_cdist(
     return dists
 
 
-def inv_softplus(y: float | np.floating[Any], dtype: torch.dtype) -> torch.Tensor:
+def inv_softplus(
+    y: float | np.floating[Any] | torch.Tensor,
+    dtype: torch.dtype,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
     """Inverse of softplus, for initialization."""
-    return torch.log(torch.exp(torch.tensor(float(y), dtype=dtype)) - 1)
+    y_tensor = torch.as_tensor(y, dtype=dtype, device=device)
+    return torch.where(y_tensor > 20.0, y_tensor, torch.log(torch.expm1(y_tensor)))
 
 
 # --------------------
@@ -159,9 +164,7 @@ class KernelScRBF(KernelScalarValued):
         if lengthscale_init is None:
             self._log_ell: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype))
         else:
-            self._log_ell = nn.Parameter(
-                torch.tensor(float(lengthscale_init), dtype=self.dtype).log()
-            )
+            self._log_ell = nn.Parameter(inv_softplus(lengthscale_init, self.dtype))
 
     def __repr__(self) -> str:
         return f"KernelScRBF(in_dim={self.in_dim}, ell={self.ell}, dtype={self.dtype})"
@@ -203,9 +206,7 @@ class KernelScExp(KernelScalarValued):
         if lengthscale_init is None:
             self._log_ell: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype))
         else:
-            self._log_ell = nn.Parameter(
-                torch.tensor(float(lengthscale_init), dtype=self.dtype).log()
-            )
+            self._log_ell = nn.Parameter(inv_softplus(lengthscale_init, self.dtype))
 
     def __repr__(self) -> str:
         return f"KernelScExp(in_dim={self.in_dim}, ell={self.ell}, dtype={self.dtype})"
@@ -264,7 +265,7 @@ class KernelScDM(KernelScalarValued):
         if eps_init is None:
             self._log_eps: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype))
         else:
-            self._log_eps = nn.Parameter(torch.tensor(float(eps_init), dtype=self.dtype).log())
+            self._log_eps = nn.Parameter(inv_softplus(eps_init, self.dtype))
         _tmp = inv_softplus(t_init, self.dtype)
         self._log_t: nn.Parameter = nn.Parameter(_tmp)
 

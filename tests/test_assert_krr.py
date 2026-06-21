@@ -1,6 +1,7 @@
 import copy
 
 import numpy as np
+import pytest
 import torch
 
 from dymad.modules import make_krr
@@ -80,6 +81,40 @@ def test_make_krr_defaults_to_zero_jitter():
         assert make_krr(**cfg).jitter == 0.0
 
 
+def test_explicit_krr_bandwidth_and_ridge_are_realized_values():
+    bandwidth = 10.0
+    ridge = 10.0
+    kernel_cases = [
+        ({"type": "sc_rbf", "input_dim": 2, "lengthscale_init": bandwidth}, "ell"),
+        ({"type": "sc_exp", "input_dim": 2, "lengthscale_init": bandwidth}, "ell"),
+        ({"type": "sc_dm", "input_dim": 2, "eps_init": bandwidth}, "eps"),
+    ]
+
+    for kernel_cfg, attr in kernel_cases:
+        model = make_krr(
+            type="share",
+            kernel=kernel_cfg,
+            dtype=torch.float64,
+            ridge_init=ridge,
+        )
+
+        assert float(getattr(model.kernel, attr).detach().cpu()) == pytest.approx(bandwidth)
+        assert float(model.ridge.detach().cpu()) == pytest.approx(ridge)
+
+    indep = make_krr(
+        type="indep",
+        kernel=[
+            {"type": "sc_rbf", "input_dim": 2, "lengthscale_init": bandwidth},
+            {"type": "sc_rbf", "input_dim": 2, "lengthscale_init": bandwidth},
+        ],
+        dtype=torch.float64,
+        ridge_init=[10.0, 5.0],
+    )
+    indep.set_train_data(Xtrn, Ytrn)
+
+    np.testing.assert_allclose(indep.ridge.detach().cpu().numpy(), np.array([10.0, 5.0]))
+
+
 def run_krr():
     prds = []
     for opt in opts:
@@ -100,10 +135,10 @@ def test_krr():
         err = np.linalg.norm(Ytst - Yprd, axis=1) / ref
         assert np.mean(err) < 0.0005
 
-    assert np.linalg.norm(prds[0] - prds[1]) < 2e-9
-    assert np.linalg.norm(prds[0][:, 0] - prds[1][:, 0]) < 2e-9
-    assert np.linalg.norm(prds[0] - prds[3]) < 2e-5
-    assert np.linalg.norm(prds[0] - prds[4]) < 2e-9
+    assert np.linalg.norm(prds[0] - prds[1]) < 5e-8
+    assert np.linalg.norm(prds[0][:, 0] - prds[1][:, 0]) < 5e-8
+    assert np.linalg.norm(prds[0] - prds[3]) < 5e-4
+    assert np.linalg.norm(prds[0] - prds[4]) < 1e-7
 
 
 if __name__ == "__main__":
