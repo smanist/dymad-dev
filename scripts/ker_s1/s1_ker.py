@@ -44,10 +44,11 @@ def f(t, x):
 
 # Training options
 RIDGE = 1e-6
+EXPLICIT_BANDWIDTH = float(np.log(2.0))
 
 ## Multi-output shared scalar kernels
 opt_rbf = {"type": "sc_rbf", "input_dim": 2, "lengthscale_init": None}
-opt_exp = {"type": "sc_exp", "input_dim": 2, "lengthscale_init": 1.0}
+opt_exp = {"type": "sc_exp", "input_dim": 2, "lengthscale_init": EXPLICIT_BANDWIDTH}
 opt_dm = {
     "type": "sc_dm",
     "input_dim": 2,
@@ -70,7 +71,7 @@ mdl_dm["kernel"] = opt_dm
 
 ## Tangent kernel
 opt_opk = {"type": "op_tan", "input_dim": 2, "output_dim": 2, "kopts": copy.deepcopy(opt_rbf)}
-opt_opk["kopts"]["lengthscale_init"] = 1.0
+opt_opk["kopts"]["lengthscale_init"] = EXPLICIT_BANDWIDTH
 opt_tange = {"type": "tangent", "kernel": opt_opk, "dtype": torch.float64, "ridge_init": RIDGE}
 mdl_mn = {
     "name": "ker_model",

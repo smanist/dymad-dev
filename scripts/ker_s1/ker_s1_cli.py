@@ -47,8 +47,9 @@ def f(t, x):
 
 
 RIDGE = 1e-6
+EXPLICIT_BANDWIDTH = float(np.log(2.0))
 opt_rbf = {"type": "sc_rbf", "input_dim": 2, "lengthscale_init": None}
-opt_exp = {"type": "sc_exp", "input_dim": 2, "lengthscale_init": 1.0}
+opt_exp = {"type": "sc_exp", "input_dim": 2, "lengthscale_init": EXPLICIT_BANDWIDTH}
 opt_dm = {"type": "sc_dm", "input_dim": 2, "eps_init": None}
 mdl_rbf = {
     "name": "ker_model",
@@ -66,7 +67,7 @@ mdl_dm = copy.deepcopy(mdl_rbf)
 mdl_dm["kernel"] = opt_dm
 
 opt_opk = {"type": "op_tan", "input_dim": 2, "output_dim": 2, "kopts": copy.deepcopy(opt_rbf)}
-opt_opk["kopts"]["lengthscale_init"] = 1.0
+opt_opk["kopts"]["lengthscale_init"] = EXPLICIT_BANDWIDTH
 opt_tange = {"type": "tangent", "kernel": opt_opk, "dtype": torch.float64, "ridge_init": RIDGE}
 GT = {0.0: (6, 3), 0.1: (7, 5), 0.3: (6, 5), 0.5: (5, 4)}
 mdl_mn = {

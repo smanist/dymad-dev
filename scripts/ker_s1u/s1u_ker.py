@@ -62,7 +62,8 @@ config_chr = {
 RIDGE = 1e-6
 
 ## Multi-output shared scalar kernel
-opt_exp = {"type": "sc_exp", "input_dim": 2, "lengthscale_init": 1.0}
+EXPLICIT_BANDWIDTH = float(np.log(2.0))
+opt_exp = {"type": "sc_exp", "input_dim": 2, "lengthscale_init": EXPLICIT_BANDWIDTH}
 opt_dm = {
     "type": "sc_dm",
     "input_dim": 2,

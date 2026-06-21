@@ -36,7 +36,8 @@ config_chr = {
 
 # Training options
 RIDGE = 1e-10
-opt_rbf1 = {"type": "sc_rbf", "input_dim": 2, "lengthscale_init": 1.0}
+EXPLICIT_BANDWIDTH = float(np.log(2.0))
+opt_rbf1 = {"type": "sc_rbf", "input_dim": 2, "lengthscale_init": EXPLICIT_BANDWIDTH}
 opt_opk1 = {
     "type": "op_sep",
     "input_dim": 2,
