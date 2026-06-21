@@ -67,28 +67,28 @@ mdl_dm["kernel"] = opt_dm
 trn_ln = {"n_epochs": 1, "method": "raw"}
 cv_rbf = {
     "param_grid": {
-        "model.kernel.lengthscale_init": ("linspace", (54.0, 75.0, 25)),
+        "model.kernel.lengthscale_init": ("linspace", (4.0, 4.35, 25)),
         "model.ridge_init": [1e-13],
     },
     "metric": "vpt",
 }
 cv_rbf_resume = {
     "param_grid": {
-        "model.kernel.lengthscale_init": ("linspace", (76.0, 85.0, 10)),
+        "model.kernel.lengthscale_init": ("linspace", (4.35, 4.5, 10)),
         "model.ridge_init": [1e-13],
     },
     "metric": "vpt",
 }
 cv_dm = {
     "param_grid": {
-        "model.kernel.eps_init": ("linspace", (1.0, 4.0, 10)),
+        "model.kernel.eps_init": ("linspace", (0.7, 1.6, 10)),
         "model.ridge_init": [1e-13],
     },
     "metric": "vpt",
 }
 cv_dm_resume = {
     "param_grid": {
-        "model.kernel.eps_init": ("linspace", (4.25, 7.0, 10)),
+        "model.kernel.eps_init": ("linspace", (1.65, 2.1, 10)),
         "model.ridge_init": [1e-13],
     },
     "metric": "vpt",

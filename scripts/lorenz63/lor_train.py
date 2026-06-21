@@ -61,7 +61,7 @@ trn_ln = {
 cv_rbf = {
     "param_grid": {
         # "model.kernel.lengthscale_init": ('logspace', (1.0, 7.0, 25, True, 2)),
-        "model.kernel.lengthscale_init": ("linspace", (54.0, 75.0, 25)),
+        "model.kernel.lengthscale_init": ("linspace", (4.0, 4.35, 25)),
         "model.ridge_init": [1e-13],
     },
     "metric": "vpt",
@@ -69,7 +69,7 @@ cv_rbf = {
 cv_dm = {
     "param_grid": {
         # "model.kernel.eps_init": ('logspace', (1.0, 7.0, 25, True, 2)),
-        "model.kernel.eps_init": ("linspace", (1.0, 4.0, 10)),
+        "model.kernel.eps_init": ("linspace", (0.7, 1.6, 10)),
         "model.ridge_init": [1e-13],
     },
     "metric": "vpt",

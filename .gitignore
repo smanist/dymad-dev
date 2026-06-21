@@ -14,6 +14,7 @@ docs/api
 docs/extra_files
 examples/**/*.npz
 examples/**/*.pkl
+examples/**/*_tuning
 scripts/**/*.npz
 scripts/**/*.pkl
 scripts/**/*_tuning
