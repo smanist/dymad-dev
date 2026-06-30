@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import torch
@@ -369,13 +369,13 @@ class KernelScDM(KernelScalarValued):
         q_density_ref = self._floor_positive(W_density.sum(dim=-1))
         _swap_parameter_storage(self._q_density_ref, q_density_ref, requires_grad=False)
 
-    def reference_row_sums(self, *, density_bandwidth: bool = False) -> torch.Tensor:
+    def _reference_row_sums(self, *, density_bandwidth: bool = False) -> torch.Tensor:
         self._require_reference_data()
         if density_bandwidth:
             return self._q_density_ref
         return self._q_ref
 
-    def row_sums(self, X: torch.Tensor, *, density_bandwidth: bool = False) -> torch.Tensor:
+    def _row_sums(self, X: torch.Tensor, *, density_bandwidth: bool = False) -> torch.Tensor:
         self._require_reference_data()
         eps = self.density_eps if density_bandwidth else self.eps
         return self._floor_positive(self.raw_kernel(X, self._Xref, eps=eps).sum(dim=-1))
@@ -387,39 +387,244 @@ class KernelScDM(KernelScalarValued):
             return self.t
         return torch.as_tensor(alpha, dtype=self.dtype, device=device)
 
-    def markov_sections(
-        self, X: torch.Tensor, *, alpha: torch.Tensor | float | None = None
+    def _heat_step_values(self, steps: int | Sequence[int]) -> tuple[tuple[int, ...], bool]:
+        if isinstance(steps, int):
+            step_values = (steps,)
+            return_single = True
+        elif isinstance(steps, Sequence) and not isinstance(steps, (str, bytes)):
+            step_values = tuple(int(step) for step in steps)
+            return_single = False
+        else:
+            raise TypeError("steps must be an int or a sequence of ints.")
+
+        if not step_values:
+            raise ValueError("steps must contain at least one value.")
+        if any(step < 1 for step in step_values):
+            raise ValueError("steps values must be positive.")
+        return step_values, return_single
+
+    def _as_heat_points(self, values: torch.Tensor, *, name: str) -> torch.Tensor:
+        tensor = torch.as_tensor(values, dtype=self.dtype, device=self._Xref.device)
+        if tensor.ndim < 2 or tensor.shape[-1] != self.in_dim:
+            raise ValueError(f"{name} must have shape (..., N, {self.in_dim}).")
+        return tensor
+
+    def _density_query_weights(self, X: torch.Tensor) -> torch.Tensor:
+        q_x = self._row_sums(X, density_bandwidth=True)
+        q_ref = self._reference_row_sums(density_bandwidth=True)
+        return q_x.reciprocal() / self._floor_positive(q_ref.reciprocal().sum())
+
+    def _density_markov_block(
+        self, rows: torch.Tensor, cols: torch.Tensor, *, alpha: torch.Tensor
     ) -> torch.Tensor:
-        self._require_reference_data()
-        alpha_tensor = self._as_alpha(alpha, device=X.device)
-        q_x = self.row_sums(X, density_bandwidth=True)
-        q_ref = self.reference_row_sums(density_bandwidth=True)
-        W = self.raw_kernel(X, self._Xref)
-        W = W / (q_x[..., None] ** alpha_tensor * q_ref**alpha_tensor)
-        return W / self._floor_positive(W.sum(dim=-1))[..., None]
+        q_rows = self._row_sums(rows, density_bandwidth=True)
+        q_cols = self._row_sums(cols, density_bandwidth=True)
+        q_ref = self._reference_row_sums(density_bandwidth=True)
 
-    def volume_weights(self) -> torch.Tensor:
-        self._require_reference_data()
-        q_ref = self.reference_row_sums(density_bandwidth=True)
-        weights = q_ref.reciprocal()
-        return weights / self._floor_positive(weights.sum())
+        row_factor = q_rows[..., None] ** alpha
+        ref_factor = q_ref**alpha
+        row_ref = self.raw_kernel(rows, self._Xref) / (row_factor * ref_factor)
+        normalizer = self._floor_positive(row_ref.sum(dim=-1))
 
-    def density_sections(
-        self, X: torch.Tensor, *, alpha: torch.Tensor | float | None = None
+        col_factor = q_cols[..., None, :] ** alpha
+        block = self.raw_kernel(rows, cols) / (row_factor * col_factor)
+        return block / normalizer[..., None]
+
+    def _uniform_factors(self, X: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if X.data_ptr() == self._Xref.data_ptr():
+            return self._D, self._Dinv1
+
+        q_x = self._row_sums(X)
+        d_x = q_x ** (-self.t)
+        row_ref = d_x[..., None] * self.raw_kernel(X, self._Xref) * self._D
+        s_x = self._floor_positive(row_ref.sum(dim=-1)) ** (-0.5)
+        return d_x, s_x
+
+    def _uniform_symmetric_block(self, rows: torch.Tensor, cols: torch.Tensor) -> torch.Tensor:
+        d_rows, s_rows = self._uniform_factors(rows)
+        d_cols, s_cols = self._uniform_factors(cols)
+        block = self.raw_kernel(rows, cols)
+        block = d_rows[..., None] * block * d_cols[..., None, :]
+        return s_rows[..., None] * block * s_cols[..., None, :]
+
+    def _heat_location_weights(
+        self, locations: torch.Tensor, weights: torch.Tensor | None
     ) -> torch.Tensor:
-        P = self.markov_sections(X, alpha=alpha)
-        return P / self.volume_weights()
+        if weights is None:
+            return torch.full(
+                locations.shape[:-1],
+                1.0 / locations.shape[-2],
+                dtype=self.dtype,
+                device=locations.device,
+            )
 
-    def heat_diagnostics(self) -> dict[str, torch.Tensor]:
+        weight_tensor = torch.as_tensor(weights, dtype=self.dtype, device=locations.device)
+        if weight_tensor.ndim < 1 or weight_tensor.shape[-1] != locations.shape[-2]:
+            raise ValueError("location_weights must have shape (..., Nloc).")
+        return weight_tensor
+
+    def _normalize_heat(
+        self,
+        values: torch.Tensor,
+        location_weights: torch.Tensor,
+        normalization: Literal["source", "median", "none"],
+    ) -> torch.Tensor:
+        if normalization == "none":
+            return values
+        if normalization not in {"source", "median"}:
+            raise ValueError("mass_normalization must be one of 'source', 'median', or 'none'.")
+
+        mass = (values * location_weights[..., None]).sum(dim=-2)
+        if normalization == "source":
+            return values / self._floor_positive(mass)[..., None, :]
+
+        scale = torch.median(mass.reshape(-1))
+        return values / self._floor_positive(scale)
+
+    def heat_kernel(
+        self,
+        locations: torch.Tensor,
+        sources: torch.Tensor | None = None,
+        *,
+        mode: Literal["density", "uniform"] = "density",
+        steps: int | Sequence[int] = 1,
+        alpha: torch.Tensor | float | None = None,
+        location_weights: torch.Tensor | None = None,
+        mass_normalization: Literal["source", "median", "none"] = "source",
+    ) -> torch.Tensor:
+        """
+        Evaluate diffusion-map heat kernels from sources to locations.
+
+        The returned tensor is indexed as ``(..., Nloc, Nsrc)``. With a sequence of
+        ``steps`` values, the result is stacked as ``(Nsteps, ..., Nloc, Nsrc)`` in
+        the requested order. ``steps=1`` is the direct source-location kernel;
+        larger values route through the reference data with ``steps - 2``
+        reference-reference transitions.
+
+        In ``density`` mode, directed Markov blocks are composed and the final
+        target block is divided by query volume weights. In ``uniform`` mode,
+        symmetric diffusion-map blocks are composed and scaled by the number of
+        reference points. Both modes are mass-normalized on the returned location
+        grid by default. ``location_weights`` supplies the quadrature weights for
+        that grid; equal weights are used when it is omitted.
+        """
         self._require_reference_data()
-        return {
-            "eps": self.eps,
-            "density_eps": self.density_eps,
-            "q_ref": self.reference_row_sums(),
-            "q_density_ref": self.reference_row_sums(density_bandwidth=True),
-            "volume_weights": self.volume_weights(),
-            "t": self.t,
-        }
+        step_values, return_single = self._heat_step_values(steps)
+        locations_tensor = self._as_heat_points(locations, name="locations")
+        if sources is None:
+            sources_tensor = locations_tensor
+        else:
+            sources_tensor = self._as_heat_points(sources, name="sources")
+
+        mode_key = mode.lower()
+        weights = self._heat_location_weights(locations_tensor, location_weights)
+        if mode_key == "density":
+            result_by_step = self._density_heat_kernel_by_step(
+                sources_tensor,
+                locations_tensor,
+                step_values,
+                alpha=alpha,
+                location_weights=weights,
+                mass_normalization=mass_normalization,
+            )
+        elif mode_key == "uniform":
+            if alpha is not None:
+                raise ValueError("alpha is only supported for density heat kernels.")
+            result_by_step = self._uniform_heat_kernel_by_step(
+                sources_tensor,
+                locations_tensor,
+                step_values,
+                location_weights=weights,
+                mass_normalization=mass_normalization,
+            )
+        else:
+            raise ValueError("mode must be either 'density' or 'uniform'.")
+
+        ordered = [result_by_step[step] for step in step_values]
+        if return_single:
+            return ordered[0]
+        return torch.stack(ordered, dim=0)
+
+    def _density_heat_kernel_by_step(
+        self,
+        sources: torch.Tensor,
+        locations: torch.Tensor,
+        step_values: tuple[int, ...],
+        *,
+        alpha: torch.Tensor | float | None,
+        location_weights: torch.Tensor,
+        mass_normalization: Literal["source", "median", "none"],
+    ) -> dict[int, torch.Tensor]:
+        alpha_tensor = self._as_alpha(alpha, device=sources.device)
+        target_weights = self._density_query_weights(locations)
+
+        direct = self._density_markov_block(sources, locations, alpha=alpha_tensor)
+        direct = direct / target_weights[..., None, :]
+        result_by_step: dict[int, torch.Tensor] = {}
+        if 1 in step_values:
+            values = direct.transpose(-1, -2)
+            result_by_step[1] = self._normalize_heat(values, location_weights, mass_normalization)
+
+        larger_steps = sorted({step for step in step_values if step >= 2})
+        if not larger_steps:
+            return result_by_step
+
+        source_ref = self._density_markov_block(sources, self._Xref, alpha=alpha_tensor)
+        ref_ref = self._density_markov_block(self._Xref, self._Xref, alpha=alpha_tensor)
+        ref_location = self._density_markov_block(self._Xref, locations, alpha=alpha_tensor)
+
+        current = source_ref
+        current_power = 0
+        for step in larger_steps:
+            target_power = step - 2
+            while current_power < target_power:
+                current = torch.matmul(current, ref_ref)
+                current_power += 1
+            values = torch.matmul(current, ref_location)
+            values = values / target_weights[..., None, :]
+            values = values.transpose(-1, -2)
+            result_by_step[step] = self._normalize_heat(
+                values, location_weights, mass_normalization
+            )
+        return result_by_step
+
+    def _uniform_heat_kernel_by_step(
+        self,
+        sources: torch.Tensor,
+        locations: torch.Tensor,
+        step_values: tuple[int, ...],
+        *,
+        location_weights: torch.Tensor,
+        mass_normalization: Literal["source", "median", "none"],
+    ) -> dict[int, torch.Tensor]:
+        scale = torch.as_tensor(self._Xref.shape[-2], dtype=self.dtype, device=self._Xref.device)
+        result_by_step: dict[int, torch.Tensor] = {}
+        if 1 in step_values:
+            direct = scale * self._uniform_symmetric_block(sources, locations)
+            values = direct.transpose(-1, -2)
+            result_by_step[1] = self._normalize_heat(values, location_weights, mass_normalization)
+
+        larger_steps = sorted({step for step in step_values if step >= 2})
+        if not larger_steps:
+            return result_by_step
+
+        source_ref = self._uniform_symmetric_block(sources, self._Xref)
+        ref_ref = self._uniform_symmetric_block(self._Xref, self._Xref)
+        ref_location = self._uniform_symmetric_block(self._Xref, locations)
+
+        current = source_ref
+        current_power = 0
+        for step in larger_steps:
+            target_power = step - 2
+            while current_power < target_power:
+                current = torch.matmul(current, ref_ref)
+                current_power += 1
+            values = scale * torch.matmul(current, ref_location)
+            values = values.transpose(-1, -2)
+            result_by_step[step] = self._normalize_heat(
+                values, location_weights, mass_normalization
+            )
+        return result_by_step
 
     def forward(self, X: torch.Tensor, Z: torch.Tensor | None = None):
         if Z is None:
