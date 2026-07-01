@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from dymad.modules import KernelScDM
+from dymad.modules import KernelScDM, KernelSparseScDM
 
 
 def test_scdm_forward_preserves_symmetric_normalized_kernel():
@@ -499,3 +499,54 @@ def test_scdm_heat_kernel_keeps_section_helpers_private():
     assert not hasattr(kernel, "heat_diagnostics")
     assert not hasattr(kernel, "row_sums")
     assert not hasattr(kernel, "reference_row_sums")
+
+
+def test_sparse_scdm_uniform_heat_kernel_matches_dense_euclidean_sections():
+    Xref = _embedded_circle_points(32)
+    locations = _embedded_circle_points(24)
+    sources = _embedded_circle_points(3)
+    dense = KernelScDM(in_dim=2, eps_init=0.2, t_init=1.0, dtype=torch.float64)
+    sparse = KernelSparseScDM(
+        in_dim=2,
+        eps_init=0.2,
+        t_init=1.0,
+        dtype=torch.float64,
+        kernel_tol=1e-14,
+    )
+    dense.set_reference_data(Xref)
+    sparse.set_reference_data(Xref)
+
+    dense_heat = dense.heat_kernel(locations, sources, mode="uniform", steps=[1, 3])
+    sparse_heat = sparse.heat_kernel(locations, sources, mode="uniform", steps=[1, 3])
+
+    assert sparse_heat.shape == dense_heat.shape
+    assert torch.allclose(sparse_heat, dense_heat, rtol=1e-10, atol=1e-10)
+
+
+def test_sparse_scdm_volume_estimate_diagnostics_match_dense_contract():
+    Xref = _embedded_circle_points(64)
+    locations = _embedded_circle_points(32)
+    sources = _embedded_circle_points(2)
+    kernel = KernelSparseScDM(in_dim=2, eps_init=0.05, dtype=torch.float64, kernel_tol=1e-14)
+    kernel.set_reference_data(Xref)
+
+    heat, diagnostics = kernel.heat_kernel(
+        locations,
+        sources,
+        mode="uniform",
+        steps=2,
+        volume_normalization="estimate_volume",
+        volume_dim=1,
+        volume_estimate_warnings=False,
+        return_diagnostics=True,
+    )
+
+    assert heat.shape == (32, 2)
+    assert diagnostics["volume_normalization"] == "estimate_volume"
+    assert diagnostics["dim"] == 1
+    assert float(diagnostics["volume"]) > 0.0
+
+
+def test_sparse_scdm_rejects_non_euclidean_metric():
+    with pytest.raises(NotImplementedError, match="Euclidean"):
+        KernelSparseScDM(in_dim=1, eps_init=0.1, metric="periodic")

@@ -20,6 +20,7 @@ from dymad.modules.kernel import (
     KernelScRBF,
     scaled_cdist,
 )
+from dymad.modules.kernel_sparse import KernelSparseScDM
 from dymad.modules.krr import (
     KRRBase,
     KRRMultiOutputIndep,
@@ -48,6 +49,7 @@ __all__ = [
     "KernelOpTangent",
     "KernelScalarValued",
     "KernelScDM",
+    "KernelSparseScDM",
     "KernelScExp",
     "KernelScRBF",
     "KRRBase",
