@@ -26,24 +26,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from dymad.modules import KernelScDM  # noqa: E402
+from dymad.modules import KernelSparseScDM  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent
 OUT = BASE_DIR / "runs" / "circle_redo"
 RAW_CSV = OUT / "circle_raw_results.csv"
 FIG_PATH = OUT / "convergence_circle.png"
+SECTION_FIG_PATH = OUT / "section_circle.png"
 
 TWO_PI = 2.0 * math.pi
 TARGET_TIME = 0.01
-# STEPS = (1, 2, 4, 8, 16, 32)
-STEPS = (8,)
+STEPS = (1, 2, 4, 8, 16, 32)
+# STEPS = (8,)
 EPSILONS = tuple(TARGET_TIME / step for step in STEPS)
-# SAMPLE_COUNTS = (512, 1024, 2048, 4096, 8192, 16384)
-SAMPLE_COUNTS = (512, 1024, 2048, 4096, 8192)
+SAMPLE_COUNTS = (512, 1024, 2048, 4096, 8192, 16384)
+# SAMPLE_COUNTS = (512, 1024, 2048, 4096, 8192)
 TRIALS = 8
 TEST_COUNT = 4096
 SEED = 2026061801
 SOURCE_FRACTIONS = (0.125, 0.375, 0.625, 0.875)
+KERNEL_TOL = 1e-10
 
 # Full DyMAD dense sections are expensive at the largest counts.  For quick
 # smoke runs, override these near the if-block below.
@@ -52,9 +54,15 @@ RUN_SAMPLE_COUNTS = SAMPLE_COUNTS
 RUN_TRIALS = TRIALS
 RUN_TEST_COUNT = TEST_COUNT
 MAX_WORKERS = 4
+SECTION_N = 16384
+SECTION_STEPS = 32
+SECTION_TRIAL = 0
+SECTION_SOURCE_INDICES = (0,)
+SECTION_TEST_COUNT = TEST_COUNT
 
-ifrun = 1
-ifplt = 1
+ifrun = 0
+ifplt = 0
+ifsec = 1
 
 
 def trial_seed(n_samples: int, trial: int) -> int:
@@ -93,7 +101,13 @@ def dymad_section(
     ref_angles: np.ndarray, sources: np.ndarray, points: np.ndarray, steps: int
 ) -> tuple[np.ndarray, float]:
     epsilon = TARGET_TIME / steps
-    kernel = KernelScDM(in_dim=2, eps_init=epsilon, t_init=1.0, dtype=torch.float64)
+    kernel = KernelSparseScDM(
+        in_dim=2,
+        eps_init=epsilon,
+        t_init=1.0,
+        dtype=torch.float64,
+        kernel_tol=KERNEL_TOL,
+    )
     kernel.set_reference_data(torch.as_tensor(embed(ref_angles), dtype=torch.float64))
     values = kernel.heat_kernel(
         torch.as_tensor(embed(points), dtype=torch.float64),
@@ -198,6 +212,34 @@ def plot_convergence(rows: list[dict[str, str]], path: Path) -> None:
     plt.close(fig)
 
 
+def plot_sections(n_samples: int, steps: int, trial: int, source_indices, path: Path) -> None:
+    source_ids, sources = source_angles()
+    source_idx = list(source_indices)
+    source_pts = sources[source_idx]
+    points = test_angles(SECTION_TEST_COUNT)
+    truth = reference_kernel(source_pts, points)
+    pred, volume_hat = dymad_section(
+        sample_angles(n_samples, trial_seed(n_samples, trial)), source_pts, points, steps
+    )
+    fig, axes = plt.subplots(
+        len(source_idx), 3, figsize=(12.0, 3.0 * len(source_idx)), squeeze=False
+    )
+    for row, idx in enumerate(source_idx):
+        error = pred[row] - truth[row]
+        panels = (("truth", truth[row]), ("DyMAD", pred[row]), ("error", error))
+        for ax, (title, values) in zip(axes[row], panels, strict=True):
+            ax.plot(points[:, 0], values)
+            ax.set_title(f"{source_ids[idx]} {title}")
+            ax.grid(True, alpha=0.25)
+    eps = TARGET_TIME / steps
+    fig.suptitle(
+        f"circle sections: N={n_samples}, eps={eps:g}, steps={steps}, trial={trial}, volume={volume_hat:.6g}"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
 if __name__ == "__main__" and ifrun:
     source_ids, source_pts = source_angles()
     test_pts = test_angles(RUN_TEST_COUNT)
@@ -237,3 +279,7 @@ if __name__ == "__main__" and ifplt:
         print(f"Wrote {FIG_PATH}")
     else:
         print(f"Missing {RAW_CSV}; set ifrun = 1 or copy the circle CSV into place.")
+
+if __name__ == "__main__" and ifsec:
+    plot_sections(SECTION_N, SECTION_STEPS, SECTION_TRIAL, SECTION_SOURCE_INDICES, SECTION_FIG_PATH)
+    print(f"Wrote {SECTION_FIG_PATH}")
