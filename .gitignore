@@ -18,6 +18,7 @@ examples/**/*_tuning
 scripts/**/*.npz
 scripts/**/*.pkl
 scripts/**/*_tuning
+scripts/ker_heat/runs
 scripts/tuning_convergence/runs
 scripts/tuning_convergence/**/context_results/
 scripts/tuning_convergence/**/median_predictions/
