@@ -225,6 +225,128 @@ def test_scdm_uniform_heat_kernel_normalizes_each_source_mass():
     assert torch.allclose(mass, torch.ones_like(mass))
 
 
+def _embedded_circle_points(n_points: int) -> torch.Tensor:
+    theta = torch.linspace(0.0, 2.0 * torch.pi, n_points + 1, dtype=torch.float64)[:-1]
+    return torch.stack((torch.cos(theta), torch.sin(theta)), dim=1)
+
+
+def test_scdm_estimates_uniform_reference_volume_with_diagnostics():
+    Xref = _embedded_circle_points(512)
+    kernel = KernelScDM(in_dim=2, eps_init=0.00125, t_init=1.0, dtype=torch.float64)
+    kernel.set_reference_data(Xref)
+
+    volume, diagnostics = kernel.estimate_reference_volume(
+        1,
+        warn=False,
+        return_diagnostics=True,
+    )
+
+    assert torch.isclose(volume, torch.tensor(2.0 * torch.pi, dtype=torch.float64), rtol=0.02)
+    assert diagnostics["dim"] == 1
+    assert diagnostics["method"] == "median"
+    assert diagnostics["row_sum_cv"] < 0.05
+    assert diagnostics["row_sum_p95_p05"] < 1.1
+
+
+def test_scdm_estimated_volume_heat_kernel_uses_physical_scale():
+    Xref = _embedded_circle_points(256)
+    locations = _embedded_circle_points(128)
+    sources = _embedded_circle_points(4)
+    kernel = KernelScDM(in_dim=2, eps_init=0.00125, t_init=1.0, dtype=torch.float64)
+    kernel.set_reference_data(Xref)
+    volume = kernel.estimate_reference_volume(1, warn=False)
+
+    heat = kernel.heat_kernel(
+        locations,
+        sources,
+        mode="uniform",
+        steps=2,
+        volume_normalization="estimate_volume",
+        volume_dim=1,
+        volume_estimate_warnings=False,
+    )
+
+    assert torch.allclose(heat.mean(dim=0), volume.reciprocal().expand(sources.shape[0]))
+
+
+def test_scdm_estimated_volume_heat_kernel_returns_diagnostics():
+    Xref = _embedded_circle_points(256)
+    locations = _embedded_circle_points(128)
+    sources = _embedded_circle_points(4)
+    kernel = KernelScDM(in_dim=2, eps_init=0.00125, t_init=1.0, dtype=torch.float64)
+    kernel.set_reference_data(Xref)
+
+    heat, diagnostics = kernel.heat_kernel(
+        locations,
+        sources,
+        mode="uniform",
+        steps=2,
+        volume_normalization="estimate_volume",
+        volume_dim=1,
+        volume_estimate_warnings=False,
+        return_diagnostics=True,
+    )
+
+    assert diagnostics["volume_normalization"] == "estimate_volume"
+    assert diagnostics["dim"] == 1
+    assert abs(float(diagnostics["volume"]) - 2.0 * torch.pi) < 0.2
+    assert torch.allclose(
+        heat.mean(dim=0),
+        torch.full(
+            (sources.shape[0],),
+            1.0 / float(diagnostics["volume"]),
+            dtype=torch.float64,
+        ),
+    )
+
+
+def test_scdm_explicit_volume_heat_kernel_uses_physical_scale():
+    Xref = _embedded_circle_points(64)
+    locations = _embedded_circle_points(32)
+    sources = _embedded_circle_points(3)
+    volume = torch.tensor(2.0 * torch.pi, dtype=torch.float64)
+    kernel = KernelScDM(in_dim=2, eps_init=0.01, t_init=1.0, dtype=torch.float64)
+    kernel.set_reference_data(Xref)
+
+    heat = kernel.heat_kernel(
+        locations,
+        sources,
+        mode="uniform",
+        steps=1,
+        volume_normalization="explicit_volume",
+        volume=volume,
+    )
+
+    assert torch.allclose(heat.mean(dim=0), volume.reciprocal().expand(sources.shape[0]))
+
+
+def test_scdm_volume_normalization_rejects_explicit_location_weights():
+    Xref = _embedded_circle_points(32)
+    kernel = KernelScDM(in_dim=2, eps_init=0.01, dtype=torch.float64)
+    kernel.set_reference_data(Xref)
+
+    with pytest.raises(ValueError, match="location_weights"):
+        kernel.heat_kernel(
+            Xref,
+            Xref[:2],
+            mode="uniform",
+            location_weights=torch.full((32,), 1.0 / 32.0, dtype=torch.float64),
+            volume_normalization="explicit_volume",
+            volume=1.0,
+        )
+
+
+def test_scdm_volume_estimate_warns_for_nonuniform_row_sums():
+    Xref = torch.tensor(
+        [[0.00], [0.01], [0.02], [0.03], [0.50], [0.80], [0.95]], dtype=torch.float64
+    )
+    kernel = KernelScDM(in_dim=1, eps_init=0.01, dtype=torch.float64, metric="periodic")
+    kernel.set_reference_data(Xref)
+
+    with pytest.warns(RuntimeWarning, match="Reference row sums vary"):
+        kernel.estimate_reference_volume(1, row_sum_cv_warn=0.01)
+
+
 def test_scdm_density_heat_kernel_median_normalization_uses_global_source_scale():
     Xref = torch.tensor(
         [[0.00], [0.02], [0.04], [0.18], [0.46], [0.75], [0.97]], dtype=torch.float64

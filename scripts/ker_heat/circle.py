@@ -9,6 +9,7 @@ import math
 import os
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 _MPL_CONFIG_DIR = Path(tempfile.gettempdir()) / "dymad_matplotlib"
@@ -34,9 +35,11 @@ FIG_PATH = OUT / "convergence_circle.png"
 
 TWO_PI = 2.0 * math.pi
 TARGET_TIME = 0.01
-STEPS = (1, 2, 4, 8, 16, 32)
+# STEPS = (1, 2, 4, 8, 16, 32)
+STEPS = (8,)
 EPSILONS = tuple(TARGET_TIME / step for step in STEPS)
-SAMPLE_COUNTS = (512, 1024, 2048, 4096, 8192, 16384)
+# SAMPLE_COUNTS = (512, 1024, 2048, 4096, 8192, 16384)
+SAMPLE_COUNTS = (512, 1024, 2048, 4096, 8192)
 TRIALS = 8
 TEST_COUNT = 4096
 SEED = 2026061801
@@ -48,6 +51,7 @@ RUN_STEPS = STEPS
 RUN_SAMPLE_COUNTS = SAMPLE_COUNTS
 RUN_TRIALS = TRIALS
 RUN_TEST_COUNT = TEST_COUNT
+MAX_WORKERS = 4
 
 ifrun = 1
 ifplt = 1
@@ -87,7 +91,7 @@ def reference_kernel(sources: np.ndarray, points: np.ndarray) -> np.ndarray:
 
 def dymad_section(
     ref_angles: np.ndarray, sources: np.ndarray, points: np.ndarray, steps: int
-) -> np.ndarray:
+) -> tuple[np.ndarray, float]:
     epsilon = TARGET_TIME / steps
     kernel = KernelScDM(in_dim=2, eps_init=epsilon, t_init=1.0, dtype=torch.float64)
     kernel.set_reference_data(torch.as_tensor(embed(ref_angles), dtype=torch.float64))
@@ -96,8 +100,13 @@ def dymad_section(
         torch.as_tensor(embed(sources), dtype=torch.float64),
         mode="uniform",
         steps=steps,
+        volume_normalization="estimate_volume",
+        volume_dim=1,
+        volume_estimate_warnings=False,
+        return_diagnostics=True,
     )
-    return values.detach().cpu().numpy().T
+    section, diagnostics = values
+    return section.detach().cpu().numpy().T, float(diagnostics["volume"])
 
 
 def metric_rows(ids, estimate, truth, n_samples: int, trial: int, steps: int):
@@ -117,6 +126,13 @@ def metric_rows(ids, estimate, truth, n_samples: int, trial: int, steps: int):
         }
         for i in range(len(ids))
     ]
+
+
+def run_one(task):
+    step_count, n, tr, source_ids, source_pts, test_pts, truth = task
+    ref_pts = sample_angles(n, trial_seed(n, tr))
+    pred, _volume_hat = dymad_section(ref_pts, source_pts, test_pts, step_count)
+    return step_count, n, tr, metric_rows(source_ids, pred, truth, n, tr, step_count)
 
 
 def write_rows(path: Path, rows: list[dict[str, object]]) -> None:
@@ -182,21 +198,42 @@ def plot_convergence(rows: list[dict[str, str]], path: Path) -> None:
     plt.close(fig)
 
 
-if ifrun:
+if __name__ == "__main__" and ifrun:
     source_ids, source_pts = source_angles()
     test_pts = test_angles(RUN_TEST_COUNT)
     truth = reference_kernel(source_pts, test_pts)
+    tasks = [
+        (step_count, n, tr, source_ids, source_pts, test_pts, truth)
+        for step_count in RUN_STEPS
+        for n in RUN_SAMPLE_COUNTS
+        for tr in range(RUN_TRIALS)
+    ]
     raw_rows: list[dict[str, object]] = []
-    for step_count in RUN_STEPS:
-        for n in RUN_SAMPLE_COUNTS:
-            for tr in range(RUN_TRIALS):
-                ref_pts = sample_angles(n, trial_seed(n, tr))
-                pred = dymad_section(ref_pts, source_pts, test_pts, step_count)
-                raw_rows.extend(metric_rows(source_ids, pred, truth, n, tr, step_count))
+    if MAX_WORKERS > 1:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            futures = [pool.submit(run_one, task) for task in tasks]
+            results = []
+            for future in as_completed(futures):
+                step_count, n, tr, rows = future.result()
+                results.append((step_count, n, tr, rows))
                 print(
-                    f"circle steps={step_count} eps={TARGET_TIME / step_count:g} n={n} trial={tr}"
+                    f"done circle steps={step_count} eps={TARGET_TIME / step_count:g} "
+                    f"n={n} trial={tr}",
+                    flush=True,
                 )
+    else:
+        results = [run_one(task) for task in tasks]
+    for step_count, n, tr, rows in results:
+        raw_rows.extend(rows)
+        if MAX_WORKERS <= 1:
+            print(
+                f"done circle steps={step_count} eps={TARGET_TIME / step_count:g} n={n} trial={tr}"
+            )
     write_rows(RAW_CSV, raw_rows)
 
-if ifplt:
-    plot_convergence(read_rows(RAW_CSV), FIG_PATH)
+if __name__ == "__main__" and ifplt:
+    if RAW_CSV.exists():
+        plot_convergence(read_rows(RAW_CSV), FIG_PATH)
+        print(f"Wrote {FIG_PATH}")
+    else:
+        print(f"Missing {RAW_CSV}; set ifrun = 1 or copy the circle CSV into place.")

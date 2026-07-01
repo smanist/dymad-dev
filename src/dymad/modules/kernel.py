@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any, Literal, cast
@@ -380,6 +381,71 @@ class KernelScDM(KernelScalarValued):
         eps = self.density_eps if density_bandwidth else self.eps
         return self._floor_positive(self.raw_kernel(X, self._Xref, eps=eps).sum(dim=-1))
 
+    def estimate_reference_volume(
+        self,
+        dim: int,
+        *,
+        method: Literal["median", "mean"] = "median",
+        warn: bool = True,
+        row_sum_cv_warn: float = 0.25,
+        row_sum_spread_warn: float = 2.0,
+        return_diagnostics: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, float | int | str]]:
+        """Estimate uniform-reference manifold volume from short-step row sums.
+
+        The estimator assumes approximately uniform reference samples and uses
+        ``sum_j exp(-||x_i-x_j||^2/(4 eps))``. Large row-sum variation triggers
+        a warning because it often indicates non-uniform sampling, boundary
+        bias, or an unsuitable bandwidth.
+        """
+
+        self._require_reference_data()
+        if dim <= 0:
+            raise ValueError("dim must be positive.")
+        if method not in {"median", "mean"}:
+            raise ValueError("method must be either 'median' or 'mean'.")
+
+        q_ref = self._reference_row_sums()
+        center = torch.median(q_ref) if method == "median" else torch.mean(q_ref)
+        factor = torch.as_tensor(4.0 * np.pi, dtype=self.dtype, device=q_ref.device) * self.eps
+        volume = q_ref.shape[-1] * factor ** (0.5 * dim) / self._floor_positive(center)
+
+        q_mean = torch.mean(q_ref)
+        q_std = torch.std(q_ref, unbiased=False)
+        q_p05 = torch.quantile(q_ref, 0.05)
+        q_p95 = torch.quantile(q_ref, 0.95)
+        row_sum_cv = q_std / self._floor_positive(q_mean)
+        row_sum_spread = q_p95 / self._floor_positive(q_p05)
+        row_sum_cv_value = float(row_sum_cv.detach().cpu())
+        row_sum_spread_value = float(row_sum_spread.detach().cpu())
+        diagnostics: dict[str, float | int | str] = {
+            "dim": dim,
+            "method": method,
+            "volume": float(volume.detach().cpu()),
+            "row_sum_mean": float(q_mean.detach().cpu()),
+            "row_sum_median": float(torch.median(q_ref).detach().cpu()),
+            "row_sum_cv": row_sum_cv_value,
+            "row_sum_p05": float(q_p05.detach().cpu()),
+            "row_sum_p95": float(q_p95.detach().cpu()),
+            "row_sum_p95_p05": row_sum_spread_value,
+        }
+        if warn and (
+            row_sum_cv_value > row_sum_cv_warn or row_sum_spread_value > row_sum_spread_warn
+        ):
+            warnings.warn(
+                "Reference row sums vary substantially "
+                f"(cv={row_sum_cv_value:.3g}, "
+                f"p95/p5={row_sum_spread_value:.3g}). "
+                "The volume estimator assumes approximately uniform reference "
+                "sampling and weak boundary bias.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+        if return_diagnostics:
+            return volume, diagnostics
+        return volume
+
     def _as_alpha(
         self, alpha: torch.Tensor | float | None, *, device: torch.device
     ) -> torch.Tensor:
@@ -448,20 +514,78 @@ class KernelScDM(KernelScalarValued):
         return s_rows[..., None] * block * s_cols[..., None, :]
 
     def _heat_location_weights(
-        self, locations: torch.Tensor, weights: torch.Tensor | None
-    ) -> torch.Tensor:
+        self,
+        locations: torch.Tensor,
+        weights: torch.Tensor | None,
+        *,
+        volume_normalization: Literal["none", "explicit_volume", "estimate_volume"],
+        volume: torch.Tensor | float | None,
+        volume_dim: int | None,
+        volume_estimate_warnings: bool,
+        volume_row_sum_cv_warn: float,
+        volume_row_sum_spread_warn: float,
+    ) -> tuple[torch.Tensor, dict[str, float | int | str]]:
+        if weights is not None and volume_normalization != "none":
+            raise ValueError("location_weights cannot be combined with volume_normalization.")
+
+        if volume_normalization == "explicit_volume":
+            if volume is None:
+                raise ValueError("volume is required when volume_normalization='explicit_volume'.")
+            volume_tensor = torch.as_tensor(volume, dtype=self.dtype, device=locations.device)
+            if torch.any(volume_tensor <= 0):
+                raise ValueError("volume must be positive.")
+            diagnostics: dict[str, float | int | str] = {"volume_normalization": "explicit_volume"}
+            if volume_tensor.numel() == 1:
+                diagnostics["volume"] = float(volume_tensor.detach().cpu())
+            else:
+                diagnostics["volume_shape"] = str(tuple(volume_tensor.shape))
+            location_weights = torch.ones(
+                locations.shape[:-1], dtype=self.dtype, device=locations.device
+            ) * (volume_tensor / locations.shape[-2])
+            return location_weights, diagnostics
+
+        if volume_normalization == "estimate_volume":
+            if volume_dim is None:
+                raise ValueError(
+                    "volume_dim is required when volume_normalization='estimate_volume'."
+                )
+            volume_tensor, diagnostics = cast(
+                tuple[torch.Tensor, dict[str, float | int | str]],
+                self.estimate_reference_volume(
+                    volume_dim,
+                    warn=volume_estimate_warnings,
+                    row_sum_cv_warn=volume_row_sum_cv_warn,
+                    row_sum_spread_warn=volume_row_sum_spread_warn,
+                    return_diagnostics=True,
+                ),
+            )
+            diagnostics = {"volume_normalization": "estimate_volume", **diagnostics}
+            location_weights = torch.ones(
+                locations.shape[:-1], dtype=self.dtype, device=locations.device
+            ) * (volume_tensor.to(locations.device) / locations.shape[-2])
+            return location_weights, diagnostics
+
+        if volume_normalization != "none":
+            raise ValueError(
+                "volume_normalization must be one of 'none', 'explicit_volume', "
+                "or 'estimate_volume'."
+            )
+
         if weights is None:
-            return torch.full(
-                locations.shape[:-1],
-                1.0 / locations.shape[-2],
-                dtype=self.dtype,
-                device=locations.device,
+            return (
+                torch.full(
+                    locations.shape[:-1],
+                    1.0 / locations.shape[-2],
+                    dtype=self.dtype,
+                    device=locations.device,
+                ),
+                {"volume_normalization": "none"},
             )
 
         weight_tensor = torch.as_tensor(weights, dtype=self.dtype, device=locations.device)
         if weight_tensor.ndim < 1 or weight_tensor.shape[-1] != locations.shape[-2]:
             raise ValueError("location_weights must have shape (..., Nloc).")
-        return weight_tensor
+        return weight_tensor, {"volume_normalization": "none", "location_weights": "explicit"}
 
     def _normalize_heat(
         self,
@@ -491,7 +615,14 @@ class KernelScDM(KernelScalarValued):
         alpha: torch.Tensor | float | None = None,
         location_weights: torch.Tensor | None = None,
         mass_normalization: Literal["source", "median", "none"] = "source",
-    ) -> torch.Tensor:
+        volume_normalization: Literal["none", "explicit_volume", "estimate_volume"] = "none",
+        volume: torch.Tensor | float | None = None,
+        volume_dim: int | None = None,
+        volume_estimate_warnings: bool = True,
+        volume_row_sum_cv_warn: float = 0.25,
+        volume_row_sum_spread_warn: float = 2.0,
+        return_diagnostics: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, float | int | str]]:
         """
         Evaluate diffusion-map heat kernels from sources to locations.
 
@@ -506,7 +637,11 @@ class KernelScDM(KernelScalarValued):
         symmetric diffusion-map blocks are composed and scaled by the number of
         reference points. Both modes are mass-normalized on the returned location
         grid by default. ``location_weights`` supplies the quadrature weights for
-        that grid; equal weights are used when it is omitted.
+        that grid; equal weights are used when it is omitted. Alternatively,
+        ``volume_normalization`` can convert equal location weights to an
+        explicit or estimated total volume, in which case the returned section
+        is already scaled against that volume. Set ``return_diagnostics=True``
+        to return the volume metadata used for this scaling.
         """
         self._require_reference_data()
         step_values, return_single = self._heat_step_values(steps)
@@ -517,7 +652,20 @@ class KernelScDM(KernelScalarValued):
             sources_tensor = self._as_heat_points(sources, name="sources")
 
         mode_key = mode.lower()
-        weights = self._heat_location_weights(locations_tensor, location_weights)
+        if volume_normalization == "estimate_volume" and mode_key != "uniform":
+            raise ValueError(
+                "volume_normalization='estimate_volume' is only supported in uniform mode."
+            )
+        weights, diagnostics = self._heat_location_weights(
+            locations_tensor,
+            location_weights,
+            volume_normalization=volume_normalization,
+            volume=volume,
+            volume_dim=volume_dim,
+            volume_estimate_warnings=volume_estimate_warnings,
+            volume_row_sum_cv_warn=volume_row_sum_cv_warn,
+            volume_row_sum_spread_warn=volume_row_sum_spread_warn,
+        )
         if mode_key == "density":
             result_by_step = self._density_heat_kernel_by_step(
                 sources_tensor,
@@ -542,8 +690,12 @@ class KernelScDM(KernelScalarValued):
 
         ordered = [result_by_step[step] for step in step_values]
         if return_single:
-            return ordered[0]
-        return torch.stack(ordered, dim=0)
+            result = ordered[0]
+        else:
+            result = torch.stack(ordered, dim=0)
+        if return_diagnostics:
+            return result, diagnostics
+        return result
 
     def _density_heat_kernel_by_step(
         self,
