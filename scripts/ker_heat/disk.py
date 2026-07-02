@@ -61,7 +61,7 @@ SECTION_TEST_COUNT = TEST_COUNT
 
 ifrun = 1
 ifplt = 1
-ifsec = 0
+ifsec = 1
 
 
 def trial_seed(n_samples: int, trial: int) -> int:
@@ -347,12 +347,16 @@ if __name__ == "__main__" and ifrun:
                     f"done disk steps={step_count} eps={TARGET_TIME / step_count:g} n={n} trial={tr}",
                     flush=True,
                 )
+        for _, _, _, rows in results:
+            raw_rows.extend(rows)
     else:
-        results = [run_one(task) for task in tasks]
-    for step_count, n, tr, rows in results:
-        raw_rows.extend(rows)
-        if MAX_WORKERS <= 1:
-            print(f"done disk steps={step_count} eps={TARGET_TIME / step_count:g} n={n} trial={tr}")
+        for task in tasks:
+            step_count, n, tr, rows = run_one(task)
+            raw_rows.extend(rows)
+            print(
+                f"done disk steps={step_count} eps={TARGET_TIME / step_count:g} n={n} trial={tr}",
+                flush=True,
+            )
     write_rows(RAW_CSV, raw_rows)
 
 if __name__ == "__main__" and ifplt:
