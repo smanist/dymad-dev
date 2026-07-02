@@ -60,14 +60,18 @@ Use this shape for new user-facing runnable examples, benchmarks, and training d
    - `resolve_case_indices(...)`
    - `print_case_table(...)`
    - `stage_workdir(...)`
-4. Keep each execution phase in its own function, typically:
+4. Reuse `scripts/runtime_env.py` for shared runtime setup that must happen before imports from
+   plotting, backend, or repo-local libraries. For example, call
+   `configure_script_runtime(__file__, matplotlib=True)` before importing `matplotlib` or `dymad`
+   in scripts that save plots and need to run under CI or sandboxed environments.
+5. Keep each execution phase in its own function, typically:
    - `prepare_workdir(...)`
    - `generate_data(...)` when needed
    - `train(...)`
    - `plot(...)`
    - `predict(...)`
-5. Keep `main()` as the only orchestration entrypoint.
-6. End with an import-safe guard:
+6. Keep `main()` as the only orchestration entrypoint.
+7. End with an import-safe guard:
 
 ```python
 if __name__ == "__main__":

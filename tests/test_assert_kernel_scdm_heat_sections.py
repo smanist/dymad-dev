@@ -1,7 +1,12 @@
+import os
+from pathlib import Path
+
 import pytest
 import torch
 
-from dymad.modules import KernelScDM, KernelSparseScDM
+from dymad.modules import KernelScDM
+
+os.environ.setdefault("KEOPS_CACHE_FOLDER", str(Path("/tmp") / "dymad_keops_cache"))
 
 
 def test_scdm_forward_preserves_symmetric_normalized_kernel():
@@ -501,33 +506,278 @@ def test_scdm_heat_kernel_keeps_section_helpers_private():
     assert not hasattr(kernel, "reference_row_sums")
 
 
-def test_sparse_scdm_uniform_heat_kernel_matches_dense_euclidean_sections():
+def _nonuniform_euclidean_reference() -> torch.Tensor:
+    return torch.tensor(
+        [
+            [0.00, 0.00],
+            [0.04, 0.01],
+            [0.10, 0.02],
+            [0.25, 0.08],
+            [0.45, 0.18],
+            [0.72, 0.37],
+            [0.91, 0.62],
+            [1.00, 0.95],
+        ],
+        dtype=torch.float64,
+    )
+
+
+def _dense_keops_scdm_pair(
+    *,
+    eps_init: float = 0.08,
+    t_init: float = 1.0,
+    density_bandwidth_factor: float = 1.4,
+) -> tuple[KernelScDM, KernelScDM]:
+    xref = _nonuniform_euclidean_reference()
+    dense = KernelScDM(
+        in_dim=2,
+        eps_init=eps_init,
+        t_init=t_init,
+        dtype=torch.float64,
+        density_bandwidth_factor=density_bandwidth_factor,
+    )
+    keops = KernelScDM(
+        in_dim=2,
+        eps_init=eps_init,
+        t_init=t_init,
+        dtype=torch.float64,
+        density_bandwidth_factor=density_bandwidth_factor,
+        backend="keops",
+    )
+    dense.set_reference_data(xref)
+    keops.set_reference_data(xref)
+    return dense, keops
+
+
+def test_keops_scdm_backend_matches_dense_euclidean_sections():
+    pytest.importorskip("pykeops")
     Xref = _embedded_circle_points(32)
     locations = _embedded_circle_points(24)
     sources = _embedded_circle_points(3)
     dense = KernelScDM(in_dim=2, eps_init=0.2, t_init=1.0, dtype=torch.float64)
-    sparse = KernelSparseScDM(
+    keops = KernelScDM(
         in_dim=2,
         eps_init=0.2,
         t_init=1.0,
         dtype=torch.float64,
-        kernel_tol=1e-14,
+        backend="keops",
     )
     dense.set_reference_data(Xref)
-    sparse.set_reference_data(Xref)
+    keops.set_reference_data(Xref)
 
     dense_heat = dense.heat_kernel(locations, sources, mode="uniform", steps=[1, 3])
-    sparse_heat = sparse.heat_kernel(locations, sources, mode="uniform", steps=[1, 3])
+    keops_heat = keops.heat_kernel(locations, sources, mode="uniform", steps=[1, 3])
 
-    assert sparse_heat.shape == dense_heat.shape
-    assert torch.allclose(sparse_heat, dense_heat, rtol=1e-10, atol=1e-10)
+    assert keops_heat.shape == dense_heat.shape
+    assert torch.allclose(keops_heat, dense_heat, rtol=1e-10, atol=1e-10)
 
 
-def test_sparse_scdm_volume_estimate_diagnostics_match_dense_contract():
+@pytest.mark.parametrize("mode", ["uniform", "density"])
+def test_keops_scdm_batched_sources_singleton_locations_match_dense(mode: str):
+    pytest.importorskip("pykeops")
+    sources = torch.tensor(
+        [
+            [[0.03, 0.01], [0.38, 0.15], [0.88, 0.58]],
+            [[0.05, 0.03], [0.44, 0.20], [0.94, 0.70]],
+        ],
+        dtype=torch.float64,
+    )
+    locations = torch.tensor(
+        [[[0.02, 0.02], [0.21, 0.06], [0.52, 0.23], [0.87, 0.50]]],
+        dtype=torch.float64,
+    )
+    dense, keops = _dense_keops_scdm_pair()
+    kwargs = {"alpha": 0.75} if mode == "density" else {}
+
+    expected = dense.heat_kernel(
+        locations,
+        sources,
+        mode=mode,
+        steps=[1, 2, 3],
+        mass_normalization="none",
+        **kwargs,
+    )
+    actual = keops.heat_kernel(
+        locations,
+        sources,
+        mode=mode,
+        steps=[1, 2, 3],
+        mass_normalization="none",
+        **kwargs,
+    )
+
+    assert actual.shape == expected.shape
+    assert torch.allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
+
+@pytest.mark.parametrize("mode", ["uniform", "density"])
+def test_keops_scdm_unbatched_sources_batched_locations_match_dense(mode: str):
+    pytest.importorskip("pykeops")
+    sources = torch.tensor([[0.03, 0.01], [0.38, 0.15], [0.88, 0.58]], dtype=torch.float64)
+    locations = torch.tensor(
+        [
+            [[0.02, 0.02], [0.21, 0.06], [0.52, 0.23], [0.87, 0.50]],
+            [[0.06, 0.03], [0.25, 0.10], [0.61, 0.28], [0.91, 0.62]],
+        ],
+        dtype=torch.float64,
+    )
+    dense, keops = _dense_keops_scdm_pair()
+    kwargs = {"alpha": 0.75} if mode == "density" else {}
+
+    expected = dense.heat_kernel(
+        locations,
+        sources,
+        mode=mode,
+        steps=[1, 2, 3],
+        mass_normalization="none",
+        **kwargs,
+    )
+    actual = keops.heat_kernel(
+        locations,
+        sources,
+        mode=mode,
+        steps=[1, 2, 3],
+        mass_normalization="none",
+        **kwargs,
+    )
+
+    assert actual.shape == expected.shape
+    assert torch.allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
+
+@pytest.mark.parametrize("mode", ["uniform", "density"])
+def test_keops_scdm_multi_leading_batch_heat_kernel_matches_dense(mode: str):
+    pytest.importorskip("pykeops")
+    sources = torch.tensor(
+        [
+            [[[0.03, 0.01], [0.38, 0.15], [0.88, 0.58]]],
+            [[[0.05, 0.03], [0.44, 0.20], [0.94, 0.70]]],
+        ],
+        dtype=torch.float64,
+    )
+    locations = torch.tensor(
+        [
+            [
+                [[0.02, 0.02], [0.21, 0.06], [0.52, 0.23], [0.87, 0.50]],
+                [[0.06, 0.03], [0.25, 0.10], [0.61, 0.28], [0.91, 0.62]],
+                [[0.10, 0.05], [0.30, 0.12], [0.68, 0.32], [0.96, 0.80]],
+            ]
+        ],
+        dtype=torch.float64,
+    )
+    dense, keops = _dense_keops_scdm_pair()
+    kwargs = {"alpha": 0.75} if mode == "density" else {}
+
+    expected = dense.heat_kernel(
+        locations,
+        sources,
+        mode=mode,
+        steps=[1, 2, 3],
+        mass_normalization="none",
+        **kwargs,
+    )
+    actual = keops.heat_kernel(
+        locations,
+        sources,
+        mode=mode,
+        steps=[1, 2, 3],
+        mass_normalization="none",
+        **kwargs,
+    )
+
+    assert actual.shape == expected.shape
+    assert actual.shape[1:] == (2, 3, 4, 3)
+    assert torch.allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
+
+@pytest.mark.parametrize("mode", ["uniform", "density"])
+def test_keops_scdm_batched_sources_none_matches_dense(mode: str):
+    pytest.importorskip("pykeops")
+    locations = torch.tensor(
+        [
+            [[0.02, 0.02], [0.21, 0.06], [0.52, 0.23], [0.87, 0.50]],
+            [[0.06, 0.03], [0.25, 0.10], [0.61, 0.28], [0.91, 0.62]],
+        ],
+        dtype=torch.float64,
+    )
+    dense, keops = _dense_keops_scdm_pair()
+    kwargs = {"alpha": 0.75} if mode == "density" else {}
+
+    expected = dense.heat_kernel(
+        locations,
+        sources=None,
+        mode=mode,
+        steps=[1, 2, 3],
+        mass_normalization="none",
+        **kwargs,
+    )
+    actual = keops.heat_kernel(
+        locations,
+        sources=None,
+        mode=mode,
+        steps=[1, 2, 3],
+        mass_normalization="none",
+        **kwargs,
+    )
+
+    assert actual.shape == expected.shape
+    assert torch.allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
+
+@pytest.mark.parametrize("mode", ["uniform", "density"])
+def test_keops_scdm_batched_location_weights_match_dense(mode: str):
+    pytest.importorskip("pykeops")
+    sources = torch.tensor(
+        [
+            [[[0.03, 0.01], [0.38, 0.15], [0.88, 0.58]]],
+            [[[0.05, 0.03], [0.44, 0.20], [0.94, 0.70]]],
+        ],
+        dtype=torch.float64,
+    )
+    locations = torch.tensor(
+        [
+            [
+                [[0.02, 0.02], [0.21, 0.06], [0.52, 0.23], [0.87, 0.50]],
+                [[0.06, 0.03], [0.25, 0.10], [0.61, 0.28], [0.91, 0.62]],
+                [[0.10, 0.05], [0.30, 0.12], [0.68, 0.32], [0.96, 0.80]],
+            ]
+        ],
+        dtype=torch.float64,
+    )
+    weights = torch.tensor(
+        [[[0.10, 0.20, 0.30, 0.40], [0.18, 0.22, 0.26, 0.34], [0.25, 0.25, 0.25, 0.25]]],
+        dtype=torch.float64,
+    )
+    dense, keops = _dense_keops_scdm_pair()
+    kwargs = {"alpha": 0.75} if mode == "density" else {}
+
+    expected = dense.heat_kernel(
+        locations,
+        sources,
+        mode=mode,
+        steps=[1, 2, 3],
+        location_weights=weights,
+        **kwargs,
+    )
+    actual = keops.heat_kernel(
+        locations,
+        sources,
+        mode=mode,
+        steps=[1, 2, 3],
+        location_weights=weights,
+        **kwargs,
+    )
+
+    assert actual.shape == expected.shape
+    assert torch.allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
+
+def test_keops_scdm_volume_estimate_diagnostics_match_dense_contract():
+    pytest.importorskip("pykeops")
     Xref = _embedded_circle_points(64)
     locations = _embedded_circle_points(32)
     sources = _embedded_circle_points(2)
-    kernel = KernelSparseScDM(in_dim=2, eps_init=0.05, dtype=torch.float64, kernel_tol=1e-14)
+    kernel = KernelScDM(in_dim=2, eps_init=0.05, dtype=torch.float64, backend="keops")
     kernel.set_reference_data(Xref)
 
     heat, diagnostics = kernel.heat_kernel(
@@ -547,6 +797,99 @@ def test_sparse_scdm_volume_estimate_diagnostics_match_dense_contract():
     assert float(diagnostics["volume"]) > 0.0
 
 
-def test_sparse_scdm_rejects_non_euclidean_metric():
+def test_keops_scdm_density_heat_kernel_matches_dense_euclidean_sections():
+    pytest.importorskip("pykeops")
+    Xref = torch.tensor(
+        [
+            [0.00, 0.00],
+            [0.04, 0.01],
+            [0.10, 0.02],
+            [0.25, 0.08],
+            [0.45, 0.18],
+            [0.72, 0.37],
+            [0.91, 0.62],
+            [1.00, 0.95],
+        ],
+        dtype=torch.float64,
+    )
+    locations = torch.tensor(
+        [[0.02, 0.02], [0.21, 0.06], [0.52, 0.23], [0.87, 0.50], [0.96, 0.87]],
+        dtype=torch.float64,
+    )
+    sources = torch.tensor([[0.03, 0.01], [0.38, 0.15], [0.88, 0.58]], dtype=torch.float64)
+    dense = KernelScDM(
+        in_dim=2,
+        eps_init=0.08,
+        t_init=1.0,
+        dtype=torch.float64,
+        density_bandwidth_factor=1.4,
+    )
+    keops = KernelScDM(
+        in_dim=2,
+        eps_init=0.08,
+        t_init=1.0,
+        dtype=torch.float64,
+        density_bandwidth_factor=1.4,
+        backend="keops",
+    )
+    dense.set_reference_data(Xref)
+    keops.set_reference_data(Xref)
+
+    dense_heat = dense.heat_kernel(
+        locations,
+        sources,
+        mode="density",
+        steps=[1, 2, 4],
+        alpha=0.75,
+        mass_normalization="none",
+    )
+    keops_heat = keops.heat_kernel(
+        locations,
+        sources,
+        mode="density",
+        steps=[1, 2, 4],
+        alpha=0.75,
+        mass_normalization="none",
+    )
+
+    assert keops_heat.shape == dense_heat.shape
+    assert torch.allclose(keops_heat, dense_heat, rtol=1e-10, atol=1e-10)
+
+
+def test_keops_scdm_density_heat_kernel_mass_normalization_matches_dense():
+    pytest.importorskip("pykeops")
+    Xref = torch.tensor(
+        [[0.0], [0.02], [0.05], [0.20], [0.38], [0.61], [0.82], [0.97]],
+        dtype=torch.float64,
+    )
+    locations = torch.tensor([[0.01], [0.18], [0.41], [0.73], [0.93]], dtype=torch.float64)
+    sources = torch.tensor([[0.03], [0.35], [0.90]], dtype=torch.float64)
+    weights = torch.tensor([0.08, 0.14, 0.20, 0.25, 0.33], dtype=torch.float64)
+    dense = KernelScDM(in_dim=1, eps_init=0.07, dtype=torch.float64)
+    keops = KernelScDM(in_dim=1, eps_init=0.07, dtype=torch.float64, backend="keops")
+    dense.set_reference_data(Xref)
+    keops.set_reference_data(Xref)
+
+    dense_heat = dense.heat_kernel(
+        locations,
+        sources,
+        mode="density",
+        steps=[1, 3],
+        location_weights=weights,
+    )
+    keops_heat = keops.heat_kernel(
+        locations,
+        sources,
+        mode="density",
+        steps=[1, 3],
+        location_weights=weights,
+    )
+
+    assert keops_heat.shape == dense_heat.shape
+    assert torch.allclose(keops_heat, dense_heat, rtol=1e-10, atol=1e-10)
+
+
+def test_keops_scdm_backend_rejects_non_euclidean_metric():
     with pytest.raises(NotImplementedError, match="Euclidean"):
-        KernelSparseScDM(in_dim=1, eps_init=0.1, metric="periodic")
+        kernel = KernelScDM(in_dim=1, eps_init=0.1, metric="periodic", backend="keops")
+        kernel.set_reference_data(torch.linspace(0.0, 1.0, 4, dtype=torch.float64)[:, None])

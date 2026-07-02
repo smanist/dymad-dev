@@ -6,27 +6,27 @@ from __future__ import annotations
 
 import csv
 import math
-import os
 import sys
-import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-_MPL_CONFIG_DIR = Path(tempfile.gettempdir()) / "dymad_matplotlib"
-_MPL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("MPLCONFIGDIR", str(_MPL_CONFIG_DIR))
+SCRIPTS_DIR = Path(__file__).resolve().parents[1]
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from runtime_env import configure_script_runtime  # noqa: E402
+
+configure_script_runtime(__file__, matplotlib=True)
 
 import matplotlib
 import numpy as np
 import torch
 from scipy.stats import qmc
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from dymad.modules import KernelSparseScDM  # noqa: E402
+from dymad.modules import KernelScDM  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent
 OUT = BASE_DIR / "runs" / "torus_redo"
@@ -44,10 +44,7 @@ TRIALS = 8
 TEST_COUNT = 4096
 SEED = 2026061801
 CASE_INDEX = 4
-KERNEL_TOL = 1e-10
 
-# Full sparse sections at the largest counts are memory-sensitive.  If a run
-# crashes, raise KERNEL_TOL slightly, keeping it as low as the machine allows.
 RUN_STEPS = STEPS
 RUN_SAMPLE_COUNTS = SAMPLE_COUNTS
 RUN_TRIALS = TRIALS
@@ -117,12 +114,12 @@ def dymad_section(
     ref_angles: np.ndarray, src: np.ndarray, pts: np.ndarray, steps: int
 ) -> tuple[np.ndarray, float]:
     epsilon = TARGET_TIME / steps
-    kernel = KernelSparseScDM(
+    kernel = KernelScDM(
         in_dim=4,
         eps_init=epsilon,
         t_init=1.0,
         dtype=torch.float64,
-        kernel_tol=KERNEL_TOL,
+        backend="keops",
     )
     kernel.set_reference_data(torch.as_tensor(embed(ref_angles), dtype=torch.float64))
     values = kernel.heat_kernel(

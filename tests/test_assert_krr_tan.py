@@ -120,6 +120,41 @@ def test_krr():
     assert dif < 1e-5, "DMF, difference"
 
 
+def test_matrix_free_tangent_krr_matches_dense_predictions():
+    train = slice(0, 80)
+    test = slice(80, 110)
+    cfg = {
+        **opt_tange,
+        "ridge_init": 1e-2,
+    }
+    dense = make_krr(**cfg, solver="dense_cholesky")
+    matrix_free = make_krr(
+        **cfg,
+        solver="matrix_free_cg",
+        cg_rtol=1e-12,
+        cg_max_iter=500,
+    )
+    dense.set_train_data(X[train], Y[train])
+    matrix_free.set_train_data(X[train], Y[train])
+    dense_manifold = ManifoldAnalytical(X[train], d=2, fT=lambda x: tangent_2torus(x, b))
+    matrix_free_manifold = ManifoldAnalytical(X[train], d=2, fT=lambda x: tangent_2torus(x, b))
+    dense_manifold.precompute()
+    matrix_free_manifold.precompute()
+    dense.set_manifold(dense_manifold)
+    matrix_free.set_manifold(matrix_free_manifold)
+
+    dense.fit()
+    matrix_free.fit()
+    with torch.no_grad():
+        query = torch.as_tensor(X[test], dtype=torch.float64)
+        dense_pred = dense(query)
+        matrix_free_pred = matrix_free(query)
+
+    assert matrix_free._cg_diagnostics is not None
+    assert matrix_free._cg_diagnostics["converged"]
+    assert torch.allclose(matrix_free_pred, dense_pred, rtol=1e-7, atol=1e-8)
+
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 

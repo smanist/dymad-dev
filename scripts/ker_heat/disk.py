@@ -6,15 +6,17 @@ from __future__ import annotations
 
 import csv
 import math
-import os
 import sys
-import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-_MPL_CONFIG_DIR = Path(tempfile.gettempdir()) / "dymad_matplotlib"
-_MPL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("MPLCONFIGDIR", str(_MPL_CONFIG_DIR))
+SCRIPTS_DIR = Path(__file__).resolve().parents[1]
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from runtime_env import configure_script_runtime  # noqa: E402
+
+configure_script_runtime(__file__, matplotlib=True)
 
 import matplotlib
 import numpy as np
@@ -22,12 +24,10 @@ import torch
 from scipy import special
 from scipy.stats import qmc
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from dymad.modules import KernelSparseScDM  # noqa: E402
+from dymad.modules import KernelScDM  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent
 OUT = BASE_DIR / "runs" / "disk_redo"
@@ -44,18 +44,15 @@ TEST_COUNT = 4096
 SEED = 2026061801
 CASE_INDEX = 8
 DISK_AREA = math.pi
-KERNEL_TOL = 1e-8
 REFERENCE_TERM_TOL = 1e-13
 REFERENCE_ANGULAR_ORDER = 42
 REFERENCE_RADIAL_ROOTS = 42
 
-# Full sparse sections at the largest counts are memory-sensitive.  If a run
-# crashes, raise KERNEL_TOL slightly, keeping it as low as the machine allows.
 RUN_STEPS = STEPS
 RUN_SAMPLE_COUNTS = SAMPLE_COUNTS
 RUN_TRIALS = TRIALS
 RUN_TEST_COUNT = TEST_COUNT
-MAX_WORKERS = 4
+MAX_WORKERS = 1
 SECTION_N = 65536
 SECTION_STEPS = 8
 SECTION_TRIAL = 0
@@ -143,12 +140,12 @@ def dymad_section(
     ref_pts: np.ndarray, src: np.ndarray, pts: np.ndarray, steps: int
 ) -> tuple[np.ndarray, float]:
     epsilon = TARGET_TIME / steps
-    kernel = KernelSparseScDM(
+    kernel = KernelScDM(
         in_dim=2,
         eps_init=epsilon,
         t_init=1.0,
         dtype=torch.float64,
-        kernel_tol=KERNEL_TOL,
+        backend="keops",
     )
     kernel.set_reference_data(torch.as_tensor(ref_pts, dtype=torch.float64))
     values = kernel.heat_kernel(

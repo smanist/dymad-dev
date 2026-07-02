@@ -43,6 +43,9 @@ docs = [
 test = [
   "pytest>=8",
 ]
+keops = [
+  "pykeops>=2.3",
+]
 viz = [
   "torchview>=0.2.6",
   "graphviz",

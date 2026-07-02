@@ -1,5 +1,6 @@
 import logging
-from typing import cast
+from collections.abc import Callable
+from typing import Any, cast
 
 import numpy as np
 import scipy.linalg as spl
@@ -8,6 +9,68 @@ import torch
 from dymad.numerics.complex import disc2cont
 
 logger = logging.getLogger(__name__)
+
+
+def conjugate_gradient_spd(
+    matvec: Callable[[torch.Tensor], torch.Tensor],
+    rhs: torch.Tensor,
+    *,
+    rtol: float = 1.0e-10,
+    atol: float = 0.0,
+    max_iter: int = 1000,
+    initial: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """Solve an SPD linear system with conjugate gradients."""
+    if rtol < 0.0:
+        raise ValueError("rtol must be non-negative.")
+    if atol < 0.0:
+        raise ValueError("atol must be non-negative.")
+    if max_iter <= 0:
+        raise ValueError("max_iter must be positive.")
+
+    x = torch.zeros_like(rhs) if initial is None else initial.clone()
+    r = rhs - matvec(x)
+    p = r.clone()
+    rs_old = torch.sum(r * r)
+    rhs_norm = torch.linalg.norm(rhs)
+    threshold = torch.maximum(
+        torch.as_tensor(atol, dtype=rhs.dtype, device=rhs.device),
+        torch.as_tensor(rtol, dtype=rhs.dtype, device=rhs.device) * rhs_norm,
+    )
+    residual_norm = torch.sqrt(rs_old)
+    if float(residual_norm.detach().cpu()) <= float(threshold.detach().cpu()):
+        return x, {
+            "converged": True,
+            "iterations": 0,
+            "residual_norm": float(residual_norm.detach().cpu()),
+            "threshold": float(threshold.detach().cpu()),
+        }
+
+    converged = False
+    iterations = 0
+    tiny = torch.finfo(rhs.dtype).tiny
+    for iteration in range(1, max_iter + 1):
+        Ap = matvec(p)
+        denom = torch.clamp(torch.sum(p * Ap), min=tiny)
+        alpha = rs_old / denom
+        x = x + alpha * p
+        r = r - alpha * Ap
+        rs_new = torch.sum(r * r)
+        residual_norm = torch.sqrt(rs_new)
+        iterations = iteration
+        if float(residual_norm.detach().cpu()) <= float(threshold.detach().cpu()):
+            converged = True
+            break
+        beta = rs_new / torch.clamp(rs_old, min=tiny)
+        p = r + beta * p
+        rs_old = rs_new
+
+    return x, {
+        "converged": converged,
+        "iterations": iterations,
+        "residual_norm": float(residual_norm.detach().cpu()),
+        "threshold": float(threshold.detach().cpu()),
+    }
 
 
 def truncated_svd(X, order):
