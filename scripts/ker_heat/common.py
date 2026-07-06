@@ -146,6 +146,16 @@ def median_curve(
     return np.asarray(selected_ns, dtype=float), np.asarray(centers, dtype=float)
 
 
+def line_colors(values: Sequence[int]) -> dict[int, tuple[float, float, float]]:
+    base = np.asarray([0.04, 0.20, 0.55], dtype=float)
+    white = np.ones(3, dtype=float)
+    blends = np.linspace(0.0, 0.62, len(values))
+    return {
+        value: tuple(float(channel) for channel in (1.0 - blend) * base + blend * white)
+        for value, blend in zip(values, blends, strict=True)
+    }
+
+
 def plot_convergence(
     rows: list[dict[str, str]],
     *,
@@ -163,7 +173,7 @@ def plot_convergence(
         squeeze=False,
         constrained_layout=True,
     )
-    colors = dict(zip(steps_values, plt.cm.tab10(np.linspace(0.0, 1.0, len(steps_values)))))
+    colors = line_colors(steps_values)
     for row_idx, group in enumerate(groups):
         for step_count in steps_values:
             eps = target_time / step_count
@@ -180,6 +190,45 @@ def plot_convergence(
     for ax in axes.flat:
         ax.set_xlabel("sample count N")
         ax.set_ylabel("median error")
+        ax.grid(True, which="both", alpha=0.28)
+        ax.legend(fontsize=8)
+    fig.suptitle(title)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def plot_max_abs_convergence(
+    rows: list[dict[str, str]],
+    *,
+    path: Path,
+    steps_values: Sequence[int],
+    target_time: float,
+    title: str,
+    source_groups: Sequence[str] | None = None,
+) -> None:
+    groups = [None] if source_groups is None else list(source_groups)
+    fig, axes = plt.subplots(
+        len(groups),
+        1,
+        figsize=(6.6, 4.2 * len(groups)),
+        squeeze=False,
+        constrained_layout=True,
+    )
+    colors = line_colors(steps_values)
+    for row_idx, group in enumerate(groups):
+        ax = axes[row_idx, 0]
+        for step_count in steps_values:
+            eps = target_time / step_count
+            ns, max_abs = median_curve(
+                rows, steps=step_count, metric="max_abs_error", source_group=group
+            )
+            label = f"eps={eps:g}, p={step_count}"
+            ax.loglog(ns, max_abs, marker="o", color=colors[step_count], label=label)
+        prefix = "" if group is None else f"{group}: "
+        ax.set_title(f"{prefix}max abs")
+        ax.set_xlabel("sample count N")
+        ax.set_ylabel("median max abs error")
         ax.grid(True, which="both", alpha=0.28)
         ax.legend(fontsize=8)
     fig.suptitle(title)

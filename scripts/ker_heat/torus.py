@@ -29,6 +29,7 @@ from common import (  # noqa: E402
     metric_rows as build_metric_rows,
     periodic_heat_kernel,
     plot_convergence as plot_convergence_curves,
+    plot_max_abs_convergence as plot_max_abs_convergence_curves,
     read_rows,
     run_serial,
     trial_seed as build_trial_seed,
@@ -39,6 +40,7 @@ BASE_DIR = Path(__file__).resolve().parent
 OUT = BASE_DIR / "runs" / "torus_redo"
 RAW_CSV = OUT / "torus_raw_results.csv"
 FIG_PATH = OUT / "convergence_torus.png"
+MAX_ABS_FIG_PATH = OUT / "convergence_torus_max_abs.png"
 SECTION_FIG_PATH = OUT / "section_torus.png"
 
 TWO_PI = 2.0 * math.pi
@@ -173,12 +175,22 @@ def plot_convergence(rows: list[dict[str, str]], path: Path) -> None:
         path=path,
         steps_values=STEPS,
         target_time=TARGET_TIME,
-        title="Torus DyMAD uniform-mode convergence",
+        title="Torus uniform-mode convergence",
+    )
+
+
+def plot_max_abs_convergence(rows: list[dict[str, str]], path: Path) -> None:
+    plot_max_abs_convergence_curves(
+        rows,
+        path=path,
+        steps_values=STEPS,
+        target_time=TARGET_TIME,
+        title="Torus max-abs convergence",
     )
 
 
 def plot_sections(n_samples: int, steps: int, trial: int, source_indices, path: Path) -> None:
-    source_ids, source_pts_all, _groups = sources()
+    _source_ids, source_pts_all, _groups = sources()
     source_idx = list(source_indices)
     source_pts = source_pts_all[source_idx]
     pts = locations(SECTION_TEST_COUNT)
@@ -196,24 +208,53 @@ def plot_sections(n_samples: int, steps: int, trial: int, source_indices, path: 
         squeeze=False,
         constrained_layout=True,
     )
+    tick_values = [0.0, math.pi, TWO_PI]
+    tick_labels = [r"$0$", r"$\pi$", r"$2\pi$"]
     for row, idx in enumerate(source_idx):
         error = pred[row] - truth[row]
         vmin = min(float(np.min(truth[row])), float(np.min(pred[row])))
         vmax = max(float(np.max(truth[row])), float(np.max(pred[row])))
         err_max = max(float(np.max(np.abs(error))), np.finfo(float).tiny)
-        panels = (
-            ("truth", truth[row], "viridis", vmin, vmax),
-            ("DyMAD", pred[row], "viridis", vmin, vmax),
-            ("error", error, "coolwarm", -err_max, err_max),
-        )
-        for ax, (title, values, cmap, lo, hi) in zip(axes[row], panels, strict=True):
+        shared_image = None
+        panels = (("Truth", truth[row]), ("Prediction", pred[row]))
+        for ax, (title, values) in zip(axes[row, :2], panels, strict=True):
             image = ax.pcolormesh(
-                xx, yy, values.reshape(side, side), shading="auto", cmap=cmap, vmin=lo, vmax=hi
+                xx,
+                yy,
+                values.reshape(side, side),
+                shading="auto",
+                cmap="viridis",
+                vmin=vmin,
+                vmax=vmax,
             )
+            shared_image = image
             ax.scatter(source_pts_all[idx, 0], source_pts_all[idx, 1], c="black", s=16)
-            ax.set_title(f"{source_ids[idx]} {title}")
+            ax.set_title(title)
             ax.set_aspect("equal")
-            fig.colorbar(image, ax=ax, shrink=0.78)
+            ax.set_xticks(tick_values, tick_labels)
+            ax.set_yticks(tick_values, tick_labels)
+            ax.set_xlabel(r"$\theta_1$")
+        if shared_image is not None:
+            fig.colorbar(shared_image, ax=axes[row, :2], shrink=0.78)
+
+        error_image = axes[row, 2].pcolormesh(
+            xx,
+            yy,
+            error.reshape(side, side),
+            shading="auto",
+            cmap="coolwarm",
+            vmin=-err_max,
+            vmax=err_max,
+        )
+        axes[row, 2].scatter(source_pts_all[idx, 0], source_pts_all[idx, 1], c="black", s=16)
+        axes[row, 2].set_title("Error")
+        axes[row, 2].set_aspect("equal")
+        axes[row, 2].set_xticks(tick_values, tick_labels)
+        axes[row, 2].set_yticks(tick_values, tick_labels)
+        axes[row, 2].set_xlabel(r"$\theta_1$")
+        fig.colorbar(error_image, ax=axes[row, 2], shrink=0.78)
+    for ax in axes[:, 0]:
+        ax.set_ylabel(r"$\theta_2$")
     eps = TARGET_TIME / steps
     fig.suptitle(
         f"torus sections: N={n_samples}, eps={eps:g}, steps={steps}, trial={trial}, volume={volume:.6g}"
@@ -237,8 +278,11 @@ if __name__ == "__main__" and ifrun:
 
 if __name__ == "__main__" and ifplt:
     if RAW_CSV.exists():
-        plot_convergence(read_rows(RAW_CSV), FIG_PATH)
+        raw_rows = read_rows(RAW_CSV)
+        plot_convergence(raw_rows, FIG_PATH)
         print(f"Wrote {FIG_PATH}")
+        plot_max_abs_convergence(raw_rows, MAX_ABS_FIG_PATH)
+        print(f"Wrote {MAX_ABS_FIG_PATH}")
     else:
         print(f"Missing {RAW_CSV}; set ifrun = 1 or copy the torus CSV into place.")
 

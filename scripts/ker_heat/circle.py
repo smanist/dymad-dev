@@ -29,6 +29,7 @@ from common import (  # noqa: E402
     metric_rows as build_metric_rows,
     periodic_heat_kernel,
     plot_convergence as plot_convergence_curves,
+    plot_max_abs_convergence as plot_max_abs_convergence_curves,
     read_rows,
     run_serial,
     trial_seed as build_trial_seed,
@@ -39,6 +40,7 @@ BASE_DIR = Path(__file__).resolve().parent
 OUT = BASE_DIR / "runs" / "circle_redo"
 RAW_CSV = OUT / "circle_raw_results.csv"
 FIG_PATH = OUT / "convergence_circle.png"
+MAX_ABS_FIG_PATH = OUT / "convergence_circle_max_abs.png"
 SECTION_FIG_PATH = OUT / "section_circle.png"
 
 TWO_PI = 2.0 * math.pi
@@ -146,12 +148,22 @@ def plot_convergence(rows: list[dict[str, str]], path: Path) -> None:
         path=path,
         steps_values=STEPS,
         target_time=TARGET_TIME,
-        title="Circle DyMAD uniform-mode convergence",
+        title="Circle uniform-mode convergence",
+    )
+
+
+def plot_max_abs_convergence(rows: list[dict[str, str]], path: Path) -> None:
+    plot_max_abs_convergence_curves(
+        rows,
+        path=path,
+        steps_values=STEPS,
+        target_time=TARGET_TIME,
+        title="Circle max-abs convergence",
     )
 
 
 def plot_sections(n_samples: int, steps: int, trial: int, source_indices, path: Path) -> None:
-    source_ids, sources = source_angles()
+    _source_ids, sources = source_angles()
     source_idx = list(source_indices)
     source_pts = sources[source_idx]
     points = test_angles(SECTION_TEST_COUNT)
@@ -160,18 +172,25 @@ def plot_sections(n_samples: int, steps: int, trial: int, source_indices, path: 
         sample_angles(n_samples, trial_seed(n_samples, trial)), source_pts, points, steps
     )
     fig, axes = plt.subplots(
-        len(source_idx), 3, figsize=(12.0, 3.0 * len(source_idx)), squeeze=False
+        len(source_idx),
+        3,
+        figsize=(12.0, 3.0 * len(source_idx)),
+        squeeze=False,
+        constrained_layout=True,
     )
-    for row, idx in enumerate(source_idx):
+    for row, _idx in enumerate(source_idx):
         error = pred[row] - truth[row]
-        panels = (("truth", truth[row]), ("DyMAD", pred[row]), ("error", error))
+        panels = (("Truth", truth[row]), ("Prediction", pred[row]), ("Error", error))
         for ax, (title, values) in zip(axes[row], panels, strict=True):
             ax.plot(points[:, 0], values)
-            ax.set_title(f"{source_ids[idx]} {title}")
+            ax.set_title(title)
+            ax.set_xticks([0.0, math.pi, TWO_PI], [r"$0$", r"$\pi$", r"$2\pi$"])
+            ax.set_xlabel(r"$\theta$")
             ax.grid(True, alpha=0.25)
     eps = TARGET_TIME / steps
     fig.suptitle(
-        f"circle sections: N={n_samples}, eps={eps:g}, steps={steps}, trial={trial}, volume={volume_hat:.6g}"
+        f"circle sections: N={n_samples}, eps={eps:g}, steps={steps}, trial={trial}, volume={volume_hat:.6g}",
+        y=1.08,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=180)
@@ -192,8 +211,11 @@ if __name__ == "__main__" and ifrun:
 
 if __name__ == "__main__" and ifplt:
     if RAW_CSV.exists():
-        plot_convergence(read_rows(RAW_CSV), FIG_PATH)
+        raw_rows = read_rows(RAW_CSV)
+        plot_convergence(raw_rows, FIG_PATH)
         print(f"Wrote {FIG_PATH}")
+        plot_max_abs_convergence(raw_rows, MAX_ABS_FIG_PATH)
+        print(f"Wrote {MAX_ABS_FIG_PATH}")
     else:
         print(f"Missing {RAW_CSV}; set ifrun = 1 or copy the circle CSV into place.")
 
