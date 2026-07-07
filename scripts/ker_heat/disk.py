@@ -25,7 +25,7 @@ from scipy.stats import qmc
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from dymad.modules import KernelScDM  # noqa: E402
+from dymad.modules import KernelScDMHeat  # noqa: E402
 from common import (  # noqa: E402
     metric_rows as build_metric_rows,
     plot_convergence as plot_convergence_curves,
@@ -147,10 +147,10 @@ def dymad_section(
     ref_pts: np.ndarray, src: np.ndarray, pts: np.ndarray, steps: int
 ) -> tuple[np.ndarray, float]:
     epsilon = TARGET_TIME / steps
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=2,
         eps_init=epsilon,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         backend="keops",
     )

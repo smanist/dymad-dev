@@ -20,6 +20,7 @@ from dymad.modules.kernel import (
     KernelScRBF,
     scaled_cdist,
 )
+from dymad.modules.kernel_scdm_heat import KernelScDMHeat
 from dymad.modules.krr import (
     KRRBase,
     KRRMultiOutputIndep,
@@ -48,6 +49,7 @@ __all__ = [
     "KernelOpTangent",
     "KernelScalarValued",
     "KernelScDM",
+    "KernelScDMHeat",
     "KernelScExp",
     "KernelScRBF",
     "KRRBase",

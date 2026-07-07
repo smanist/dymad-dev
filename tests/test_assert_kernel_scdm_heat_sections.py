@@ -4,19 +4,19 @@ from pathlib import Path
 import pytest
 import torch
 
-from dymad.modules import KernelScDM
+from dymad.modules import KernelScDM, KernelScDMHeat
 
 os.environ.setdefault("KEOPS_CACHE_FOLDER", str(Path("/tmp") / "dymad_keops_cache"))
 
 
 def test_scdm_forward_preserves_symmetric_normalized_kernel():
     X = torch.tensor([[0.0, 0.0], [0.25, 0.5], [0.5, 0.25], [1.0, 1.0]], dtype=torch.float64)
-    kernel = KernelScDM(in_dim=2, eps_init=0.2, t_init=1.0, dtype=torch.float64)
+    kernel = KernelScDM(in_dim=2, eps_init=0.2, alpha_init=1.0, dtype=torch.float64)
     kernel.set_reference_data(X)
 
     W = torch.exp(-(torch.cdist(X, X) ** 2) / (4.0 * kernel.eps))
     q = W.sum(dim=-1)
-    D = q ** (-kernel.t)
+    D = q ** (-kernel.alpha)
     expected = D[:, None] * W * D[None, :]
     Dinv1 = expected.sum(dim=-1) ** (-0.5)
     expected = Dinv1[:, None] * expected * Dinv1[None, :]
@@ -34,17 +34,17 @@ def test_scdm_periodic_metric_wraps_unit_period_axes():
 
     euclidean = KernelScDM(
         in_dim=1, eps_init=0.1, metric="euclidean", dtype=torch.float64
-    ).raw_kernel(X, Z, eps=eps)
+    )._raw_kernel(X, Z, eps=eps)
     periodic = KernelScDM(
         in_dim=1, eps_init=0.1, metric="periodic", dtype=torch.float64
-    ).raw_kernel(X, Z, eps=eps)
+    )._raw_kernel(X, Z, eps=eps)
     periodic_axis_subset = KernelScDM(
         in_dim=2,
         eps_init=0.1,
         metric="periodic",
         periodic_axes=(0,),
         dtype=torch.float64,
-    ).raw_kernel(
+    )._raw_kernel(
         torch.tensor([[0.01, 0.01]], dtype=torch.float64),
         torch.tensor([[0.99, 0.99]], dtype=torch.float64),
         eps=eps,
@@ -73,17 +73,17 @@ def test_scdm_periodic_axes_must_be_integers():
 def test_scdm_density_heat_kernel_direct_reference_has_unit_weight_mass():
     Xref = torch.linspace(0.0, 1.0, 24, dtype=torch.float64)[:, None]
     sources = torch.tensor([[0.02], [0.37], [0.89]], dtype=torch.float64)
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=1,
         eps_init=0.01,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         metric="periodic",
         density_bandwidth_factor=1.5,
     )
     kernel.set_reference_data(Xref)
 
-    q_ref = kernel.raw_kernel(Xref, Xref, eps=kernel.density_eps).sum(dim=-1)
+    q_ref = kernel._raw_kernel(Xref, Xref, eps=kernel.density_eps).sum(dim=-1)
     weights = q_ref.reciprocal() / q_ref.reciprocal().sum()
     heat = kernel.heat_kernel(Xref, sources, mode="density", location_weights=weights)
     mass = (heat * weights[:, None]).sum(dim=0)
@@ -101,16 +101,16 @@ def test_scdm_density_heat_kernel_is_finite_for_nonuniform_reference_points():
         [[0.00], [0.01], [0.015], [0.20], [0.55], [0.73], [0.95]], dtype=torch.float64
     )
     sources = torch.tensor([[0.02], [0.40], [0.98]], dtype=torch.float64)
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=1,
         eps_init=0.02,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         metric="periodic",
     )
     kernel.set_reference_data(Xref)
 
-    q_ref = kernel.raw_kernel(Xref, Xref, eps=kernel.density_eps).sum(dim=-1)
+    q_ref = kernel._raw_kernel(Xref, Xref, eps=kernel.density_eps).sum(dim=-1)
     weights = q_ref.reciprocal() / q_ref.reciprocal().sum()
     heat = kernel.heat_kernel(Xref, sources, mode="density", alpha=1.0, location_weights=weights)
     mass = (heat * weights[:, None]).sum(dim=0)
@@ -124,10 +124,10 @@ def test_scdm_density_heat_kernel_is_finite_for_nonuniform_reference_points():
 def test_scdm_density_heat_kernel_direct_reference_matches_manual_density_formula():
     Xref = torch.linspace(0.0, 1.0, 16, dtype=torch.float64)[:, None]
     sources = torch.tensor([[0.03], [0.41], [0.88]], dtype=torch.float64)
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=1,
         eps_init=0.02,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         metric="periodic",
     )
@@ -141,10 +141,10 @@ def test_scdm_density_heat_kernel_direct_reference_matches_manual_density_formul
         alpha=1.0,
         mass_normalization="none",
     )
-    q_sources = kernel.raw_kernel(sources, Xref, eps=kernel.density_eps).sum(dim=-1)
-    q_ref = kernel.raw_kernel(Xref, Xref, eps=kernel.density_eps).sum(dim=-1)
+    q_sources = kernel._raw_kernel(sources, Xref, eps=kernel.density_eps).sum(dim=-1)
+    q_ref = kernel._raw_kernel(Xref, Xref, eps=kernel.density_eps).sum(dim=-1)
     weights = q_ref.reciprocal() / q_ref.reciprocal().sum()
-    block = kernel.raw_kernel(sources, Xref) / (q_sources[:, None] * q_ref[None, :])
+    block = kernel._raw_kernel(sources, Xref) / (q_sources[:, None] * q_ref[None, :])
     markov = block / block.sum(dim=-1)[:, None]
     expected = markov / weights[None, :]
 
@@ -157,16 +157,16 @@ def test_scdm_density_heat_kernel_preserves_mass_on_reference_targets():
         [[0.00], [0.01], [0.02], [0.21], [0.50], [0.74], [0.96]], dtype=torch.float64
     )
     sources = torch.tensor([[0.015], [0.42], [0.90]], dtype=torch.float64)
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=1,
         eps_init=0.03,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         metric="periodic",
     )
     kernel.set_reference_data(Xref)
 
-    q_ref = kernel.raw_kernel(Xref, Xref, eps=kernel.density_eps).sum(dim=-1)
+    q_ref = kernel._raw_kernel(Xref, Xref, eps=kernel.density_eps).sum(dim=-1)
     weights = q_ref.reciprocal() / q_ref.reciprocal().sum()
     heat = kernel.heat_kernel(
         Xref,
@@ -186,10 +186,10 @@ def test_scdm_density_heat_kernel_preserves_mass_on_reference_targets():
 def test_scdm_uniform_heat_kernel_direct_reference_matches_symmetric_sections():
     Xref = torch.linspace(0.0, 1.0, 12, dtype=torch.float64)[:, None]
     sources = torch.tensor([[0.08], [0.34], [0.77]], dtype=torch.float64)
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=1,
         eps_init=0.04,
-        t_init=0.5,
+        alpha_init=0.5,
         dtype=torch.float64,
         metric="periodic",
     )
@@ -207,10 +207,10 @@ def test_scdm_uniform_heat_kernel_normalizes_each_source_mass():
     sources = torch.tensor([[0.08], [0.34], [0.77]], dtype=torch.float64)
     locations = torch.linspace(0.0, 1.0, 27, dtype=torch.float64)[:, None]
     weights = torch.full((27,), 1.0 / 27.0, dtype=torch.float64)
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=1,
         eps_init=0.03,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         metric="periodic",
     )
@@ -237,7 +237,7 @@ def _embedded_circle_points(n_points: int) -> torch.Tensor:
 
 def test_scdm_estimates_uniform_reference_volume_with_diagnostics():
     Xref = _embedded_circle_points(512)
-    kernel = KernelScDM(in_dim=2, eps_init=0.00125, t_init=1.0, dtype=torch.float64)
+    kernel = KernelScDMHeat(in_dim=2, eps_init=0.00125, alpha_init=1.0, dtype=torch.float64)
     kernel.set_reference_data(Xref)
 
     volume, diagnostics = kernel.estimate_reference_volume(
@@ -257,7 +257,7 @@ def test_scdm_estimated_volume_heat_kernel_uses_physical_scale():
     Xref = _embedded_circle_points(256)
     locations = _embedded_circle_points(128)
     sources = _embedded_circle_points(4)
-    kernel = KernelScDM(in_dim=2, eps_init=0.00125, t_init=1.0, dtype=torch.float64)
+    kernel = KernelScDMHeat(in_dim=2, eps_init=0.00125, alpha_init=1.0, dtype=torch.float64)
     kernel.set_reference_data(Xref)
     volume = kernel.estimate_reference_volume(1, warn=False)
 
@@ -278,7 +278,7 @@ def test_scdm_estimated_volume_heat_kernel_returns_diagnostics():
     Xref = _embedded_circle_points(256)
     locations = _embedded_circle_points(128)
     sources = _embedded_circle_points(4)
-    kernel = KernelScDM(in_dim=2, eps_init=0.00125, t_init=1.0, dtype=torch.float64)
+    kernel = KernelScDMHeat(in_dim=2, eps_init=0.00125, alpha_init=1.0, dtype=torch.float64)
     kernel.set_reference_data(Xref)
 
     heat, diagnostics = kernel.heat_kernel(
@@ -310,7 +310,7 @@ def test_scdm_explicit_volume_heat_kernel_uses_physical_scale():
     locations = _embedded_circle_points(32)
     sources = _embedded_circle_points(3)
     volume = torch.tensor(2.0 * torch.pi, dtype=torch.float64)
-    kernel = KernelScDM(in_dim=2, eps_init=0.01, t_init=1.0, dtype=torch.float64)
+    kernel = KernelScDMHeat(in_dim=2, eps_init=0.01, alpha_init=1.0, dtype=torch.float64)
     kernel.set_reference_data(Xref)
 
     heat = kernel.heat_kernel(
@@ -327,7 +327,7 @@ def test_scdm_explicit_volume_heat_kernel_uses_physical_scale():
 
 def test_scdm_volume_normalization_rejects_explicit_location_weights():
     Xref = _embedded_circle_points(32)
-    kernel = KernelScDM(in_dim=2, eps_init=0.01, dtype=torch.float64)
+    kernel = KernelScDMHeat(in_dim=2, eps_init=0.01, dtype=torch.float64)
     kernel.set_reference_data(Xref)
 
     with pytest.raises(ValueError, match="location_weights"):
@@ -345,7 +345,7 @@ def test_scdm_volume_estimate_warns_for_nonuniform_row_sums():
     Xref = torch.tensor(
         [[0.00], [0.01], [0.02], [0.03], [0.50], [0.80], [0.95]], dtype=torch.float64
     )
-    kernel = KernelScDM(in_dim=1, eps_init=0.01, dtype=torch.float64, metric="periodic")
+    kernel = KernelScDMHeat(in_dim=1, eps_init=0.01, dtype=torch.float64, metric="periodic")
     kernel.set_reference_data(Xref)
 
     with pytest.warns(RuntimeWarning, match="Reference row sums vary"):
@@ -359,10 +359,10 @@ def test_scdm_density_heat_kernel_median_normalization_uses_global_source_scale(
     sources = torch.tensor([[0.01], [0.22], [0.55], [0.91]], dtype=torch.float64)
     locations = torch.linspace(0.0, 1.0, 19, dtype=torch.float64)[:, None]
     weights = torch.full((19,), 1.0 / 19.0, dtype=torch.float64)
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=1,
         eps_init=0.04,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         metric="periodic",
     )
@@ -396,10 +396,10 @@ def test_scdm_uniform_heat_kernel_median_normalization_uses_global_source_scale(
     sources = torch.tensor([[0.02], [0.31], [0.55], [0.89]], dtype=torch.float64)
     locations = torch.linspace(0.0, 1.0, 21, dtype=torch.float64)[:, None]
     weights = torch.full((21,), 1.0 / 21.0, dtype=torch.float64)
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=1,
         eps_init=0.04,
-        t_init=0.5,
+        alpha_init=0.5,
         dtype=torch.float64,
         metric="periodic",
     )
@@ -432,10 +432,10 @@ def test_scdm_heat_kernel_multiple_steps_preserve_requested_order():
     Xref = torch.linspace(0.0, 1.0, 10, dtype=torch.float64)[:, None]
     sources = torch.tensor([[0.12], [0.62]], dtype=torch.float64)
     locations = torch.tensor([[0.18], [0.48], [0.81]], dtype=torch.float64)
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=1,
         eps_init=0.05,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         metric="periodic",
     )
@@ -459,10 +459,10 @@ def test_scdm_heat_kernel_supports_broadcast_batches():
     Xref = torch.linspace(0.0, 1.0, 9, dtype=torch.float64)[:, None]
     sources = torch.tensor([[[0.08], [0.25]], [[0.45], [0.70]]], dtype=torch.float64)
     locations = torch.tensor([[[0.15], [0.35], [0.90]]], dtype=torch.float64)
-    kernel = KernelScDM(
+    kernel = KernelScDMHeat(
         in_dim=1,
         eps_init=0.05,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         metric="periodic",
     )
@@ -476,7 +476,7 @@ def test_scdm_heat_kernel_supports_broadcast_batches():
 
 def test_scdm_heat_kernel_validates_mode_steps_and_alpha():
     Xref = torch.linspace(0.0, 1.0, 8, dtype=torch.float64)[:, None]
-    kernel = KernelScDM(in_dim=1, eps_init=0.03, dtype=torch.float64)
+    kernel = KernelScDMHeat(in_dim=1, eps_init=0.03, dtype=torch.float64)
     kernel.set_reference_data(Xref)
 
     with pytest.raises(ValueError, match="positive"):
@@ -504,6 +504,11 @@ def test_scdm_heat_kernel_keeps_section_helpers_private():
     assert not hasattr(kernel, "heat_diagnostics")
     assert not hasattr(kernel, "row_sums")
     assert not hasattr(kernel, "reference_row_sums")
+    assert not hasattr(kernel, "raw_kernel")
+    assert not hasattr(kernel, "heat_kernel")
+    assert not hasattr(kernel, "estimate_reference_volume")
+    assert not hasattr(kernel, "density_eps")
+    assert not hasattr(kernel, "density_bandwidth_factor")
 
 
 def _nonuniform_euclidean_reference() -> torch.Tensor:
@@ -525,21 +530,21 @@ def _nonuniform_euclidean_reference() -> torch.Tensor:
 def _dense_keops_scdm_pair(
     *,
     eps_init: float = 0.08,
-    t_init: float = 1.0,
+    alpha_init: float = 1.0,
     density_bandwidth_factor: float = 1.4,
-) -> tuple[KernelScDM, KernelScDM]:
+) -> tuple[KernelScDMHeat, KernelScDMHeat]:
     xref = _nonuniform_euclidean_reference()
-    dense = KernelScDM(
+    dense = KernelScDMHeat(
         in_dim=2,
         eps_init=eps_init,
-        t_init=t_init,
+        alpha_init=alpha_init,
         dtype=torch.float64,
         density_bandwidth_factor=density_bandwidth_factor,
     )
-    keops = KernelScDM(
+    keops = KernelScDMHeat(
         in_dim=2,
         eps_init=eps_init,
-        t_init=t_init,
+        alpha_init=alpha_init,
         dtype=torch.float64,
         density_bandwidth_factor=density_bandwidth_factor,
         backend="keops",
@@ -554,11 +559,11 @@ def test_keops_scdm_backend_matches_dense_euclidean_sections():
     Xref = _embedded_circle_points(32)
     locations = _embedded_circle_points(24)
     sources = _embedded_circle_points(3)
-    dense = KernelScDM(in_dim=2, eps_init=0.2, t_init=1.0, dtype=torch.float64)
-    keops = KernelScDM(
+    dense = KernelScDMHeat(in_dim=2, eps_init=0.2, alpha_init=1.0, dtype=torch.float64)
+    keops = KernelScDMHeat(
         in_dim=2,
         eps_init=0.2,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         backend="keops",
     )
@@ -777,7 +782,7 @@ def test_keops_scdm_volume_estimate_diagnostics_match_dense_contract():
     Xref = _embedded_circle_points(64)
     locations = _embedded_circle_points(32)
     sources = _embedded_circle_points(2)
-    kernel = KernelScDM(in_dim=2, eps_init=0.05, dtype=torch.float64, backend="keops")
+    kernel = KernelScDMHeat(in_dim=2, eps_init=0.05, dtype=torch.float64, backend="keops")
     kernel.set_reference_data(Xref)
 
     heat, diagnostics = kernel.heat_kernel(
@@ -817,17 +822,17 @@ def test_keops_scdm_density_heat_kernel_matches_dense_euclidean_sections():
         dtype=torch.float64,
     )
     sources = torch.tensor([[0.03, 0.01], [0.38, 0.15], [0.88, 0.58]], dtype=torch.float64)
-    dense = KernelScDM(
+    dense = KernelScDMHeat(
         in_dim=2,
         eps_init=0.08,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         density_bandwidth_factor=1.4,
     )
-    keops = KernelScDM(
+    keops = KernelScDMHeat(
         in_dim=2,
         eps_init=0.08,
-        t_init=1.0,
+        alpha_init=1.0,
         dtype=torch.float64,
         density_bandwidth_factor=1.4,
         backend="keops",
@@ -865,8 +870,8 @@ def test_keops_scdm_density_heat_kernel_mass_normalization_matches_dense():
     locations = torch.tensor([[0.01], [0.18], [0.41], [0.73], [0.93]], dtype=torch.float64)
     sources = torch.tensor([[0.03], [0.35], [0.90]], dtype=torch.float64)
     weights = torch.tensor([0.08, 0.14, 0.20, 0.25, 0.33], dtype=torch.float64)
-    dense = KernelScDM(in_dim=1, eps_init=0.07, dtype=torch.float64)
-    keops = KernelScDM(in_dim=1, eps_init=0.07, dtype=torch.float64, backend="keops")
+    dense = KernelScDMHeat(in_dim=1, eps_init=0.07, dtype=torch.float64)
+    keops = KernelScDMHeat(in_dim=1, eps_init=0.07, dtype=torch.float64, backend="keops")
     dense.set_reference_data(Xref)
     keops.set_reference_data(Xref)
 
@@ -891,5 +896,5 @@ def test_keops_scdm_density_heat_kernel_mass_normalization_matches_dense():
 
 def test_keops_scdm_backend_rejects_non_euclidean_metric():
     with pytest.raises(NotImplementedError, match="Euclidean"):
-        kernel = KernelScDM(in_dim=1, eps_init=0.1, metric="periodic", backend="keops")
+        kernel = KernelScDMHeat(in_dim=1, eps_init=0.1, metric="periodic", backend="keops")
         kernel.set_reference_data(torch.linspace(0.0, 1.0, 4, dtype=torch.float64)[:, None])
