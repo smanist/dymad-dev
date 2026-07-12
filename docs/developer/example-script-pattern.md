@@ -93,6 +93,21 @@ if __name__ == "__main__":
    `--no-predict`, and `--no-show`.
 9. Return an integer status code.
 
+## Run Artifacts
+
+Keep generated intermediate run artifacts local to the script tree by default. For runnable scripts
+under `scripts/`, use a script-local run root such as:
+
+```python
+BASE_DIR = Path(__file__).resolve().parent
+OUTPUT_ROOT = BASE_DIR / "runs" / "my_study_name"
+```
+
+Avoid `Path("./runs/...")` for script defaults because it depends on the caller's current working
+directory and can accidentally write into the repo root. If a script supports a user-supplied
+workdir, resolve that explicit override separately; the default should still be anchored to the
+script location.
+
 ## CLI Recommended Skeleton
 
 ```python

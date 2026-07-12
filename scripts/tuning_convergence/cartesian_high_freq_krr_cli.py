@@ -33,9 +33,7 @@ def _parse_int_or_tuple_arg(text: str) -> int | tuple[int, ...]:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def default_levels_for_target(target: str) -> tuple[int, ...]:
-    if target == "oscillatory":
-        return (512, 1024, 2048, 4096, 8192)
+def default_levels_for_target(_target: str) -> tuple[int, ...]:
     return (512, 1024, 2048, 4096)
 
 
@@ -97,7 +95,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--refinement-strategy",
         choices=("nelder_mead_like", "batch_pattern_search", "multi_start_nelder_mead"),
-        default="batch_pattern_search",
+        default="multi_start_nelder_mead",
     )
     parser.add_argument("--tuning-policy", choices=("per_trial", "per_level"), default="per_trial")
     parser.add_argument("--seed", type=int, default=0)
