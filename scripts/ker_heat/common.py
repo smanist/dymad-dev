@@ -31,6 +31,7 @@ BASE_FIELDS = [
 ]
 
 CONVERGENCE_FONT_SIZE = 14
+SECTION_FONT_SIZE = 14
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,20 @@ class HeatCase:
     section_source_indices: tuple[int, ...]
     parallel: bool
     fit_point_count: int
+
+
+def section_plot_title(case: HeatCase, steps: int, *, include_study: bool = True) -> str:
+    """Format a heat-section figure title for a selected step count."""
+
+    epsilon = case.target_time / steps
+    details = f"N={case.section_n}, eps={epsilon:g}, steps={steps}"
+    return f"{case.study}: {details}" if include_study else details
+
+
+def section_plot_steps(case: HeatCase, *, smallest_epsilon: bool = False) -> int:
+    """Choose the configured section steps or the value with the smallest epsilon."""
+
+    return max(case.steps) if smallest_epsilon else case.section_steps
 
 
 @dataclass(frozen=True)

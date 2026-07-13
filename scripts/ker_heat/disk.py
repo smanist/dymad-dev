@@ -27,10 +27,13 @@ import matplotlib.pyplot as plt  # noqa: E402
 from common import (  # noqa: E402
     HeatCase,
     HeatSectionSpec,
+    SECTION_FONT_SIZE,
     evaluate_heat_section,
     metric_rows as build_metric_rows,
     plot_study,
     run_study,
+    section_plot_steps,
+    section_plot_title,
     study_artifact_paths,
     trial_seed as build_trial_seed,
 )
@@ -301,6 +304,7 @@ def case_source_groups(case: str) -> list[str]:
 
 def plot_sections(case: str, path: Path) -> None:
     config = CASES[case]
+    section_steps = section_plot_steps(config, smallest_epsilon=case == "interior_no_mass")
     _source_ids, source_pts_all, _source_groups = case_sources(case)
     source_idx = list(config.section_source_indices)
     source_pts = source_pts_all[source_idx]
@@ -311,7 +315,7 @@ def plot_sections(case: str, path: Path) -> None:
         reference_sample(case, config.section_n, trial_seed(config.section_n, SECTION_TRIAL)),
         source_pts,
         pts,
-        config.section_steps,
+        section_steps,
     )
     fig, axes = plt.subplots(
         len(source_idx),
@@ -340,12 +344,14 @@ def plot_sections(case: str, path: Path) -> None:
                     s=28,
                 )
                 ax.scatter(source_pts_all[idx, 0], source_pts_all[idx, 1], c="black", s=30)
-            ax.set_title(title, fontsize=14)
+            ax.set_title(title, fontsize=SECTION_FONT_SIZE)
             ax.set_aspect("equal")
             ax.set_xticks(tick_values)
             ax.set_yticks(tick_values)
-            ax.set_xlabel("x")
-        fig.colorbar(image, ax=axes[row, :2], shrink=0.78)
+            ax.set_xlabel("x", fontsize=SECTION_FONT_SIZE)
+            ax.tick_params(axis="both", labelsize=SECTION_FONT_SIZE)
+        colorbar = fig.colorbar(image, ax=axes[row, :2], shrink=0.78)
+        colorbar.ax.tick_params(labelsize=SECTION_FONT_SIZE)
         error_image = axes[row, 2].tricontourf(
             pts[:, 0],
             pts[:, 1],
@@ -355,17 +361,19 @@ def plot_sections(case: str, path: Path) -> None:
             vmin=-err_max,
             vmax=err_max,
         )
-        axes[row, 2].set_title("Error", fontsize=14)
+        axes[row, 2].set_title("Error", fontsize=SECTION_FONT_SIZE)
         axes[row, 2].set_aspect("equal")
         axes[row, 2].set_xticks(tick_values)
         axes[row, 2].set_yticks(tick_values)
-        axes[row, 2].set_xlabel("x")
-        fig.colorbar(error_image, ax=axes[row, 2], shrink=0.78)
+        axes[row, 2].set_xlabel("x", fontsize=SECTION_FONT_SIZE)
+        axes[row, 2].tick_params(axis="both", labelsize=SECTION_FONT_SIZE)
+        colorbar = fig.colorbar(error_image, ax=axes[row, 2], shrink=0.78)
+        colorbar.ax.tick_params(labelsize=SECTION_FONT_SIZE)
     for ax in axes[:, 0]:
-        ax.set_ylabel("y")
-    epsilon = config.target_time / config.section_steps
+        ax.set_ylabel("y", fontsize=SECTION_FONT_SIZE)
     fig.suptitle(
-        f"{config.study}: N={config.section_n}, eps={epsilon:g}, steps={config.section_steps}"
+        section_plot_title(config, section_steps, include_study=case != "interior_no_mass"),
+        fontsize=SECTION_FONT_SIZE,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=180)

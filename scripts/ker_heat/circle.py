@@ -26,11 +26,14 @@ import matplotlib.pyplot as plt  # noqa: E402
 from common import (  # noqa: E402
     HeatCase,
     HeatSectionSpec,
+    SECTION_FONT_SIZE,
     evaluate_heat_section,
     metric_rows as build_metric_rows,
     periodic_heat_kernel,
     plot_study,
     run_study,
+    section_plot_steps,
+    section_plot_title,
     study_artifact_paths,
     trial_seed as build_trial_seed,
 )
@@ -206,6 +209,7 @@ def warm_keops_backend() -> None:
 
 def plot_sections(case: str, path: Path) -> None:
     config = CASES[case]
+    section_steps = section_plot_steps(config, smallest_epsilon=case == "no_mass")
     _source_ids, source_pts_all = source_angles()
     source_idx = list(config.section_source_indices)
     source_pts = source_pts_all[source_idx]
@@ -216,7 +220,7 @@ def plot_sections(case: str, path: Path) -> None:
         reference_sample(case, config.section_n, trial_seed(config.section_n, SECTION_TRIAL)),
         source_pts,
         points,
-        config.section_steps,
+        section_steps,
     )
     fig, axes = plt.subplots(
         len(source_idx),
@@ -239,15 +243,14 @@ def plot_sections(case: str, path: Path) -> None:
                     s=28,
                 )
                 ax.scatter(source_pts_all[idx, 0], 0.0, c="black", s=30)
-            ax.set_title(title, fontsize=14)
+            ax.set_title(title, fontsize=SECTION_FONT_SIZE)
             ax.set_xticks([0.0, math.pi, TWO_PI], [r"$0$", r"$\pi$", r"$2\pi$"])
-            ax.set_xlabel(r"$\theta$")
+            ax.set_xlabel(r"$\theta$", fontsize=SECTION_FONT_SIZE)
             ax.grid(True, alpha=0.25)
-            ax.tick_params(axis="both", labelsize=14)
-    epsilon = config.target_time / config.section_steps
+            ax.tick_params(axis="both", labelsize=SECTION_FONT_SIZE)
     fig.suptitle(
-        f"{config.study}: N={config.section_n}, eps={epsilon:g}, steps={config.section_steps}",
-        y=1.08,
+        section_plot_title(config, section_steps, include_study=case != "no_mass"),
+        fontsize=SECTION_FONT_SIZE,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=180)
