@@ -1,4 +1,4 @@
-"""Flat-torus heat-kernel convergence studies."""
+"""Curved 3D donut-torus heat-kernel convergence study."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import math
 import sys
+from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
@@ -18,7 +20,7 @@ configure_script_runtime(__file__, matplotlib=True)
 
 import matplotlib
 import numpy as np
-from scipy.stats import qmc
+from scipy import linalg
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -28,33 +30,35 @@ from common import (  # noqa: E402
     HeatSectionSpec,
     evaluate_heat_section,
     metric_rows as build_metric_rows,
-    periodic_heat_kernel,
     plot_study,
     run_study,
     study_artifact_paths,
-    trial_seed as build_trial_seed,
+)
+from torus import (  # noqa: E402
+    BASE_DIR,
+    RUN_TEST_COUNT,
+    RUN_TRIALS,
+    RUN_WORKERS,
+    SAMPLE_COUNTS,
+    SECTION_TEST_COUNT,
+    SECTION_TRIAL,
+    STEPS,
+    TARGET_TIME,
+    TWO_PI,
+    locations,
+    sample,
+    sources,
+    trial_seed,
 )
 
-BASE_DIR = Path(__file__).resolve().parent
-TWO_PI = 2.0 * math.pi
-TORUS_AREA = TWO_PI * TWO_PI
-TARGET_TIME = 0.04
-STEPS = (1, 2, 4, 8)
-SAMPLE_COUNTS = (4096, 8192, 16384, 32768, 65536)
-TRIALS = 8
-TEST_COUNT = 4096
-SEED = 2026061801
-CASE_INDEX = 4
-
-RUN_TRIALS = TRIALS
-RUN_TEST_COUNT = TEST_COUNT
-SECTION_TRIAL = 0
-SECTION_TEST_COUNT = TEST_COUNT
-RUN_WORKERS = 4
-RUN_PARALLEL = False
+DONUT_MAJOR_RADIUS = 2.0
+DONUT_MINOR_RADIUS = 0.75
+DONUT_AREA = 4.0 * math.pi * math.pi * DONUT_MAJOR_RADIUS * DONUT_MINOR_RADIUS
+DONUT_THETA_POINTS = 95
+DONUT_ANGULAR_MODES = 32
 
 
-def torus_case(study: str, title: str, parallel: bool) -> HeatCase:
+def donut_case(study: str, title: str, parallel: bool) -> HeatCase:
     return HeatCase(
         study=study,
         title=title,
@@ -70,10 +74,10 @@ def torus_case(study: str, title: str, parallel: bool) -> HeatCase:
 
 
 CASES: dict[str, HeatCase] = {
-    "mass": torus_case("torus_mass", "Torus mass-normalized convergence", parallel=False),
-    "no_mass": torus_case("torus_no_mass", "Torus no-mass convergence", parallel=RUN_PARALLEL),
-    "nonuniform": torus_case(
-        "torus_nonuniform", "Torus nonuniform-sample convergence", parallel=RUN_PARALLEL
+    "mass": donut_case("torus_donut_mass", "Donut torus mass-normalized convergence", False),
+    "no_mass": donut_case("torus_donut_no_mass", "Donut torus no-mass convergence", False),
+    "nonuniform": donut_case(
+        "torus_donut_nonuniform", "Donut torus nonuniform-sample convergence", False
     ),
 }
 ACTIVE_CASES = ("mass", "no_mass", "nonuniform")
@@ -83,83 +87,137 @@ ifplt = 1
 ifsec = 1
 
 
-def trial_seed(n_samples: int, trial: int) -> int:
-    return build_trial_seed(SEED, n_samples, trial, CASE_INDEX)
-
-
-def sample(n_samples: int, seed: int) -> np.ndarray:
-    sampler = qmc.Sobol(d=2, scramble=True, seed=seed)
-    return TWO_PI * sampler.random_base2(math.ceil(math.log2(n_samples)))[:n_samples]
-
-
-def nonuniform_sample(n_samples: int, seed: int) -> np.ndarray:
-    points = sample(n_samples, seed)
-    amplitudes = np.asarray([0.55, -0.40], dtype=float)
-    return np.mod(points + amplitudes[None, :] * np.sin(points), TWO_PI)
-
-
-def reference_sample(case: str, n_samples: int, seed: int) -> np.ndarray:
-    if case == "nonuniform":
-        return nonuniform_sample(n_samples, seed)
-    return sample(n_samples, seed)
-
-
-def locations(n_points: int) -> np.ndarray:
-    side = int(round(math.sqrt(n_points)))
-    if side * side != n_points:
-        raise ValueError("n_points must be a perfect square for the 2D torus")
-    axis = TWO_PI * (np.arange(side, dtype=float) + 0.5) / side
-    xx, yy = np.meshgrid(axis, axis, indexing="xy")
-    return np.column_stack((xx.ravel(), yy.ravel()))
-
-
-def sources() -> tuple[list[str], np.ndarray, list[str]]:
-    ids = ["t2_q0", "t2_q1", "t2_q2", "t2_q3", "t2_q4"]
-    coords = [[0.25, 0.25], [0.50, 0.50], [0.75, 0.25], [0.25, 0.75], [0.90, 0.10]]
-    return ids, TWO_PI * np.asarray(coords, dtype=float), ["all"] * len(ids)
-
-
-def embed(points: np.ndarray) -> np.ndarray:
+def donut_embed(points: np.ndarray) -> np.ndarray:
+    phi, theta = points[:, 0], points[:, 1]
+    ring_radius = DONUT_MAJOR_RADIUS + DONUT_MINOR_RADIUS * np.cos(theta)
     return np.column_stack(
         (
-            np.cos(points[:, 0]),
-            np.sin(points[:, 0]),
-            np.cos(points[:, 1]),
-            np.sin(points[:, 1]),
+            ring_radius * np.cos(phi),
+            ring_radius * np.sin(phi),
+            DONUT_MINOR_RADIUS * np.sin(theta),
         )
     )
 
 
-def reference(src: np.ndarray, pts: np.ndarray) -> np.ndarray:
-    return periodic_heat_kernel(src[:, 0], pts[:, 0], TARGET_TIME, TWO_PI) * periodic_heat_kernel(
-        src[:, 1], pts[:, 1], TARGET_TIME, TWO_PI
+def uniform_surface_sample(n_samples: int, seed: int) -> np.ndarray:
+    """Map parameter-uniform Sobol points to the donut's uniform area measure."""
+
+    points = sample(n_samples, seed)
+    target_theta = points[:, 1]
+    theta = target_theta.copy()
+    ratio = DONUT_MINOR_RADIUS / DONUT_MAJOR_RADIUS
+    for _ in range(8):
+        theta -= (theta + ratio * np.sin(theta) - target_theta) / (1.0 + ratio * np.cos(theta))
+    return np.column_stack((points[:, 0], np.mod(theta, TWO_PI)))
+
+
+def reference_sample(case: str, n_samples: int, seed: int) -> np.ndarray:
+    if case == "nonuniform":
+        return sample(n_samples, seed)
+    return uniform_surface_sample(n_samples, seed)
+
+
+@dataclass(frozen=True)
+class DonutSpectrum:
+    eigenvalues: tuple[np.ndarray, ...]
+    eigenvectors: tuple[np.ndarray, ...]
+
+
+def periodic_derivative_matrix(n_points: int) -> np.ndarray:
+    modes = np.fft.fftfreq(n_points, d=1.0 / n_points)
+    identity = np.eye(n_points)
+    return np.fft.ifft(1j * modes[:, None] * np.fft.fft(identity, axis=0), axis=0).real
+
+
+@cache
+def donut_spectrum(
+    theta_points: int = DONUT_THETA_POINTS,
+    angular_modes: int = DONUT_ANGULAR_MODES,
+) -> DonutSpectrum:
+    if theta_points % 2 == 0:
+        raise ValueError("theta_points must be odd for the Fourier differentiation grid.")
+    theta = TWO_PI * np.arange(theta_points, dtype=float) / theta_points
+    derivative = periodic_derivative_matrix(theta_points)
+    area_factor = DONUT_MAJOR_RADIUS + DONUT_MINOR_RADIUS * np.cos(theta)
+    theta_step = TWO_PI / theta_points
+    mass = theta_step * np.diag(DONUT_MINOR_RADIUS * area_factor)
+    stiffness_base = (
+        theta_step * derivative.T @ ((area_factor / DONUT_MINOR_RADIUS)[:, None] * derivative)
     )
+    eigenvalues, eigenvectors = [], []
+    for mode in range(angular_modes + 1):
+        stiffness = stiffness_base + theta_step * np.diag(
+            mode * mode * DONUT_MINOR_RADIUS / area_factor
+        )
+        values, vectors = linalg.eigh(stiffness, mass, check_finite=False)
+        eigenvalues.append(values)
+        eigenvectors.append(vectors)
+    return DonutSpectrum(tuple(eigenvalues), tuple(eigenvectors))
 
 
-def torus_location_weights(points: np.ndarray) -> np.ndarray:
-    return np.full(points.shape[0], TORUS_AREA / points.shape[0], dtype=float)
+def evaluate_theta_modes(theta: np.ndarray, eigenvectors: np.ndarray) -> np.ndarray:
+    n_points = eigenvectors.shape[0]
+    modes = np.fft.fftfreq(n_points, d=1.0 / n_points)
+    coefficients = np.fft.fft(eigenvectors, axis=0) / n_points
+    basis = np.exp(1j * np.outer(np.mod(theta, TWO_PI), modes))
+    return np.real(basis @ coefficients)
+
+
+def donut_reference(
+    src: np.ndarray,
+    pts: np.ndarray,
+    t: float = TARGET_TIME,
+    *,
+    theta_points: int = DONUT_THETA_POINTS,
+    angular_modes: int = DONUT_ANGULAR_MODES,
+) -> np.ndarray:
+    spectrum = donut_spectrum(theta_points, angular_modes)
+    values = np.zeros((src.shape[0], pts.shape[0]), dtype=float)
+    phi_difference = src[:, None, 0] - pts[None, :, 0]
+    for mode, (eigenvalues, eigenvectors) in enumerate(
+        zip(spectrum.eigenvalues, spectrum.eigenvectors, strict=True)
+    ):
+        keep = eigenvalues * t <= 36.0
+        source_modes = evaluate_theta_modes(src[:, 1], eigenvectors[:, keep])
+        point_modes = evaluate_theta_modes(pts[:, 1], eigenvectors[:, keep])
+        theta_sum = (source_modes * np.exp(-eigenvalues[keep] * t)[None, :]) @ point_modes.T
+        coefficient = 1.0 / TWO_PI if mode == 0 else 1.0 / math.pi
+        values += coefficient * np.cos(mode * phi_difference) * theta_sum
+    return values
+
+
+def donut_location_weights(points: np.ndarray) -> np.ndarray:
+    side = int(round(math.sqrt(points.shape[0])))
+    if side * side != points.shape[0]:
+        raise ValueError("Donut quadrature points must form a square parameter grid.")
+    parameter_area = (TWO_PI / side) ** 2
+    return (
+        parameter_area
+        * DONUT_MINOR_RADIUS
+        * (DONUT_MAJOR_RADIUS + DONUT_MINOR_RADIUS * np.cos(points[:, 1]))
+    )
 
 
 SECTION_SPECS = {
     "mass": HeatSectionSpec(
-        ambient_dim=4,
-        encode=embed,
+        ambient_dim=3,
+        encode=donut_embed,
         mode="uniform",
         volume_normalization="estimate_volume",
         volume_dim=2,
     ),
     "no_mass": HeatSectionSpec(
-        ambient_dim=4,
-        encode=embed,
+        ambient_dim=3,
+        encode=donut_embed,
         mode="uniform",
         mass_normalization="none",
     ),
     "nonuniform": HeatSectionSpec(
-        ambient_dim=4,
-        encode=embed,
+        ambient_dim=3,
+        encode=donut_embed,
         mode="density",
         alpha=1.0,
-        location_weights=torus_location_weights,
+        location_weights=donut_location_weights,
     ),
 }
 
@@ -181,24 +239,41 @@ def dymad_section(
     )
 
 
+def warm_keops_backend() -> None:
+    _source_ids, source_pts, _source_groups = sources()
+    for case in ACTIVE_CASES:
+        dymad_section(
+            case,
+            reference_sample(case, 8, trial_seed(8, 0)),
+            source_pts,
+            locations(4),
+            CASES[case].section_steps,
+        )
+
+
 def case_truth(case: str, src: np.ndarray, pts: np.ndarray) -> np.ndarray:
-    truth = reference(src, pts)
-    return TORUS_AREA * truth if case == "no_mass" else truth
+    truth = donut_reference(src, pts, CASES[case].target_time)
+    return DONUT_AREA * truth if case == "no_mass" else truth
 
 
 def run_one(task):
     case, step_count, n_samples, trial, source_ids, source_pts, source_groups, test_pts, truth = (
         task
     )
-    ref_pts = reference_sample(case, n_samples, trial_seed(n_samples, trial))
-    pred = dymad_section(case, ref_pts, source_pts, test_pts, step_count)
+    pred = dymad_section(
+        case,
+        reference_sample(case, n_samples, trial_seed(n_samples, trial)),
+        source_pts,
+        test_pts,
+        step_count,
+    )
     return (
         step_count,
         n_samples,
         trial,
         build_metric_rows(
             case=CASES[case].study,
-            target_time=TARGET_TIME,
+            target_time=CASES[case].target_time,
             ids=source_ids,
             groups=source_groups,
             estimate=pred,
@@ -206,22 +281,9 @@ def run_one(task):
             n_samples=n_samples,
             trial=trial,
             steps=step_count,
-            weights=torus_location_weights(test_pts),
+            weights=donut_location_weights(test_pts),
         ),
     )
-
-
-def warm_keops_backend() -> None:
-    _source_ids, source_pts, _source_groups = sources()
-    points = locations(4)
-    for case in ACTIVE_CASES:
-        dymad_section(
-            case,
-            reference_sample(case, 8, trial_seed(8, 0)),
-            source_pts,
-            points,
-            CASES[case].section_steps,
-        )
 
 
 def plot_sections(case: str, path: Path) -> None:

@@ -107,7 +107,7 @@ def compare_case(
     case: str,
     n_ref: int = REF_COUNT,
     n_loc: int = LOC_COUNT,
-) -> tuple[list[dict[str, float | str]], list[np.ndarray], list[np.ndarray]]:
+) -> tuple[dict[str, float | str], np.ndarray, np.ndarray]:
     ref, loc, src = case_points(case, n_ref, n_loc)
     dense = kernel(ref, backend="torch")
     keops = kernel(ref, backend="keops")
@@ -115,17 +115,15 @@ def compare_case(
     section_dense = sections(dense, loc, src)
     gram_diff = gram(keops, ref) - gram_dense
     section_diff = sections(keops, loc, src) - section_dense
-    rows = [
-        {
-            "case": case,
-            "backend": "keops",
-            "gram_max_abs": float(np.max(np.abs(gram_diff))),
-            "gram_rel_fro": rel_fro(gram_diff, gram_dense),
-            "section_max_abs": float(np.max(np.abs(section_diff))),
-            "section_rel_fro": rel_fro(section_diff, section_dense),
-        }
-    ]
-    return rows, [gram_diff], [section_diff]
+    row = {
+        "case": case,
+        "backend": "keops",
+        "gram_max_abs": float(np.max(np.abs(gram_diff))),
+        "gram_rel_fro": rel_fro(gram_diff, gram_dense),
+        "section_max_abs": float(np.max(np.abs(section_diff))),
+        "section_rel_fro": rel_fro(section_diff, section_dense),
+    }
+    return row, gram_diff, section_diff
 
 
 def write_rows(rows: list[dict[str, float | str]], path: Path = CSV_PATH) -> None:
@@ -146,29 +144,24 @@ def write_rows(rows: list[dict[str, float | str]], path: Path = CSV_PATH) -> Non
 
 def plot_case(
     case: str,
-    rows: list[dict[str, float | str]],
-    gram_diffs: list[np.ndarray],
-    section_diffs: list[np.ndarray],
+    gram_diff: np.ndarray,
+    section_diff: np.ndarray,
     output_dir: Path = OUT,
 ) -> None:
-    del rows
-    image_values = [
-        np.log10(np.abs(diff) + 1e-16) for diffs in (gram_diffs, section_diffs) for diff in diffs
-    ]
-    vmin, vmax = (
-        min(float(values.min()) for values in image_values),
-        max(float(values.max()) for values in image_values),
-    )
+    gram_image = np.log10(np.abs(gram_diff) + 1e-16)
+    section_image = np.log10(np.abs(section_diff) + 1e-16)
+    vmin = min(float(gram_image.min()), float(section_image.min()))
+    vmax = max(float(gram_image.max()), float(section_image.max()))
     fig, axes = plt.subplots(1, 3, figsize=(10.2, 3.6), constrained_layout=True)
     image = None
-    for ax, diff, label in zip(
+    for ax, values, label in zip(
         axes[:2],
-        (gram_diffs[0], section_diffs[0]),
+        (gram_image, section_image),
         ("Gram", "sections"),
         strict=True,
     ):
         image = ax.imshow(
-            np.log10(np.abs(diff) + 1e-16),
+            values,
             aspect="auto",
             cmap="magma",
             vmin=vmin,
@@ -181,7 +174,7 @@ def plot_case(
         fig.colorbar(image, ax=axes[:2], location="right", shrink=0.88, label="log10 abs diff")
     axes[2].bar(
         ["Gram", "sections"],
-        [float(np.max(np.abs(gram_diffs[0]))), float(np.max(np.abs(section_diffs[0])))],
+        [float(np.max(np.abs(gram_diff))), float(np.max(np.abs(section_diff)))],
     )
     axes[2].set_yscale("log")
     axes[2].set_ylabel("max abs difference")
@@ -192,13 +185,13 @@ def plot_case(
     plt.close(fig)
 
 
-_computed: dict[str, tuple[list[dict[str, float | str]], list[np.ndarray], list[np.ndarray]]] = {}
+_computed: dict[str, tuple[dict[str, float | str], np.ndarray, np.ndarray]] = {}
 
 if __name__ == "__main__" and ifrun:
     all_rows: list[dict[str, float | str]] = []
     for case_name in CASES:
         _computed[case_name] = compare_case(case_name)
-        all_rows.extend(_computed[case_name][0])
+        all_rows.append(_computed[case_name][0])
         print(f"done {case_name}", flush=True)
     write_rows(all_rows)
     print(f"Wrote {CSV_PATH}")
@@ -206,6 +199,6 @@ if __name__ == "__main__" and ifrun:
 if __name__ == "__main__" and ifplt:
     if not _computed:
         _computed = {case_name: compare_case(case_name) for case_name in CASES}
-    for case_name, result in _computed.items():
-        plot_case(case_name, *result)
+    for case_name, (_row, gram_diff, section_diff) in _computed.items():
+        plot_case(case_name, gram_diff, section_diff)
         print(f"Wrote {OUT / f'{case_name}_keops_dense_verify.png'}")

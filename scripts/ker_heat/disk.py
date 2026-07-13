@@ -1,4 +1,4 @@
-"""Disk heat-kernel section convergence with DyMAD uniform mode."""
+"""Neumann disk heat-kernel convergence studies."""
 
 from __future__ import annotations
 
@@ -18,53 +18,78 @@ configure_script_runtime(__file__, matplotlib=True)
 
 import matplotlib
 import numpy as np
-import torch
 from scipy import special
 from scipy.stats import qmc
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from dymad.modules import KernelScDMHeat  # noqa: E402
 from common import (  # noqa: E402
+    HeatCase,
+    HeatSectionSpec,
+    evaluate_heat_section,
     metric_rows as build_metric_rows,
-    plot_convergence as plot_convergence_curves,
-    plot_max_abs_convergence as plot_max_abs_convergence_curves,
-    read_rows,
-    run_serial,
+    plot_study,
+    run_study,
+    study_artifact_paths,
     trial_seed as build_trial_seed,
-    write_rows,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-OUT = BASE_DIR / "runs" / "disk_redo"
-RAW_CSV = OUT / "disk_raw_results.csv"
-FIG_PATH = OUT / "convergence_disk.png"
-MAX_ABS_FIG_PATH = OUT / "convergence_disk_max_abs.png"
-SECTION_FIG_PATH = OUT / "section_disk.png"
-
-TARGET_TIME = 0.08
-STEPS = (1, 2, 4, 8)
-EPSILONS = tuple(TARGET_TIME / step for step in STEPS)
-SAMPLE_COUNTS = (32, 64, 128, 256, 512, 1024, 2048, 4096)
-TRIALS = 8
-TEST_COUNT = 4096
+DISK_AREA = math.pi
 SEED = 2026061801
 CASE_INDEX = 8
-DISK_AREA = math.pi
 REFERENCE_TERM_TOL = 1e-13
 REFERENCE_ANGULAR_ORDER = 42
 REFERENCE_RADIAL_ROOTS = 42
+RUN_PARALLEL = False
 
-RUN_STEPS = STEPS
-RUN_SAMPLE_COUNTS = SAMPLE_COUNTS
-RUN_TRIALS = TRIALS
-RUN_TEST_COUNT = TEST_COUNT
-SECTION_N = 4096
-SECTION_STEPS = 8
+
+CASES: dict[str, HeatCase] = {
+    "mass": HeatCase(
+        study="disk_full_mass",
+        title="Disk full mass-normalized convergence",
+        target_time=0.08,
+        steps=(1, 2, 4, 8),
+        sample_counts=(32, 64, 128, 256, 512, 1024, 2048, 4096),
+        section_n=4096,
+        section_steps=8,
+        section_source_indices=(0,),
+        parallel=False,
+        fit_point_count=3,
+    ),
+    "interior_no_mass": HeatCase(
+        study="disk_interior_no_mass",
+        title="Disk interior no-mass convergence",
+        target_time=0.04,
+        steps=(1, 2, 4, 8, 16, 32),
+        sample_counts=(512, 1024, 2048, 4096, 8192, 16384, 32768),
+        section_n=4096,
+        section_steps=1,
+        section_source_indices=(4,),
+        parallel=RUN_PARALLEL,
+        fit_point_count=4,
+    ),
+    "nonuniform": HeatCase(
+        study="disk_full_nonuniform",
+        title="Disk full nonuniform-sample convergence",
+        target_time=0.08,
+        steps=(1, 2, 4, 8),
+        sample_counts=(32, 64, 128, 256, 512, 1024, 2048, 4096),
+        section_n=4096,
+        section_steps=8,
+        section_source_indices=(0,),
+        parallel=RUN_PARALLEL,
+        fit_point_count=3,
+    ),
+}
+ACTIVE_CASES = ("mass", "interior_no_mass", "nonuniform")
+SOURCE_SETS = {"mass": "full", "interior_no_mass": "interior", "nonuniform": "full"}
+RUN_TRIALS = 8
+RUN_TEST_COUNT = 4096
+SECTION_TEST_COUNT = 4096
 SECTION_TRIAL = 0
-SECTION_SOURCE_INDICES = (0, 3)
-SECTION_TEST_COUNT = TEST_COUNT
+RUN_WORKERS = 4
 
 ifrun = 1
 ifplt = 1
@@ -83,11 +108,24 @@ def sample(n_samples: int, seed: int) -> np.ndarray:
     return np.column_stack((radius * np.cos(theta), radius * np.sin(theta)))
 
 
+def nonuniform_sample(n_samples: int, seed: int) -> np.ndarray:
+    points = sample(n_samples, seed)
+    radii = np.linalg.norm(points, axis=1)
+    scale = np.divide(radii**0.65, radii, out=np.ones_like(radii), where=radii > 0.0)
+    return points * scale[:, None]
+
+
+def reference_sample(case: str, n_samples: int, seed: int) -> np.ndarray:
+    if case == "nonuniform":
+        return nonuniform_sample(n_samples, seed)
+    return sample(n_samples, seed)
+
+
 def locations(n_points: int) -> np.ndarray:
     return sample(n_points, seed=2026062101)
 
 
-def sources() -> tuple[list[str], np.ndarray, list[str]]:
+def full_sources() -> tuple[list[str], np.ndarray, list[str]]:
     data = [
         ("d_center", (0.0, 0.0), "interior"),
         ("d_int_x35", (0.35, 0.0), "interior"),
@@ -101,6 +139,27 @@ def sources() -> tuple[list[str], np.ndarray, list[str]]:
         np.asarray([item[1] for item in data], dtype=float),
         [item[2] for item in data],
     )
+
+
+def interior_sources() -> tuple[list[str], np.ndarray, list[str]]:
+    data = [
+        ("d_center", (0.0, 0.0), "interior"),
+        ("d_x25", (0.25, 0.0), "interior"),
+        ("d_diag40", (0.2828427125, 0.2828427125), "interior"),
+        ("d_y55", (0.0, 0.55), "interior"),
+        ("d_diag60", (0.4242640687, 0.4242640687), "interior"),
+    ]
+    return (
+        [item[0] for item in data],
+        np.asarray([item[1] for item in data], dtype=float),
+        [item[2] for item in data],
+    )
+
+
+def case_sources(case: str) -> tuple[list[str], np.ndarray, list[str]]:
+    if SOURCE_SETS[case] == "interior":
+        return interior_sources()
+    return full_sources()
 
 
 def mode_table(
@@ -119,7 +178,7 @@ def mode_table(
     return roots, norms
 
 
-def reference(src: np.ndarray, pts: np.ndarray, t: float = TARGET_TIME) -> np.ndarray:
+def reference(src: np.ndarray, pts: np.ndarray, t: float) -> np.ndarray:
     roots, norms = mode_table()
     radii = np.linalg.norm(pts, axis=1)
     theta = np.arctan2(pts[:, 1], pts[:, 0])
@@ -143,97 +202,116 @@ def reference(src: np.ndarray, pts: np.ndarray, t: float = TARGET_TIME) -> np.nd
     return values
 
 
-def dymad_section(
-    ref_pts: np.ndarray, src: np.ndarray, pts: np.ndarray, steps: int
-) -> tuple[np.ndarray, float]:
-    epsilon = TARGET_TIME / steps
-    kernel = KernelScDMHeat(
-        in_dim=2,
-        eps_init=epsilon,
-        alpha_init=1.0,
-        dtype=torch.float64,
-        backend="keops",
-    )
-    kernel.set_reference_data(torch.as_tensor(ref_pts, dtype=torch.float64))
-    values = kernel.heat_kernel(
-        torch.as_tensor(pts, dtype=torch.float64),
-        torch.as_tensor(src, dtype=torch.float64),
+def disk_location_weights(points: np.ndarray) -> np.ndarray:
+    return np.full(points.shape[0], DISK_AREA / points.shape[0], dtype=float)
+
+
+def identity(points: np.ndarray) -> np.ndarray:
+    return points
+
+
+SECTION_SPECS = {
+    "mass": HeatSectionSpec(
+        ambient_dim=2,
+        encode=identity,
         mode="uniform",
-        steps=steps,
         volume_normalization="estimate_volume",
         volume_dim=2,
-        volume_estimate_warnings=False,
-        return_diagnostics=True,
-    )
-    section, diagnostics = values
-    return section.detach().cpu().numpy().T, float(diagnostics["volume"])
+    ),
+    "interior_no_mass": HeatSectionSpec(
+        ambient_dim=2,
+        encode=identity,
+        mode="uniform",
+        mass_normalization="none",
+    ),
+    "nonuniform": HeatSectionSpec(
+        ambient_dim=2,
+        encode=identity,
+        mode="density",
+        alpha=1.0,
+        location_weights=disk_location_weights,
+    ),
+}
 
 
-def metric_rows(
-    ids: list[str],
-    groups: list[str],
-    estimate: np.ndarray,
-    truth: np.ndarray,
-    n_samples: int,
-    trial: int,
-    steps: int,
-) -> list[dict[str, object]]:
-    weights = np.full(truth.shape[1], DISK_AREA / truth.shape[1], dtype=float)
-    return build_metric_rows(
-        case="disk",
-        target_time=TARGET_TIME,
-        ids=ids,
-        groups=groups,
-        estimate=estimate,
-        truth=truth,
-        n_samples=n_samples,
-        trial=trial,
+def dymad_section(
+    case: str, ref_pts: np.ndarray, src: np.ndarray, pts: np.ndarray, steps: int
+) -> np.ndarray:
+    config = CASES[case]
+    try:
+        spec = SECTION_SPECS[case]
+    except KeyError as error:
+        raise ValueError(f"Unknown case: {case}") from error
+    return evaluate_heat_section(
+        spec,
+        ref_pts,
+        src,
+        pts,
+        epsilon=config.target_time / steps,
         steps=steps,
-        weights=weights,
     )
+
+
+def case_truth(case: str, src: np.ndarray, pts: np.ndarray) -> np.ndarray:
+    truth = reference(src, pts, CASES[case].target_time)
+    return DISK_AREA * truth if case == "interior_no_mass" else truth
 
 
 def run_one(task):
-    step_count, n, tr, source_ids, source_pts, source_groups, test_pts, truth = task
-    ref_pts = sample(n, trial_seed(n, tr))
-    pred, _volume = dymad_section(ref_pts, source_pts, test_pts, step_count)
-    return step_count, n, tr, metric_rows(source_ids, source_groups, pred, truth, n, tr, step_count)
-
-
-def plot_convergence(rows: list[dict[str, str]], path: Path) -> None:
-    groups = [
-        group
-        for group in ("interior", "near_boundary")
-        if any(row["source_group"] == group for row in rows)
-    ]
-    plot_convergence_curves(
-        rows,
-        path=path,
-        steps_values=STEPS,
-        target_time=TARGET_TIME,
-        title="Disk uniform-mode convergence",
-        source_groups=groups,
+    case, step_count, n_samples, trial, source_ids, source_pts, source_groups, test_pts, truth = (
+        task
+    )
+    ref_pts = reference_sample(case, n_samples, trial_seed(n_samples, trial))
+    pred = dymad_section(case, ref_pts, source_pts, test_pts, step_count)
+    return (
+        step_count,
+        n_samples,
+        trial,
+        build_metric_rows(
+            case=CASES[case].study,
+            target_time=CASES[case].target_time,
+            ids=source_ids,
+            groups=source_groups,
+            estimate=pred,
+            truth=truth,
+            n_samples=n_samples,
+            trial=trial,
+            steps=step_count,
+            weights=disk_location_weights(test_pts),
+        ),
     )
 
 
-def plot_max_abs_convergence(rows: list[dict[str, str]], path: Path) -> None:
-    plot_max_abs_convergence_curves(
-        rows,
-        path=path,
-        steps_values=STEPS,
-        target_time=TARGET_TIME,
-        title="Disk max-abs convergence",
-    )
+def warm_keops_backend() -> None:
+    _source_ids, source_pts, _source_groups = full_sources()
+    points = locations(4)
+    for case in ACTIVE_CASES:
+        dymad_section(
+            case,
+            reference_sample(case, 8, trial_seed(8, 0)),
+            source_pts,
+            points,
+            CASES[case].section_steps,
+        )
 
 
-def plot_sections(n_samples: int, steps: int, trial: int, source_indices, path: Path) -> None:
-    _source_ids, source_pts_all, _groups = sources()
-    source_idx = list(source_indices)
+def case_source_groups(case: str) -> list[str]:
+    return list(dict.fromkeys(case_sources(case)[2]))
+
+
+def plot_sections(case: str, path: Path) -> None:
+    config = CASES[case]
+    _source_ids, source_pts_all, _source_groups = case_sources(case)
+    source_idx = list(config.section_source_indices)
     source_pts = source_pts_all[source_idx]
     pts = locations(SECTION_TEST_COUNT)
-    truth = reference(source_pts, pts)
-    pred, volume = dymad_section(
-        sample(n_samples, trial_seed(n_samples, trial)), source_pts, pts, steps
+    truth = case_truth(case, source_pts, pts)
+    pred = dymad_section(
+        case,
+        reference_sample(case, config.section_n, trial_seed(config.section_n, SECTION_TRIAL)),
+        source_pts,
+        pts,
+        config.section_steps,
     )
     fig, axes = plt.subplots(
         len(source_idx),
@@ -248,22 +326,26 @@ def plot_sections(n_samples: int, steps: int, trial: int, source_indices, path: 
         vmin = min(float(np.min(truth[row])), float(np.min(pred[row])))
         vmax = max(float(np.max(truth[row])), float(np.max(pred[row])))
         err_max = max(float(np.max(np.abs(error))), np.finfo(float).tiny)
-        shared_image = None
         panels = (("Truth", truth[row]), ("Prediction", pred[row]))
-        for ax, (title, values) in zip(axes[row, :2], panels, strict=True):
+        for column, (ax, (title, values)) in enumerate(zip(axes[row, :2], panels, strict=True)):
             image = ax.tricontourf(
                 pts[:, 0], pts[:, 1], values, levels=40, cmap="viridis", vmin=vmin, vmax=vmax
             )
-            shared_image = image
-            ax.scatter(source_pts_all[idx, 0], source_pts_all[idx, 1], c="black", s=16)
-            ax.set_title(title)
+            if column == 0:
+                ax.scatter(
+                    source_pts_all[:, 0],
+                    source_pts_all[:, 1],
+                    facecolors="none",
+                    edgecolors="black",
+                    s=28,
+                )
+                ax.scatter(source_pts_all[idx, 0], source_pts_all[idx, 1], c="black", s=30)
+            ax.set_title(title, fontsize=14)
             ax.set_aspect("equal")
             ax.set_xticks(tick_values)
             ax.set_yticks(tick_values)
             ax.set_xlabel("x")
-        if shared_image is not None:
-            fig.colorbar(shared_image, ax=axes[row, :2], shrink=0.78)
-
+        fig.colorbar(image, ax=axes[row, :2], shrink=0.78)
         error_image = axes[row, 2].tricontourf(
             pts[:, 0],
             pts[:, 1],
@@ -273,8 +355,7 @@ def plot_sections(n_samples: int, steps: int, trial: int, source_indices, path: 
             vmin=-err_max,
             vmax=err_max,
         )
-        axes[row, 2].scatter(source_pts_all[idx, 0], source_pts_all[idx, 1], c="black", s=16)
-        axes[row, 2].set_title("Error")
+        axes[row, 2].set_title("Error", fontsize=14)
         axes[row, 2].set_aspect("equal")
         axes[row, 2].set_xticks(tick_values)
         axes[row, 2].set_yticks(tick_values)
@@ -282,37 +363,52 @@ def plot_sections(n_samples: int, steps: int, trial: int, source_indices, path: 
         fig.colorbar(error_image, ax=axes[row, 2], shrink=0.78)
     for ax in axes[:, 0]:
         ax.set_ylabel("y")
-    eps = TARGET_TIME / steps
+    epsilon = config.target_time / config.section_steps
     fig.suptitle(
-        f"disk sections: N={n_samples}, eps={eps:g}, steps={steps}, trial={trial}, volume={volume:.6g}"
+        f"{config.study}: N={config.section_n}, eps={epsilon:g}, steps={config.section_steps}"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=180)
     plt.close(fig)
 
 
-if __name__ == "__main__" and ifrun:
-    source_ids, source_pts, source_groups = sources()
+def run_case(case: str) -> None:
+    config = CASES[case]
+    source_ids, source_pts, groups = case_sources(case)
     test_pts = locations(RUN_TEST_COUNT)
-    truth = reference(source_pts, test_pts)
+    truth = case_truth(case, source_pts, test_pts)
     tasks = [
-        (step_count, n, tr, source_ids, source_pts, source_groups, test_pts, truth)
-        for step_count in RUN_STEPS
-        for n in RUN_SAMPLE_COUNTS
-        for tr in range(RUN_TRIALS)
+        (case, step_count, n_samples, trial, source_ids, source_pts, groups, test_pts, truth)
+        for step_count in config.steps
+        for n_samples in config.sample_counts
+        for trial in range(RUN_TRIALS)
     ]
-    write_rows(RAW_CSV, run_serial(tasks, run_one, case="disk", target_time=TARGET_TIME))
+    run_study(BASE_DIR, config, tasks, run_one, max_workers=RUN_WORKERS)
+
+
+if __name__ == "__main__" and ifrun:
+    warm_keops_backend()
+    for active_case in ACTIVE_CASES:
+        run_case(active_case)
 
 if __name__ == "__main__" and ifplt:
-    if RAW_CSV.exists():
-        raw_rows = read_rows(RAW_CSV)
-        plot_convergence(raw_rows, FIG_PATH)
-        print(f"Wrote {FIG_PATH}")
-        plot_max_abs_convergence(raw_rows, MAX_ABS_FIG_PATH)
-        print(f"Wrote {MAX_ABS_FIG_PATH}")
-    else:
-        print(f"Missing {RAW_CSV}; set ifrun = 1 or copy the disk CSV into place.")
+    for active_case in ACTIVE_CASES:
+        outputs = plot_study(
+            BASE_DIR, CASES[active_case], source_groups=case_source_groups(active_case)
+        )
+        if outputs is None:
+            raw_csv, _conv_en_path, _conv_path, _section_path = study_artifact_paths(
+                BASE_DIR, CASES[active_case]
+            )
+            print(f"Missing {raw_csv}; set ifrun = 1 or copy the CSV into place.")
+        else:
+            for output in outputs:
+                print(f"Wrote {output}")
 
 if __name__ == "__main__" and ifsec:
-    plot_sections(SECTION_N, SECTION_STEPS, SECTION_TRIAL, SECTION_SOURCE_INDICES, SECTION_FIG_PATH)
-    print(f"Wrote {SECTION_FIG_PATH}")
+    for active_case in ACTIVE_CASES:
+        _raw_csv, _conv_en_path, _conv_path, section_path = study_artifact_paths(
+            BASE_DIR, CASES[active_case]
+        )
+        plot_sections(active_case, section_path)
+        print(f"Wrote {section_path}")
