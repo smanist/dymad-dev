@@ -5,7 +5,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from common import (
+from krr_common import (
     METHOD_LABELS,
     METHODS,
     Case,
@@ -127,9 +127,7 @@ def _grid_target(case: Case):
     return lambda points: case.target(points / COORDINATE_SCALE)
 
 
-def _plot_target(
-    ax: plt.Axes, case: Case, color_limit: float, *, show_y_axis: bool = True
-) -> None:
+def _plot_target(ax: plt.Axes, case: Case, color_limit: float, *, show_y_axis: bool = True) -> None:
     _, _, _, values, _ = semi_torus_target_grid(
         GEOMETRY,
         _grid_target(case),

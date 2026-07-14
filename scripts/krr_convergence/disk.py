@@ -5,7 +5,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from common import (
+from krr_common import (
     METHOD_LABELS,
     METHODS,
     Case,
