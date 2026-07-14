@@ -20,8 +20,9 @@ from scipy.special import iv
 from dymad.kernel_analysis import KernelEigenbasis
 from dymad.modules import KernelScRBF
 
-ifrun = True
-ifplt = True
+ifrun = 1
+ifplt = 1
+ifnys = 1
 SAMPLE_SIZES = (16, 32, 64)
 SIGMA = 0.35
 N_COMPONENTS = 5
@@ -142,4 +143,37 @@ if __name__ == "__main__" and ifplt:
     axes[0].legend(ncol=4, fontsize="small")
     axes[-1].set_xlabel("angle")
     figure.savefig(OUTPUT_ROOT / "circle_rbf_eigenbasis_eigenvectors.png", dpi=160)
+    plt.close(figure)
+
+if __name__ == "__main__" and ifnys:
+    # The m=1 circle eigenspace is degenerate. Align it to the cosine/sine
+    # reference pair, then extend its cosine-like member to unseen points.
+    basis = last_solutions["dense"]
+    query_theta = 2.0 * np.pi * (np.arange(256) + 0.5) / 256
+    reference_truth = last_truth * np.sqrt(last_theta.size)
+    left, _, right_t = torch.linalg.svd(
+        basis.reference_eigenfunctions[:, 1:3].T @ reference_truth[:, 1:3]
+    )
+    prediction = (
+        (basis.transform(circle_points(query_theta))[:, 1:3] @ (left @ right_t))[:, 0]
+        .detach()
+        .cpu()
+        .numpy()
+    )
+    truth = np.sqrt(2.0) * np.cos(query_theta)
+    error = prediction - truth
+
+    figure, axes = plt.subplots(1, 2, figsize=(8, 3.2), constrained_layout=True)
+    axes[0].plot(query_theta, truth, color="black", linewidth=2.0, label="truth")
+    axes[0].plot(query_theta, prediction, linestyle="--", label="Nyström prediction")
+    axes[0].set(
+        title="Nyström extension of an m=1 eigenfunction",
+        xlabel="angle",
+        ylabel="eigenfunction value",
+    )
+    axes[0].legend(fontsize="small")
+    axes[1].hist(error, bins=24, color="tab:blue", edgecolor="white")
+    axes[1].axvline(0.0, color="black", linewidth=1.0)
+    axes[1].set(title="Nyström extension error", xlabel="prediction - truth", ylabel="count")
+    figure.savefig(OUTPUT_ROOT / "circle_rbf_eigenbasis_nystrom_extension.png", dpi=160)
     plt.close(figure)

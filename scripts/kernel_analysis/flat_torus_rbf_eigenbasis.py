@@ -20,8 +20,8 @@ from scipy.special import iv
 from dymad.kernel_analysis import KernelEigenbasis
 from dymad.modules import KernelScRBF
 
-ifrun = True
-ifplt = True
+ifrun = 1
+ifplt = 1
 GRID_SIDES = (4, 6, 8)
 SIGMA = 0.55
 N_COMPONENTS = 5
@@ -126,12 +126,14 @@ if __name__ == "__main__" and ifplt:
     figure.savefig(OUTPUT_ROOT / "flat_torus_rbf_eigenbasis_eigenvalues.png", dpi=160)
     plt.close(figure)
 
-    figure, axes = plt.subplots(N_COMPONENTS, 4, figsize=(8, 9), constrained_layout=True)
+    labels = ("truth", *SOLVERS)
+    figure, axes = plt.subplots(
+        N_COMPONENTS, len(labels), figsize=(4 * len(labels), 9), constrained_layout=True
+    )
     aligned = {
         solver: align_first_eigenspace(basis.eigenvectors, last_truth)
         for solver, basis in last_solutions.items()
     }
-    labels = ("truth", *SOLVERS)
     for mode_index in range(N_COMPONENTS):
         values = (
             last_truth[:, mode_index],
