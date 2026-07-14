@@ -61,9 +61,7 @@ def _circle_eigenvalues(kernel: KernelScRBF | KernelScDM, reference: torch.Tenso
 
     gram = kernel(reference, reference)
     angles = _circle_angles(reference.shape[0])
-    return torch.stack(
-        tuple((gram[0] * (mode * angles).cos()).sum() for mode in (0, 1, 1))
-    )
+    return torch.stack(tuple((gram[0] * (mode * angles).cos()).sum() for mode in (0, 1, 1)))
 
 
 def test_dense_gram_eigenbasis_matches_unit_circle_fourier_eigensystem() -> None:
