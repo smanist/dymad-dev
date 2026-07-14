@@ -20,6 +20,7 @@ from common import (  # noqa: E402
     epsilon_curve_at_largest_n,
     evaluate_heat_section,
     fit_loglog_rate,
+    plot_circle_torus_convergence,
     plot_convergence,
     plot_error_vs_epsilon_at_largest_n,
     run_study,
@@ -159,6 +160,75 @@ def test_epsilon_convergence_plot_uses_largest_n_per_epsilon(tmp_path: Path) -> 
         metric="max_abs_error",
         fit_point_count=2,
     )
+    assert path.stat().st_size > 0
+
+
+def test_compact_circle_torus_plot_writes_requested_curves(tmp_path: Path) -> None:
+    def make_rows(
+        *, target_time: float, steps_values: tuple[int, ...], sample_counts: tuple[int, ...]
+    ) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for steps in steps_values:
+            epsilon = target_time / steps
+            for n_samples in sample_counts:
+                rows.append(
+                    {
+                        "case": "toy",
+                        "steps": str(steps),
+                        "epsilon": str(epsilon),
+                        "n_samples": str(n_samples),
+                        "trial": "0",
+                        "source_id": "src",
+                        "relative_l2_error": str(epsilon + 1.0 / n_samples),
+                        "max_abs_error": str(epsilon + 1.0 / n_samples),
+                    }
+                )
+        return rows
+
+    circle_case = HeatCase(
+        study="circle",
+        title="Circle",
+        target_time=0.01,
+        steps=(8, 16, 32),
+        sample_counts=(32, 64, 128),
+        section_n=128,
+        section_steps=32,
+        section_source_indices=(0,),
+        parallel=False,
+        fit_point_count=3,
+    )
+    torus_case = HeatCase(
+        study="torus",
+        title="Torus",
+        target_time=0.04,
+        steps=(2, 4, 8),
+        sample_counts=(128, 256, 512),
+        section_n=512,
+        section_steps=8,
+        section_source_indices=(0,),
+        parallel=False,
+        fit_point_count=3,
+    )
+    path = tmp_path / "heat_circle_torus_convergence.png"
+
+    plot_circle_torus_convergence(
+        circle_rows=make_rows(
+            target_time=circle_case.target_time,
+            steps_values=circle_case.steps,
+            sample_counts=circle_case.sample_counts,
+        ),
+        torus_rows=make_rows(
+            target_time=torus_case.target_time,
+            steps_values=torus_case.steps,
+            sample_counts=torus_case.sample_counts,
+        ),
+        circle_case=circle_case,
+        torus_case=torus_case,
+        circle_epsilon=0.000625,
+        torus_epsilon=0.01,
+        path=path,
+    )
+
     assert path.stat().st_size > 0
 
 

@@ -215,10 +215,10 @@ if __name__ == "__main__" and ifplt:
         sharey=True,
     )
     difference_modes = numerical_modes - laplace_modes
-    color_limit = max(
-        float(torch.abs(values).max().detach().cpu())
-        for values in (numerical_modes, laplace_modes, difference_modes)
+    mode_color_limit = max(
+        float(torch.abs(values).max().detach().cpu()) for values in (numerical_modes, laplace_modes)
     )
+    difference_color_limit = float(torch.abs(difference_modes).max().detach().cpu())
     tick_locations = (0.0, float(torch.pi), float(2.0 * torch.pi))
     tick_labels = ("0", r"$\pi$", r"$2\pi$")
     for mode_index in range(N_COMPONENTS):
@@ -233,22 +233,27 @@ if __name__ == "__main__" and ifplt:
             f"LB λ={float(laplace_eigenvalues[mode_index]):.3g}",
             "difference",
         )
-        for axis, label, title, value in zip(
-            axes[:, mode_index], labels, titles, values, strict=True
+        for row_index, (axis, label, title, value) in enumerate(
+            zip(axes[:, mode_index], labels, titles, values, strict=True)
         ):
             image = axis.imshow(
                 value.detach().cpu().reshape(REFERENCE_SIDE, REFERENCE_SIDE),
                 cmap="coolwarm",
-                vmin=-color_limit,
-                vmax=color_limit,
+                vmin=-(difference_color_limit if row_index == 2 else mode_color_limit),
+                vmax=difference_color_limit if row_index == 2 else mode_color_limit,
                 extent=(0.0, float(2.0 * torch.pi), 0.0, float(2.0 * torch.pi)),
             )
+            if row_index == 2:
+                difference_image = image
+            else:
+                mode_image = image
             axis.set_ylabel(label if mode_index == 0 else "")
             axis.set_title(title)
     for axis in axes[-1]:
         axis.set(xlabel=r"$\phi$", xticks=tick_locations, xticklabels=tick_labels)
     for axis in axes[:, 0]:
         axis.set(ylabel=axis.get_ylabel(), yticks=tick_locations, yticklabels=tick_labels)
-    figure.colorbar(image, ax=axes, shrink=0.82, label="field value")
+    figure.colorbar(mode_image, ax=axes[:2].ravel().tolist(), shrink=0.82, label="mode value")
+    figure.colorbar(difference_image, ax=axes[2].tolist(), shrink=0.82, label="RBF minus LB")
     figure.savefig(OUTPUT_ROOT / "donut_torus_rbf_eigenbasis_eigenvectors.png", dpi=160)
     plt.close(figure)

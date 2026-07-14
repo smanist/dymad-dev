@@ -15,6 +15,7 @@ from typing import Any, Literal
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from matplotlib.ticker import NullLocator
 
 from dymad.kernel_analysis import DiffusionHeatSections
 from dymad.modules.kernel import KernelBackend
@@ -368,6 +369,19 @@ def fit_loglog_rate(x_values: np.ndarray, y_values: np.ndarray) -> tuple[float, 
     return float(slope), float(math.exp(intercept))
 
 
+def step_count_for_epsilon(case: HeatCase, epsilon: float) -> int:
+    """Return the configured step count corresponding to an epsilon value."""
+
+    matches = [
+        steps
+        for steps in case.steps
+        if math.isclose(case.target_time / steps, epsilon, rel_tol=1e-12, abs_tol=1e-15)
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"Expected one step count for epsilon={epsilon:g}; found {matches}.")
+    return matches[0]
+
+
 def line_colors(values: Sequence[int]) -> dict[int, tuple[float, float, float]]:
     base = np.asarray([0.04, 0.20, 0.55], dtype=float)
     white = np.ones(3, dtype=float)
@@ -487,6 +501,122 @@ def plot_error_vs_epsilon_at_largest_n(
     fig.suptitle(title, fontsize=CONVERGENCE_FONT_SIZE)
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def plot_circle_torus_convergence(
+    *,
+    circle_rows: list[dict[str, str]],
+    torus_rows: list[dict[str, str]],
+    circle_case: HeatCase,
+    torus_case: HeatCase,
+    circle_epsilon: float,
+    torus_epsilon: float,
+    path: Path,
+) -> None:
+    """Plot compact MAE convergence summaries for the circle and flat torus."""
+
+    configurations = (
+        (
+            "Circle",
+            circle_rows,
+            circle_case,
+            circle_epsilon,
+            "#093a6f",
+            "(a)",
+            "(c)",
+        ),
+        (
+            "Flat torus",
+            torus_rows,
+            torus_case,
+            torus_epsilon,
+            "#7a3e00",
+            "(b)",
+            "(d)",
+        ),
+    )
+    fig, axes = plt.subplots(2, 2, figsize=(7.1, 3.75), constrained_layout=True)
+    for column, (name, rows, case, epsilon, color, n_label, epsilon_label) in enumerate(
+        configurations
+    ):
+        n_axis = axes[0, column]
+        steps = step_count_for_epsilon(case, epsilon)
+        n_values, n_errors = median_curve(rows, steps=steps, metric="max_abs_error")
+        if not len(n_values):
+            raise ValueError(f"No {name.lower()} results found for epsilon={epsilon:g}.")
+        n_axis.loglog(n_values, n_errors, marker="o", linewidth=1.6, color=color)
+        n_axis.set_xticks(
+            n_values,
+            [rf"$2^{{{int(round(math.log2(value)))}}}$" for value in n_values],
+        )
+        n_axis.xaxis.set_minor_locator(NullLocator())
+        n_axis.set_title(
+            f"{n_label} {name}: $\\epsilon={epsilon:g}$, $p={steps}$",
+            fontsize=9,
+            loc="left",
+            pad=3,
+        )
+        n_axis.set_xlabel(r"$N$", fontsize=9)
+        n_axis.set_ylabel("MAE", fontsize=9)
+
+        epsilon_axis = axes[1, column]
+        epsilons, epsilon_errors, n_at_epsilon = epsilon_curve_at_largest_n(
+            rows, metric="max_abs_error"
+        )
+        if not len(epsilons):
+            raise ValueError(f"No {name.lower()} epsilon-convergence results found.")
+        n_values_at_epsilon = sorted({int(value) for value in n_at_epsilon})
+        n_text = str(n_values_at_epsilon[0]) if len(n_values_at_epsilon) == 1 else "largest"
+        epsilon_axis.loglog(
+            epsilons,
+            epsilon_errors,
+            marker="o",
+            linewidth=1.6,
+            color=color,
+            label="DM",
+        )
+        fit_epsilons = epsilons[: case.fit_point_count]
+        fit_errors = epsilon_errors[: case.fit_point_count]
+        rate = fit_loglog_rate(fit_epsilons, fit_errors)
+        if rate is not None:
+            slope, coefficient = rate
+            epsilon_axis.loglog(
+                fit_epsilons,
+                coefficient * fit_epsilons**slope,
+                linestyle="--",
+                linewidth=1.3,
+                color="#202020",
+                label=rf"fit: $O(\epsilon^{{{slope:.2f}}})$",
+            )
+        epsilon_axis.set_title(
+            f"{epsilon_label} {name}: $N={n_text}$",
+            fontsize=9,
+            loc="left",
+            pad=3,
+        )
+        epsilon_axis.set_xlabel(r"$\epsilon$", fontsize=9)
+        epsilon_axis.set_ylabel("MAE", fontsize=9)
+        epsilon_axis.legend(fontsize=7, loc="best")
+
+        if name == "Flat torus":
+            n_axis.set_yticks(
+                (1e-2, 5e-2),
+                (r"$10^{-2}$", r"$5 \times 10^{-2}$"),
+            )
+            epsilon_axis.set_xticks(epsilons, [rf"${value:g}$" for value in epsilons])
+            epsilon_axis.xaxis.set_minor_locator(NullLocator())
+        else:
+            epsilon_axis.set_yticks(
+                (3e-4, 1e-3, 3e-3),
+                (r"$3 \times 10^{-4}$", r"$10^{-3}$", r"$3 \times 10^{-3}$"),
+            )
+
+    for axis in axes.flat:
+        axis.tick_params(axis="both", which="both", labelsize=8)
+        axis.grid(True, which="both", alpha=0.28)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=300)
     plt.close(fig)
 
 

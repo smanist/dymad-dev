@@ -69,6 +69,7 @@ class Case:
     title: str
     target: Callable[[np.ndarray], np.ndarray]
     ambient_dim: int = 2
+    embedding: str = "augmented"
 
 
 @dataclass(frozen=True)
@@ -267,26 +268,45 @@ class SemiTorusGeometry:
         phi: np.ndarray | float,
         *,
         ambient_dim: int = 3,
+        embedding: str = "augmented",
     ) -> np.ndarray:
         theta_values = np.asarray(theta, dtype=float)
         phi_values = np.asarray(phi, dtype=float)
         radius = self.major_radius + np.cos(theta_values)
-        base = np.column_stack(
-            (
-                radius.reshape(-1) * np.cos(phi_values).reshape(-1),
-                radius.reshape(-1) * np.sin(phi_values).reshape(-1),
-                np.sin(theta_values).reshape(-1),
-            )
-        )
         if ambient_dim < 3:
             raise ValueError("ambient_dim must be at least 3")
+        flat_theta = theta_values.reshape(-1)
+        flat_phi = phi_values.reshape(-1)
+        flat_radius = radius.reshape(-1)
+        if embedding == "harmonic":
+            if ambient_dim % 2 == 0:
+                raise ValueError("harmonic torus embedding requires an odd ambient_dim")
+            harmonic_count = (ambient_dim - 1) // 2
+            coordinates: list[np.ndarray] = []
+            for order in range(1, harmonic_count + 1):
+                amplitude = flat_radius / order
+                coordinates.extend(
+                    (amplitude * np.cos(order * flat_phi), amplitude * np.sin(order * flat_phi))
+                )
+            theta_normalizer = math.sqrt(
+                sum(1.0 / (order * order) for order in range(1, harmonic_count + 1))
+            )
+            coordinates.append(np.sin(flat_theta) / theta_normalizer)
+            return np.column_stack(coordinates)
+        if embedding != "augmented":
+            raise ValueError(f"unknown semi-torus embedding: {embedding}")
+        base = np.column_stack(
+            (
+                flat_radius * np.cos(flat_phi),
+                flat_radius * np.sin(flat_phi),
+                np.sin(flat_theta),
+            )
+        )
         if ambient_dim == 3:
             return base
 
         extras: list[np.ndarray] = []
         extra_count = ambient_dim - 3
-        flat_theta = theta_values.reshape(-1)
-        flat_phi = phi_values.reshape(-1)
         for idx in range(extra_count):
             order = 1 + idx // 4
             selector = idx % 4
@@ -300,12 +320,26 @@ class SemiTorusGeometry:
                 extras.append(0.2 * np.sin(order * flat_phi))
         return np.column_stack((base, *extras))
 
-    def angles_from_points(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def angles_from_points(
+        self, points: np.ndarray, *, embedding: str = "augmented"
+    ) -> tuple[np.ndarray, np.ndarray]:
         values = np.asarray(points, dtype=float)
         if values.shape[1] < 3:
             raise ValueError("semi-torus points must have at least three coordinates")
+        if embedding == "harmonic":
+            if values.shape[1] % 2 == 0:
+                raise ValueError("harmonic torus embedding requires an odd ambient_dim")
+            harmonic_count = (values.shape[1] - 1) // 2
+            theta_normalizer = math.sqrt(
+                sum(1.0 / (order * order) for order in range(1, harmonic_count + 1))
+            )
+            sin_theta = values[:, -1] * theta_normalizer
+        elif embedding == "augmented":
+            sin_theta = values[:, 2]
+        else:
+            raise ValueError(f"unknown semi-torus embedding: {embedding}")
         rho = np.sqrt(values[:, 0] * values[:, 0] + values[:, 1] * values[:, 1])
-        theta = np.mod(np.arctan2(values[:, 2], rho - self.major_radius), 2.0 * math.pi)
+        theta = np.mod(np.arctan2(sin_theta, rho - self.major_radius), 2.0 * math.pi)
         phi = np.mod(np.arctan2(values[:, 1], values[:, 0]), 2.0 * math.pi)
         phi = np.where(phi > math.pi, 2.0 * math.pi - phi, phi)
         return theta, phi
@@ -330,10 +364,15 @@ class SemiTorusGeometry:
         return theta, phi
 
     def sample_points(
-        self, n_samples: int, rng: np.random.Generator, *, ambient_dim: int = 3
+        self,
+        n_samples: int,
+        rng: np.random.Generator,
+        *,
+        ambient_dim: int = 3,
+        embedding: str = "augmented",
     ) -> np.ndarray:
         theta, phi = self.sample_angles(n_samples, rng)
-        return self.points_from_angles(theta, phi, ambient_dim=ambient_dim)
+        return self.points_from_angles(theta, phi, ambient_dim=ambient_dim, embedding=embedding)
 
 
 @dataclass(frozen=True)
@@ -541,9 +580,13 @@ def make_semi_torus_sample(
     *,
     ambient_dim: int,
     coordinate_scale: float,
+    embedding: str = "augmented",
 ) -> Callable[[int, np.random.Generator], np.ndarray]:
     def sample(n_samples: int, rng: np.random.Generator) -> np.ndarray:
-        return geometry.sample_points(n_samples, rng, ambient_dim=ambient_dim) / coordinate_scale
+        return (
+            geometry.sample_points(n_samples, rng, ambient_dim=ambient_dim, embedding=embedding)
+            / coordinate_scale
+        )
 
     return sample
 
@@ -554,6 +597,7 @@ def make_semi_torus_target(
     boundary: str,
     m: int,
     j: int,
+    embedding: str = "augmented",
 ) -> Callable[[np.ndarray], np.ndarray]:
     mode = get_semi_torus_theta_mode(geometry, m=m, j=j)
     normalized_boundary = boundary.lower()
@@ -561,7 +605,7 @@ def make_semi_torus_target(
         raise ValueError("boundary must be 'dirichlet' or 'neumann'")
 
     def target(points: np.ndarray) -> np.ndarray:
-        theta, phi = geometry.angles_from_points(points)
+        theta, phi = geometry.angles_from_points(points, embedding=embedding)
         theta_values = mode.evaluate(theta)
         if normalized_boundary == "dirichlet":
             angular = np.sin(m * phi)
@@ -580,6 +624,7 @@ def make_semi_torus_fourier_target(
     j: int,
     fourier_order: int,
     quadrature_size: int = 4096,
+    embedding: str = "augmented",
 ) -> Callable[[np.ndarray], np.ndarray]:
     mode = get_semi_torus_fourier_theta_mode(
         geometry,
@@ -593,7 +638,7 @@ def make_semi_torus_fourier_target(
         raise ValueError("boundary must be 'dirichlet' or 'neumann'")
 
     def target(points: np.ndarray) -> np.ndarray:
-        theta, phi = geometry.angles_from_points(points)
+        theta, phi = geometry.angles_from_points(points, embedding=embedding)
         theta_values = mode.evaluate(theta)
         if normalized_boundary == "dirichlet":
             angular = np.sin(m * phi)
@@ -631,13 +676,16 @@ def semi_torus_target_grid(
     target: Callable[[np.ndarray], np.ndarray],
     *,
     ambient_dim: int = 3,
+    embedding: str = "augmented",
     n_theta: int = 96,
     n_phi: int = 48,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     theta = np.linspace(0.0, 2.0 * math.pi, n_theta, endpoint=False)
     phi = np.linspace(0.0, math.pi, n_phi)
     tt, pp = np.meshgrid(theta, phi)
-    points = geometry.points_from_angles(tt.ravel(), pp.ravel(), ambient_dim=ambient_dim)
+    points = geometry.points_from_angles(
+        tt.ravel(), pp.ravel(), ambient_dim=ambient_dim, embedding=embedding
+    )
     values = target(points).reshape(n_phi, n_theta)
     x = points[:, 0].reshape(n_phi, n_theta)
     y = points[:, 1].reshape(n_phi, n_theta)
