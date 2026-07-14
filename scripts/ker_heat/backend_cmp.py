@@ -26,7 +26,7 @@ from scipy.stats import qmc
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from dymad.modules import KernelScDMHeat  # noqa: E402
+from dymad.kernel_analysis import DiffusionHeatSections  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent
 OUT = BASE_DIR / "runs" / "keops_dense_verify"
@@ -68,8 +68,8 @@ def case_points(case: str, n_ref: int, n_loc: int) -> tuple[np.ndarray, np.ndarr
     raise ValueError(f"unknown case {case!r}")
 
 
-def kernel(ref: np.ndarray, *, backend: str) -> KernelScDMHeat:
-    model = KernelScDMHeat(
+def kernel(ref: np.ndarray, *, backend: str) -> DiffusionHeatSections:
+    model = DiffusionHeatSections(
         in_dim=2,
         eps_init=EPSILON,
         alpha_init=1.0,
@@ -80,12 +80,14 @@ def kernel(ref: np.ndarray, *, backend: str) -> KernelScDMHeat:
     return model
 
 
-def gram(model: KernelScDMHeat, ref: np.ndarray) -> np.ndarray:
+def gram(model: DiffusionHeatSections, ref: np.ndarray) -> np.ndarray:
     tensor = torch.as_tensor(ref, dtype=torch.float64)
     return model(tensor, tensor).detach().cpu().numpy()
 
 
-def sections(model: KernelScDMHeat, locations: np.ndarray, sources: np.ndarray) -> np.ndarray:
+def sections(
+    model: DiffusionHeatSections, locations: np.ndarray, sources: np.ndarray
+) -> np.ndarray:
     values = cast(
         torch.Tensor,
         model.heat_kernel(
@@ -179,7 +181,7 @@ def plot_case(
     axes[2].set_yscale("log")
     axes[2].set_ylabel("max abs difference")
     axes[2].grid(True, which="both", axis="y", alpha=0.3)
-    fig.suptitle(f"{case}: KernelScDMHeat KeOps minus dense")
+    fig.suptitle(f"{case}: DiffusionHeatSections KeOps minus dense")
     output_dir.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_dir / f"{case}_keops_dense_verify.png", dpi=170)
     plt.close(fig)

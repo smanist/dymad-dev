@@ -31,6 +31,7 @@ use and raise a clear ``NotImplementedError`` when requested.
    :caption: API Modules
 
    dymad.io
+   dymad.kernel_analysis
    dymad.losses
    dymad.models
    dymad.modules

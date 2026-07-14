@@ -150,6 +150,16 @@ class KernelAbstract(nn.Module, ABC):
         """
         pass
 
+    def require_fixed_parameters(self) -> None:
+        """Raise when analysis would need to initialize kernel parameters.
+
+        Generic kernels are assumed to be fully configured. Kernels with
+        optional data-driven initialization override this hook so analysis
+        objects never tune a kernel as a side effect of preparing references.
+        """
+
+        return None
+
     def materialize(self, X: torch.Tensor, Z: torch.Tensor | None = None) -> torch.Tensor:
         """Explicitly materialize the kernel block."""
         return self.forward(X, Z)
@@ -260,6 +270,10 @@ class KernelScRBF(KernelScalarValued):
                 _swap_parameter_storage(self._log_ell, _tmp, requires_grad=True)
                 logger.info(f"Estimated lengthscale: {self.ell}")
 
+    def require_fixed_parameters(self) -> None:
+        if self._log_ell.numel() == 0:
+            raise RuntimeError("KernelScRBF requires lengthscale_init before kernel analysis.")
+
     def forward(self, X, Z=None):
         if Z is None:
             Z = X
@@ -316,6 +330,10 @@ class KernelScExp(KernelScalarValued):
             Z = X
         sq = scaled_cdist(X, Z, self.ell, 2)
         return torch.exp(-sq)
+
+    def require_fixed_parameters(self) -> None:
+        if self._log_ell.numel() == 0:
+            raise RuntimeError("KernelScExp requires lengthscale_init before kernel analysis.")
 
     def apply(self, X: torch.Tensor, Z: torch.Tensor | None, values: torch.Tensor) -> torch.Tensor:
         if Z is None:
@@ -447,6 +465,71 @@ class KernelScDM(KernelScalarValued):
             raise RuntimeError(
                 "Call set_reference_data before evaluating reference-dependent kernels."
             )
+
+    def require_fixed_parameters(self) -> None:
+        if self._log_eps.numel() == 0:
+            raise RuntimeError("KernelScDM requires eps_init before kernel analysis.")
+
+    @property
+    def reference_points(self) -> torch.Tensor:
+        """Reference points prepared by :meth:`set_reference_data`."""
+
+        self._require_reference_data()
+        return self._Xref
+
+    @property
+    def reference_row_sums(self) -> torch.Tensor:
+        """Raw-kernel row sums at the prepared reference points."""
+
+        return self._reference_row_sums()
+
+    def raw_apply(
+        self,
+        rows: torch.Tensor,
+        cols: torch.Tensor,
+        values: torch.Tensor,
+        *,
+        eps: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Apply the unnormalized diffusion kernel without materializing it."""
+
+        if eps is None:
+            eps = self.eps
+        if self.backend == "keops":
+            if self.metric != "euclidean":
+                raise NotImplementedError(
+                    "KernelScDM backend='keops' currently supports only Euclidean inputs."
+                )
+            return self._keops_raw_apply(rows, cols, values, eps=eps)
+        return self._raw_kernel(rows, cols, eps=eps) @ values
+
+    def raw_row_sums(self, rows: torch.Tensor, *, eps: torch.Tensor | None = None) -> torch.Tensor:
+        """Return unnormalized row sums against the prepared references."""
+
+        self._require_reference_data()
+        if eps is None:
+            eps = self.eps
+        ones = torch.ones((*self._Xref.shape[:-1], 1), dtype=self.dtype, device=self._Xref.device)
+        return self._floor_positive(self.raw_apply(rows, self._Xref, ones, eps=eps).squeeze(-1))
+
+    def uniform_factors(self, X: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return density and symmetric-normalization factors for ``X``."""
+
+        return self._uniform_factors(X)
+
+    def uniform_symmetric_apply(
+        self,
+        rows: torch.Tensor,
+        cols: torch.Tensor,
+        values: torch.Tensor,
+        d_rows: torch.Tensor | None = None,
+        s_rows: torch.Tensor | None = None,
+        d_cols: torch.Tensor | None = None,
+        s_cols: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Apply the symmetric-normalized diffusion kernel."""
+
+        return self._uniform_symmetric_apply(rows, cols, values, d_rows, s_rows, d_cols, s_cols)
 
     def set_reference_data(self, Xref: torch.Tensor) -> None:
         _swap_parameter_storage(self._Xref, Xref, requires_grad=False)

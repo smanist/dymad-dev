@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from dymad.modules import KernelScDMHeat
+from dymad.kernel_analysis import DiffusionHeatSections
 from dymad.modules.kernel import KernelBackend
 
 BASE_FIELDS = [
@@ -100,7 +100,7 @@ def evaluate_heat_section(
 ) -> np.ndarray:
     """Evaluate one source-by-location heat-kernel section from a shared spec."""
 
-    kernel = KernelScDMHeat(
+    kernel = DiffusionHeatSections(
         in_dim=spec.ambient_dim,
         eps_init=epsilon,
         alpha_init=1.0,
