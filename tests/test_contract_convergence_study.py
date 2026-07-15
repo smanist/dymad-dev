@@ -1,5 +1,6 @@
 import json
 import time
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -94,6 +95,14 @@ def test_array_regression_adapter_and_summary_plot_are_reusable(tmp_path) -> Non
         metrics=("error",),
         primary_metric="error",
     )
+    standardized_split = problem.make_split(4, 2, 3, seed=0)
+    assert np.allclose(standardized_split.x_train.mean(axis=0), 0.0)
+    assert np.allclose(standardized_split.x_train.std(axis=0), 1.0)
+
+    identity_split = replace(problem, x_transform=None).make_split(4, 2, 3, seed=0)
+    assert np.array_equal(identity_split.x_train, identity_split.x_train_raw)
+    assert np.allclose(identity_split.y_train.mean(axis=0), 0.0)
+    assert np.allclose(identity_split.y_train.std(axis=0), 1.0)
     config = ArrayRegressionStudyConfig(
         output_dir=tmp_path,
         levels=(2, 4),

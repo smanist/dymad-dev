@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal, TypeAlias
 
 import numpy as np
 import torch
 
 from dymad.core import ScalerTransform
 from dymad.core.transform_module import TransformModule
+
+TransformSpec: TypeAlias = TransformModule | Literal["std"] | None
 
 
 @dataclass(frozen=True)
@@ -33,11 +36,11 @@ class Split:
         y_val: np.ndarray,
         x_test: np.ndarray,
         y_test: np.ndarray,
-        x_transform: TransformModule | None = None,
-        y_transform: TransformModule | None = None,
+        x_transform: TransformSpec = None,
+        y_transform: TransformSpec = None,
     ) -> Split:
-        x_fit = _fit_array_transform(x_transform or ScalerTransform("std"), [x_train])
-        y_fit = _fit_array_transform(y_transform or ScalerTransform("std"), [y_train])
+        x_fit = _fit_array_transform(_resolve_transform(x_transform), [x_train])
+        y_fit = _fit_array_transform(_resolve_transform(y_transform), [y_train])
         return cls(
             x_train_raw=np.asarray(x_train),
             y_train_raw=np.asarray(y_train),
@@ -90,4 +93,14 @@ def _fit_array_transform(
     transform: TransformModule, arrays: Sequence[np.ndarray]
 ) -> TransformModule:
     transform.fit([torch.as_tensor(item) for item in arrays])
+    return transform
+
+
+def _resolve_transform(transform: TransformSpec) -> TransformModule:
+    if transform is None:
+        return ScalerTransform("none")
+    if isinstance(transform, str):
+        if transform == "std":
+            return ScalerTransform("std")
+        raise ValueError(f"unknown transform shortcut {transform!r}")
     return transform

@@ -902,6 +902,8 @@ def make_problem(
         ),
         primary_metric="error",
         prediction_plotter=plot_truth_vs_prediction if prediction_plots else None,
+        x_transform=None,
+        y_transform="std",
     )
 
 
