@@ -281,10 +281,17 @@ class KRRMultiOutputIndep(KRRBase):
         assert isinstance(self.kernel, nn.ModuleList) and len(self.kernel) == self._Dy
         A = torch.empty_like(Y)
         I = torch.eye(self._Ndat, dtype=self.dtype, device=self.device)
-        for d in range(self._Dy):
-            Kxx = cast(KernelAbstract, self.kernel[d])(X, None)  # (N,N)
-            L = torch.linalg.cholesky(Kxx + (self.ridge[d] + self.jitter) * I)
-            A[:, d] = torch.cholesky_solve(Y[:, d : d + 1], L).squeeze(-1)
+        systems = [
+            cast(KernelAbstract, self.kernel[d])(X, None) + (self.ridge[d] + self.jitter) * I
+            for d in range(self._Dy)
+        ]
+        unsolved = set(range(self._Dy))
+        while unsolved:
+            first = min(unsolved)
+            matching = [d for d in sorted(unsolved) if torch.equal(systems[d], systems[first])]
+            L = torch.linalg.cholesky(systems[first])
+            A[:, matching] = torch.cholesky_solve(Y[:, matching], L)
+            unsolved.difference_update(matching)
         self._alphas.data.copy_(A)
 
         self._residual = self._comp_residual()

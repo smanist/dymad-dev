@@ -276,7 +276,7 @@ def _load_model_checkpoint(model_class, checkpoint_path):
         chkpt_path = os.path.join(chkpt_path.split(".")[0], chkpt_path)
         if not os.path.exists(chkpt_path):
             raise FileNotFoundError(f"Checkpoint file not found at {chkpt_path}.")
-    chkpt = torch.load(chkpt_path, weights_only=False)
+    chkpt = torch.load(chkpt_path, map_location="cpu", weights_only=False)
     cfg = chkpt["config"]
     md = chkpt["train_md"]
     prediction_defaults = _prediction_defaults_from_config(cfg)
@@ -287,6 +287,7 @@ def _load_model_checkpoint(model_class, checkpoint_path):
     model_config = cfg.get("model", None)
     model = model_class(model_config, md, dtype=dtype)
     model.load_state_dict(chkpt["model_state_dict"])
+    model.to("cpu")
 
     # Data transformations
     _data_transform_x = build_transform_module(
@@ -486,13 +487,20 @@ def _load_model_checkpoint(model_class, checkpoint_path):
         ei=None,
         ew=None,
         ea=None,
-        device="cpu",
+        device=None,
         ret_dat=False,
         **predict_kwargs,
     ):
         """Predict trajectory in data space."""
+        if device is None:
+            first_parameter = (
+                next(model.parameters(), None) if isinstance(model, torch.nn.Module) else None
+            )
+            device = first_parameter.device if first_parameter is not None else "cpu"
         if isinstance(t, np.ndarray):
             t = torch.from_numpy(t).to(device=device)
+        elif isinstance(t, torch.Tensor):
+            t = t.to(device=device)
         _has_graph = ei is not None
         if ei is None:
             regular_payload = _build_regular_prediction_payload(x0, u, p, device)
@@ -877,6 +885,7 @@ class DataInterface:
             self.model, self.prd_func = cast(
                 tuple[Any, Any], load_model(model_class, checkpoint_path)
             )
+            self.model.to(self.device)
 
             def encoder(x):
                 x_tensor = torch.as_tensor(x, dtype=self.dtype, device=self.device)

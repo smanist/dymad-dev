@@ -13,6 +13,11 @@ def _solve_lin_sys(zs):
         _A.append(_z**_i)
     _A = np.array(_A)
     _s = np.linalg.solve(_A, _b)
+    # Refine the solution using extended-precision residuals.  The Vandermonde
+    # systems here are tiny but can be ill-conditioned, and LAPACK differences
+    # otherwise leak a few ulps into the generated contour coefficients.
+    _residual = _b.astype(np.clongdouble) - _A.astype(np.clongdouble) @ _s.astype(np.clongdouble)
+    _s += np.linalg.solve(_A, np.asarray(_residual, dtype=np.complex128))
     # Enforce symmetry
     return 0.5 * (_s + _s[::-1].conj())
 

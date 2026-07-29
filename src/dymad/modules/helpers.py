@@ -21,7 +21,7 @@ def _swap_parameter_storage(
 ) -> None:
     if requires_grad is not None and param.is_leaf:
         param.requires_grad_(False)
-    cast(Any, param).set_(tensor)
+    cast(Any, param).set_(tensor.to(param))
     if requires_grad is not None and param.is_leaf:
         param.requires_grad_(requires_grad)
 

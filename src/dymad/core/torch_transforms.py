@@ -249,12 +249,16 @@ class ScalerTransform(TransformModule):
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         if self.offset.numel() == 0 or self.scale.numel() == 0:
             raise ValueError("ScalerTransform parameters are not initialized. Call fit(...) first.")
-        return (data - self.offset) / self.scale
+        offset = self.offset.to(data)
+        scale = self.scale.to(data)
+        return (data - offset) / scale
 
     def inverse(self, data: torch.Tensor) -> torch.Tensor:
         if self.offset.numel() == 0 or self.scale.numel() == 0:
             raise ValueError("ScalerTransform parameters are not initialized. Call fit(...) first.")
-        return data * self.scale + self.offset
+        offset = self.offset.to(data)
+        scale = self.scale.to(data)
+        return data * scale + offset
 
 
 class DelayEmbeddingTransform(TransformModule):

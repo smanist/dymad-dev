@@ -1874,7 +1874,12 @@ def _sobol_unit_centers(dim: int, count: int, *, seed: int) -> list[np.ndarray]:
     if count <= 0:
         return []
     exponent = math.ceil(math.log2(count)) if count > 1 else 0
-    sampler = qmc.Sobol(d=dim, scramble=True, rng=np.random.default_rng(seed))
+    try:
+        sampler = qmc.Sobol(d=dim, scramble=True, rng=np.random.default_rng(seed))
+    except TypeError:
+        # SciPy 1.14, the oldest supported release, still names this
+        # argument ``seed``. Newer releases renamed it to ``rng``.
+        sampler = qmc.Sobol(d=dim, scramble=True, seed=seed)
     samples = sampler.random_base2(m=exponent)[:count]
     return [np.asarray(sample, dtype=float) for sample in samples]
 

@@ -357,7 +357,10 @@ class LSUpdater:
                 params, residual = self.solver(
                     dataloader, model, self.dt, self.params, **self.kwargs
                 )
-                avg_epoch_loss = float(np.asarray(residual).mean())
+                if isinstance(residual, torch.Tensor):
+                    avg_epoch_loss = float(residual.detach().mean().cpu())
+                else:
+                    avg_epoch_loss = float(np.asarray(residual).mean())
             return avg_epoch_loss, params
 
         with torch.no_grad():
