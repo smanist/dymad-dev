@@ -1,3 +1,4 @@
+import math
 from collections.abc import Callable
 from functools import partial
 from typing import Any, Literal, cast
@@ -60,8 +61,27 @@ GCL_MAP: dict[str, type[nn.Module] | None] = {
     "sage": SAGEConv,
 }
 
+@torch.no_grad()
+def deterministic_orthogonal_(tensor: torch.Tensor, gain: float = 1.0) -> torch.Tensor:
+    """Fill a matrix with a deterministic, orthogonal cosine frame."""
+    if tensor.ndim != 2 or min(tensor.shape) == 0:
+        raise ValueError("deterministic_orthogonal_ requires a non-empty 2D tensor.")
+    rows, cols = tensor.shape
+    size = max(rows, cols)
+    row = torch.arange(size, dtype=tensor.dtype, device=tensor.device).unsqueeze(1)
+    col = torch.arange(size, dtype=tensor.dtype, device=tensor.device).unsqueeze(0)
+    basis = torch.cos(math.pi * (col + 0.5) * row / size)
+    basis.mul_(math.sqrt(2.0 / size))
+    basis[0].mul_(1.0 / math.sqrt(2.0))
+    frame = basis[:, : min(rows, cols)]
+    tensor.copy_(frame if rows >= cols else frame.T)
+    tensor.mul_(gain)
+    return tensor
+
+
 #: Mapping of weight initialization names to functions.
 INIT_MAP_W: dict[str, InitFn] = {
+    "deterministic_orthogonal": deterministic_orthogonal_,
     "kaiming_uniform": nn.init.kaiming_uniform_,
     "kaiming_normal": nn.init.kaiming_normal_,
     "xavier_uniform": nn.init.xavier_uniform_,

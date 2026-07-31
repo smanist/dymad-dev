@@ -1,4 +1,5 @@
 import pytest
+import torch
 
 import dymad.models.collections as collections_module
 from dymad.models.model_spec import ModelSpecValidationError
@@ -153,3 +154,35 @@ def test_rollout_engine_rejects_exp_override_with_control_inputs() -> None:
 
     with pytest.raises(ModelSpecValidationError):
         select_rollout_engine(spec, {"predictor_type": "exp"}, resolved.dims)
+
+
+def test_deterministic_orthogonal_autoencoder_is_seed_independent_tight_frame() -> None:
+    model_config = {
+        "encoder_layers": 1,
+        "decoder_layers": 1,
+        "hidden_dimension": 32,
+        "koopman_dimension": 4,
+        "activation": "none",
+        "weight_init": "deterministic_orthogonal",
+    }
+    data_meta = {
+        "n_total_state_features": 2,
+        "n_total_control_features": 1,
+        "delay": 0,
+    }
+
+    torch.manual_seed(1)
+    model_a = collections_module.KBF(model_config, data_meta)
+    torch.manual_seed(99)
+    model_b = collections_module.KBF(model_config, data_meta)
+
+    encoder_a = model_a.encoder_net.net[0].weight
+    decoder_a = model_a.decoder_net.net[0].weight
+    encoder_b = model_b.encoder_net.net[0].weight
+    decoder_b = model_b.decoder_net.net[0].weight
+
+    torch.testing.assert_close(encoder_a, encoder_b, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(decoder_a, decoder_b, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(decoder_a, encoder_a.T)
+    gram = encoder_a.T @ encoder_a
+    torch.testing.assert_close(gram, torch.eye(2) * gram[0, 0])

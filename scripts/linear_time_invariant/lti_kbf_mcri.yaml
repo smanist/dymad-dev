@@ -24,7 +24,7 @@ model:
   koopman_dimension: 4
   const_term: true
   activation: "none"
-  weight_init: "xavier_uniform"
+  weight_init: "deterministic_orthogonal"
   input_order: "cubic"
 
 prediction_criterion:
