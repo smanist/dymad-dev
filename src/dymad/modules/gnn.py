@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -108,8 +108,10 @@ class GNN(nn.Module):
     def _init_gcl(self, m: nn.Module) -> None:
         # Only initialize GCL layers with weight/bias
         weight = getattr(m, "weight", None)
-        if isinstance(weight, torch.Tensor) and weight.ndim >= 2:
-            self._weight_init(weight, self._gain)
+        if isinstance(weight, torch.Tensor):
+            weight_tensor = cast(torch.Tensor, weight)
+            if weight_tensor.ndim >= 2:
+                self._weight_init(weight_tensor, self._gain)
         bias = getattr(m, "bias", None)
         if isinstance(bias, torch.Tensor):
             self._bias_init(bias)

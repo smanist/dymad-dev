@@ -99,10 +99,12 @@ class _NDRTransformBase(ExternalTransformModule):
         self._make_ndr()
         if self._ndr is None:
             raise ValueError(f"{type(self).__name__} failed to initialize its NDR model.")
-        self._X = np.vstack(data)
-        self.input_dim = int(self._X.shape[-1])
-        self._Z = np.asarray(self._ndr.fit_transform(self._X))
-        self.output_dim = int(self._Z.shape[-1])
+        X = np.vstack(data)
+        self._X = X
+        self.input_dim = int(X.shape[-1])
+        Z = np.asarray(self._ndr.fit_transform(X))
+        self._Z = Z
+        self.output_dim = int(Z.shape[-1])
         self._prepare_inverse()
 
     def _forward_external(self, data: list[np.ndarray]) -> list[np.ndarray]:

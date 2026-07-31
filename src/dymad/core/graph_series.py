@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -77,7 +77,8 @@ class GraphSeries:
 
     @property
     def fixed_topology(self) -> bool:
-        return isinstance(self.edge_index, torch.Tensor) and self.edge_index.ndim == 2
+        edge_index = self.edge_index
+        return isinstance(edge_index, torch.Tensor) and cast(torch.Tensor, edge_index).ndim == 2
 
     def slice_steps(self, start: int, end: int) -> GraphSeries:
         n_steps = int(self.time.shape[0])
@@ -145,13 +146,15 @@ class VariableEdgeGraphSeries(GraphSeries):
     edge_index: torch.Tensor | tuple[torch.Tensor, ...]
 
     def __post_init__(self) -> None:
-        if isinstance(self.edge_index, torch.Tensor):
-            if self.edge_index.ndim != 3 or self.edge_index.shape[0] != self.time.shape[0]:
+        edge_index = self.edge_index
+        if isinstance(edge_index, torch.Tensor):
+            edge_index_tensor = cast(torch.Tensor, edge_index)
+            if edge_index_tensor.ndim != 3 or edge_index_tensor.shape[0] != self.time.shape[0]:
                 raise ValueError(
                     "VariableEdgeGraphSeries.edge_index must have shape [n_steps, 2, n_edges] "
                     "or [n_steps, n_edges, 2]"
                 )
-        elif len(self.edge_index) != self.time.shape[0]:
+        elif len(edge_index) != self.time.shape[0]:
             raise ValueError("VariableEdgeGraphSeries.edge_index must align with time steps")
         if isinstance(self.edge_weight, tuple) and len(self.edge_weight) != self.time.shape[0]:
             raise ValueError("VariableEdgeGraphSeries.edge_weight must align with time steps")

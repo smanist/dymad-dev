@@ -291,12 +291,12 @@ class KernelScDM(KernelScalarValued):
         )
 
     @property
-    def eps(self):  # eps > 0
-        return F.softplus(self._log_eps)
+    def eps(self) -> torch.Tensor:  # eps > 0
+        return cast(torch.Tensor, F.softplus(self._log_eps))
 
     @property
-    def t(self):  # t > 0
-        return F.softplus(self._log_t)
+    def t(self) -> torch.Tensor:  # t > 0
+        return cast(torch.Tensor, F.softplus(self._log_t))
 
     @property
     def density_eps(self) -> torch.Tensor:
@@ -333,10 +333,9 @@ class KernelScDM(KernelScalarValued):
     ) -> torch.Tensor:
         if Z is None:
             Z = X
-        if eps is None:
-            eps = self.eps
+        bandwidth = self.eps if eps is None else eps
         sq = self._squared_distances(X, Z)
-        return torch.exp(-sq / (4.0 * eps))
+        return torch.exp(-sq / (4.0 * bandwidth))
 
     def _rbf(self, X, Z):
         return self.raw_kernel(X, Z)
@@ -422,17 +421,16 @@ class KernelScDM(KernelScalarValued):
         }
 
     def forward(self, X: torch.Tensor, Z: torch.Tensor | None = None):
-        if Z is None:
-            Z = self._Xref
+        reference = self._Xref if Z is None else Z
 
-        if X.data_ptr() == Z.data_ptr() and X.data_ptr() == self._Xref.data_ptr():
+        if X.data_ptr() == reference.data_ptr() and X.data_ptr() == self._Xref.data_ptr():
             # K(X,X) with reference data, use cached
             W = self._rbf(X, X)
             W = self._D[..., None] * W * self._D[..., None, :]
             W = self._Dinv1[..., None] * W * self._Dinv1[..., None, :]
             return W
 
-        W = self._rbf(X, Z)
+        W = self._rbf(X, reference)
         D = self._floor_positive(W.sum(dim=-1)) ** (-self.t)
         W = D[..., None] * W * self._D[..., None, :]
         Dinv1 = self._floor_positive(W.sum(dim=-1)) ** (-0.5)

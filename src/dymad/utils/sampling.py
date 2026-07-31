@@ -5,23 +5,26 @@ import os
 import pickle
 from collections.abc import Callable
 from os import PathLike
-from typing import Any, cast
+from typing import Any, TypeAlias, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.interpolate import CubicSpline, interp1d
 from scipy.signal import chirp
 
 from dymad.utils.misc import load_config
 
-Array = np.ndarray
-Rng = np.random.Generator | None
-ConfigLike = str | PathLike[str] | dict[str, Any] | None
-ControlSampler = Callable[[float | Array, int], Array]
-StateSampler = Callable[[int], Array]
-NoiseSampler = Callable[[Array, int], Array]
-SampleWithControl = tuple[Array, Array, Array, Array] | tuple[Array, Array, Array, Array, Array]
-SampleAutonomous = tuple[Array, Array, Array] | tuple[Array, Array, Array, Array]
+Array: TypeAlias = NDArray[Any]
+Rng: TypeAlias = np.random.Generator | None
+ConfigLike: TypeAlias = str | PathLike[str] | dict[str, Any] | None
+ControlSampler: TypeAlias = Callable[[float | Array, int], Array]
+StateSampler: TypeAlias = Callable[[int], Array]
+NoiseSampler: TypeAlias = Callable[[Array, int], Array]
+SampleWithControl: TypeAlias = (
+    tuple[Array, Array, Array, Array] | tuple[Array, Array, Array, Array, Array]
+)
+SampleAutonomous: TypeAlias = tuple[Array, Array, Array] | tuple[Array, Array, Array, Array]
 
 
 def _require_rng(rng: Rng) -> np.random.Generator:
@@ -32,7 +35,8 @@ def _independent_rng(
     rng: int | np.random.Generator | None,
 ) -> np.random.Generator:
     if isinstance(rng, np.random.Generator):
-        state_bytes = pickle.dumps(rng.bit_generator.state, protocol=5)
+        generator = cast(np.random.Generator, rng)
+        state_bytes = pickle.dumps(generator.bit_generator.state, protocol=5)
         digest = hashlib.blake2b(state_bytes, digest_size=16).digest()
         entropy = np.frombuffer(digest, dtype=np.uint32)
         return np.random.default_rng(np.random.SeedSequence(entropy))
@@ -76,10 +80,10 @@ def chirp_control(
         Callable:
             A callable that takes a time grid and returns the chirp signal.
     """
-    rng = _require_rng(rng)
+    generator = _require_rng(rng)
     f0, f1 = freq_range
-    A = rng.uniform(*amp_range)
-    P = rng.uniform(*phase_range)
+    A = generator.uniform(*amp_range)
+    P = generator.uniform(*phase_range)
     amplitude = np.broadcast_to(A, (dim,))
 
     def _sampler(t_grid: float | Array, i: int) -> Array:
@@ -126,12 +130,12 @@ def gaussian_control(
         Callable:
             A callable that takes a time grid and returns the Gaussian signal.
     """
-    rng = _require_rng(rng)
-    mean = np.broadcast_to(mean, (dim,))
-    std = np.broadcast_to(std, (dim,))
+    generator = _require_rng(rng)
+    mean_array = np.broadcast_to(mean, (dim,))
+    std_array = np.broadcast_to(std, (dim,))
     Nt = int(np.ceil(t1 / dt)) + 1
     ts = np.arange(Nt) * dt
-    us = rng.normal(mean, std, size=(ts.size, dim))
+    us = generator.normal(mean_array, std_array, size=(ts.size, dim))
     _int = _build_interpolant(ts, us, mode)
 
     def _sampler(t_grid: float | Array, i: int) -> Array:
@@ -165,10 +169,10 @@ def sine_control(
         Callable:
             A callable that takes a time grid and returns the sine signal.
     """
-    rng = _require_rng(rng)
-    A = rng.uniform(*amp_range, size=(dim, num_components))
-    F = rng.uniform(*freq_range, size=(dim, num_components))
-    P = rng.uniform(*phase_range, size=(dim, num_components)) / 180 * np.pi
+    generator = _require_rng(rng)
+    A = generator.uniform(*amp_range, size=(dim, num_components))
+    F = generator.uniform(*freq_range, size=(dim, num_components))
+    P = generator.uniform(*phase_range, size=(dim, num_components)) / 180 * np.pi
 
     def _sampler(t_grid: float | Array, i: int) -> Array:
         del i
@@ -210,11 +214,11 @@ def sphere_control(
         Callable:
             A callable that takes a time grid and returns the control signal on the sphere.
     """
-    rng = _require_rng(rng)
+    generator = _require_rng(rng)
     rad = np.broadcast_to(radius, (dim,))
     Nt = int(np.ceil(t1 / dt)) + 1
     ts = np.arange(Nt) * dt
-    us = rng.normal(0, 1, size=(ts.size, dim))
+    us = generator.normal(0, 1, size=(ts.size, dim))
     us /= np.maximum(np.linalg.norm(us, axis=1, keepdims=True), 1e-15)
     us *= rad
     _int = _build_interpolant(ts, us, mode)
@@ -294,13 +298,13 @@ def gaussian_x0(
         Callable:
             A callable that returns a sample from the Gaussian distribution.
     """
-    rng = _require_rng(rng)
-    mean = np.broadcast_to(mean, (dim,))
-    std = np.broadcast_to(std, (dim,))
+    generator = _require_rng(rng)
+    mean_array = np.broadcast_to(mean, (dim,))
+    std_array = np.broadcast_to(std, (dim,))
 
     def _sampler(i: int) -> Array:
         del i
-        return rng.normal(mean, std, size=(dim,))
+        return generator.normal(mean_array, std_array, size=(dim,))
 
     return _sampler
 
@@ -324,9 +328,12 @@ def grid_x0(*, bounds: float | Array, dim: int, n_points: int = 3, rng: Rng = No
             A callable that takes an index and returns a sample from the grid-based initial condition.
     """
     del rng
-    bounds = np.broadcast_to(bounds, (dim, 2))
+    bounds_array = np.broadcast_to(bounds, (dim, 2))
     n_points_arr = np.broadcast_to(n_points, (dim,))
-    xs = [np.linspace(bounds[i, 0], bounds[i, 1], int(n_points_arr[i])) for i in range(dim)]
+    xs = [
+        np.linspace(bounds_array[i, 0], bounds_array[i, 1], int(n_points_arr[i]))
+        for i in range(dim)
+    ]
     msh = np.meshgrid(*xs, indexing="ij")
     arr = np.stack(msh, axis=-1).reshape(-1, dim)
 
@@ -353,12 +360,12 @@ def uniform_x0(*, bounds: float | Array, dim: int, rng: Rng = None) -> StateSamp
         Callable:
             A callable that takes an index and returns a sample from the uniform distribution.
     """
-    rng = _require_rng(rng)
-    bounds = np.broadcast_to(bounds, (dim, 2)).T
+    generator = _require_rng(rng)
+    bounds_array = np.broadcast_to(bounds, (dim, 2)).T
 
     def _sampler(i: int) -> Array:
         del i
-        return rng.uniform(low=bounds[0], high=bounds[1], size=(dim,))
+        return generator.uniform(low=bounds_array[0], high=bounds_array[1], size=(dim,))
 
     return _sampler
 
@@ -381,13 +388,13 @@ def perturb_x0(*, bounds: float | Array, dim: int, ref: Array, rng: Rng = None) 
         Callable:
             A callable that takes an index and returns a perturbed sample.
     """
-    rng = _require_rng(rng)
-    bounds = np.broadcast_to(bounds, (dim, 2)).T
+    generator = _require_rng(rng)
+    bounds_array = np.broadcast_to(bounds, (dim, 2)).T
 
     def _sampler(i: int) -> Array:
         del i
-        _j = rng.integers(0, ref.shape[0])
-        return ref[_j] + rng.uniform(low=bounds[0], high=bounds[1], size=(dim,))
+        _j = generator.integers(0, ref.shape[0])
+        return ref[_j] + generator.uniform(low=bounds_array[0], high=bounds_array[1], size=(dim,))
 
     return _sampler
 
@@ -412,13 +419,13 @@ def gaussian_noise(
     rng: Rng = None,
 ) -> NoiseSampler:
     """Generate additive Gaussian observation noise."""
-    rng = _require_rng(rng)
-    mean = np.broadcast_to(mean, (dim,))
-    std = np.broadcast_to(std, (dim,))
+    generator = _require_rng(rng)
+    mean_array = np.broadcast_to(mean, (dim,))
+    std_array = np.broadcast_to(std, (dim,))
 
     def _sampler(y_grid: Array, traj_idx: int) -> Array:
         del traj_idx
-        return rng.normal(mean, std, size=y_grid.shape)
+        return generator.normal(mean_array, std_array, size=y_grid.shape)
 
     return _sampler
 
@@ -430,12 +437,12 @@ def uniform_noise(
     rng: Rng = None,
 ) -> NoiseSampler:
     """Generate additive uniform observation noise."""
-    rng = _require_rng(rng)
-    bounds = np.broadcast_to(bounds, (dim, 2)).T
+    generator = _require_rng(rng)
+    bounds_array = np.broadcast_to(bounds, (dim, 2)).T
 
     def _sampler(y_grid: Array, traj_idx: int) -> Array:
         del traj_idx
-        return rng.uniform(low=bounds[0], high=bounds[1], size=y_grid.shape)
+        return generator.uniform(low=bounds_array[0], high=bounds_array[1], size=y_grid.shape)
 
     return _sampler
 
@@ -448,13 +455,13 @@ def laplace_noise(
     rng: Rng = None,
 ) -> NoiseSampler:
     """Generate additive Laplace observation noise."""
-    rng = _require_rng(rng)
-    loc = np.broadcast_to(loc, (dim,))
-    scale = np.broadcast_to(scale, (dim,))
+    generator = _require_rng(rng)
+    loc_array = np.broadcast_to(loc, (dim,))
+    scale_array = np.broadcast_to(scale, (dim,))
 
     def _sampler(y_grid: Array, traj_idx: int) -> Array:
         del traj_idx
-        return rng.laplace(loc, scale, size=y_grid.shape)
+        return generator.laplace(loc_array, scale_array, size=y_grid.shape)
 
     return _sampler
 
@@ -468,14 +475,14 @@ def student_t_noise(
     rng: Rng = None,
 ) -> NoiseSampler:
     """Generate additive Student-t observation noise."""
-    rng = _require_rng(rng)
-    df = np.broadcast_to(df, (dim,))
-    loc = np.broadcast_to(loc, (dim,))
-    scale = np.broadcast_to(scale, (dim,))
+    generator = _require_rng(rng)
+    df_array = np.broadcast_to(df, (dim,))
+    loc_array = np.broadcast_to(loc, (dim,))
+    scale_array = np.broadcast_to(scale, (dim,))
 
     def _sampler(y_grid: Array, traj_idx: int) -> Array:
         del traj_idx
-        return loc + scale * rng.standard_t(df, size=y_grid.shape)
+        return loc_array + scale_array * generator.standard_t(df_array, size=y_grid.shape)
 
     return _sampler
 
@@ -606,7 +613,7 @@ class TrajectorySampler:
             u_grid = np.stack([u_call_external(t) for t in t_grid])
             return u_call_external, u_grid
 
-        if isinstance(u_spec, Array):
+        if isinstance(u_spec, np.ndarray):
             # Externally supplied array data
             U_vec = u_spec if u_spec.ndim == 2 else u_spec[traj_idx]
             assert t_grid.size == U_vec.shape[0], (
@@ -638,7 +645,7 @@ class TrajectorySampler:
         if x0_spec is None:
             return None
 
-        if isinstance(x0_spec, Array):
+        if isinstance(x0_spec, np.ndarray):
             # Externally supplied array data
             x0_arr = np.asarray(x0_spec)
             if x0_arr.ndim == 1:

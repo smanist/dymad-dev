@@ -15,9 +15,10 @@ from torch.utils import dlpack as torch_dlpack
 def torch_to_jax(t: torch.Tensor | None) -> jax.Array | None:
     if t is None:
         return None
-    if not t.is_contiguous():
-        t = t.contiguous()
-    return jax_dlpack.from_dlpack(t.detach())
+    tensor = cast(torch.Tensor, t)
+    if not tensor.is_contiguous():
+        tensor = tensor.contiguous()
+    return jax_dlpack.from_dlpack(tensor.detach())
 
 
 def jax_to_torch(

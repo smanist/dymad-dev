@@ -1,7 +1,7 @@
 import copy
 import logging
 from dataclasses import replace
-from typing import Any, Optional, cast
+from typing import Any, Optional, TypeAlias, cast
 
 import numpy as np
 import torch
@@ -23,11 +23,11 @@ from dymad.utils.graph import adj_to_edge
 
 logger = logging.getLogger("dymad.cv")
 
-SeriesDataset = list[RegularSeries] | list[GraphSeries]
-Loader = DataLoader[RegularTrainerBatch] | DataLoader[GraphTrainerBatch]
+SeriesDataset: TypeAlias = list[RegularSeries] | list[GraphSeries]
+Loader: TypeAlias = DataLoader[RegularTrainerBatch] | DataLoader[GraphTrainerBatch]
 
 
-def _stack_if_uniform(data):
+def _stack_if_uniform(data: Any) -> Any:
     if data is None:
         return None
     try:
@@ -36,7 +36,7 @@ def _stack_if_uniform(data):
         return list(data)
 
 
-def _unpack_object_array(data):
+def _unpack_object_array(data: Any) -> Any:
     if isinstance(data, np.ndarray) and data.dtype == object:
         return [_unpack_object_array(item) for item in data.tolist()]
     return data
@@ -107,7 +107,13 @@ def _pack_graph_series_time_varying_topology(series: GraphSeries) -> GraphSeries
     )
 
 
-def _process_data(data, x, label, base_dim=1, offset=0):
+def _process_data(
+    data: Any,
+    x: list[np.ndarray],
+    label: str,
+    base_dim: int = 1,
+    offset: int = 0,
+) -> list[Any]:
     """
     x as reference data, list of arrays.
 
@@ -121,6 +127,7 @@ def _process_data(data, x, label, base_dim=1, offset=0):
     """
     _dim = base_dim - offset
     data = _unpack_object_array(data)
+    _data: list[Any]
     if data is None:
         logger.info(f"No {label} detected. Setting to None.")
         if offset == 0:
@@ -293,6 +300,7 @@ class TrajectoryManager:
         self.typed_dataset: SeriesDataset | None = None
         self.dataset: SeriesDataset | None = None
         self.dataloader: Loader | None = None
+        self.data_index: torch.Tensor | None = None
 
         self._init_transforms()
         self._load_metadata(self.metadata, data_key)
@@ -393,9 +401,10 @@ class TrajectoryManager:
             assert metadata["n_data"] == len(metadata["data_index"])
             logger.info("Reusing data index from provided metadata.")
 
-            self.data_index = torch.tensor(metadata["data_index"], dtype=torch.long)
+            data_index = torch.tensor(metadata["data_index"], dtype=torch.long)
+            self.data_index = data_index
             self.metadata["n_data"] = metadata["n_data"]
-            self.metadata["data_index"] = self.data_index.tolist()
+            self.metadata["data_index"] = data_index.tolist()
 
             self.set_transforms(metadata=metadata)  # This sets self._transform_fitted = True
         else:
@@ -471,14 +480,15 @@ class TrajectoryManager:
         """
         if index is None:
             # By default use all data
-            self.data_index = torch.arange(0, len(self.x), dtype=torch.long)
+            resolved_index = torch.arange(0, len(self.x), dtype=torch.long)
+        elif isinstance(index, list):
+            resolved_index = torch.tensor(index, dtype=torch.long)
         else:
-            if isinstance(index, list):
-                index = torch.tensor(index, dtype=torch.long)
-            self.data_index = index
+            resolved_index = index
+        self.data_index = resolved_index
 
-        self.metadata["n_data"] = len(self.data_index)
-        self.metadata["data_index"] = self.data_index.tolist()
+        self.metadata["n_data"] = len(resolved_index)
+        self.metadata["data_index"] = resolved_index.tolist()
 
         logger.info(f"Data index set: {self.metadata['n_data']} trajectories.")
 
@@ -722,20 +732,23 @@ class TrajectoryManager:
         if indices is None:
             if self.data_index is None:
                 raise ValueError("data_index must be set before creating a regular-series dataset")
-            indices = self.data_index
-        if isinstance(indices, list):
-            indices = torch.tensor(indices, dtype=torch.long)
-        if self.typed_dataset is not None and self.data_index is not None:
+            resolved_indices = self.data_index
+        elif isinstance(indices, list):
+            resolved_indices = torch.tensor(indices, dtype=torch.long)
+        else:
+            resolved_indices = indices
+        typed_dataset = self.typed_dataset
+        data_index = self.data_index
+        if typed_dataset is not None and data_index is not None:
             position_by_index = {
-                int(raw_index): position
-                for position, raw_index in enumerate(self.data_index.tolist())
+                int(raw_index): position for position, raw_index in enumerate(data_index.tolist())
             }
-            if all(int(index) in position_by_index for index in indices.tolist()):
+            if all(int(index) in position_by_index for index in resolved_indices.tolist()):
                 return cast(
                     list[RegularSeries],
-                    [self.typed_dataset[position_by_index[int(index)]] for index in indices],
+                    [typed_dataset[position_by_index[int(index)]] for index in resolved_indices],
                 )
-        return self._transform_regular_series_by_index(indices)
+        return self._transform_regular_series_by_index(resolved_indices)
 
     def _create_raw_regular_series_by_index(self, indices: torch.Tensor) -> list[RegularSeries]:
         dataset = []
@@ -1123,20 +1136,23 @@ class TrajectoryManagerGraph(TrajectoryManager):
         if indices is None:
             if self.data_index is None:
                 raise ValueError("data_index must be set before creating a graph-series dataset")
-            indices = self.data_index
-        if isinstance(indices, list):
-            indices = torch.tensor(indices, dtype=torch.long)
-        if self.typed_dataset is not None and self.data_index is not None:
+            resolved_indices = self.data_index
+        elif isinstance(indices, list):
+            resolved_indices = torch.tensor(indices, dtype=torch.long)
+        else:
+            resolved_indices = indices
+        typed_dataset = self.typed_dataset
+        data_index = self.data_index
+        if typed_dataset is not None and data_index is not None:
             position_by_index = {
-                int(raw_index): position
-                for position, raw_index in enumerate(self.data_index.tolist())
+                int(raw_index): position for position, raw_index in enumerate(data_index.tolist())
             }
-            if all(int(index) in position_by_index for index in indices.tolist()):
+            if all(int(index) in position_by_index for index in resolved_indices.tolist()):
                 return cast(
                     list[GraphSeries],
-                    [self.typed_dataset[position_by_index[int(index)]] for index in indices],
+                    [typed_dataset[position_by_index[int(index)]] for index in resolved_indices],
                 )
-        return self._transform_graph_series_by_index(indices)
+        return self._transform_graph_series_by_index(resolved_indices)
 
     def _transform_graph_series_by_index(self, indices: torch.Tensor) -> list[GraphSeries]:
         raw_batch = GraphSeriesBatch.collate(self._create_raw_graph_series_by_index(indices))

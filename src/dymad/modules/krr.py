@@ -66,16 +66,18 @@ class KRRBase(nn.Module):
 
     def set_train_data(self, X: torch.Tensor, Y: torch.Tensor) -> None:
         assert X.ndim == 2 and Y.ndim == 2
-        self.X_train = torch.as_tensor(X, dtype=self.dtype, device=self.device)
-        self.Y_train = torch.as_tensor(Y, dtype=self.dtype, device=self.device)
-        self._Ndat, self._Dy = self.Y_train.shape
+        X_train = torch.as_tensor(X, dtype=self.dtype, device=self.device)
+        Y_train = torch.as_tensor(Y, dtype=self.dtype, device=self.device)
+        self.X_train = X_train
+        self.Y_train = Y_train
+        self._Ndat, self._Dy = Y_train.shape
         self._residual = None  # reset
 
         if isinstance(self.kernel, nn.ModuleList):
             for k in self.kernel:
-                cast(KernelAbstract, k).set_reference_data(self.X_train)
+                cast(KernelAbstract, k).set_reference_data(X_train)
         else:
-            self.kernel.set_reference_data(self.X_train)
+            self.kernel.set_reference_data(X_train)
 
         self._on_set_train_data()  # hook for subclasses
 

@@ -197,11 +197,8 @@ def _graph_series_from_runtime(payload: UniformGraphRuntime) -> GraphSeries:
         else:
             edge_attr = payload.edge_attr[0]
 
-    cls = (
-        FixedGraphSeries
-        if isinstance(edge_index, torch.Tensor) and edge_index.ndim == 2
-        else VariableEdgeGraphSeries
-    )
+    is_fixed = isinstance(edge_index, torch.Tensor) and cast(torch.Tensor, edge_index).ndim == 2
+    cls = FixedGraphSeries if is_fixed else VariableEdgeGraphSeries
     return cls(
         time=payload.time[0],
         node_state=payload.node_state[0],

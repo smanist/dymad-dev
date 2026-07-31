@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -88,7 +88,11 @@ class SeriesAdapter:
             edge_attr, dtype=dtype, device=device
         )
 
-        if isinstance(edge_index_payload, torch.Tensor) and edge_index_payload.ndim == 2:
+        is_fixed = (
+            isinstance(edge_index_payload, torch.Tensor)
+            and cast(torch.Tensor, edge_index_payload).ndim == 2
+        )
+        if is_fixed:
             return FixedGraphSeries(
                 time=time_tensor,
                 node_state=node_state_tensor,

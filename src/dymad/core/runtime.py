@@ -105,35 +105,41 @@ def _graph_edge_steps(
     tuple[torch.Tensor, ...] | None,
 ]:
     n_steps = int(series.time.shape[0])
-    if isinstance(series.edge_index, torch.Tensor):
-        if series.edge_index.ndim == 3 and series.edge_index.shape[0] == n_steps:
+    edge_index_payload = series.edge_index
+    if isinstance(edge_index_payload, torch.Tensor):
+        edge_index_tensor = cast(torch.Tensor, edge_index_payload)
+        if edge_index_tensor.ndim == 3 and edge_index_tensor.shape[0] == n_steps:
             edge_index = tuple(
-                step if step.shape[0] == 2 else step.transpose(0, 1) for step in series.edge_index
+                step if step.shape[0] == 2 else step.transpose(0, 1) for step in edge_index_tensor
             )
         else:
-            edge_index = tuple(series.edge_index for _ in range(n_steps))
+            edge_index = tuple(edge_index_tensor for _ in range(n_steps))
     else:
-        edge_index = series.edge_index
+        edge_index = edge_index_payload
 
-    if isinstance(series.edge_weight, torch.Tensor):
-        if series.edge_weight.ndim >= 2 and series.edge_weight.shape[0] == n_steps:
-            edge_weight = tuple(series.edge_weight[step] for step in range(n_steps))
+    edge_weight_payload = series.edge_weight
+    if isinstance(edge_weight_payload, torch.Tensor):
+        edge_weight_tensor = cast(torch.Tensor, edge_weight_payload)
+        if edge_weight_tensor.ndim >= 2 and edge_weight_tensor.shape[0] == n_steps:
+            edge_weight = tuple(edge_weight_tensor[step] for step in range(n_steps))
         else:
-            edge_weight = tuple(series.edge_weight for _ in range(n_steps))
-    elif series.edge_weight is None:
+            edge_weight = tuple(edge_weight_tensor for _ in range(n_steps))
+    elif edge_weight_payload is None:
         edge_weight = None
     else:
-        edge_weight = series.edge_weight
+        edge_weight = edge_weight_payload
 
-    if isinstance(series.edge_attr, torch.Tensor):
-        if series.edge_attr.ndim >= 3 and series.edge_attr.shape[0] == n_steps:
-            edge_attr = tuple(series.edge_attr[step] for step in range(n_steps))
+    edge_attr_payload = series.edge_attr
+    if isinstance(edge_attr_payload, torch.Tensor):
+        edge_attr_tensor = cast(torch.Tensor, edge_attr_payload)
+        if edge_attr_tensor.ndim >= 3 and edge_attr_tensor.shape[0] == n_steps:
+            edge_attr = tuple(edge_attr_tensor[step] for step in range(n_steps))
         else:
-            edge_attr = tuple(series.edge_attr for _ in range(n_steps))
-    elif series.edge_attr is None:
+            edge_attr = tuple(edge_attr_tensor for _ in range(n_steps))
+    elif edge_attr_payload is None:
         edge_attr = None
     else:
-        edge_attr = series.edge_attr
+        edge_attr = edge_attr_payload
 
     return edge_index, edge_weight, edge_attr
 
@@ -223,7 +229,7 @@ def _stack_fixed_edge_index(series_items: tuple[GraphSeries, ...]) -> torch.Tens
         edge_index = item.edge_index
         if not isinstance(edge_index, torch.Tensor):
             raise TypeError("Fixed-topology graph batches require tensor edge indices.")
-        edge_index_tensors.append(edge_index.transpose(0, 1))
+        edge_index_tensors.append(cast(torch.Tensor, edge_index).transpose(0, 1))
     return torch.stack(
         edge_index_tensors,
         dim=0,
@@ -388,6 +394,11 @@ def _graph_tensor_field(
     if isinstance(payload, tuple):
         raise TypeError("Graph tensor payload must be materialized before runtime construction.")
     return payload
+
+
+def _has_rank_three_edge_index(series: GraphSeries) -> bool:
+    edge_index = series.edge_index
+    return isinstance(edge_index, torch.Tensor) and cast(torch.Tensor, edge_index).ndim == 3
 
 
 def _graph_truncate_tensor(
@@ -1614,10 +1625,7 @@ def to_padded_graph_runtime(batch: GraphSeriesBatch) -> GraphRuntime:
                 max_steps=n_steps,
                 time_ndim=3,
             )
-        elif all(
-            isinstance(item.edge_index, torch.Tensor) and item.edge_index.ndim == 3
-            for item in items
-        ):
+        elif all(_has_rank_three_edge_index(item) for item in items):
             edge_index = _stack_time_varying_edge_index(items, max_steps=n_steps)
             edge_weight = _stack_time_varying_graph_field(
                 tuple(_graph_tensor_field(item.edge_weight) for item in items),
@@ -1674,9 +1682,7 @@ def to_padded_graph_runtime(batch: GraphSeriesBatch) -> GraphRuntime:
             max_steps=max_steps,
             time_ndim=3,
         )
-    elif all(
-        isinstance(item.edge_index, torch.Tensor) and item.edge_index.ndim == 3 for item in items
-    ):
+    elif all(_has_rank_three_edge_index(item) for item in items):
         edge_index = _pad_time_varying_edge_index(items, max_steps=max_steps)
         edge_weight = _stack_time_varying_graph_field(
             tuple(_graph_tensor_field(item.edge_weight) for item in items),
