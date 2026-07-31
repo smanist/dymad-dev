@@ -287,7 +287,8 @@ def _load_model_checkpoint(model_class, checkpoint_path):
     model_config = cfg.get("model", None)
     model = model_class(model_config, md, dtype=dtype)
     model.load_state_dict(chkpt["model_state_dict"])
-    model.to("cpu")
+    if isinstance(model, torch.nn.Module):
+        model.to("cpu")
 
     # Data transformations
     _data_transform_x = build_transform_module(
