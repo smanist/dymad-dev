@@ -48,7 +48,7 @@ trn_ref = {
     "chop_step": 0.5,
 }
 trn_nd1 = dict(trn_ref)
-trn_nd2 = {"sweep_tols": [1e-1, 1e-2, 1e-3], **trn_ref}
+trn_nd2 = {"sweep_tols": [1e-1, 1e-2, 5e-4], **trn_ref}
 trn_nd3 = {"sweep_tols": [1e-1, 1e-2, 1e-3], "sweep_mode": "full", **trn_ref}
 trn_opts = [trn_nd1, trn_nd2, trn_nd3]
 DEFAULT_CASES = [0, 1, 2]

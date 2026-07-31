@@ -53,7 +53,7 @@ phases:
 
   - type: 'optimizer'
     trainer: 'NODE'
-    n_epochs: 50
+    n_epochs: 60
     save_interval: 10
     learning_rate: 5e-3
     decay_rate: 0.999

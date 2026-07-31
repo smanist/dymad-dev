@@ -26,6 +26,7 @@ model:
   activation: "none"
   weight_init: "xavier_uniform"
   input_order: "cubic"
+  linear_dynamics_init_scale: 0.1
 
 criterion:
   dynamics:

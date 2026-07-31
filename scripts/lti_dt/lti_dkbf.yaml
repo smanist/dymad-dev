@@ -26,6 +26,7 @@ model:
   activation: "none"
   weight_init: "xavier_uniform"
   gain: 0.01
+  linear_dynamics_init_scale: 0.0
 
 criterion:
   dynamics:

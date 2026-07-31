@@ -179,6 +179,12 @@ class CD_LFM(ComposedDynamics):
 
         # Processor in the dynamics
         processor_net = FlexLinear(dims["s"], dims["z"], bias=False, dtype=dtype, device=device)
+        nn.init.eye_(processor_net.weight)
+        init_scale = model_config.get(
+            "linear_dynamics_init_scale", 0.55 if model_spec.continuous_time else 1.0
+        )
+        with torch.no_grad():
+            processor_net.weight.mul_(-init_scale if model_spec.continuous_time else init_scale)
 
         # Prediction options
         input_order = model_config.get("input_order", "cubic")
