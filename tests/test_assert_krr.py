@@ -115,6 +115,42 @@ def test_explicit_krr_bandwidth_and_ridge_are_realized_values():
     np.testing.assert_allclose(indep.ridge.detach().cpu().numpy(), np.array([10.0, 5.0]))
 
 
+def test_independent_krr_prediction_follows_input_device():
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model = make_krr(**opt_indp1)
+    model.set_train_data(Xtrn, Ytrn)
+    model.fit()
+    model.to(device)
+
+    prediction = model(torch.as_tensor(Xtst, dtype=torch.float64, device=device))
+
+    assert prediction.device == device
+
+
+def test_independent_krr_reuses_factorization_for_matching_systems(monkeypatch):
+    model = make_krr(
+        type="indep",
+        kernel=[opt_rbf1, opt_rbf1, opt_rbf2],
+        dtype=torch.float64,
+        ridge_init=RIDGE,
+    )
+    target = np.column_stack([Ytrn, Ytrn[:, 0]])
+    model.set_train_data(Xtrn, target)
+    original_cholesky = torch.linalg.cholesky
+    factorization_count = 0
+
+    def counted_cholesky(*args, **kwargs):
+        nonlocal factorization_count
+        factorization_count += 1
+        return original_cholesky(*args, **kwargs)
+
+    monkeypatch.setattr(torch.linalg, "cholesky", counted_cholesky)
+
+    model.fit()
+
+    assert factorization_count == 2
+
+
 def run_krr():
     prds = []
     for opt in opts:

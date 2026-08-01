@@ -282,18 +282,31 @@ class KRRMultiOutputIndep(KRRBase):
         X, Y = self.X_train, self.Y_train
         assert isinstance(self.kernel, nn.ModuleList) and len(self.kernel) == self._Dy
         A = torch.empty_like(Y)
-        I = torch.eye(self._Ndat, dtype=self.dtype, device=self.device)
-        systems = [
-            cast(KernelAbstract, self.kernel[d])(X, None) + (self.ridge[d] + self.jitter) * I
-            for d in range(self._Dy)
-        ]
-        unsolved = set(range(self._Dy))
+        I = torch.eye(self._Ndat, dtype=self.dtype, device=X.device)
+        unsolved = list(range(self._Dy))
         while unsolved:
-            first = min(unsolved)
-            matching = [d for d in sorted(unsolved) if torch.equal(systems[d], systems[first])]
-            L = torch.linalg.cholesky(systems[first])
+            # Compare systems lazily so peak matrix storage stays independent of
+            # the output dimension while identical systems still share a factorization.
+            first, *candidates = unsolved
+            first_system = (
+                cast(KernelAbstract, self.kernel[first])(X, None)
+                + (self.ridge[first] + self.jitter) * I
+            )
+            matching = [first]
+            remaining = []
+            for d in candidates:
+                candidate_system = (
+                    cast(KernelAbstract, self.kernel[d])(X, None)
+                    + (self.ridge[d] + self.jitter) * I
+                )
+                if torch.equal(candidate_system, first_system):
+                    matching.append(d)
+                else:
+                    remaining.append(d)
+                del candidate_system
+            L = torch.linalg.cholesky(first_system)
             A[:, matching] = torch.cholesky_solve(Y[:, matching], L)
-            unsolved.difference_update(matching)
+            unsolved = remaining
         self._alphas.data.copy_(A)
 
         self._residual = self._comp_residual()
@@ -303,7 +316,7 @@ class KRRMultiOutputIndep(KRRBase):
         M = Xnew.shape[:-1]
         assert isinstance(self.kernel, nn.ModuleList)
         D = len(self.kernel)
-        Yhat = torch.empty((*M, D), dtype=self.dtype, device=self.device)
+        Yhat = torch.empty((*M, D), dtype=self.dtype, device=Xnew.device)
         for d in range(D):
             Kxz = cast(KernelAbstract, self.kernel[d])(Xnew, self._Xref)
             Yhat[..., d] = Kxz @ self._alphas[:, d]

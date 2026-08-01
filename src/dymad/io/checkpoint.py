@@ -38,6 +38,19 @@ class BoundaryLoadTrace:
     model_ref: str
 
 
+def _move_model_to_device(model: Any, device: torch.device | str) -> Any:
+    """Move registered tensors and synchronize DyMAD's explicit device metadata."""
+    if not isinstance(model, torch.nn.Module):
+        return model
+
+    target_device = torch.device(device)
+    model.to(target_device)
+    for module in model.modules():
+        if "device" in vars(module):
+            cast(Any, module).device = target_device
+    return model
+
+
 def _atleast_3d(x):
     if x.ndim == 2:
         return np.expand_dims(x, axis=0)
@@ -287,8 +300,7 @@ def _load_model_checkpoint(model_class, checkpoint_path):
     model_config = cfg.get("model", None)
     model = model_class(model_config, md, dtype=dtype)
     model.load_state_dict(chkpt["model_state_dict"])
-    if isinstance(model, torch.nn.Module):
-        model.to("cpu")
+    model = _move_model_to_device(model, "cpu")
 
     # Data transformations
     _data_transform_x = build_transform_module(
@@ -886,7 +898,7 @@ class DataInterface:
             self.model, self.prd_func = cast(
                 tuple[Any, Any], load_model(model_class, checkpoint_path)
             )
-            self.model.to(self.device)
+            self.model = _move_model_to_device(self.model, self.device)
 
             def encoder(x):
                 x_tensor = torch.as_tensor(x, dtype=self.dtype, device=self.device)

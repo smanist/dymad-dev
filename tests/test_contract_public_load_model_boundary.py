@@ -2,12 +2,41 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import torch
+
 from dymad.agent.exec.context import build_default_context
 from dymad.io import load_model
+from dymad.io.checkpoint import _move_model_to_device
 
 
 class DummyModel:
     pass
+
+
+class DeviceTrackingChild(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.device = None
+        self.projection = torch.nn.Linear(2, 2)
+
+
+class DeviceTrackingModule(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.device = None
+        self.child = DeviceTrackingChild()
+
+
+def test_move_model_to_device_synchronizes_explicit_device_metadata() -> None:
+    model = DeviceTrackingModule()
+    target = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    moved = _move_model_to_device(model, target)
+
+    assert moved is model
+    assert model.device == target
+    assert model.child.device == target
+    assert model.child.projection.weight.device == target
 
 
 def test_public_load_model_routes_via_boundary(monkeypatch, tmp_path: Path) -> None:

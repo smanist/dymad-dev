@@ -61,6 +61,7 @@ GCL_MAP: dict[str, type[nn.Module] | None] = {
     "sage": SAGEConv,
 }
 
+
 @torch.no_grad()
 def deterministic_orthogonal_(tensor: torch.Tensor, gain: float = 1.0) -> torch.Tensor:
     """Fill a matrix with a deterministic, orthogonal cosine frame."""

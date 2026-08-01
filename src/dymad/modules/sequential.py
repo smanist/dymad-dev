@@ -232,7 +232,7 @@ class SimpleRNN(SequentialBase):
         self.device = device
 
     def _run_seq(self, x):
-        hidden = torch.zeros(x.shape[0], self.hidden_dim, device=self.device, dtype=self.dtype)
+        hidden = x.new_zeros((x.shape[0], self.hidden_dim))
 
         output = []
         for t in range(self.seq_len):
