@@ -882,6 +882,8 @@ def make_problem(
     sample: Callable[[int, np.random.Generator], np.ndarray],
     target: Callable[[np.ndarray], np.ndarray],
     prediction_plots: bool,
+    x_transform: str | None = None,
+    y_transform: str | None = "std",
 ) -> ArrayRegressionProblem:
     return ArrayRegressionProblem(
         name=name,
@@ -902,8 +904,8 @@ def make_problem(
         ),
         primary_metric="error",
         prediction_plotter=plot_truth_vs_prediction if prediction_plots else None,
-        x_transform=None,
-        y_transform="std",
+        x_transform=x_transform,
+        y_transform=y_transform,
     )
 
 
@@ -913,6 +915,8 @@ def run_group_cases(
     root: Path,
     args: argparse.Namespace,
     sample_for_case: Callable[[Case], Callable[[int, np.random.Generator], np.ndarray]],
+    x_transform: str | None = None,
+    y_transform: str | None = "std",
 ) -> None:
     for group in groups:
         for case in group.cases:
@@ -941,6 +945,8 @@ def run_group_cases(
                 sample=sample_for_case(case),
                 target=case.target,
                 prediction_plots=not args.no_prediction_plots,
+                x_transform=x_transform,
+                y_transform=y_transform,
             )
             result = run_array_regression_study(
                 problem,

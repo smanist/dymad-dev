@@ -55,6 +55,27 @@ class DonutTorusGeometry:
     major_radius: float = MAJOR_RADIUS
     minor_radius: float = MINOR_RADIUS
 
+    @staticmethod
+    @cache
+    def _isometric_embedding_matrix(ambient_dim: int) -> np.ndarray:
+        """Return a deterministic isometric map from R^3 into R^``ambient_dim``.
+
+        The columns are the first three orthonormal DCT-II modes.  Thus an
+        isometric embedding uses every output coordinate while preserving the
+        Euclidean distance between every pair of original torus points.
+        """
+
+        if ambient_dim < 3:
+            raise ValueError("ambient_dim must be at least 3")
+        if ambient_dim == 3:
+            return np.eye(3)
+        rows = np.arange(ambient_dim, dtype=float)[:, None]
+        modes = np.arange(3, dtype=float)[None, :]
+        matrix = np.cos(math.pi * (rows + 0.5) * modes / ambient_dim)
+        matrix[:, 0] *= math.sqrt(1.0 / ambient_dim)
+        matrix[:, 1:] *= math.sqrt(2.0 / ambient_dim)
+        return matrix
+
     def points_from_angles(
         self,
         theta: np.ndarray | float,
@@ -68,6 +89,15 @@ class DonutTorusGeometry:
         ring_radius = self.major_radius + self.minor_radius * np.cos(theta_values)
         if ambient_dim < 3:
             raise ValueError("ambient_dim must be at least 3")
+        base = np.column_stack(
+            (
+                ring_radius * np.cos(phi_values),
+                ring_radius * np.sin(phi_values),
+                self.minor_radius * np.sin(theta_values),
+            )
+        )
+        if embedding == "isometric":
+            return base @ self._isometric_embedding_matrix(ambient_dim).T
         if embedding == "harmonic":
             if ambient_dim % 2 == 0:
                 raise ValueError("harmonic torus embedding requires an odd ambient_dim")
@@ -85,13 +115,6 @@ class DonutTorusGeometry:
             return np.column_stack(coordinates)
         if embedding != "augmented":
             raise ValueError(f"unknown donut-torus embedding: {embedding}")
-        base = np.column_stack(
-            (
-                ring_radius * np.cos(phi_values),
-                ring_radius * np.sin(phi_values),
-                self.minor_radius * np.sin(theta_values),
-            )
-        )
         if ambient_dim == 3:
             return base
         extras: list[np.ndarray] = []
@@ -114,7 +137,12 @@ class DonutTorusGeometry:
         values = np.asarray(points, dtype=float)
         if values.ndim != 2 or values.shape[1] < 3:
             raise ValueError("donut-torus points must have at least three coordinates")
-        if embedding == "harmonic":
+        if embedding == "isometric":
+            base = values @ self._isometric_embedding_matrix(values.shape[1])
+            sin_theta = base[:, 2] / self.minor_radius
+            radius = np.hypot(base[:, 0], base[:, 1])
+            phi = np.mod(np.arctan2(base[:, 1], base[:, 0]), 2.0 * math.pi)
+        elif embedding == "harmonic":
             if values.shape[1] % 2 == 0:
                 raise ValueError("harmonic torus embedding requires an odd ambient_dim")
             harmonic_count = (values.shape[1] - 1) // 2
@@ -122,11 +150,14 @@ class DonutTorusGeometry:
                 sum(1.0 / (order * order) for order in range(1, harmonic_count + 1))
             )
             sin_theta = values[:, -1] * theta_normalizer / self.minor_radius
+            radius = np.hypot(values[:, 0], values[:, 1])
+            phi = np.mod(np.arctan2(values[:, 1], values[:, 0]), 2.0 * math.pi)
         elif embedding == "augmented":
             sin_theta = values[:, 2] / self.minor_radius
+            radius = np.hypot(values[:, 0], values[:, 1])
+            phi = np.mod(np.arctan2(values[:, 1], values[:, 0]), 2.0 * math.pi)
         else:
             raise ValueError(f"unknown donut-torus embedding: {embedding}")
-        radius = np.hypot(values[:, 0], values[:, 1])
         theta = np.mod(
             np.arctan2(
                 sin_theta,
@@ -134,7 +165,6 @@ class DonutTorusGeometry:
             ),
             2.0 * math.pi,
         )
-        phi = np.mod(np.arctan2(values[:, 1], values[:, 0]), 2.0 * math.pi)
         return theta, phi
 
     def sample_points(
@@ -499,6 +529,22 @@ GROUPS = (
                 name_prefix="neumann",
                 show_ambient_dim=True,
                 embedding="harmonic",
+            )
+            for ambient_dim in (3, 7, 11, 15)
+        ),
+        show_targets=False,
+    ),
+    Group(
+        "Donut-torus Neumann LB eigenfunction (m=1, j=1) by ambient dimension (isometric embedding)",
+        "donut_neumann_isometric_ambient",
+        tuple(
+            laplace_case(
+                1,
+                1,
+                ambient_dim,
+                name_prefix="isometric",
+                show_ambient_dim=True,
+                embedding="isometric",
             )
             for ambient_dim in (3, 7, 11, 15)
         ),

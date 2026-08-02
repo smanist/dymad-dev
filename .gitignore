@@ -9,6 +9,7 @@
 **/dev.ipynb
 build/
 runs/
+output/
 src/dymad.egg-info/
 docs/_build
 docs/api
