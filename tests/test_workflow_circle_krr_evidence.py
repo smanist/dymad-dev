@@ -1,53 +1,34 @@
-"""Workflow coverage for the ambient-circle diffusion-map/RBF KRR study."""
+"""Workflow coverage for the figure-only ambient-circle KRR study."""
 
 from __future__ import annotations
 
-import csv
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+FIGURES = {
+    "circle_labels.png",
+    "circle_semi_lb.png",
+    "circle_semi_mode.png",
+    "circle_semi_rbf.png",
+    "circle_full_lb.png",
+    "circle_angles.png",
+    "semicircle_endpoints.png",
+    "circle_krr.png",
+    "fullcircle_lb_endpoints.png",
+}
+SCRIPT = Path("scripts/circle_krr_evidence/circle_krr.py")
 
-def test_circle_krr_evidence_cli_writes_paired_tuning_and_decomposition_artifacts(
-    tmp_path: Path,
-) -> None:
-    output_dir = tmp_path / "circle_oracle"
-    result = subprocess.run(
-        [
-            sys.executable,
-            "scripts/circle_krr_evidence/circle_krr_evidence_cli.py",
-            "--output-dir",
-            str(output_dir),
-            "--semi-n-train",
-            "16",
-            "--full-n-train",
-            "16",
-            "--semi-n-valid",
-            "15",
-            "--full-n-valid",
-            "16",
-            "--n-test",
-            "128",
-            "--quadrature-order",
-            "32",
-            "--endpoint-count",
-            "2",
-            "--initial-grid-size",
-            "2",
-            "--refinement-budget",
-            "0",
-            "--fixed-rbf-ridge-count",
-            "3",
-            "--max-workers",
-            "1",
-            "--no-report",
-        ],
+
+def _run(output: Path, mpl: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--quick", "--workers", "1", "--output-dir", str(output)],
         cwd=Path.cwd(),
         env={
             **os.environ,
-            "MPLCONFIGDIR": str(tmp_path / "mpl"),
+            "MPLCONFIGDIR": str(mpl),
             "OPENBLAS_NUM_THREADS": "1",
             "OMP_NUM_THREADS": "1",
             "MKL_NUM_THREADS": "1",
@@ -57,58 +38,23 @@ def test_circle_krr_evidence_cli_writes_paired_tuning_and_decomposition_artifact
         check=True,
         timeout=120,
     )
-    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
-    assert "Wrote ambient-circle KRR evidence" in result.stdout
-    assert summary["protocol"]["kernel_distance"] == "ambient Euclidean chord distance in R^2"
-    assert summary["protocol"]["semi_circle"] == {
-        "n_train": 16,
-        "n_valid": 15,
-        "test_sampling": "seeded uniform random theta",
-    }
-    assert summary["protocol"]["full_circle"]["n_train"] == 16
-    assert summary["protocol"]["tuning"]["rbf_fixed_sweep"] == {
-        "ambient_lengthscale": 0.2,
-        "ridge_count": 3,
-        "ridge_bounds": [1.0e-16, 1.0e-8],
-    }
-    # The theoretical gap is zero; a principal-angle calculation near one
-    # incurs a square-root amplification of floating-point roundoff.
-    assert summary["full_circle"]["rbf_to_lb_subspace_gap"] < 1.0e-6
-    semi_angles = summary["semicircle"]["krr_mode_angles"]["comparisons"]
-    assert len(semi_angles) == 5
-    assert all(
-        all(0.0 <= angle <= 90.0 + 1.0e-8 for angle in row["principal_angles_degrees"])
-        for row in semi_angles.values()
+
+
+def test_circle_krr_study_writes_only_reproducible_report_figures(tmp_path: Path) -> None:
+    first, second = tmp_path / "first", tmp_path / "second"
+    result = _run(first, tmp_path / "mpl")
+    _run(second, tmp_path / "mpl")
+
+    assert "Wrote 9 figures" in result.stdout
+    assert {path.name for path in first.iterdir()} == FIGURES
+    assert {path.name for path in second.iterdir()} == FIGURES
+    assert (first / "circle_labels.png").read_bytes() == (second / "circle_labels.png").read_bytes()
+
+    coefficients = json.loads(
+        Path("scripts/circle_krr_evidence/label_coefficients.json").read_text(encoding="utf-8")
     )
-    full_angles = summary["full_circle"]["krr_mode_angles"]["comparisons"]
-    assert len(full_angles) == 2
-    assert all(
-        all(0.0 <= angle <= 90.0 + 1.0e-8 for angle in row["principal_angles_degrees"])
-        for row in full_angles.values()
-    )
-    assert summary["audit"]["maximum_decomposition_defect"] < 1.0e-8
-    assert summary["audit"]["leakage_exceeds_total_count"] == 0
-    assert summary["audit"]["maximum_leakage_to_total_ratio"] <= 1.0
-    assert summary["semicircle"]["families"]["count"] == 2
-    with (output_dir / "decompositions.csv").open(newline="", encoding="utf-8") as file:
-        decomposition_rows = list(csv.DictReader(file))
-    assert all(
-        float(row["leakage"]) <= float(row["population_error"])
-        for row in decomposition_rows
-    )
-    for name in (
-        "selected_models.csv",
-        "tuning_evaluations.csv",
-        "decompositions.csv",
-        "semicircle_family_diagnostics.csv",
-        "krr_mode_angles.csv",
-        "summary.json",
-    ):
-        assert (output_dir / name).is_file()
-    assert {path.name for path in output_dir.glob("*.png")} == {
-        "target_ensembles.png",
-        "kernel_mode_comparison.png",
-        "semicircle_endpoints.png",
-        "semicircle_family_focus_and_summary.png",
-        "fullcircle_lb_endpoints.png",
-    }
+    assert set(coefficients) == {"semicircle_lb", "semicircle_rbf", "full_circle_lb"}
+    assert all(len(values) == 12 for values in coefficients.values())
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert len(source.splitlines()) < 500
+    assert "target" not in source.lower()
