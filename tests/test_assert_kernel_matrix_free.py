@@ -82,6 +82,31 @@ def test_keops_scalar_apply_matches_torch_apply(torch_kernel, keops_kernel) -> N
     assert torch.allclose(actual, expected, rtol=1e-12, atol=1e-12)
 
 
+@pytest.mark.parametrize(
+    "torch_kernel,keops_kernel",
+    [
+        (
+            KernelScRBF(in_dim=2, lengthscale_init=0.4, dtype=torch.float64),
+            KernelScRBF(in_dim=2, lengthscale_init=0.4, dtype=torch.float64, backend="keops"),
+        ),
+        (
+            KernelScExp(in_dim=2, lengthscale_init=0.6, dtype=torch.float64),
+            KernelScExp(in_dim=2, lengthscale_init=0.6, dtype=torch.float64, backend="keops"),
+        ),
+    ],
+)
+def test_keops_scalar_vector_apply_matches_torch_apply(torch_kernel, keops_kernel) -> None:
+    pytest.importorskip("pykeops")
+    X, Z, values = _points()
+    vector = values[:, 0]
+
+    expected = torch_kernel.apply(X, Z, vector)
+    actual = keops_kernel.apply(X, Z, vector)
+
+    assert actual.shape == expected.shape == (X.shape[0],)
+    assert torch.allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
 def test_keops_scdm_apply_matches_torch_apply() -> None:
     pytest.importorskip("pykeops")
     Xref = torch.tensor(
@@ -101,6 +126,25 @@ def test_keops_scdm_apply_matches_torch_apply() -> None:
     expected = dense.apply(X, Xref, values)
     actual = keops.apply(X, Xref, values)
 
+    assert torch.allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
+def test_keops_scdm_vector_apply_matches_torch_apply() -> None:
+    pytest.importorskip("pykeops")
+    Xref = torch.tensor(
+        [[0.0, 0.0], [0.25, 0.5], [0.5, 0.25], [0.9, 0.1], [1.0, 1.0]],
+        dtype=torch.float64,
+    )
+    vector = torch.linspace(-0.5, 0.7, Xref.shape[0], dtype=torch.float64)
+    dense = KernelScDM(in_dim=2, eps_init=0.2, dtype=torch.float64)
+    keops = KernelScDM(in_dim=2, eps_init=0.2, dtype=torch.float64, backend="keops")
+    dense.set_reference_data(Xref)
+    keops.set_reference_data(Xref)
+
+    expected = dense.apply(Xref[:3], Xref, vector)
+    actual = keops.apply(Xref[:3], Xref, vector)
+
+    assert actual.shape == expected.shape == (3,)
     assert torch.allclose(actual, expected, rtol=1e-12, atol=1e-12)
 
 
@@ -168,8 +212,8 @@ class _ConstantTangentManifold:
     _Nman = 1
 
     def _estimate_tangent(self, X: np.ndarray) -> np.ndarray:
-        basis = np.zeros((X.shape[0], 1, 2), dtype=float)
-        basis[:, 0, 0] = 1.0
+        basis = np.zeros((*X.shape[:-1], 1, 2), dtype=float)
+        basis[..., 0, 0] = 1.0
         return basis
 
 
@@ -188,3 +232,35 @@ def test_tangent_intrinsic_apply_matches_materialized_contraction() -> None:
     expected = torch.einsum("n a m b, m b -> n a", materialized, values)
 
     assert torch.allclose(actual, expected)
+
+
+def test_tangent_apply_preserves_leading_query_batches() -> None:
+    X, Z, _ = _points()
+    batched_X = torch.stack((X, X + torch.tensor([0.03, -0.02], dtype=torch.float64)))
+    intrinsic_values = torch.tensor([[1.0], [0.2], [-0.4], [1.2]], dtype=torch.float64)
+    ambient_values = torch.tensor(
+        [[1.0, -0.5], [0.2, 0.7], [-0.4, 0.3], [1.2, -0.1]], dtype=torch.float64
+    )
+    kernel = KernelOpTangent(
+        KernelScRBF(in_dim=2, lengthscale_init=0.4, dtype=torch.float64),
+        out_dim=2,
+        dtype=torch.float64,
+    )
+    kernel.set_manifold(_ConstantTangentManifold())
+
+    intrinsic, _Tx = kernel.intrinsic_apply(batched_X, Z, intrinsic_values)
+    materialized, _Tx, _Tz = kernel(batched_X, Z)
+    expected_intrinsic = torch.einsum("... n a m b, m b -> ... n a", materialized, intrinsic_values)
+    ambient = kernel.apply(batched_X, Z, ambient_values)
+    expected_ambient = torch.einsum(
+        "... n a m b, m b i, m i -> ... n a",
+        materialized,
+        _Tz,
+        ambient_values,
+    )
+    expected_ambient = torch.einsum("... n a, ... n a i -> ... n i", expected_ambient, _Tx)
+
+    assert intrinsic.shape == expected_intrinsic.shape == (2, X.shape[0], 1)
+    assert ambient.shape == (2, X.shape[0], 2)
+    assert torch.allclose(intrinsic, expected_intrinsic)
+    assert torch.allclose(ambient, expected_ambient)

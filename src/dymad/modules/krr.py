@@ -169,6 +169,56 @@ class KRRBase(nn.Module):
         self._cg_diagnostics = diagnostics
         return solution, diagnostics
 
+    def _load_from_state_dict(
+        self,
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        for name in ("_ridge_unconstrained", "_alphas", "_Xref"):
+            saved = state_dict.get(prefix + name)
+            current = cast(nn.Parameter, getattr(self, name))
+            if saved is not None and current.shape != saved.shape:
+                current.data = torch.empty(saved.shape, dtype=current.dtype, device=current.device)
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+        self._restore_loaded_inference_state()
+
+    def _restore_loaded_inference_state(self) -> None:
+        if self._Xref.ndim != 2 or self._Xref.shape[0] == 0 or self._alphas.numel() == 0:
+            self._solver_used = None
+            return
+
+        self._Ndat = int(self._Xref.shape[0])
+        if self._alphas.ndim == 2:
+            self._Dy = int(self._alphas.shape[-1])
+            materialized_elements = self._Ndat * self._Ndat
+            if isinstance(self.kernel, nn.ModuleList):
+                materialized_elements *= self._Dy
+        else:
+            kernel = cast(KernelAbstract, self.kernel)
+            self._Dy = int(cast(Any, kernel).out_dim)
+            materialized_elements = (self._Ndat * self._Dy) ** 2
+
+        self.X_train = self._Xref
+        self.Y_train = None
+        self._residual = None
+        self._cg_diagnostics = None
+        self._solver_used = (
+            "dense_cholesky" if self._use_dense_solver(materialized_elements) else "matrix_free_cg"
+        )
+
 
 class KRRMultiOutputShared(KRRBase):
     """

@@ -197,3 +197,20 @@ def test_eigenbasis_state_dict_contains_fixed_reference_state() -> None:
     assert "reference_points" in state
     assert "eigenvalues" in state
     assert "kernel._log_ell" in state
+
+
+@pytest.mark.parametrize("kernel_factory", [_kernel, _dm_kernel], ids=("rbf", "dm"))
+def test_eigenbasis_state_dict_round_trip_restores_fixed_basis(kernel_factory) -> None:
+    reference = _reference_points(18)
+    weights = torch.linspace(1.0, 2.0, reference.shape[0], dtype=torch.float64)
+    basis = KernelEigenbasis(kernel_factory(), 3).solve(reference, sample_weights=weights)
+    query = _circle_points(_circle_angles(11, phase=0.13))
+    expected = basis.transform(query)
+
+    restored = KernelEigenbasis(kernel_factory(), 3)
+    restored.load_state_dict(basis.state_dict())
+
+    assert torch.equal(restored.reference_points, basis.reference_points)
+    assert torch.equal(restored.sample_weights, basis.sample_weights)
+    assert torch.equal(restored.eigenvalues, basis.eigenvalues)
+    assert torch.allclose(restored.transform(query), expected, rtol=1e-12, atol=1e-12)

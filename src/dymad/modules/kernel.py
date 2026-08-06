@@ -50,6 +50,9 @@ def _keops_weighted_exp_sum(
     values: torch.Tensor,
     exponent: Any,
 ) -> torch.Tensor:
+    squeeze_result = values.ndim == 1
+    if squeeze_result:
+        values = values[:, None]
     if rows.ndim < 2 or cols.ndim < 2 or values.ndim < 2:
         raise ValueError(
             "KeOps reductions require inputs shaped (..., N, d), (..., M, d), and (..., M, R)."
@@ -69,7 +72,8 @@ def _keops_weighted_exp_sum(
     cols_j = LazyTensor(cols[..., None, :, :])
     values_j = LazyTensor(values[..., None, :, :])
     kernel = exponent(rows_i, cols_j).exp()
-    return cast(torch.Tensor, (kernel * values_j).sum(axis=rows.ndim - 1))
+    result = cast(torch.Tensor, (kernel * values_j).sum(axis=rows.ndim - 1))
+    return result.squeeze(-1) if squeeze_result else result
 
 
 # --------------------
@@ -565,6 +569,31 @@ class KernelScDM(KernelScalarValued):
         W = self._D[..., None] * W * self._D[..., None, :]
         _swap_parameter_storage(self._Dinv1, self._floor_positive(W.sum(dim=-1)) ** (-0.5))
 
+    def _load_from_state_dict(
+        self,
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        for name in ("_Xref", "_D", "_Dinv1", "_q_ref"):
+            saved = state_dict.get(prefix + name)
+            current = cast(nn.Parameter, getattr(self, name))
+            if saved is not None and current.shape != saved.shape:
+                current.data = torch.empty(saved.shape, dtype=current.dtype, device=current.device)
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+
     def _reference_row_sums(self) -> torch.Tensor:
         self._require_reference_data()
         return self._q_ref
@@ -618,6 +647,9 @@ class KernelScDM(KernelScalarValued):
         d_cols: torch.Tensor | None = None,
         s_cols: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        squeeze_result = values.ndim == 1
+        if squeeze_result:
+            values = values[:, None]
         if d_rows is None or s_rows is None:
             d_rows, s_rows = self._uniform_factors(rows)
         if d_cols is None or s_cols is None:
@@ -627,7 +659,8 @@ class KernelScDM(KernelScalarValued):
             summed = self._keops_raw_apply(rows, cols, weighted, eps=self.eps)
         else:
             summed = self._raw_kernel(rows, cols) @ weighted
-        return (d_rows * s_rows)[..., :, None] * summed
+        result = (d_rows * s_rows)[..., :, None] * summed
+        return result.squeeze(-1) if squeeze_result else result
 
     def forward(self, X: torch.Tensor, Z: torch.Tensor | None = None):
         if Z is None:
@@ -815,7 +848,7 @@ class KernelOpTangent(KernelOperatorValued):
 
         _Tx = self._tangent(X)  # (..., d, Dy)
         _Tz = self._tangent(Z)  # (M, d, Dy)
-        out = torch.einsum("... a i, m b i, ... m -> ... a m b", _Tx, _Tz, k)  # (..., d, M, d)
+        out = torch.einsum("... n a i, ... m b i, ... n m -> ... n a m b", _Tx, _Tz, k)
 
         return out, _Tx, _Tz
 
@@ -834,15 +867,15 @@ class KernelOpTangent(KernelOperatorValued):
             Tx = self._tangent(X)
         if Tz is None:
             Tz = self._tangent(Z)
-        ambient_values = torch.einsum("m b i, m b -> m i", Tz, values)
+        ambient_values = torch.einsum("... m b i, ... m b -> ... m i", Tz, values)
         ambient_result = self.scalar_kernel.apply(X, Z, ambient_values)
-        return torch.einsum("n a i, n i -> n a", Tx, ambient_result), Tx
+        return torch.einsum("... n a i, ... n i -> ... n a", Tx, ambient_result), Tx
 
     def apply(self, X: torch.Tensor, Z: torch.Tensor | None, values: torch.Tensor) -> torch.Tensor:
         if Z is None:
             Z = X
         Tx = self._tangent(X)
         Tz = self._tangent(Z)
-        intrinsic_values = torch.einsum("m b i, m i -> m b", Tz, values)
+        intrinsic_values = torch.einsum("... m b i, ... m i -> ... m b", Tz, values)
         intrinsic_result, _ = self.intrinsic_apply(X, Z, intrinsic_values, Tx=Tx, Tz=Tz)
-        return torch.einsum("n a, n a i -> n i", intrinsic_result, Tx)
+        return torch.einsum("... n a, ... n a i -> ... n i", intrinsic_result, Tx)

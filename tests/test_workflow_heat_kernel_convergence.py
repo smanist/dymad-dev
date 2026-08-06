@@ -350,3 +350,15 @@ def test_backend_comparison_plot_uses_direct_difference_arrays(tmp_path: Path) -
     backend_cmp.plot_case("toy", gram_diff, section_diff, output_dir=tmp_path)
 
     assert (tmp_path / "toy_keops_dense_verify.png").stat().st_size > 0
+
+
+def test_backend_comparison_gram_materializes_the_composed_kernel() -> None:
+    reference = backend_cmp.circle_points(12)
+    model = backend_cmp.kernel(reference, backend="torch")
+
+    actual = backend_cmp.gram(model, reference)
+    tensor = model.kernel.reference_points
+    expected = model.kernel.materialize(tensor, tensor).detach().cpu().numpy()
+
+    assert actual.shape == (reference.shape[0], reference.shape[0])
+    assert np.allclose(actual, expected)

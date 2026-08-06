@@ -82,7 +82,7 @@ def kernel(ref: np.ndarray, *, backend: str) -> DiffusionHeatSections:
 
 def gram(model: DiffusionHeatSections, ref: np.ndarray) -> np.ndarray:
     tensor = torch.as_tensor(ref, dtype=torch.float64)
-    return model(tensor, tensor).detach().cpu().numpy()
+    return model.kernel.materialize(tensor, tensor).detach().cpu().numpy()
 
 
 def sections(

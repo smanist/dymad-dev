@@ -512,6 +512,46 @@ def test_scdm_heat_kernel_keeps_section_helpers_private():
     assert not hasattr(kernel, "density_bandwidth_factor")
 
 
+@pytest.mark.parametrize("mode", ["uniform", "density"])
+def test_diffusion_heat_state_dict_round_trip_restores_reference_state(mode: str) -> None:
+    reference = torch.tensor([[0.0], [0.08], [0.23], [0.51], [0.77], [1.0]], dtype=torch.float64)
+    locations = torch.linspace(0.03, 0.97, 5, dtype=torch.float64)[:, None]
+    sources = reference[[1, 4]]
+    original = DiffusionHeatSections(
+        in_dim=1,
+        eps_init=0.06,
+        alpha_init=0.75,
+        dtype=torch.float64,
+        density_bandwidth_factor=1.3,
+    )
+    original.prepare_reference(reference)
+    expected = original.heat_kernel(
+        locations,
+        sources,
+        mode=mode,
+        steps=[1, 2],
+        mass_normalization="none",
+    )
+
+    restored = DiffusionHeatSections(
+        in_dim=1,
+        eps_init=0.06,
+        alpha_init=0.75,
+        dtype=torch.float64,
+        density_bandwidth_factor=1.3,
+    )
+    restored.load_state_dict(original.state_dict())
+    actual = restored.heat_kernel(
+        locations,
+        sources,
+        mode=mode,
+        steps=[1, 2],
+        mass_normalization="none",
+    )
+
+    assert torch.allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
 def _nonuniform_euclidean_reference() -> torch.Tensor:
     return torch.tensor(
         [

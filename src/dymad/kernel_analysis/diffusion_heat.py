@@ -110,6 +110,33 @@ class DiffusionHeatSections(nn.Module):
 
         self.prepare_reference(X_ref)
 
+    def _load_from_state_dict(
+        self,
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict[str, object],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        saved = state_dict.get(prefix + "density_reference_row_sums")
+        if saved is not None and self.density_reference_row_sums.shape != saved.shape:
+            self.density_reference_row_sums = torch.empty(
+                saved.shape,
+                dtype=self.density_reference_row_sums.dtype,
+                device=self.density_reference_row_sums.device,
+            )
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+
     def _require_reference_data(self) -> None:
         if self.density_reference_row_sums.numel() == 0:
             raise RuntimeError("Call prepare_reference before evaluating heat sections.")
