@@ -34,6 +34,7 @@ Maintenance rule:
 | A new checkpoint compatibility behavior | `src/dymad/io/checkpoint.py`, maybe `src/dymad/agent/exec/workflow.py` and facade/store files | Keep the public `dymad.io` behavior accurate even if the executor only plans part of the flow |
 | A new low-level runtime, transform, or batching behavior | `src/dymad/core/*`, `src/dymad/io/*`, `src/dymad/training/*` | Do not route this through `agent/*` unless the boundary contract changes |
 | A new numerical primitive or solver | `src/dymad/numerics/*` | Keep numerics isolated from agent/MCP concerns |
+| Kernel-based analysis over existing scalar kernels | `src/dymad/kernel_analysis/*` | Keep kernels and KRR modules in `modules/*`; compose them for eigensystems, Nyström extension, and heat analysis |
 | A new spectral runtime or adapter behavior | `src/dymad/sako/*`, then registry/executor files if you want it exposed as an analysis workflow | Library behavior first, user-facing exposure second |
 
 ## Follow-Up Guide Sections

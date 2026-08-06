@@ -40,6 +40,8 @@ Use the existing tuning/convergence example as the local pattern:
 
 - `scripts/tuning_convergence/cartesian_high_freq_krr_problem.py`
 - `scripts/tuning_convergence/cartesian_high_freq_krr_cli.py`
+- `scripts/tuning_convergence/cartesian_high_freq_krr_targets.py`
+- `scripts/tuning_convergence/cartesian_high_freq_krr.py`
 - `tests/test_workflow_tuning_convergence_example.py`
 
 ## Stable Contract

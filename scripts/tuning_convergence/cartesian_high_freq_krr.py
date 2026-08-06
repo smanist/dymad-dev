@@ -18,19 +18,15 @@ from dymad.studies.convergence import (  # noqa: E402
 )
 
 # fmt: off
-# TARGET_NAME = "smooth_radial"
 # TARGET_NAME = "laplace_neumann_m2_k2"
-TARGET_NAME = "rbf_eigen_m2_k2"
-if TARGET_NAME == "oscillatory":
-    LEVELS = (512, 1024, 2048, 4096, 8192)
-else:
-    LEVELS = (512, 1024, 2048, 4096)
+TARGET_NAME = "oscillatory"
+LEVELS = (512, 1024, 2048, 4096)
 TRIALS = 5
 N_VAL = 1024
 N_TEST = 4096
 INITIAL_BUDGET = (9, 9)
-REFINEMENT_STRATEGY = "batch_pattern_search"
-REFINEMENT_BUDGET = 64 if REFINEMENT_STRATEGY == "batch_pattern_search" else 20
+REFINEMENT_STRATEGY = "multi_start_nelder_mead"
+REFINEMENT_BUDGET = 64
 TUNING_POLICY = "per_trial"
 SEED = 0
 MAX_WORKERS = 4

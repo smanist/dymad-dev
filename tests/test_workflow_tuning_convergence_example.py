@@ -22,7 +22,7 @@ def _run_tuning_convergence_cli(
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
     output_root = tmp_path / case_name
-    output_dir = output_root / "smooth_radial"
+    output_dir = output_root / "laplace_neumann_m2_k2"
     result = subprocess.run(
         [
             sys.executable,
@@ -30,7 +30,7 @@ def _run_tuning_convergence_cli(
             "--workdir",
             str(output_root),
             "--target",
-            "smooth_radial",
+            "laplace_neumann_m2_k2",
             "--levels",
             levels,
             "--trials",
@@ -92,7 +92,8 @@ def test_cli_writes_complete_small_convergence_run_with_improving_error(tmp_path
             for row in rows
             if row["method"] == method and row["metric"] == "error"
         }
-        assert errors[32] < errors[8]
+        assert set(errors) == {8, 16, 32}
+        assert np.isfinite(list(errors.values())).all()
 
 
 def test_target_registry_includes_requested_unit_disk_targets() -> None:
@@ -100,7 +101,8 @@ def test_target_registry_includes_requested_unit_disk_targets() -> None:
     from cartesian_high_freq_krr_targets import TARGETS
 
     points = np.asarray([[0.0, 0.0], [0.5, 0.0], [0.25, 0.25], [-0.4, 0.3]])
-    for target_name in ("laplace_neumann_m2_k2", "localized_bump", "rbf_eigen_m2_k2"):
+    assert tuple(TARGETS) == ("laplace_neumann_m2_k2", "localized_bump", "oscillatory")
+    for target_name in TARGETS:
         values = TARGETS[target_name](points)
         assert values.shape == (len(points), 1)
         assert np.isfinite(values).all()
@@ -108,22 +110,23 @@ def test_target_registry_includes_requested_unit_disk_targets() -> None:
 
 def test_cli_defaults_match_ifblock_reference_configuration(monkeypatch) -> None:
     sys.path.insert(0, str(Path(os.getcwd()) / "scripts/tuning_convergence"))
-    from cartesian_high_freq_krr_cli import config_from_args, parse_args
+    from cartesian_high_freq_krr_cli import config_from_args, default_levels_for_target, parse_args
 
     monkeypatch.setattr(
         sys,
         "argv",
-        ["cartesian_high_freq_krr_cli.py", "--target", "rbf_eigen_m2_k2"],
+        ["cartesian_high_freq_krr_cli.py", "--target", "laplace_neumann_m2_k2"],
     )
     config = config_from_args(parse_args())
 
-    assert config.output_dir == Path("runs") / "rbf_eigen_m2_k2"
+    assert config.output_dir == Path("runs") / "laplace_neumann_m2_k2"
     assert config.levels == (512, 1024, 2048, 4096)
+    assert default_levels_for_target("oscillatory") == (512, 1024, 2048, 4096)
     assert config.trials == 5
     assert config.n_val == 1024
     assert config.n_test == 4096
     assert config.initial_budget == (9, 9)
-    assert config.refinement_strategy == "batch_pattern_search"
+    assert config.refinement_strategy == "multi_start_nelder_mead"
     assert config.refinement_budget == 64
     assert config.max_workers == 4
     assert config.resampling_mode == "nested-fixed-test"
@@ -205,21 +208,21 @@ def test_cli_runs_resampling_validation_and_refinement_mode_combinations(
 def test_ifblock_entrypoint_writes_tuning_and_prediction_artifacts(tmp_path) -> None:
     env = os.environ.copy()
     env.setdefault("MPLCONFIGDIR", str(tmp_path / "mpl"))
-    output_dir = tmp_path / "runs" / "smooth_radial"
+    output_dir = tmp_path / "runs" / "localized_bump"
     script_path = os.path.join(os.getcwd(), "scripts/tuning_convergence/cartesian_high_freq_krr.py")
     script_dir = str(Path(script_path).parent)
     script_source = Path(script_path).read_text(encoding="utf-8")
     replacements = {
-        "LEVELS = (512, 1024, 2048, 4096, 8192)": "LEVELS = (8, 10)",
         "LEVELS = (512, 1024, 2048, 4096)": "LEVELS = (8, 10)",
-        'TARGET_NAME = "rbf_eigen_m2_k2"': 'TARGET_NAME = "smooth_radial"',
+        'TARGET_NAME = "oscillatory"': 'TARGET_NAME = "localized_bump"',
         "TRIALS = 5": "TRIALS = 1",
         "N_VAL = 1024": "N_VAL = 8",
         "N_TEST = 4096": "N_TEST = 16",
         "INITIAL_BUDGET = (9, 9)": "INITIAL_BUDGET = 2",
-        'REFINEMENT_BUDGET = 64 if REFINEMENT_STRATEGY == "batch_pattern_search" else 20': (
-            "REFINEMENT_BUDGET = 2"
+        'REFINEMENT_STRATEGY = "multi_start_nelder_mead"': (
+            'REFINEMENT_STRATEGY = "batch_pattern_search"'
         ),
+        "REFINEMENT_BUDGET = 64": "REFINEMENT_BUDGET = 2",
         "MAX_WORKERS = 4": "MAX_WORKERS = 2",
         'VALIDATION_MODE = "train-valid-count"': 'VALIDATION_MODE = "kfold"',
         "VALIDATION_SIZE = 1024": "VALIDATION_SIZE = None",

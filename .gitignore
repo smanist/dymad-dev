@@ -8,6 +8,8 @@
 **/*.pt
 **/dev.ipynb
 build/
+runs/
+output/
 src/dymad.egg-info/
 docs/_build
 docs/api
@@ -18,10 +20,16 @@ examples/**/*_tuning
 scripts/**/*.npz
 scripts/**/*.pkl
 scripts/**/*_tuning
-scripts/tuning_convergence/runs
+scripts/**/runs
+scripts/**/temp
+scripts/tuning_convergence/*_reports/
 scripts/tuning_convergence/**/context_results/
 scripts/tuning_convergence/**/median_predictions/
 scripts/tuning_convergence/**/tuning/
+scripts/krr_convergence/reports/
+scripts/krr_convergence/**/context_results/
+scripts/krr_convergence/**/median_predictions/
+scripts/krr_convergence/**/tuning/
 tests/ker_model/*.npz
 tests/ker_model/*/*.npz
 tests/results/*.npz

@@ -37,6 +37,7 @@ Maintenance rule:
 | `src/dymad/io` | checkpoint loading, trajectory/data managers, legacy public runtime entrypoints |
 | `src/dymad/core` | typed runtime/series/transform building blocks |
 | `src/dymad/numerics` | math and linear-algebra utilities |
+| `src/dymad/kernel_analysis` | kernel eigensystems, Nyström interpolation, and diffusion-kernel heat analysis |
 | `src/dymad/sako` | spectral analysis runtime and adapters |
 
 ## Layer Stack

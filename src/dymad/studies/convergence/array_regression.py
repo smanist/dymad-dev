@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from dymad.io import Split
+from dymad.core.transform_module import TransformModule
+from dymad.io import Split, TransformSpec
 from dymad.studies.convergence.core import (
     ConvergenceEvaluationContext,
     ConvergenceStudyResult,
@@ -42,6 +44,8 @@ class ArrayRegressionProblem:
     metrics: tuple[str, ...]
     primary_metric: str
     prediction_plotter: Callable[[MedianPlotContext, Split], None] | None = None
+    x_transform: TransformSpec = "std"
+    y_transform: TransformSpec = "std"
 
     def split_from_arrays(
         self,
@@ -57,6 +61,8 @@ class ArrayRegressionProblem:
             y_val=self.target(x_val),
             x_test=x_test,
             y_test=self.target(x_test),
+            x_transform=_copy_transform_spec(self.x_transform),
+            y_transform=_copy_transform_spec(self.y_transform),
         )
 
     def make_split(self, n_train: int, n_val: int, n_test: int, seed: int) -> Split:
@@ -102,6 +108,12 @@ class NestedArraySamples:
             x_val=x_train[:1],
             x_test=self.x_test,
         )
+
+
+def _copy_transform_spec(transform: TransformSpec) -> TransformSpec:
+    if isinstance(transform, TransformModule):
+        return deepcopy(transform)
+    return transform
 
 
 @dataclass(frozen=True)

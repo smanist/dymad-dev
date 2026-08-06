@@ -5,6 +5,7 @@ from dymad.numerics.gradients import central_diff, complex_step, torch_jacobian
 from dymad.numerics.linalg import (
     check_direction,
     check_orthogonality,
+    conjugate_gradient_spd,
     eig_low_rank,
     expm_full_rank,
     expm_low_rank,
@@ -33,6 +34,7 @@ __all__ = [
     "central_diff",
     "check_direction",
     "check_orthogonality",
+    "conjugate_gradient_spd",
     "complex_grid",
     "complex_map",
     "complex_plot",

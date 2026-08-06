@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import torch
@@ -9,6 +9,9 @@ import torch.nn.functional as F
 
 from dymad.modules.helpers import _swap_parameter_storage
 from dymad.modules.kernel import KernelAbstract, KernelOpTangent, inv_softplus
+from dymad.numerics import conjugate_gradient_spd
+
+KRRSolver = Literal["dense_cholesky", "matrix_free_cg", "auto"]
 
 
 class KRRBase(nn.Module):
@@ -31,6 +34,11 @@ class KRRBase(nn.Module):
         ridge_init: float | list[float] = 0,
         jitter: float = 0.0,
         device: torch.device | str | None = None,
+        solver: KRRSolver = "dense_cholesky",
+        cg_rtol: float = 1.0e-10,
+        cg_atol: float = 0.0,
+        cg_max_iter: int = 1000,
+        dense_threshold: int = 16_000_000,
     ):
         super().__init__()
         self.kernel: KernelAbstract | nn.ModuleList = kernel
@@ -42,6 +50,15 @@ class KRRBase(nn.Module):
 
         self.ridge_init: float | list[float] = ridge_init
         self.jitter = float(jitter)
+        if solver not in {"dense_cholesky", "matrix_free_cg", "auto"}:
+            raise ValueError("solver must be 'dense_cholesky', 'matrix_free_cg', or 'auto'.")
+        self.solver: KRRSolver = solver
+        self.cg_rtol = float(cg_rtol)
+        self.cg_atol = float(cg_atol)
+        self.cg_max_iter = int(cg_max_iter)
+        self.dense_threshold = int(dense_threshold)
+        self._solver_used: str | None = None
+        self._cg_diagnostics: dict[str, Any] | None = None
 
         # Train data & caches
         self.X_train: torch.Tensor | None = None
@@ -125,38 +142,88 @@ class KRRBase(nn.Module):
     def _predict_from_solution(self, Xnew: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError("This is the base class.")
 
-    def _single_kernel(self) -> KernelAbstract:
-        if isinstance(self.kernel, nn.ModuleList):
-            raise TypeError("kernel_sections requires a single kernel, not a ModuleList.")
-        return self.kernel
-
     def _require_reference_data(self) -> None:
         if self._Xref.numel() == 0:
             raise RuntimeError("Call set_reference_data or set_train_data before this operation.")
 
-    def kernel_sections(self, Xnew: torch.Tensor, *, mode: str = "kernel") -> torch.Tensor:
-        self._require_reference_data()
-        kernel = self._single_kernel()
-        X = torch.as_tensor(Xnew, dtype=self.dtype, device=self.device)
-        mode_key = mode.lower()
-        if mode_key == "kernel":
-            return kernel(X, self._Xref)
-        if mode_key == "markov":
-            if not hasattr(kernel, "markov_sections"):
-                raise TypeError("Kernel does not provide markov_sections.")
-            return cast(Any, kernel).markov_sections(X)
-        if mode_key == "density":
-            if not hasattr(kernel, "density_sections"):
-                raise TypeError("Kernel does not provide density_sections.")
-            return cast(Any, kernel).density_sections(X)
-        raise ValueError("mode must be one of 'kernel', 'markov', or 'density'.")
+    def _use_dense_solver(self, materialized_elements: int) -> bool:
+        if self.solver == "dense_cholesky":
+            return True
+        if self.solver == "matrix_free_cg":
+            return False
+        return materialized_elements <= self.dense_threshold
 
-    def reference_weights(self) -> torch.Tensor:
-        self._require_reference_data()
-        kernel = self._single_kernel()
-        if not hasattr(kernel, "volume_weights"):
-            raise TypeError("Kernel does not provide volume_weights.")
-        return cast(Any, kernel).volume_weights()
+    def _solve_cg(self, matvec: Any, rhs: torch.Tensor) -> tuple[torch.Tensor, dict[str, Any]]:
+        solution, diagnostics = conjugate_gradient_spd(
+            matvec,
+            rhs,
+            rtol=self.cg_rtol,
+            atol=self.cg_atol,
+            max_iter=self.cg_max_iter,
+        )
+        if not diagnostics["converged"]:
+            raise RuntimeError(
+                "Matrix-free KRR CG solve did not converge "
+                f"after {diagnostics['iterations']} iterations "
+                f"(residual={diagnostics['residual_norm']:.3e}, "
+                f"threshold={diagnostics['threshold']:.3e})."
+            )
+        self._cg_diagnostics = diagnostics
+        return solution, diagnostics
+
+    def _load_from_state_dict(
+        self,
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        for name in ("_ridge_unconstrained", "_alphas", "_Xref"):
+            saved = state_dict.get(prefix + name)
+            current = cast(nn.Parameter, getattr(self, name))
+            if saved is not None and current.shape != saved.shape:
+                current.data = torch.empty(saved.shape, dtype=current.dtype, device=current.device)
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+        self._restore_loaded_inference_state()
+
+    def _restore_loaded_inference_state(self) -> None:
+        if self._Xref.ndim != 2 or self._Xref.shape[0] == 0 or self._alphas.numel() == 0:
+            self._solver_used = None
+            return
+
+        self._Ndat = int(self._Xref.shape[0])
+        if self._alphas.ndim == 2:
+            self._Dy = int(self._alphas.shape[-1])
+            materialized_elements = self._Ndat * self._Ndat
+            if isinstance(self.kernel, nn.ModuleList):
+                materialized_elements *= self._Dy
+        else:
+            kernel = cast(KernelAbstract, self.kernel)
+            self._Dy = int(cast(Any, kernel).out_dim)
+            materialized_elements = (self._Ndat * self._Dy) ** 2
+
+        # Keep the restored training inputs as ordinary runtime state. Assigning
+        # the ``Parameter`` itself would register ``X_train`` as a new parameter,
+        # so a second strict state-dict load would incorrectly require an
+        # ``X_train`` key that was absent from the original checkpoint.
+        self.X_train = self._Xref.detach()
+        self.Y_train = None
+        self._residual = None
+        self._cg_diagnostics = None
+        self._solver_used = (
+            "dense_cholesky" if self._use_dense_solver(materialized_elements) else "matrix_free_cg"
+        )
 
 
 class KRRMultiOutputShared(KRRBase):
@@ -172,10 +239,25 @@ class KRRMultiOutputShared(KRRBase):
         ridge_init: float = 0,
         jitter: float = 0.0,
         device: torch.device | str | None = None,
+        solver: KRRSolver = "dense_cholesky",
+        cg_rtol: float = 1.0e-10,
+        cg_atol: float = 0.0,
+        cg_max_iter: int = 1000,
+        dense_threshold: int = 16_000_000,
     ):
         assert not kernel.is_operator_valued, "kernel should be scalar-valued."
 
-        super().__init__(kernel, ridge_init=ridge_init, jitter=jitter, device=device)
+        super().__init__(
+            kernel,
+            ridge_init=ridge_init,
+            jitter=jitter,
+            device=device,
+            solver=solver,
+            cg_rtol=cg_rtol,
+            cg_atol=cg_atol,
+            cg_max_iter=cg_max_iter,
+            dense_threshold=dense_threshold,
+        )
 
         self._ridge_unconstrained = nn.Parameter(
             inv_softplus(ridge_init, self.dtype, device=self.device)
@@ -204,16 +286,31 @@ class KRRMultiOutputShared(KRRBase):
         assert self.X_train is not None and self.Y_train is not None, "Call set_train_data first."
 
         X, Y = self.X_train, self.Y_train
+        if not self._use_dense_solver(self._Ndat * self._Ndat):
+            ridge = self.ridge + self.jitter
+
+            def matvec(values: torch.Tensor) -> torch.Tensor:
+                return cast(KernelAbstract, self.kernel).apply(X, X, values) + ridge * values
+
+            A, _diagnostics = self._solve_cg(matvec, Y)
+            self._alphas.data.copy_(A)
+            self._solver_used = "matrix_free_cg"
+            self._residual = self._comp_residual()
+            return self._residual
+
         Kxx = cast(KernelAbstract, self.kernel)(X, None)  # (N,N)
         I = torch.eye(self._Ndat, dtype=self.dtype, device=self.device)
         L = torch.linalg.cholesky(Kxx + (self.ridge + self.jitter) * I)
         A = torch.cholesky_solve(Y, L)  # (N,Dy)
         self._alphas.data.copy_(A)
 
+        self._solver_used = "dense_cholesky"
         self._residual = self._comp_residual()
         return self._residual
 
     def _predict_from_solution(self, Xnew: torch.Tensor):
+        if self._solver_used == "matrix_free_cg":
+            return cast(KernelAbstract, self.kernel).apply(Xnew, self._Xref, self._alphas)
         Kxz = cast(KernelAbstract, self.kernel)(Xnew, self._Xref)  # (M,N)
         return Kxz @ self._alphas  # (M,Dy)
 
@@ -232,6 +329,11 @@ class KRRMultiOutputIndep(KRRBase):
         ridge_init: float | list[float] = 0,
         jitter: float = 0.0,
         device: torch.device | str | None = None,
+        solver: KRRSolver = "dense_cholesky",
+        cg_rtol: float = 1.0e-10,
+        cg_atol: float = 0.0,
+        cg_max_iter: int = 1000,
+        dense_threshold: int = 16_000_000,
     ):
         assert isinstance(kernel, nn.ModuleList), "kernel should be a ModuleList of kernels."
         for _k in kernel:
@@ -239,7 +341,17 @@ class KRRMultiOutputIndep(KRRBase):
                 "kernel should be scalar-valued."
             )
 
-        super().__init__(kernel, ridge_init=ridge_init, jitter=jitter, device=device)
+        super().__init__(
+            kernel,
+            ridge_init=ridge_init,
+            jitter=jitter,
+            device=device,
+            solver=solver,
+            cg_rtol=cg_rtol,
+            cg_atol=cg_atol,
+            cg_max_iter=cg_max_iter,
+            dense_threshold=dense_threshold,
+        )
 
     def __repr__(self) -> str:
         _r = self.ridge_init if self.X_train is None else self.ridge
@@ -281,7 +393,22 @@ class KRRMultiOutputIndep(KRRBase):
 
         X, Y = self.X_train, self.Y_train
         assert isinstance(self.kernel, nn.ModuleList) and len(self.kernel) == self._Dy
+        kernels = cast(nn.ModuleList, self.kernel)
         A = torch.empty_like(Y)
+        if not self._use_dense_solver(self._Dy * self._Ndat * self._Ndat):
+            for d in range(self._Dy):
+                ridge = self.ridge[d] + self.jitter
+
+                def matvec(values: torch.Tensor, d: int = d) -> torch.Tensor:
+                    return cast(KernelAbstract, kernels[d]).apply(X, X, values) + ridge * values
+
+                solution, _diagnostics = self._solve_cg(matvec, Y[:, d : d + 1])
+                A[:, d] = solution.squeeze(-1)
+            self._alphas.data.copy_(A)
+            self._solver_used = "matrix_free_cg"
+            self._residual = self._comp_residual()
+            return self._residual
+
         I = torch.eye(self._Ndat, dtype=self.dtype, device=X.device)
         unsolved = list(range(self._Dy))
         while unsolved:
@@ -289,15 +416,14 @@ class KRRMultiOutputIndep(KRRBase):
             # the output dimension while identical systems still share a factorization.
             first, *candidates = unsolved
             first_system = (
-                cast(KernelAbstract, self.kernel[first])(X, None)
+                cast(KernelAbstract, kernels[first])(X, None)
                 + (self.ridge[first] + self.jitter) * I
             )
             matching = [first]
             remaining = []
             for d in candidates:
                 candidate_system = (
-                    cast(KernelAbstract, self.kernel[d])(X, None)
-                    + (self.ridge[d] + self.jitter) * I
+                    cast(KernelAbstract, kernels[d])(X, None) + (self.ridge[d] + self.jitter) * I
                 )
                 if torch.equal(candidate_system, first_system):
                     matching.append(d)
@@ -309,17 +435,26 @@ class KRRMultiOutputIndep(KRRBase):
             unsolved = remaining
         self._alphas.data.copy_(A)
 
+        self._solver_used = "dense_cholesky"
         self._residual = self._comp_residual()
         return self._residual
 
     def _predict_from_solution(self, Xnew: torch.Tensor):
         M = Xnew.shape[:-1]
         assert isinstance(self.kernel, nn.ModuleList)
-        D = len(self.kernel)
+        kernels = cast(nn.ModuleList, self.kernel)
+        D = len(kernels)
         Yhat = torch.empty((*M, D), dtype=self.dtype, device=Xnew.device)
         for d in range(D):
-            Kxz = cast(KernelAbstract, self.kernel[d])(Xnew, self._Xref)
-            Yhat[..., d] = Kxz @ self._alphas[:, d]
+            if self._solver_used == "matrix_free_cg":
+                Yhat[..., d] = (
+                    cast(KernelAbstract, kernels[d])
+                    .apply(Xnew, self._Xref, self._alphas[:, d : d + 1])
+                    .squeeze(-1)
+                )
+            else:
+                Kxz = cast(KernelAbstract, kernels[d])(Xnew, self._Xref)
+                Yhat[..., d] = Kxz @ self._alphas[:, d]
         return Yhat
 
 
@@ -336,10 +471,25 @@ class KRROperatorValued(KRRBase):
         ridge_init: float = 0,
         jitter: float = 0.0,
         device: torch.device | str | None = None,
+        solver: KRRSolver = "dense_cholesky",
+        cg_rtol: float = 1.0e-10,
+        cg_atol: float = 0.0,
+        cg_max_iter: int = 1000,
+        dense_threshold: int = 16_000_000,
     ):
         assert kernel.is_operator_valued, "kernel must be operator-valued."
 
-        super().__init__(kernel, ridge_init=ridge_init, jitter=jitter, device=device)
+        super().__init__(
+            kernel,
+            ridge_init=ridge_init,
+            jitter=jitter,
+            device=device,
+            solver=solver,
+            cg_rtol=cg_rtol,
+            cg_atol=cg_atol,
+            cg_max_iter=cg_max_iter,
+            dense_threshold=dense_threshold,
+        )
 
         self._ridge_unconstrained = nn.Parameter(
             inv_softplus(ridge_init, self.dtype, device=self.device)
@@ -366,6 +516,20 @@ class KRROperatorValued(KRRBase):
 
         X, Y = self.X_train, self.Y_train
 
+        if not self._use_dense_solver((self._Ndat * self._Dy) ** 2):
+            ridge = self.ridge + self.jitter
+
+            def matvec(flat_values: torch.Tensor) -> torch.Tensor:
+                values = flat_values.reshape(self._Ndat, self._Dy)
+                applied = cast(KernelAbstract, self.kernel).apply(X, X, values)
+                return (applied + ridge * values).reshape(-1, 1)
+
+            _tmp, _diagnostics = self._solve_cg(matvec, Y.reshape(-1, 1))
+            self._alphas.data.copy_(_tmp.squeeze(-1))
+            self._solver_used = "matrix_free_cg"
+            self._residual = self._comp_residual()
+            return self._residual
+
         Kxx = cast(KernelAbstract, self.kernel)(X, None)  # (N,N,Dy,Dy)
         Kflat = Kxx.reshape(self._Ndat * self._Dy, self._Ndat * self._Dy)
         A = Kflat + self.ridge * torch.eye(
@@ -377,10 +541,15 @@ class KRROperatorValued(KRRBase):
         _tmp = torch.cholesky_solve(Y.reshape(-1, 1), L).squeeze(-1)  # (N*Dy,)
         self._alphas.data.copy_(_tmp)
 
+        self._solver_used = "dense_cholesky"
         self._residual = self._comp_residual()
         return self._residual
 
     def _predict_from_solution(self, Xnew: torch.Tensor):
+        if self._solver_used == "matrix_free_cg":
+            return cast(KernelAbstract, self.kernel).apply(
+                Xnew, self._Xref, self._alphas.reshape(self._Ndat, self._Dy)
+            )
         dim = Xnew.shape[:-2]
         Kxz = cast(KernelAbstract, self.kernel)(Xnew, self._Xref)  # (...,M,Dy,N,Dy)
         M, D, N, _ = Kxz.shape[-4:]
@@ -409,10 +578,25 @@ class KRRTangent(KRRBase):
         ridge_init: float = 0,
         jitter: float = 0.0,
         device: torch.device | str | None = None,
+        solver: KRRSolver = "dense_cholesky",
+        cg_rtol: float = 1.0e-10,
+        cg_atol: float = 0.0,
+        cg_max_iter: int = 1000,
+        dense_threshold: int = 16_000_000,
     ):
         assert isinstance(kernel, KernelOpTangent), "kernel must be KernelOpTangent."
 
-        super().__init__(kernel, ridge_init=ridge_init, jitter=jitter, device=device)
+        super().__init__(
+            kernel,
+            ridge_init=ridge_init,
+            jitter=jitter,
+            device=device,
+            solver=solver,
+            cg_rtol=cg_rtol,
+            cg_atol=cg_atol,
+            cg_max_iter=cg_max_iter,
+            dense_threshold=dense_threshold,
+        )
 
         self._ridge_unconstrained = nn.Parameter(
             inv_softplus(ridge_init, self.dtype, device=self.device)
@@ -445,6 +629,25 @@ class KRRTangent(KRRBase):
 
         X, Y = self.X_train, self.Y_train
 
+        if not self._use_dense_solver(self._Ndat * self._Ndat * self._Dy * self._Dy):
+            Tx = cast(KernelOpTangent, self.kernel)._tangent(X)
+            _Y = torch.matmul(Tx, Y[..., None]).squeeze(-1)
+            _d = _Y.shape[-1]
+            ridge = self.ridge + self.jitter
+
+            def matvec(flat_values: torch.Tensor) -> torch.Tensor:
+                values = flat_values.reshape(self._Ndat, _d)
+                applied, _ = cast(KernelOpTangent, self.kernel).intrinsic_apply(
+                    X, X, values, Tx=Tx, Tz=Tx
+                )
+                return (applied + ridge * values).reshape(-1, 1)
+
+            _tmp, _diagnostics = self._solve_cg(matvec, _Y.reshape(-1, 1))
+            self._alphas.data.copy_(_tmp.squeeze(-1))
+            self._solver_used = "matrix_free_cg"
+            self._residual = self._comp_residual()
+            return self._residual
+
         Kxx, Tx, _ = cast(KernelOpTangent, self.kernel)(X, None)  # (N,N,d,d), (N,d,Dy)
         _Y = torch.matmul(Tx, Y[..., None]).squeeze(-1)  # (N,d), the effective targets
         _d = _Y.shape[-1]
@@ -457,10 +660,19 @@ class KRRTangent(KRRBase):
         _tmp = torch.cholesky_solve(_Y.reshape(-1, 1), L).squeeze(-1)  # (N*d,)
         self._alphas.data.copy_(_tmp)
 
+        self._solver_used = "dense_cholesky"
         self._residual = self._comp_residual()
         return self._residual
 
     def _predict_from_solution(self, Xnew: torch.Tensor):
+        if self._solver_used == "matrix_free_cg":
+            Tx = cast(KernelOpTangent, self.kernel)._tangent(Xnew)
+            Tz = cast(KernelOpTangent, self.kernel)._tangent(self._Xref)
+            _d = Tz.shape[-2]
+            intrinsic, Tx = cast(KernelOpTangent, self.kernel).intrinsic_apply(
+                Xnew, self._Xref, self._alphas.reshape(self._Ndat, _d), Tx=Tx, Tz=Tz
+            )
+            return torch.matmul(intrinsic[..., None, :], Tx).squeeze(-2)
         dim = Xnew.shape[:-2]
         Kxz, Tx, _ = cast(KernelOpTangent, self.kernel)(
             Xnew, self._Xref

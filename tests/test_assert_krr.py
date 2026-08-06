@@ -177,6 +177,102 @@ def test_krr():
     assert np.linalg.norm(prds[0] - prds[4]) < 1e-7
 
 
+@pytest.mark.parametrize("opt", [opt_share, opt_indp1, opt_opva2])
+def test_matrix_free_krr_matches_dense_predictions(opt):
+    dense_cfg = copy.deepcopy(opt)
+    dense_cfg["ridge_init"] = 1e-6
+    matrix_free_cfg = copy.deepcopy(dense_cfg)
+
+    dense = make_krr(**dense_cfg, solver="dense_cholesky")
+    matrix_free = make_krr(
+        **matrix_free_cfg,
+        solver="matrix_free_cg",
+        cg_rtol=1e-12,
+        cg_max_iter=500,
+    )
+    dense.set_train_data(Xtrn, Ytrn)
+    matrix_free.set_train_data(Xtrn, Ytrn)
+
+    dense.fit()
+    matrix_free.fit()
+    with torch.no_grad():
+        dense_pred = dense(torch.as_tensor(Xtst, dtype=torch.float64))
+        matrix_free_pred = matrix_free(torch.as_tensor(Xtst, dtype=torch.float64))
+
+    assert matrix_free._cg_diagnostics is not None
+    assert matrix_free._cg_diagnostics["converged"]
+    assert torch.allclose(matrix_free_pred, dense_pred, rtol=1e-7, atol=1e-8)
+
+
+@pytest.mark.parametrize("opt", [opt_share, opt_indp1, opt_opva2])
+def test_matrix_free_krr_state_dict_round_trip_restores_inference_path(opt):
+    cfg = {**copy.deepcopy(opt), "ridge_init": 1e-6}
+    trained = make_krr(
+        **cfg,
+        solver="matrix_free_cg",
+        cg_rtol=1e-12,
+        cg_max_iter=500,
+    )
+    trained.set_train_data(Xtrn, Ytrn)
+    trained.fit()
+    query = torch.as_tensor(Xtst[:31], dtype=torch.float64)
+    expected = trained(query)
+
+    restored = make_krr(
+        **cfg,
+        solver="matrix_free_cg",
+        cg_rtol=1e-12,
+        cg_max_iter=500,
+    )
+    restored.load_state_dict(trained.state_dict())
+    actual = restored(query)
+
+    assert restored._solver_used == "matrix_free_cg"
+    assert restored._Ndat == Xtrn.shape[0]
+    assert restored._Dy == Ytrn.shape[1]
+    assert "X_train" not in restored.state_dict()
+    restored.load_state_dict(trained.state_dict())
+    assert torch.allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
+def test_auto_krr_state_dict_round_trip_recomputes_matrix_free_inference_path() -> None:
+    cfg = {**copy.deepcopy(opt_share), "ridge_init": 1e-6}
+    trained = make_krr(
+        **cfg,
+        solver="auto",
+        dense_threshold=1,
+        cg_rtol=1e-12,
+        cg_max_iter=500,
+    )
+    trained.set_train_data(Xtrn, Ytrn)
+    trained.fit()
+
+    restored = make_krr(
+        **cfg,
+        solver="auto",
+        dense_threshold=1,
+        cg_rtol=1e-12,
+        cg_max_iter=500,
+    )
+    restored.load_state_dict(trained.state_dict())
+
+    assert trained._solver_used == "matrix_free_cg"
+    assert restored._solver_used == "matrix_free_cg"
+
+
+def test_matrix_free_krr_reports_cg_non_convergence():
+    model = make_krr(
+        **{**opt_share, "ridge_init": 1e-6},
+        solver="matrix_free_cg",
+        cg_max_iter=1,
+        cg_rtol=1e-16,
+    )
+    model.set_train_data(Xtrn, Ytrn)
+
+    with pytest.raises(RuntimeError, match="CG solve did not converge"):
+        model.fit()
+
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 

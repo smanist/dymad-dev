@@ -16,6 +16,7 @@ from dymad.modules.krr import (
     KRRMultiOutputIndep,
     KRRMultiOutputShared,
     KRROperatorValued,
+    KRRSolver,
     KRRTangent,
 )
 from dymad.modules.misc import TakeFirst, TakeFirstGraph
@@ -301,6 +302,11 @@ def make_krr(
     jitter=0.0,
     dtype=None,
     device=None,
+    solver: KRRSolver = "dense_cholesky",
+    cg_rtol: float = 1.0e-10,
+    cg_atol: float = 0.0,
+    cg_max_iter: int = 1000,
+    dense_threshold: int = 16_000_000,
 ) -> nn.Module:
     """
     Factory function to create preset Kernel Ridge Regression (KRR) models. Including:
@@ -354,17 +360,41 @@ def make_krr(
         if len(k_modules) != 1:
             raise ValueError("Shared KRR expects exactly one kernel configuration.")
         return KRRMultiOutputShared(
-            kernel=k_modules[0], ridge_init=ridge_init, jitter=jitter, device=device
+            kernel=k_modules[0],
+            ridge_init=ridge_init,
+            jitter=jitter,
+            device=device,
+            solver=solver,
+            cg_rtol=cg_rtol,
+            cg_atol=cg_atol,
+            cg_max_iter=cg_max_iter,
+            dense_threshold=dense_threshold,
         )
     elif _type == "indep":
         return KRRMultiOutputIndep(
-            kernel=nn.ModuleList(k_modules), ridge_init=ridge_init, jitter=jitter, device=device
+            kernel=nn.ModuleList(k_modules),
+            ridge_init=ridge_init,
+            jitter=jitter,
+            device=device,
+            solver=solver,
+            cg_rtol=cg_rtol,
+            cg_atol=cg_atol,
+            cg_max_iter=cg_max_iter,
+            dense_threshold=dense_threshold,
         )
     elif _type == "opval":
         if len(k_modules) != 1:
             raise ValueError("Operator-valued KRR expects exactly one kernel configuration.")
         return KRROperatorValued(
-            kernel=k_modules[0], ridge_init=ridge_init, jitter=jitter, device=device
+            kernel=k_modules[0],
+            ridge_init=ridge_init,
+            jitter=jitter,
+            device=device,
+            solver=solver,
+            cg_rtol=cg_rtol,
+            cg_atol=cg_atol,
+            cg_max_iter=cg_max_iter,
+            dense_threshold=dense_threshold,
         )
     elif _type == "tangent":
         if len(k_modules) != 1:
@@ -374,6 +404,11 @@ def make_krr(
             ridge_init=ridge_init,
             jitter=jitter,
             device=device,
+            solver=solver,
+            cg_rtol=cg_rtol,
+            cg_atol=cg_atol,
+            cg_max_iter=cg_max_iter,
+            dense_threshold=dense_threshold,
         )
     else:
         raise ValueError(f"Unknown KRR type '{type}'.")

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any, cast
+from functools import cache
+from pathlib import Path
+from typing import Any, Literal, cast
 
 import numpy as np
 import torch
@@ -14,6 +18,62 @@ from dymad.modules.helpers import _swap_parameter_storage
 from dymad.numerics import DimensionEstimator
 
 logger = logging.getLogger(__name__)
+
+KernelBackend = Literal["torch", "keops"]
+_KEOPS_CACHE = Path(tempfile.gettempdir()) / "dymad_keops_cache"
+
+
+def _validate_backend(backend: str) -> KernelBackend:
+    if backend not in {"torch", "keops"}:
+        raise ValueError("backend must be either 'torch' or 'keops'.")
+    return cast(KernelBackend, backend)
+
+
+@cache
+def _lazy_tensor_cls() -> Any:
+    _KEOPS_CACHE.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("KEOPS_CACHE_FOLDER", str(_KEOPS_CACHE))
+    os.environ.setdefault("PYKEOPS_CACHE_FOLDER", str(_KEOPS_CACHE))
+    try:
+        from pykeops.torch import LazyTensor
+    except ImportError as exc:
+        raise ImportError(
+            "PyKeOps is required for backend='keops'. Install DyMAD with the "
+            "'keops' extra or install pykeops."
+        ) from exc
+    return LazyTensor
+
+
+def _keops_weighted_exp_sum(
+    rows: torch.Tensor,
+    cols: torch.Tensor,
+    values: torch.Tensor,
+    exponent: Any,
+) -> torch.Tensor:
+    squeeze_result = values.ndim == 1
+    if squeeze_result:
+        values = values[:, None]
+    if rows.ndim < 2 or cols.ndim < 2 or values.ndim < 2:
+        raise ValueError(
+            "KeOps reductions require inputs shaped (..., N, d), (..., M, d), and (..., M, R)."
+        )
+    if rows.shape[-1] != cols.shape[-1]:
+        raise ValueError("KeOps reduction row and column point dimensions must match.")
+    if values.shape[-2] != cols.shape[-2]:
+        raise ValueError("KeOps reduction values must have the same column count as cols.")
+
+    batch_shape = torch.broadcast_shapes(rows.shape[:-2], cols.shape[:-2], values.shape[:-2])
+    rows = rows.expand(*batch_shape, *rows.shape[-2:])
+    cols = cols.expand(*batch_shape, *cols.shape[-2:])
+    values = values.expand(*batch_shape, *values.shape[-2:])
+
+    LazyTensor = _lazy_tensor_cls()
+    rows_i = LazyTensor(rows[..., :, None, :])
+    cols_j = LazyTensor(cols[..., None, :, :])
+    values_j = LazyTensor(values[..., None, :, :])
+    kernel = exponent(rows_i, cols_j).exp()
+    result = cast(torch.Tensor, (kernel * values_j).sum(axis=rows.ndim - 1))
+    return result.squeeze(-1) if squeeze_result else result
 
 
 # --------------------
@@ -94,6 +154,28 @@ class KernelAbstract(nn.Module, ABC):
         """
         pass
 
+    def require_fixed_parameters(self) -> None:
+        """Raise when analysis would need to initialize kernel parameters.
+
+        Generic kernels are assumed to be fully configured. Kernels with
+        optional data-driven initialization override this hook so analysis
+        objects never tune a kernel as a side effect of preparing references.
+        """
+
+        return None
+
+    def materialize(self, X: torch.Tensor, Z: torch.Tensor | None = None) -> torch.Tensor:
+        """Explicitly materialize the kernel block."""
+        return self.forward(X, Z)
+
+    def apply(self, X: torch.Tensor, Z: torch.Tensor | None, values: torch.Tensor) -> torch.Tensor:
+        """Apply ``K(X, Z)`` to ``values``.
+
+        The default implementation materializes the block. Kernels with
+        backend-specific reductions override this method.
+        """
+        return self.materialize(X, Z) @ values
+
 
 # Drived Bases
 class KernelScalarValued(KernelAbstract, ABC):
@@ -158,9 +240,15 @@ class KernelScRBF(KernelScalarValued):
     """
 
     def __init__(
-        self, in_dim: int, lengthscale_init: float | None = None, dtype: torch.dtype | None = None
+        self,
+        in_dim: int,
+        lengthscale_init: float | None = None,
+        dtype: torch.dtype | None = None,
+        *,
+        backend: KernelBackend = "torch",
     ):
         super().__init__(in_dim, dtype=dtype)
+        self.backend = _validate_backend(backend)
         if lengthscale_init is None:
             self._log_ell: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype))
         else:
@@ -186,11 +274,30 @@ class KernelScRBF(KernelScalarValued):
                 _swap_parameter_storage(self._log_ell, _tmp, requires_grad=True)
                 logger.info(f"Estimated lengthscale: {self.ell}")
 
+    def require_fixed_parameters(self) -> None:
+        if self._log_ell.numel() == 0:
+            raise RuntimeError("KernelScRBF requires lengthscale_init before kernel analysis.")
+
     def forward(self, X, Z=None):
         if Z is None:
             Z = X
         sq = scaled_cdist(X, Z, self.ell, 2) ** 2
         return torch.exp(-0.5 * sq)
+
+    def apply(self, X: torch.Tensor, Z: torch.Tensor | None, values: torch.Tensor) -> torch.Tensor:
+        if Z is None:
+            Z = X
+        if self.backend == "torch":
+            return super().apply(X, Z, values)
+        rows = torch.as_tensor(X, dtype=self.dtype)
+        cols = torch.as_tensor(Z, dtype=self.dtype, device=rows.device)
+        weights = torch.as_tensor(values, dtype=self.dtype, device=cols.device)
+
+        def exponent(rows_i: Any, cols_j: Any) -> Any:
+            delta = (rows_i - cols_j) / self.ell
+            return -0.5 * delta.sqnorm2()
+
+        return _keops_weighted_exp_sum(rows, cols, weights, exponent)
 
 
 class KernelScExp(KernelScalarValued):
@@ -200,9 +307,15 @@ class KernelScExp(KernelScalarValued):
     """
 
     def __init__(
-        self, in_dim: int, lengthscale_init: float | None = None, dtype: torch.dtype | None = None
+        self,
+        in_dim: int,
+        lengthscale_init: float | None = None,
+        dtype: torch.dtype | None = None,
+        *,
+        backend: KernelBackend = "torch",
     ):
         super().__init__(in_dim, dtype=dtype)
+        self.backend = _validate_backend(backend)
         if lengthscale_init is None:
             self._log_ell: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype))
         else:
@@ -222,30 +335,48 @@ class KernelScExp(KernelScalarValued):
         sq = scaled_cdist(X, Z, self.ell, 2)
         return torch.exp(-sq)
 
+    def require_fixed_parameters(self) -> None:
+        if self._log_ell.numel() == 0:
+            raise RuntimeError("KernelScExp requires lengthscale_init before kernel analysis.")
+
+    def apply(self, X: torch.Tensor, Z: torch.Tensor | None, values: torch.Tensor) -> torch.Tensor:
+        if Z is None:
+            Z = X
+        if self.backend == "torch":
+            return super().apply(X, Z, values)
+        rows = torch.as_tensor(X, dtype=self.dtype)
+        cols = torch.as_tensor(Z, dtype=self.dtype, device=rows.device)
+        weights = torch.as_tensor(values, dtype=self.dtype, device=cols.device)
+
+        def exponent(rows_i: Any, cols_j: Any) -> Any:
+            sq = ((rows_i - cols_j) / self.ell).sqnorm2()
+            return -(sq + 1.0e-300).sqrt()
+
+        return _keops_weighted_exp_sum(rows, cols, weights, exponent)
+
 
 class KernelScDM(KernelScalarValued):
     """
     Symmetric-normalized diffusion kernel via diffusion maps.
 
-    Everything keeps autograd for eps and t.
+    Everything keeps autograd for eps and alpha.
     """
 
     def __init__(
         self,
         in_dim: int,
         eps_init: float | None = None,
-        t_init: float = 1.0,
+        alpha_init: float = 1.0,
         dtype: torch.dtype | None = None,
         *,
         metric: str = "euclidean",
         periodic_axes: tuple[int, ...] | None = None,
-        density_bandwidth_factor: float = 1.0,
+        backend: KernelBackend = "torch",
     ):
         super().__init__(in_dim, dtype=dtype)
+        self.backend = _validate_backend(backend)
         if metric not in {"euclidean", "periodic"}:
             raise ValueError("metric must be either 'euclidean' or 'periodic'.")
-        if density_bandwidth_factor <= 0:
-            raise ValueError("density_bandwidth_factor must be positive.")
         if periodic_axes is not None:
             if not all(isinstance(axis, int) for axis in periodic_axes):
                 raise TypeError("periodic_axes entries must be integers.")
@@ -260,14 +391,13 @@ class KernelScDM(KernelScalarValued):
             axes = None
         self.metric = metric
         self.periodic_axes = axes
-        self.density_bandwidth_factor = float(density_bandwidth_factor)
 
         if eps_init is None:
             self._log_eps: nn.Parameter = nn.Parameter(torch.empty(0, dtype=self.dtype))
         else:
             self._log_eps = nn.Parameter(inv_softplus(eps_init, self.dtype))
-        _tmp = inv_softplus(t_init, self.dtype)
-        self._log_t: nn.Parameter = nn.Parameter(_tmp)
+        _tmp = inv_softplus(alpha_init, self.dtype)
+        self._log_alpha: nn.Parameter = nn.Parameter(_tmp)
 
         # caches
         self._Xref: nn.Parameter = nn.Parameter(
@@ -280,13 +410,10 @@ class KernelScDM(KernelScalarValued):
         self._q_ref: nn.Parameter = nn.Parameter(
             torch.empty(0, dtype=self.dtype), requires_grad=False
         )
-        self._q_density_ref: nn.Parameter = nn.Parameter(
-            torch.empty(0, dtype=self.dtype), requires_grad=False
-        )
 
     def __repr__(self) -> str:
         return (
-            f"KernelScDM(in_dim={self.in_dim}, eps={self.eps}, t={self.t}, "
+            f"KernelScDM(in_dim={self.in_dim}, eps={self.eps}, alpha={self.alpha}, "
             f"metric={self.metric!r}, dtype={self.dtype})"
         )
 
@@ -295,12 +422,8 @@ class KernelScDM(KernelScalarValued):
         return cast(torch.Tensor, F.softplus(self._log_eps))
 
     @property
-    def t(self) -> torch.Tensor:  # t > 0
-        return cast(torch.Tensor, F.softplus(self._log_t))
-
-    @property
-    def density_eps(self) -> torch.Tensor:
-        return self.eps * self.density_bandwidth_factor
+    def alpha(self) -> torch.Tensor:  # alpha > 0
+        return cast(torch.Tensor, F.softplus(self._log_alpha))
 
     def _tiny(self, tensor: torch.Tensor) -> float:
         return torch.finfo(tensor.dtype).tiny
@@ -328,7 +451,7 @@ class KernelScDM(KernelScalarValued):
             delta = wrapped_delta
         return (delta**2).sum(dim=-1)
 
-    def raw_kernel(
+    def _raw_kernel(
         self, X: torch.Tensor, Z: torch.Tensor | None = None, *, eps: torch.Tensor | None = None
     ) -> torch.Tensor:
         if Z is None:
@@ -338,11 +461,78 @@ class KernelScDM(KernelScalarValued):
         return torch.exp(-sq / (4.0 * bandwidth))
 
     def _rbf(self, X, Z):
-        return self.raw_kernel(X, Z)
+        return self._raw_kernel(X, Z)
 
     def _require_reference_data(self) -> None:
         if self._Xref.numel() == 0:
-            raise RuntimeError("Call set_reference_data before evaluating reference sections.")
+            raise RuntimeError(
+                "Call set_reference_data before evaluating reference-dependent kernels."
+            )
+
+    def require_fixed_parameters(self) -> None:
+        if self._log_eps.numel() == 0:
+            raise RuntimeError("KernelScDM requires eps_init before kernel analysis.")
+
+    @property
+    def reference_points(self) -> torch.Tensor:
+        """Reference points prepared by :meth:`set_reference_data`."""
+
+        self._require_reference_data()
+        return self._Xref
+
+    @property
+    def reference_row_sums(self) -> torch.Tensor:
+        """Raw-kernel row sums at the prepared reference points."""
+
+        return self._reference_row_sums()
+
+    def raw_apply(
+        self,
+        rows: torch.Tensor,
+        cols: torch.Tensor,
+        values: torch.Tensor,
+        *,
+        eps: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Apply the unnormalized diffusion kernel without materializing it."""
+
+        if eps is None:
+            eps = self.eps
+        if self.backend == "keops":
+            if self.metric != "euclidean":
+                raise NotImplementedError(
+                    "KernelScDM backend='keops' currently supports only Euclidean inputs."
+                )
+            return self._keops_raw_apply(rows, cols, values, eps=eps)
+        return self._raw_kernel(rows, cols, eps=eps) @ values
+
+    def raw_row_sums(self, rows: torch.Tensor, *, eps: torch.Tensor | None = None) -> torch.Tensor:
+        """Return unnormalized row sums against the prepared references."""
+
+        self._require_reference_data()
+        if eps is None:
+            eps = self.eps
+        ones = torch.ones((*self._Xref.shape[:-1], 1), dtype=self.dtype, device=self._Xref.device)
+        return self._floor_positive(self.raw_apply(rows, self._Xref, ones, eps=eps).squeeze(-1))
+
+    def uniform_factors(self, X: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return density and symmetric-normalization factors for ``X``."""
+
+        return self._uniform_factors(X)
+
+    def uniform_symmetric_apply(
+        self,
+        rows: torch.Tensor,
+        cols: torch.Tensor,
+        values: torch.Tensor,
+        d_rows: torch.Tensor | None = None,
+        s_rows: torch.Tensor | None = None,
+        d_cols: torch.Tensor | None = None,
+        s_cols: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Apply the symmetric-normalized diffusion kernel."""
+
+        return self._uniform_symmetric_apply(rows, cols, values, d_rows, s_rows, d_cols, s_cols)
 
     def set_reference_data(self, Xref: torch.Tensor) -> None:
         _swap_parameter_storage(self._Xref, Xref, requires_grad=False)
@@ -357,73 +547,131 @@ class KernelScDM(KernelScalarValued):
                 _swap_parameter_storage(self._log_eps, _tmp, requires_grad=True)
                 logger.info(f"Estimated epsilon: {self.eps}")
 
+        if self.backend == "keops":
+            if self.metric != "euclidean":
+                raise NotImplementedError(
+                    "KernelScDM backend='keops' currently supports only Euclidean inputs."
+                )
+            q_ref = self._floor_positive(self._keops_kernel_sum(Xref, Xref, eps=self.eps))
+            _swap_parameter_storage(self._q_ref, q_ref, requires_grad=False)
+            d_ref = q_ref ** (-self.alpha)
+            _swap_parameter_storage(self._D, d_ref, requires_grad=False)
+            ref_sum = self._keops_raw_apply(Xref, Xref, d_ref[:, None], eps=self.eps).squeeze(-1)
+            s_ref = self._floor_positive(d_ref * ref_sum) ** (-0.5)
+            _swap_parameter_storage(self._Dinv1, s_ref, requires_grad=False)
+            return
+
         W = self._rbf(Xref, Xref)
         q_ref = self._floor_positive(W.sum(dim=-1))
         _swap_parameter_storage(self._q_ref, q_ref, requires_grad=False)
-        _swap_parameter_storage(self._D, q_ref ** (-self.t))
+        _swap_parameter_storage(self._D, q_ref ** (-self.alpha))
         W = self._D[..., None] * W * self._D[..., None, :]
         _swap_parameter_storage(self._Dinv1, self._floor_positive(W.sum(dim=-1)) ** (-0.5))
 
-        W_density = self.raw_kernel(Xref, Xref, eps=self.density_eps)
-        q_density_ref = self._floor_positive(W_density.sum(dim=-1))
-        _swap_parameter_storage(self._q_density_ref, q_density_ref, requires_grad=False)
+    def _load_from_state_dict(
+        self,
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        for name in ("_Xref", "_D", "_Dinv1", "_q_ref"):
+            saved = state_dict.get(prefix + name)
+            current = cast(nn.Parameter, getattr(self, name))
+            if saved is not None and current.shape != saved.shape:
+                current.data = torch.empty(saved.shape, dtype=current.dtype, device=current.device)
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
 
-    def reference_row_sums(self, *, density_bandwidth: bool = False) -> torch.Tensor:
+    def _reference_row_sums(self) -> torch.Tensor:
         self._require_reference_data()
-        if density_bandwidth:
-            return self._q_density_ref
         return self._q_ref
 
-    def row_sums(self, X: torch.Tensor, *, density_bandwidth: bool = False) -> torch.Tensor:
+    def _row_sums(self, X: torch.Tensor) -> torch.Tensor:
         self._require_reference_data()
-        eps = self.density_eps if density_bandwidth else self.eps
-        return self._floor_positive(self.raw_kernel(X, self._Xref, eps=eps).sum(dim=-1))
+        if self.backend == "keops":
+            if self.metric != "euclidean":
+                raise NotImplementedError(
+                    "KernelScDM backend='keops' currently supports only Euclidean inputs."
+                )
+            return self._floor_positive(self._keops_kernel_sum(X, self._Xref, eps=self.eps))
+        return self._floor_positive(self._raw_kernel(X, self._Xref).sum(dim=-1))
 
-    def _as_alpha(
-        self, alpha: torch.Tensor | float | None, *, device: torch.device
+    def _uniform_factors(self, X: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if X.data_ptr() == self._Xref.data_ptr() and X.shape == self._Xref.shape:
+            return self._D, self._Dinv1
+
+        q_x = self._row_sums(X)
+        d_x = q_x ** (-self.alpha)
+        if self.backend == "keops":
+            ref_sum = self._keops_raw_apply(X, self._Xref, self._D[:, None], eps=self.eps).squeeze(
+                -1
+            )
+            s_x = self._floor_positive(d_x * ref_sum) ** (-0.5)
+            return d_x, s_x
+        row_ref = d_x[..., None] * self._raw_kernel(X, self._Xref) * self._D
+        s_x = self._floor_positive(row_ref.sum(dim=-1)) ** (-0.5)
+        return d_x, s_x
+
+    def _uniform_symmetric_block(self, rows: torch.Tensor, cols: torch.Tensor) -> torch.Tensor:
+        d_rows, s_rows = self._uniform_factors(rows)
+        d_cols, s_cols = self._uniform_factors(cols)
+        if self.backend == "keops":
+            n_cols = cols.shape[-2]
+            eye = torch.eye(n_cols, dtype=self.dtype, device=cols.device)
+            if cols.ndim > 2:
+                eye = eye.expand(*cols.shape[:-2], n_cols, n_cols)
+            return self._uniform_symmetric_apply(rows, cols, eye, d_rows, s_rows, d_cols, s_cols)
+        block = self._raw_kernel(rows, cols)
+        block = d_rows[..., None] * block * d_cols[..., None, :]
+        return s_rows[..., None] * block * s_cols[..., None, :]
+
+    def _uniform_symmetric_apply(
+        self,
+        rows: torch.Tensor,
+        cols: torch.Tensor,
+        values: torch.Tensor,
+        d_rows: torch.Tensor | None = None,
+        s_rows: torch.Tensor | None = None,
+        d_cols: torch.Tensor | None = None,
+        s_cols: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        if alpha is None:
-            return self.t
-        return torch.as_tensor(alpha, dtype=self.dtype, device=device)
-
-    def markov_sections(
-        self, X: torch.Tensor, *, alpha: torch.Tensor | float | None = None
-    ) -> torch.Tensor:
-        self._require_reference_data()
-        alpha_tensor = self._as_alpha(alpha, device=X.device)
-        q_x = self.row_sums(X, density_bandwidth=True)
-        q_ref = self.reference_row_sums(density_bandwidth=True)
-        W = self.raw_kernel(X, self._Xref)
-        W = W / (q_x[..., None] ** alpha_tensor * q_ref**alpha_tensor)
-        return W / self._floor_positive(W.sum(dim=-1))[..., None]
-
-    def volume_weights(self) -> torch.Tensor:
-        self._require_reference_data()
-        q_ref = self.reference_row_sums(density_bandwidth=True)
-        weights = q_ref.reciprocal()
-        return weights / self._floor_positive(weights.sum())
-
-    def density_sections(
-        self, X: torch.Tensor, *, alpha: torch.Tensor | float | None = None
-    ) -> torch.Tensor:
-        P = self.markov_sections(X, alpha=alpha)
-        return P / self.volume_weights()
-
-    def heat_diagnostics(self) -> dict[str, torch.Tensor]:
-        self._require_reference_data()
-        return {
-            "eps": self.eps,
-            "density_eps": self.density_eps,
-            "q_ref": self.reference_row_sums(),
-            "q_density_ref": self.reference_row_sums(density_bandwidth=True),
-            "volume_weights": self.volume_weights(),
-            "t": self.t,
-        }
+        squeeze_result = values.ndim == 1
+        if squeeze_result:
+            values = values[:, None]
+        if d_rows is None or s_rows is None:
+            d_rows, s_rows = self._uniform_factors(rows)
+        if d_cols is None or s_cols is None:
+            d_cols, s_cols = self._uniform_factors(cols)
+        assert d_rows is not None and s_rows is not None
+        assert d_cols is not None and s_cols is not None
+        weighted = (d_cols * s_cols)[..., :, None] * values
+        if self.backend == "keops":
+            summed = self._keops_raw_apply(rows, cols, weighted, eps=self.eps)
+        else:
+            summed = self._raw_kernel(rows, cols) @ weighted
+        result = (d_rows * s_rows)[..., :, None] * summed
+        return result.squeeze(-1) if squeeze_result else result
 
     def forward(self, X: torch.Tensor, Z: torch.Tensor | None = None):
         reference = self._Xref if Z is None else Z
 
-        if X.data_ptr() == reference.data_ptr() and X.data_ptr() == self._Xref.data_ptr():
+        if (
+            X.data_ptr() == reference.data_ptr()
+            and X.data_ptr() == self._Xref.data_ptr()
+            and X.shape == self._Xref.shape
+            and reference.shape == self._Xref.shape
+        ):
             # K(X,X) with reference data, use cached
             W = self._rbf(X, X)
             W = self._D[..., None] * W * self._D[..., None, :]
@@ -431,11 +679,43 @@ class KernelScDM(KernelScalarValued):
             return W
 
         W = self._rbf(X, reference)
-        D = self._floor_positive(W.sum(dim=-1)) ** (-self.t)
+        D = self._floor_positive(W.sum(dim=-1)) ** (-self.alpha)
         W = D[..., None] * W * self._D[..., None, :]
         Dinv1 = self._floor_positive(W.sum(dim=-1)) ** (-0.5)
         W = Dinv1[..., None] * W * self._Dinv1[..., None, :]
         return W
+
+    def apply(self, X: torch.Tensor, Z: torch.Tensor | None, values: torch.Tensor) -> torch.Tensor:
+        if Z is None:
+            Z = self._Xref
+        rows = torch.as_tensor(X, dtype=self.dtype, device=self._Xref.device)
+        cols = torch.as_tensor(Z, dtype=self.dtype, device=self._Xref.device)
+        weights = torch.as_tensor(values, dtype=self.dtype, device=self._Xref.device)
+        if self.backend == "torch":
+            return self.forward(rows, cols) @ weights
+        if self.metric != "euclidean":
+            raise NotImplementedError(
+                "KernelScDM backend='keops' currently supports only Euclidean inputs."
+            )
+        return self._uniform_symmetric_apply(rows, cols, weights)
+
+    def _keops_kernel_sum(
+        self, rows: torch.Tensor, cols: torch.Tensor, *, eps: torch.Tensor
+    ) -> torch.Tensor:
+        ones = torch.ones((*cols.shape[:-1], 1), dtype=self.dtype, device=cols.device)
+        return self._keops_raw_apply(rows, cols, ones, eps=eps).squeeze(-1)
+
+    def _keops_raw_apply(
+        self, rows: torch.Tensor, cols: torch.Tensor, values: torch.Tensor, *, eps: torch.Tensor
+    ) -> torch.Tensor:
+        rows_tensor = torch.as_tensor(rows, dtype=self.dtype, device=self._Xref.device)
+        cols_tensor = torch.as_tensor(cols, dtype=self.dtype, device=rows_tensor.device)
+        values_tensor = torch.as_tensor(values, dtype=self.dtype, device=cols_tensor.device)
+
+        def exponent(rows_i: Any, cols_j: Any) -> Any:
+            return -(rows_i - cols_j).sqnorm2() / (4.0 * eps)
+
+        return _keops_weighted_exp_sum(rows_tensor, cols_tensor, values_tensor, exponent)
 
 
 ## Operator kernels
@@ -496,6 +776,21 @@ class KernelOpSeparable(KernelOperatorValuedScalars):
         out = torch.einsum("i ... m, i a b -> ... a m b", k, B)
         return out
 
+    def apply(self, X: torch.Tensor, Z: torch.Tensor | None, values: torch.Tensor) -> torch.Tensor:
+        if Z is None:
+            Z = X
+        L = torch.tril(self.Ls)
+        B = torch.matmul(L, L.transpose(-1, -2))
+        result = torch.zeros(
+            (X.shape[-2], self.out_dim),
+            dtype=self.dtype,
+            device=torch.as_tensor(X).device,
+        )
+        for idx, kernel in enumerate(self.scalar_kernels):
+            weighted = values @ B[idx].T
+            result = result + cast(KernelScalarValued, kernel).apply(X, Z, weighted)
+        return result
+
 
 class KernelOpTangent(KernelOperatorValued):
     """
@@ -553,6 +848,34 @@ class KernelOpTangent(KernelOperatorValued):
 
         _Tx = self._tangent(X)  # (..., d, Dy)
         _Tz = self._tangent(Z)  # (M, d, Dy)
-        out = torch.einsum("... a i, m b i, ... m -> ... a m b", _Tx, _Tz, k)  # (..., d, M, d)
+        out = torch.einsum("... n a i, ... m b i, ... n m -> ... n a m b", _Tx, _Tz, k)
 
         return out, _Tx, _Tz
+
+    def intrinsic_apply(
+        self,
+        X: torch.Tensor,
+        Z: torch.Tensor | None,
+        values: torch.Tensor,
+        *,
+        Tx: torch.Tensor | None = None,
+        Tz: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if Z is None:
+            Z = X
+        if Tx is None:
+            Tx = self._tangent(X)
+        if Tz is None:
+            Tz = self._tangent(Z)
+        ambient_values = torch.einsum("... m b i, ... m b -> ... m i", Tz, values)
+        ambient_result = self.scalar_kernel.apply(X, Z, ambient_values)
+        return torch.einsum("... n a i, ... n i -> ... n a", Tx, ambient_result), Tx
+
+    def apply(self, X: torch.Tensor, Z: torch.Tensor | None, values: torch.Tensor) -> torch.Tensor:
+        if Z is None:
+            Z = X
+        Tx = self._tangent(X)
+        Tz = self._tangent(Z)
+        intrinsic_values = torch.einsum("... m b i, ... m i -> ... m b", Tz, values)
+        intrinsic_result, _ = self.intrinsic_apply(X, Z, intrinsic_values, Tx=Tx, Tz=Tz)
+        return torch.einsum("... n a, ... n a i -> ... n i", intrinsic_result, Tx)

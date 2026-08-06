@@ -236,6 +236,11 @@ class CD_KM(ComposedDynamics):
             "jitter": model_config.get("jitter", 0.0),
             "dtype": dtype,
             "device": device,
+            "solver": model_config.get("solver", "dense_cholesky"),
+            "cg_rtol": model_config.get("cg_rtol", 1e-10),
+            "cg_atol": model_config.get("cg_atol", 0.0),
+            "cg_max_iter": model_config.get("cg_max_iter", 1000),
+            "dense_threshold": model_config.get("dense_threshold", 16_000_000),
         }
         processor_net = make_krr(**opts)
 
