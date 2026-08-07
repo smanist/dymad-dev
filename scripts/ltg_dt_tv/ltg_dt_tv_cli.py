@@ -82,7 +82,9 @@ def prepare_workdir(root: Path):
 
 def stage_data(root: Path):
     data_files = ["data/data_n2_s3_k4_s10.pkl", "data/data_n2_s3_k4_s20.pkl"]
-    if all((BASE_DIR / path).exists() for path in data_files):
+    if root.resolve() != BASE_DIR.resolve() and all(
+        (BASE_DIR / path).exists() for path in data_files
+    ):
         stage_workdir(root, BASE_DIR, data_files, data_dir=True)
         print(f"Staged data under: {root / 'data'}")
         return

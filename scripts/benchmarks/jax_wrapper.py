@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import torch
 
 from dymad.utils import JaxWrapper
+from dymad.utils.wrapper import torch_to_jax
 
 
 def _parse_args() -> argparse.Namespace:
@@ -103,7 +104,10 @@ def main() -> int:
         torch.rand(args.batch_size, 1, device=device) + 0.5,
     )
     jax_layer = JaxWrapper(_jax_dynamics, jit=True)
-    jax_input_device = jax.dlpack.from_dlpack(tensors[0].detach()).device
+    jax_input = torch_to_jax(tensors[0].detach())
+    if jax_input is None:
+        raise RuntimeError("Unable to convert the benchmark input to JAX")
+    jax_input_device = jax_input.device
 
     def run_jax_wrapper() -> None:
         inputs = tuple(tensor.detach().requires_grad_(True) for tensor in tensors)

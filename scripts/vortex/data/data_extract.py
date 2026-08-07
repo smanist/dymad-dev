@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import urllib.request
 import zipfile
@@ -13,6 +14,7 @@ from scipy.io import loadmat
 
 DATA_URL = "http://dmdbook.com/DATA.zip"
 MAT_FILENAME = "CYLINDER_ALL.mat"
+MAT_SHA256 = "f8f71ccf072f23435e6d237622eb631e812dc4a8c0f2014ce2b59b5512675f56"
 RAW_FILENAME = "raw.npz"
 
 
@@ -27,10 +29,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _verify_mat_checksum(mat_path: Path) -> None:
+    digest = hashlib.sha256()
+    with mat_path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != MAT_SHA256:
+        raise ValueError(f"Checksum mismatch for {mat_path}: expected {MAT_SHA256}, got {actual}")
+
+
 def download_mat_file(data_dir: Path) -> Path:
     data_dir.mkdir(parents=True, exist_ok=True)
     mat_path = data_dir / MAT_FILENAME
     if mat_path.exists():
+        _verify_mat_checksum(mat_path)
         return mat_path
 
     archive_path = data_dir / "DATA.zip"
@@ -51,6 +64,7 @@ def download_mat_file(data_dir: Path) -> Path:
                 shutil.copyfileobj(source, destination)
     finally:
         archive_path.unlink(missing_ok=True)
+    _verify_mat_checksum(mat_path)
     print(f"Extracted vortex MAT data: {mat_path}")
     return mat_path
 
@@ -59,6 +73,9 @@ def extract_raw_data(data_dir: Path) -> Path:
     data_dir = data_dir.expanduser().resolve()
     raw_path = data_dir / RAW_FILENAME
     if raw_path.exists():
+        mat_path = data_dir / MAT_FILENAME
+        if mat_path.exists():
+            _verify_mat_checksum(mat_path)
         return raw_path
 
     mat_path = download_mat_file(data_dir)

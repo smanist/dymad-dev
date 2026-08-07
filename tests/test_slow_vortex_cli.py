@@ -1,16 +1,31 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
+from scripts.vortex.data import data_extract
 
 from tests.slow_regression_utils import build_mpl_env
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "vortex" / "vor_proc_cli.py"
+
+
+def test_vortex_mat_checksum_rejects_changed_data(monkeypatch, tmp_path: Path):
+    expected = b"expected vortex fixture"
+    mat_path = tmp_path / data_extract.MAT_FILENAME
+    mat_path.write_bytes(expected)
+    monkeypatch.setattr(data_extract, "MAT_SHA256", hashlib.sha256(expected).hexdigest())
+
+    data_extract._verify_mat_checksum(mat_path)
+    mat_path.write_bytes(b"changed vortex fixture")
+
+    with pytest.raises(ValueError, match="Checksum mismatch"):
+        data_extract._verify_mat_checksum(mat_path)
 
 
 @pytest.mark.extra_slow

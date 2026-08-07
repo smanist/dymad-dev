@@ -1073,6 +1073,36 @@ def test_seed_cv_trial_reproducibly_resets_numpy_and_torch() -> None:
     torch.testing.assert_close(first_torch, second_torch, rtol=0.0, atol=0.0)
 
 
+def test_cv_base_seed_uses_active_torch_seed_unless_configured() -> None:
+    with torch.random.fork_rng():
+        torch.manual_seed(12345)
+
+        assert driver._resolve_cv_base_seed({}) == 12345
+        assert driver._resolve_cv_base_seed({"seed": 17}) == 17
+
+
+def test_cv_trial_seeds_depend_on_fold_not_combo_order() -> None:
+    trainer = object.__new__(driver.DriverBase)
+    trainer.base_seed = 101
+    trainer.base_name = "demo"
+    trainer.checkpoint_prefix = "checkpoints"
+    trainer.results_prefix = "results"
+    trainer.train_sets = []
+    trainer.valid_sets = []
+    trainer.model_class = torch.nn.Module
+    trainer.device = torch.device("cpu")
+    trainer.metric = "total"
+    fold_specs = [(0, {}), (1, {})]
+
+    first = trainer._trial_args_for_combo(combo_idx=0, combo={"value": 1}, fold_specs=fold_specs)
+    reordered = trainer._trial_args_for_combo(
+        combo_idx=9, combo={"value": 1}, fold_specs=fold_specs
+    )
+
+    assert [args["seed"] for args in first] == [101, 102]
+    assert [args["seed"] for args in reordered] == [101, 102]
+
+
 def test_run_cv_single_uses_trainer_run_with_typed_context(monkeypatch):
     calls = {"init": 0, "run": 0}
     expected_metric = 0.123

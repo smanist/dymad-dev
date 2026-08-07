@@ -1,8 +1,12 @@
+import jax
 import jax.numpy as jnp
 import pytest
 import torch
 
 from dymad.utils import JaxWrapper
+from dymad.utils.wrapper import torch_to_jax
+
+JAX_GPU_AVAILABLE = any(device.platform == "gpu" for device in jax.devices())
 
 
 def test_jax_wrapper():
@@ -46,13 +50,20 @@ def test_jax_wrapper():
     assert err.item() < 5e-6, "W grad"
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+@pytest.mark.skipif(
+    not torch.cuda.is_available() or not JAX_GPU_AVAILABLE,
+    reason="PyTorch and JAX must both have CUDA available",
+)
 def test_jax_wrapper_preserves_cuda_device_and_gradients():
     def f_jax(x: jnp.ndarray) -> jnp.ndarray:
         return jnp.tanh(x) + x**2
 
     x = torch.randn(8, 4, device="cuda", dtype=torch.float64, requires_grad=True)
     reference = x.detach().clone().requires_grad_(True)
+    jax_x = torch_to_jax(x.detach())
+
+    assert jax_x is not None
+    assert jax_x.device.platform == "gpu"
 
     actual = JaxWrapper(f_jax, jit=True)(x)
     actual.sum().backward()

@@ -113,7 +113,7 @@ trn_dt_node = {
     "decay_rate": 0.999,
     "chop_mode": "unfold",
     "chop_step": 0.5,
-    "sweep_lengths": [3, 5, 7],
+    "sweep_lengths": [3],
     "sweep_epoch_step": 500,
 }
 

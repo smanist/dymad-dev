@@ -54,6 +54,11 @@ class CVSearchBoundSpec:
 CVSearchHandler = Callable[..., CVSearchRunResult]
 
 
+def _resolve_cv_base_seed(config: dict[str, Any]) -> int:
+    configured_seed = config.get("seed")
+    return int(torch.initial_seed() if configured_seed is None else configured_seed)
+
+
 def _seed_cv_trial(seed: int) -> None:
     seed = int(seed) % (2**32)
     random.seed(seed)
@@ -206,6 +211,7 @@ class DriverBase:
         self.train_sets: list[TrajectoryManagerLike] = []
         self.valid_sets: list[TrajectoryManagerLike] = []
         self.base_config = load_config(config_path, config_mod)
+        self.base_seed = _resolve_cv_base_seed(self.base_config)
         self.model_class = model_class
         self.execution_services = ExecutionServices.from_driver_config(
             self.base_config,
@@ -504,7 +510,6 @@ class DriverBase:
         fold_specs: Sequence[tuple[int, dict[str, Any]]],
     ) -> list[dict[str, Any]]:
         trial_args_list = []
-        base_seed = int(self.base_config.get("seed", 0))
         for fold_idx, fold_cfg in fold_specs:
             trial_args_list.append(
                 {
@@ -520,7 +525,7 @@ class DriverBase:
                     "model_class": self.model_class,
                     "device": self.device,
                     "metric": self.metric,
-                    "seed": base_seed + combo_idx * 1_000_003 + fold_idx,
+                    "seed": self.base_seed + fold_idx,
                 }
             )
         return trial_args_list
