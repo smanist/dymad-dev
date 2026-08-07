@@ -371,12 +371,16 @@ class SVDTransform(TransformModule):
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         if self.projection.numel() == 0:
             raise ValueError("SVDTransform parameters are not initialized. Call fit(...) first.")
-        return (data - self.offset).matmul(self.projection)
+        offset = self.offset.to(data)
+        projection = self.projection.to(data)
+        return (data - offset).matmul(projection)
 
     def inverse(self, data: torch.Tensor) -> torch.Tensor:
         if self.projection.numel() == 0:
             raise ValueError("SVDTransform parameters are not initialized. Call fit(...) first.")
-        return data.matmul(self.projection.transpose(0, 1)) + self.offset
+        offset = self.offset.to(data)
+        projection = self.projection.to(data)
+        return data.matmul(projection.transpose(0, 1)) + offset
 
 
 class AutoencoderTransform(TransformModule):

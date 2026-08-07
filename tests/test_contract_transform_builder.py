@@ -69,6 +69,37 @@ def test_build_transform_module_wraps_external_transforms(config, module_type, r
     np.testing.assert_allclose(recovered, reference_inverse, rtol=rtol, atol=rtol)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
+def test_external_transform_autograd_preserves_cuda_device() -> None:
+    tt = np.linspace(0.0, np.pi, 81)
+    mixing = np.random.default_rng(9).random((2, 6))
+    payload = (np.column_stack([np.cos(tt), np.sin(tt)]) @ mixing).astype(np.float32)
+    module = build_transform_module(
+        {
+            "type": "DiffMap",
+            "edim": 2,
+            "mode": "knn",
+            "Knn": 12,
+            "inverse": "gmls",
+            "order": 1,
+            "Kphi": 4,
+        }
+    )
+    module.fit([torch.as_tensor(payload)])
+
+    state = torch.as_tensor(payload, device="cuda").requires_grad_(True)
+    latent = module(state)
+    latent.square().sum().backward()
+    assert state.grad is not None
+    assert state.grad.device == state.device
+
+    latent = latent.detach().requires_grad_(True)
+    recovered = module.inverse(latent)
+    recovered.square().sum().backward()
+    assert latent.grad is not None
+    assert latent.grad.device == latent.device
+
+
 @pytest.mark.parametrize(
     ("config", "expected_kwargs"),
     [

@@ -76,3 +76,16 @@ def test_vpt_loss():
 
     assert np.abs(loss_cls.item() - loss_ref) < eps, "VPTLoss softmax, non-trivial"
     assert loss_fun.item() == STP + 0.5, "vpt_loss exact, non-trivial"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_vpt_losses_follow_cuda_input_device():
+    pred = predictions.cuda()
+    target = targets.cuda()
+
+    loss_cls = VPTLoss(gamma=0.08, scl=1.0).cuda()(pred, target)
+    vpt, loss_fun = vpt_loss(pred, target, gamma=0.08)
+
+    assert loss_cls.device.type == "cuda"
+    assert vpt.device.type == "cuda"
+    assert loss_fun.device.type == "cuda"

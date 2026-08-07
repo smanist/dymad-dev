@@ -71,7 +71,7 @@ def vpt_loss(
     """Exact version of VPT loss (not differentiable)"""
     with torch.no_grad():
         E_k = _vpt_loss(predictions, targets)
-        E_k = torch.cat([E_k, torch.full((E_k.shape[0], 1), float("inf"))], dim=-1)
+        E_k = torch.cat([E_k, E_k.new_full((E_k.shape[0], 1), float("inf"))], dim=-1)
         msk = E_k < gamma
         vpt = torch.argmin(msk.float(), dim=-1)
         avg_vpt = torch.mean(vpt.float())
@@ -112,7 +112,7 @@ class VPTLoss(nn.Module):
         self, predictions: torch.Tensor | object, targets: torch.Tensor | object
     ) -> torch.Tensor:
         E_k = _vpt_loss(predictions, targets)
-        E_k = torch.cat([E_k, torch.full((E_k.shape[0], 1), float("inf"))], dim=-1)
+        E_k = torch.cat([E_k, E_k.new_full((E_k.shape[0], 1), float("inf"))], dim=-1)
         B, T = E_k.shape
 
         # Soft probability that step k is still valid

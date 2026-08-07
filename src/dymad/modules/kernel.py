@@ -44,6 +44,14 @@ def _lazy_tensor_cls() -> Any:
     return LazyTensor
 
 
+@cache
+def _keops_gpu_available() -> bool:
+    _lazy_tensor_cls()
+    from pykeops.config import gpu_available
+
+    return bool(gpu_available)
+
+
 def _keops_weighted_exp_sum(
     rows: torch.Tensor,
     cols: torch.Tensor,
@@ -66,6 +74,12 @@ def _keops_weighted_exp_sum(
     rows = rows.expand(*batch_shape, *rows.shape[-2:])
     cols = cols.expand(*batch_shape, *cols.shape[-2:])
     values = values.expand(*batch_shape, *values.shape[-2:])
+
+    if (rows.is_cuda or cols.is_cuda or values.is_cuda) and not _keops_gpu_available():
+        raise RuntimeError(
+            "PyKeOps was installed without a usable CUDA backend. Install a CUDA toolkit "
+            "compatible with PyTorch, or use backend='torch' for CUDA tensors."
+        )
 
     LazyTensor = _lazy_tensor_cls()
     rows_i = LazyTensor(rows[..., :, None, :])

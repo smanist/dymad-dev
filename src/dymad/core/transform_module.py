@@ -103,7 +103,7 @@ class _ExternalForwardAutograd(torch.autograd.Function):
         module: ExternalTransformModule = ctx.module
         ref, _output = ctx.saved_tensors
         grad_input = module.forward_vjp(ref, grad_output)
-        return None, grad_input
+        return None, grad_input.to(device=ref.device, dtype=ref.dtype)
 
 
 class _ExternalInverseAutograd(torch.autograd.Function):
@@ -119,7 +119,7 @@ class _ExternalInverseAutograd(torch.autograd.Function):
         module: ExternalTransformModule = ctx.module
         ref, _output = ctx.saved_tensors
         grad_input = module.inverse_vjp(ref, grad_output)
-        return None, grad_input
+        return None, grad_input.to(device=ref.device, dtype=ref.dtype)
 
 
 @dataclass(frozen=True)
@@ -256,7 +256,9 @@ class TransformModule(nn.Module, ABC):
         cotangent_tensor, cot_is_tensor = _ref_to_tensor(cotangent, device=device, dtype=dtype)
         jacobian = self.forward_jacobian(ref_tensor)
         jacobian_tensor = torch.as_tensor(jacobian, device=device, dtype=dtype)
-        grad = jacobian_tensor.transpose(0, 1).matmul(cotangent_tensor.reshape(-1))
+        cotangent_shape = (*jacobian_tensor.shape[:-2], jacobian_tensor.shape[-2])
+        cotangent_tensor = cotangent_tensor.reshape(cotangent_shape)
+        grad = jacobian_tensor.transpose(-2, -1).matmul(cotangent_tensor.unsqueeze(-1)).squeeze(-1)
         grad = grad.reshape(ref_tensor.shape)
         return _restore_like(grad, as_tensor=ref_is_tensor or cot_is_tensor)
 
@@ -267,7 +269,9 @@ class TransformModule(nn.Module, ABC):
         cotangent_tensor, cot_is_tensor = _ref_to_tensor(cotangent, device=device, dtype=dtype)
         jacobian = self.inverse_jacobian(ref_tensor)
         jacobian_tensor = torch.as_tensor(jacobian, device=device, dtype=dtype)
-        grad = jacobian_tensor.transpose(0, 1).matmul(cotangent_tensor.reshape(-1))
+        cotangent_shape = (*jacobian_tensor.shape[:-2], jacobian_tensor.shape[-2])
+        cotangent_tensor = cotangent_tensor.reshape(cotangent_shape)
+        grad = jacobian_tensor.transpose(-2, -1).matmul(cotangent_tensor.unsqueeze(-1)).squeeze(-1)
         grad = grad.reshape(ref_tensor.shape)
         return _restore_like(grad, as_tensor=ref_is_tensor or cot_is_tensor)
 
@@ -357,7 +361,7 @@ class ExternalTransformModule(TransformModule, ABC):
             device=device,
             dtype=dtype,
         )
-        jacobian = jacobian_t.transpose(0, 1)
+        jacobian = jacobian_t.transpose(-2, -1)
         return _restore_like(jacobian, as_tensor=as_tensor)
 
     def get_backward_modes(self, ref=None, rng: list[int] | None = None, **_kwargs) -> np.ndarray:

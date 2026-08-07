@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import torch
 
 from dymad.core import (
@@ -97,6 +98,21 @@ def test_svd():
     check_data([Xt], [Xr], label="SVD reload")
     Xi = reld.inverse_transform([Xt])[0]
     check_data([Xi], [Xn], label="Inverse SVD reload")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_svd_fitted_on_cpu_follows_cuda_input_device():
+    svd = _fit(SVDTransform(order=2, ifcen=True), Xs)
+    cpu_input = torch.as_tensor(Xn, dtype=torch.float64)
+    expected = svd(cpu_input)
+
+    actual = svd(cpu_input.cuda())
+    reconstructed = svd.inverse(actual)
+
+    assert actual.device.type == "cuda"
+    assert reconstructed.device.type == "cuda"
+    assert torch.allclose(actual.cpu(), expected, rtol=1e-12, atol=1e-12)
+    assert torch.allclose(reconstructed.cpu(), cpu_input, rtol=1e-12, atol=1e-12)
 
 
 def test_compose():

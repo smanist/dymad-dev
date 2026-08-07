@@ -19,7 +19,7 @@ from scripts.cli_helpers import (
     set_seed,
     stage_workdir,
 )
-from scripts.pirom_res_dt.res_train import DPJ, DPT, f, mdl_kl, t_grid, trn_nd
+from scripts.pirom_res_dt.res_train import DPJ, DPT, B, f, mdl_kl, t_grid, trn_nd
 
 from dymad.io import load_model
 from dymad.training import NODETrainer
@@ -41,9 +41,13 @@ def parse_args():
 
 
 def prepare_workdir(root: Path):
-    stage_workdir(
-        root, BASE_DIR, ["res_model.yaml", "res_test.yaml", "data/res.npz"], data_dir=True
-    )
+    stage_workdir(root, BASE_DIR, ["res_data.yaml", "res_model.yaml", "res_test.yaml"])
+
+
+def generate_data(root: Path, seed: int | None = None):
+    sampler = TrajectorySampler(f, config=root / "res_data.yaml", rng=seed)
+    sampler.sample(t_grid, batch=B, save=str(root / "data" / "res.npz"))
+    print(f"Generated data: {root / 'data' / 'res.npz'}")
 
 
 def train(selected: list[int], root: Path):
@@ -108,6 +112,8 @@ def main():
         return 0
 
     selected = resolve_case_indices(args.case, len(cases), DEFAULT_CASES)
+    if not (root / "data" / "res.npz").exists():
+        generate_data(root, args.seed)
     if not args.no_train:
         train(selected, root)
     if not args.no_plot:

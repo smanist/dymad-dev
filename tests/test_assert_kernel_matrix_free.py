@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import torch
 
+import dymad.modules.kernel as kernel_module
 from dymad.modules import KernelOpSeparable, KernelOpTangent, KernelScDM, KernelScExp, KernelScRBF
 
 _KEOPS_CACHE = Path(tempfile.gettempdir()) / "dymad_keops_cache"
@@ -178,6 +179,64 @@ def test_keops_scdm_batched_apply_matches_torch_apply() -> None:
 
     assert actual.shape == expected.shape
     assert torch.allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_keops_cuda_unavailable_fails_before_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("pykeops")
+    monkeypatch.setattr(kernel_module, "_keops_gpu_available", lambda: False)
+    X, Z, values = (tensor.cuda() for tensor in _points())
+    kernel = KernelScRBF(
+        in_dim=2,
+        lengthscale_init=0.4,
+        dtype=torch.float64,
+        backend="keops",
+    ).cuda()
+
+    with pytest.raises(RuntimeError, match="without a usable CUDA backend"):
+        kernel.apply(X, Z, values)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_keops_cuda_kernels_match_torch() -> None:
+    pytest.importorskip("pykeops")
+    if not kernel_module._keops_gpu_available():
+        pytest.skip("PyKeOps CUDA backend is not available")
+
+    X, Z, values = (tensor.cuda() for tensor in _points())
+    dense_rbf = KernelScRBF(
+        in_dim=2,
+        lengthscale_init=0.4,
+        dtype=torch.float64,
+    ).cuda()
+    keops_rbf = KernelScRBF(
+        in_dim=2,
+        lengthscale_init=0.4,
+        dtype=torch.float64,
+        backend="keops",
+    ).cuda()
+    assert torch.allclose(
+        keops_rbf.apply(X, Z, values),
+        dense_rbf.apply(X, Z, values),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+    dense_dm = KernelScDM(in_dim=2, eps_init=0.2, dtype=torch.float64).cuda()
+    keops_dm = KernelScDM(
+        in_dim=2,
+        eps_init=0.2,
+        dtype=torch.float64,
+        backend="keops",
+    ).cuda()
+    dense_dm.set_reference_data(Z)
+    keops_dm.set_reference_data(Z)
+    assert torch.allclose(
+        keops_dm.apply(X, Z, values),
+        dense_dm.apply(X, Z, values),
+        rtol=1e-12,
+        atol=1e-12,
+    )
 
 
 def test_separable_operator_apply_matches_materialized_contraction() -> None:

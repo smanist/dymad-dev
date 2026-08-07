@@ -355,6 +355,9 @@ def make_krr(
             )
         )
 
+    if device is not None:
+        k_modules = [cast(KernelAbstract, kernel_module.to(device)) for kernel_module in k_modules]
+
     _type = type.lower()
     if _type == "share":
         if len(k_modules) != 1:

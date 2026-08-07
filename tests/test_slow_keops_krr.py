@@ -33,14 +33,15 @@ def _grid_data() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return X, Y, Xquery
 
 
-def _assert_keops_matrix_free_matches_dense(dense_cfg, keops_cfg) -> None:
+def _assert_keops_matrix_free_matches_dense(dense_cfg, keops_cfg, *, device=None) -> None:
     X, Y, Xquery = _grid_data()
-    dense = make_krr(**dense_cfg, solver="dense_cholesky")
+    dense = make_krr(**dense_cfg, solver="dense_cholesky", device=device)
     matrix_free = make_krr(
         **keops_cfg,
         solver="matrix_free_cg",
         cg_rtol=1e-12,
         cg_max_iter=500,
+        device=device,
     )
     dense.set_train_data(X, Y)
     matrix_free.set_train_data(X, Y)
@@ -48,12 +49,13 @@ def _assert_keops_matrix_free_matches_dense(dense_cfg, keops_cfg) -> None:
     dense.fit()
     matrix_free.fit()
     with torch.no_grad():
-        query = torch.as_tensor(Xquery, dtype=torch.float64)
+        query = torch.as_tensor(Xquery, dtype=torch.float64, device=device)
         dense_pred = dense(query)
         matrix_free_pred = matrix_free(query)
 
     assert matrix_free._cg_diagnostics is not None
     assert matrix_free._cg_diagnostics["converged"]
+    assert matrix_free_pred.device == query.device
     assert torch.allclose(matrix_free_pred, dense_pred, rtol=1e-7, atol=1e-8)
 
 
@@ -74,6 +76,30 @@ def test_keops_matrix_free_shared_krr_matches_dense() -> None:
     }
 
     _assert_keops_matrix_free_matches_dense(dense_cfg, keops_cfg)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_keops_matrix_free_shared_krr_matches_dense_on_cuda() -> None:
+    pytest.importorskip("pykeops")
+    dense_cfg = {
+        "type": "share",
+        "kernel": {"type": "sc_rbf", "input_dim": 2, "lengthscale_init": 0.6},
+        "dtype": torch.float64,
+        "ridge_init": 1e-6,
+    }
+    keops_cfg = {
+        **dense_cfg,
+        "kernel": {
+            **dense_cfg["kernel"],
+            "backend": "keops",
+        },
+    }
+
+    _assert_keops_matrix_free_matches_dense(
+        dense_cfg,
+        keops_cfg,
+        device=torch.device("cuda"),
+    )
 
 
 def test_keops_matrix_free_operator_krr_matches_dense() -> None:

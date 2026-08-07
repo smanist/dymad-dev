@@ -26,9 +26,9 @@ nSubSys = 5
 nStates = nNodes * nSubSys
 
 # Control flow
-iftop = 0  # Generate topologies
+iftop = 1  # Generate topologies
 ifdyn = 1  # Generate dynamics data
-ifplt = 1  # Plot dynamics
+ifplt = 0  # Plot dynamics
 # ------------------------
 # End of Parameters for users
 # ------------------------

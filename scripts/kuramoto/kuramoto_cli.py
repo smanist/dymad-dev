@@ -1,6 +1,7 @@
 import argparse
 import copy
 import os
+import runpy
 import sys
 from pathlib import Path
 
@@ -41,19 +42,19 @@ def parse_args():
 
 
 def prepare_workdir(root: Path):
-    stage_workdir(
-        root,
-        BASE_DIR,
-        ["kur_seq.yaml", f"{DATA_STEM}_train.npz", f"{DATA_STEM}_test.npz"],
-        data_dir=True,
-    )
+    stage_workdir(root, BASE_DIR, ["kur_seq.yaml"], data_dir=True)
 
 
 def stage_data(root: Path):
-    stage_workdir(
-        root, BASE_DIR, [f"{DATA_STEM}_train.npz", f"{DATA_STEM}_test.npz"], data_dir=True
-    )
-    print(f"Staged data under: {root / 'data'}")
+    data_files = [f"{DATA_STEM}_train.npz", f"{DATA_STEM}_test.npz"]
+    if all((BASE_DIR / path).exists() for path in data_files):
+        stage_workdir(root, BASE_DIR, data_files, data_dir=True)
+        print(f"Staged data under: {root / 'data'}")
+        return
+
+    (root / "data").mkdir(parents=True, exist_ok=True)
+    runpy.run_path(str(BASE_DIR / "gen_data.py"), run_name="__main__")
+    print(f"Generated data under: {root / 'data'}")
 
 
 def train(selected: list[int], root: Path):
