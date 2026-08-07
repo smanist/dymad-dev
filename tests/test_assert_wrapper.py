@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+import pytest
 import torch
 
 from dymad.utils import JaxWrapper
@@ -43,3 +44,22 @@ def test_jax_wrapper():
     assert err.item() < 1e-7, "X grad"
     err = torch.linalg.norm(w.grad - W.grad) / torch.linalg.norm(w.grad)
     assert err.item() < 5e-6, "W grad"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_jax_wrapper_preserves_cuda_device_and_gradients():
+    def f_jax(x: jnp.ndarray) -> jnp.ndarray:
+        return jnp.tanh(x) + x**2
+
+    x = torch.randn(8, 4, device="cuda", dtype=torch.float64, requires_grad=True)
+    reference = x.detach().clone().requires_grad_(True)
+
+    actual = JaxWrapper(f_jax, jit=True)(x)
+    actual.sum().backward()
+    expected = torch.tanh(reference) + reference**2
+    expected.sum().backward()
+
+    assert actual.device.type == "cuda"
+    assert x.grad is not None
+    assert torch.allclose(actual, expected, rtol=1e-6, atol=1e-7)
+    assert torch.allclose(x.grad, reference.grad, rtol=1e-6, atol=1e-7)

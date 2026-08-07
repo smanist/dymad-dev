@@ -2,7 +2,7 @@ data:
   path: './data/ltg.npz'
   n_samples: 128
   n_steps: 501
-  double_precision: false
+  double_precision: true
 
 transform_x:
   type: "identity"
@@ -36,10 +36,11 @@ criterion:
     weight: 1.0
 
 training:
-  n_epochs: 500
+  n_epochs: 750
   save_interval: 10
   load_checkpoint: false
   learning_rate: 5e-3
+  decay_rate: 1.0
   weak_form_params:
     N: 13
     dN: 2

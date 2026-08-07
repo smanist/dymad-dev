@@ -1,5 +1,6 @@
 import copy
 import os
+import random
 import shutil
 import warnings
 from collections.abc import Callable, Iterable, Sequence
@@ -51,6 +52,15 @@ class CVSearchBoundSpec:
 
 
 CVSearchHandler = Callable[..., CVSearchRunResult]
+
+
+def _seed_cv_trial(seed: int) -> None:
+    seed = int(seed) % (2**32)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 # --------------------
@@ -117,6 +127,8 @@ def _build_phase_context(
 
 
 def run_cv_single(args: dict[str, Any]):
+    _seed_cv_trial(args.get("seed", 0))
+
     # Apply hyperparameter overrides to this fold's config
     cfg, model_prefix = _apply_combo_to_config(
         args["combo_idx"],
@@ -492,6 +504,7 @@ class DriverBase:
         fold_specs: Sequence[tuple[int, dict[str, Any]]],
     ) -> list[dict[str, Any]]:
         trial_args_list = []
+        base_seed = int(self.base_config.get("seed", 0))
         for fold_idx, fold_cfg in fold_specs:
             trial_args_list.append(
                 {
@@ -507,6 +520,7 @@ class DriverBase:
                     "model_class": self.model_class,
                     "device": self.device,
                     "metric": self.metric,
+                    "seed": base_seed + combo_idx * 1_000_003 + fold_idx,
                 }
             )
         return trial_args_list

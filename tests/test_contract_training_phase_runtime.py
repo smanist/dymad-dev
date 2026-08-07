@@ -974,6 +974,19 @@ def test_load_config_koopman_example_phase_overrides_survive_shared_config():
     assert accelerated["phases"][2]["learning_rate"] == pytest.approx(5e-3)
 
 
+def test_seed_cv_trial_reproducibly_resets_numpy_and_torch() -> None:
+    driver._seed_cv_trial(123)
+    first_numpy = np.random.random(4)
+    first_torch = torch.rand(4)
+
+    driver._seed_cv_trial(123)
+    second_numpy = np.random.random(4)
+    second_torch = torch.rand(4)
+
+    np.testing.assert_array_equal(first_numpy, second_numpy)
+    torch.testing.assert_close(first_torch, second_torch, rtol=0.0, atol=0.0)
+
+
 def test_run_cv_single_uses_trainer_run_with_typed_context(monkeypatch):
     calls = {"init": 0, "run": 0}
     expected_metric = 0.123

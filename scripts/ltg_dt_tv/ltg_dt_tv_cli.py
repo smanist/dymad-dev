@@ -1,6 +1,7 @@
 import argparse
 import copy
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,6 +27,8 @@ from dymad.training import NODETrainer
 from dymad.utils import plot_summary, plot_trajectory
 
 BASE_DIR = Path(__file__).resolve().parent
+DATA_INTERVALS = (10, 20)
+DATA_SEED = 1
 
 mdl_kb = {
     "name": "kura_model",
@@ -40,11 +43,11 @@ mdl_kb = {
 }
 
 trn_nd = {
-    "n_epochs": 1000,
+    "n_epochs": 5000,
     "save_interval": 50,
     "load_checkpoint": False,
     "learning_rate": 1e-2,
-    "decay_rate": 0.999,
+    "decay_rate": 1.0,
     "reconstruction_weight": 1.0,
     "dynamics_weight": 1.0,
     "sweep_lengths": [2, 4, 8],
@@ -74,28 +77,28 @@ def parse_args():
 
 
 def prepare_workdir(root: Path):
-    stage_workdir(
-        root,
-        BASE_DIR,
-        [
-            "config.yaml",
-            "data/data_n2_s3_k4_s10.pkl",
-            "data/data_n2_s3_k4_s20.pkl",
-        ],
-    )
+    stage_workdir(root, BASE_DIR, ["config.yaml"])
 
 
 def stage_data(root: Path):
-    stage_workdir(
-        root,
-        BASE_DIR,
-        [
-            "data/data_n2_s3_k4_s10.pkl",
-            "data/data_n2_s3_k4_s20.pkl",
-        ],
-        data_dir=True,
-    )
-    print(f"Staged data under: {root / 'data'}")
+    data_files = ["data/data_n2_s3_k4_s10.pkl", "data/data_n2_s3_k4_s20.pkl"]
+    if all((BASE_DIR / path).exists() for path in data_files):
+        stage_workdir(root, BASE_DIR, data_files, data_dir=True)
+        print(f"Staged data under: {root / 'data'}")
+        return
+
+    (root / "data").mkdir(parents=True, exist_ok=True)
+    for n_stint in DATA_INTERVALS:
+        command = [
+            sys.executable,
+            str(BASE_DIR / "gen_data.py"),
+            "--n-stint",
+            str(n_stint),
+            "--seed",
+            str(DATA_SEED),
+        ]
+        subprocess.run(command, check=True, cwd=root)
+    print(f"Generated data under: {root / 'data'}")
 
 
 def train(selected: list[int], root: Path, seed: int | None = None):

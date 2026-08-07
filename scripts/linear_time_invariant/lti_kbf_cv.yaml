@@ -2,7 +2,7 @@ data:
   path: './data/lti.npz'
   n_samples: 128
   n_steps: 501
-  double_precision: false
+  double_precision: true
 
 transform_x:
   type: "identity"

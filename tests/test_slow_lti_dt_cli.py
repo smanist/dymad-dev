@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -55,7 +55,6 @@ class Case:
     model_name: str
     model_class: type
     seed: int = TEST_SEED
-    metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
     def run_dir_name(self) -> str:
@@ -65,7 +64,7 @@ class Case:
 CASES = [
     Case(0, "dldm", DLDM),
     Case(1, "dkbf", DKBF),
-    Case(2, "dkbl", DKBF, metric_factors={"crit_train_last": 5.0, "crit_valid_last": 5.0}),
+    Case(2, "dkbl", DKBF),
     Case(3, "ltil", DLTI),
 ]
 
@@ -146,5 +145,4 @@ def test_lti_dt_cli(case: Case, tmp_path: Path, request, baseline_store):
     baseline = load_baselines(BASELINE_PATH)[case.model_name]
     assert_summary_against_baseline(summary, baseline)
     for metric_name, baseline_value in baseline["metrics"].items():
-        factor = case.metric_factors.get(metric_name)
-        assert record["metrics"][metric_name] <= scaled_limit(metric_name, baseline_value, factor)
+        assert record["metrics"][metric_name] <= scaled_limit(metric_name, baseline_value)

@@ -67,6 +67,7 @@ trn_wf = {
     "decay_rate": 0.999,
     "weak_form_params": {"N": 13, "dN": 2, "ordpol": 2, "ordint": 2},
 }
+trn_wf_kbf = {**trn_wf, "n_epochs": 3000, "decay_rate": 1.0}
 trn_nd = {
     "n_epochs": 2000,
     "save_interval": 20,
@@ -92,7 +93,7 @@ config_path = "kp_model.yaml"
 cfgs = [
     ("ldm_wf", LDM, WeakFormTrainer, {"model": mdl_ld, "training": trn_wf}),
     ("ldm_node", LDM, NODETrainer, {"model": mdl_ld, "training": trn_nd}),
-    ("kbf_wf", KBF, WeakFormTrainer, {"model": mdl_kb, "training": trn_wf}),
+    ("kbf_wf", KBF, WeakFormTrainer, {"model": mdl_kb, "training": trn_wf_kbf}),
     ("kbf_node", KBF, NODETrainer, {"model": mdl_kb, "training": trn_nd}),
     ("kbf_ln", KBF, LinearTrainer, {"model": mdl_kl, "training": trn_ln}),
 ]

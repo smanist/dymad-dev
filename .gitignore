@@ -19,6 +19,7 @@ examples/**/*.pkl
 examples/**/*_tuning
 scripts/**/*.npz
 scripts/**/*.pkl
+scripts/vortex/data/*.mat
 scripts/**/*_tuning
 scripts/**/runs
 scripts/**/temp

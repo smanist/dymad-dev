@@ -26,10 +26,8 @@ def load_baselines(path: Path) -> dict:
         return json.load(fh)
 
 
-def scaled_limit(metric_name: str, baseline_value: float, factor: float | None = None) -> float:
-    use_factor = (
-        DIAGNOSTIC_SAFETY_FACTORS.get(metric_name, SAFETY_FACTOR) if factor is None else factor
-    )
+def scaled_limit(metric_name: str, baseline_value: float) -> float:
+    use_factor = DIAGNOSTIC_SAFETY_FACTORS.get(metric_name, SAFETY_FACTOR)
     abs_tol = ABS_TOLERANCES.get(metric_name, 1.0e-9)
     return max(baseline_value * use_factor, baseline_value + abs_tol)
 
@@ -146,10 +144,6 @@ def extract_record(summary: dict, rmse: float) -> dict:
     }
 
 
-def compare_record_metrics(
-    record: dict, baseline: dict, metric_factors: dict[str, float] | None = None
-) -> None:
-    metric_factors = metric_factors or {}
+def compare_record_metrics(record: dict, baseline: dict) -> None:
     for metric_name, baseline_value in baseline["metrics"].items():
-        factor = metric_factors.get(metric_name)
-        assert record["metrics"][metric_name] <= scaled_limit(metric_name, baseline_value, factor)
+        assert record["metrics"][metric_name] <= scaled_limit(metric_name, baseline_value)

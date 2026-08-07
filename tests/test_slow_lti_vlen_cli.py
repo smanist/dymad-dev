@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -46,7 +46,6 @@ class Case:
     model_name: str
     model_class: type
     seed: int = TEST_SEED
-    metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
     def run_dir_name(self) -> str:
@@ -124,7 +123,7 @@ def test_lti_vlen_cli(case: Case, tmp_path: Path, request, baseline_store):
         return
     baseline = load_baseline_store(BASELINE_PATH)[case.model_name]
     assert_summary_against_baseline(summary, baseline)
-    compare_record_metrics(record, baseline, case.metric_factors)
+    compare_record_metrics(record, baseline)
 
 
 @pytest.mark.slow

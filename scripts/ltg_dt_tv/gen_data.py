@@ -1,3 +1,4 @@
+import argparse
 import pickle
 
 import matplotlib.pyplot as plt
@@ -21,8 +22,22 @@ kl, ku = 4.0, 6.0  # de = 0.75
 # nStint = 10                # Number of time intervals
 # Nt     = 100
 Ntrj = 20  # Number of trajectories
-nStint = 20  # Number of time intervals
 Nt = 100
+DATA_SEED = 1
+
+parser = argparse.ArgumentParser(description="Generate LTG time-varying graph data.")
+parser.add_argument("--n-stint", type=int, default=20, help="Number of topology intervals.")
+parser.add_argument(
+    "--seed",
+    type=int,
+    default=DATA_SEED,
+    help="Seed for reproducible topology and trajectory data.",
+)
+args = parser.parse_args()
+nStint = args.n_stint
+if nStint <= 0 or Nt % nStint != 0:
+    raise ValueError(f"n_stint must be a positive divisor of {Nt}, got {nStint}")
+np.random.seed(args.seed)
 
 # Model size
 nNodes = 2
@@ -30,9 +45,9 @@ nSubSys = 3
 nStates = nNodes * nSubSys
 
 # Control flow
-iftop = 0  # Generate topologies
+iftop = 1  # Generate topologies
 ifdyn = 1  # Generate dynamics data
-ifplt = 1  # Plot dynamics
+ifplt = 0  # Plot dynamics
 # ------------------------
 # End of Parameters for users
 # ------------------------
@@ -85,6 +100,16 @@ if iftop:
                 A0[I + i, J + j] = K[m]
                 A0[J + j, I + i] = K[m]
         AAs.append(A0)
+
+    # Keep every discrete-time topology contractive. Randomly generated
+    # topologies can otherwise have spectral radius greater than one and
+    # produce exploding trajectories that are unsuitable as a regression
+    # fixture.
+    transition_scale = wu * 1.15
+    for n, adjacency in enumerate(AAs):
+        radius = float(np.max(np.abs(np.linalg.eigvals(adjacency / transition_scale))))
+        if radius >= 1.0:
+            AAs[n] = adjacency / (radius * 1.05)
 
     ## Save figures of topologies for sanity check
     vmn1, vmx1 = np.min(AAs[0]), np.max(AAs[0])

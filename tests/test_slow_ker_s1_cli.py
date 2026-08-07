@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -65,7 +65,6 @@ class Case:
     model_name: str
     model_class: type
     seed: int = TEST_SEED
-    metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
     def run_dir_name(self) -> str:
@@ -73,12 +72,7 @@ class Case:
 
 
 CASES = [
-    Case(
-        0,
-        "km_exp",
-        KM,
-        metric_factors={"crit_train_last": 500.0, "crit_valid_last": 500.0, "rmse": 2.0},
-    ),
+    Case(0, "km_exp", KM),
     Case(1, "kmm_tn", KMM),
     Case(2, "dks_rbf", DKMSK),
     Case(3, "dks_exp", DKMSK),
@@ -160,5 +154,4 @@ def test_ker_s1_cli(case: Case, tmp_path: Path, request, baseline_store):
     baseline = load_baselines(BASELINE_PATH)[case.model_name]
     assert_summary_against_baseline(summary, baseline)
     for metric_name, baseline_value in baseline["metrics"].items():
-        factor = case.metric_factors.get(metric_name)
-        assert record["metrics"][metric_name] <= scaled_limit(metric_name, baseline_value, factor)
+        assert record["metrics"][metric_name] <= scaled_limit(metric_name, baseline_value)

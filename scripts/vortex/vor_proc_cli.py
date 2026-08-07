@@ -1,4 +1,6 @@
 import argparse
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +14,7 @@ from dymad.io import DataInterface
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_PATH = BASE_DIR / "vor_model.yaml"
+DATA_EXTRACT_SCRIPT = DATA_DIR / "data_extract.py"
 NX = 199
 NY = 449
 DEFAULT_SPLIT_INDEX = 140
@@ -95,10 +98,25 @@ def resolve_output_path(root: Path, output: Path) -> Path:
     return output if output.is_absolute() else root / output
 
 
-def generate_data(root: Path, raw_data_path: Path, split_index: int) -> tuple[Path, Path]:
-    if not raw_data_path.exists():
+def ensure_raw_data(raw_data_path: Path) -> Path:
+    raw_data_path = raw_data_path.expanduser().resolve()
+    if raw_data_path.exists():
+        return raw_data_path
+    if raw_data_path != (DATA_DIR / "raw.npz").resolve():
         raise FileNotFoundError(f"Raw vortex data not found: {raw_data_path}")
 
+    subprocess.run(
+        [sys.executable, str(DATA_EXTRACT_SCRIPT), "--data-dir", str(DATA_DIR)],
+        check=True,
+        cwd=BASE_DIR,
+    )
+    if not raw_data_path.exists():
+        raise FileNotFoundError(f"Vortex data extraction did not create {raw_data_path}")
+    return raw_data_path
+
+
+def generate_data(root: Path, raw_data_path: Path, split_index: int) -> tuple[Path, Path]:
+    raw_data_path = ensure_raw_data(raw_data_path)
     dat = np.load(raw_data_path)["vor"]
     nt, nx, ny = dat.shape
     if (nx, ny) != (NX, NY):

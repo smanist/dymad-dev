@@ -5,7 +5,7 @@ import math
 import os
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -70,7 +70,6 @@ class SlowLTICase:
     model_name: str
     model_class: type
     seed: int = TEST_SEED
-    metric_factors: dict[str, float] = field(default_factory=dict)
 
     @property
     def script_path(self) -> Path:
@@ -215,10 +214,8 @@ def _load_baselines() -> dict:
         return json.load(fh)
 
 
-def _scaled_limit(case: SlowLTICase, metric_name: str, baseline_value: float) -> float:
-    factor = case.metric_factors.get(
-        metric_name, DIAGNOSTIC_SAFETY_FACTORS.get(metric_name, SAFETY_FACTOR)
-    )
+def _scaled_limit(metric_name: str, baseline_value: float) -> float:
+    factor = DIAGNOSTIC_SAFETY_FACTORS.get(metric_name, SAFETY_FACTOR)
     return max(baseline_value * factor, baseline_value + ABS_TOLERANCES[metric_name])
 
 
@@ -350,7 +347,7 @@ def _run_and_check(case: SlowLTICase, tmp_path: Path, request, baseline_store):
     baseline = _load_baselines()[case.model_name]
     _assert_summary_against_baseline(summary, case, baseline)
     for metric_name, baseline_value in baseline["metrics"].items():
-        assert record["metrics"][metric_name] <= _scaled_limit(case, metric_name, baseline_value)
+        assert record["metrics"][metric_name] <= _scaled_limit(metric_name, baseline_value)
 
 
 @pytest.mark.slow

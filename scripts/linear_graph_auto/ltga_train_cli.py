@@ -87,6 +87,7 @@ trn_wf = {
     "decay_rate": 0.999,
     "weak_form_params": {"N": 13, "dN": 2, "ordpol": 2, "ordint": 2},
 }
+trn_wf_kbf = {**trn_wf, "n_epochs": 1400, "decay_rate": 1.0}
 trn_nd = {
     "n_epochs": 500,
     "save_interval": 10,
@@ -125,7 +126,7 @@ cases = [
         "name": "kbf_wf",
         "model": GKBF,
         "trainer": WeakFormTrainer,
-        "config_mod": {"model": mdl_kb, "training": trn_wf},
+        "config_mod": {"model": mdl_kb, "training": trn_wf_kbf},
     },
     {
         "name": "kbf_node",

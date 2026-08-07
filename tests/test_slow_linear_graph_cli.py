@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -61,7 +61,6 @@ class Case:
     model_name: str
     model_class: type
     seed: int = TEST_SEED
-    metric_factors: dict[str, float] = field(default_factory=dict)
     ode_method: str | None = None
 
     @property
@@ -78,7 +77,6 @@ CASES = [
         "lti_ln",
         GLTI,
         seed=0,
-        metric_factors={"best_valid_total": 10.0, "final_valid_loss": 10.0},
         ode_method="rk4",
     ),
 ]
@@ -152,7 +150,7 @@ def test_linear_graph_cli(case: Case, tmp_path: Path, request, baseline_store):
         return
     baseline = load_baseline_store(BASELINE_PATH)[case.model_name]
     assert_summary_against_baseline(summary, baseline)
-    compare_record_metrics(record, baseline, case.metric_factors)
+    compare_record_metrics(record, baseline)
 
 
 @pytest.mark.slow

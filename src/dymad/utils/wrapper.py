@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from functools import lru_cache
+from functools import cache, lru_cache
 from typing import Any, cast
 
 import jax
@@ -12,10 +12,17 @@ from torch.utils import dlpack as torch_dlpack
 
 
 # ---- Torch <-> JAX via DLPack ----
+@cache
+def _jax_has_gpu() -> bool:
+    return any(device.platform == "gpu" for device in jax.devices())
+
+
 def torch_to_jax(t: torch.Tensor | None) -> jax.Array | None:
     if t is None:
         return None
     tensor = cast(torch.Tensor, t)
+    if tensor.is_cuda and not _jax_has_gpu():
+        tensor = tensor.cpu()
     if not tensor.is_contiguous():
         tensor = tensor.contiguous()
     return jax_dlpack.from_dlpack(tensor.detach())

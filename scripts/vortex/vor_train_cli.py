@@ -3,6 +3,8 @@ import copy
 import os
 import random
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -17,6 +19,9 @@ from dymad.utils import animate, compare_contour, plot_summary, setup_logging
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "vor_model.yaml"
 DEFAULT_DATA_PATH = BASE_DIR / "data" / "cylinder.npz"
+DEFAULT_RAW_DATA_PATH = BASE_DIR / "data" / "raw.npz"
+DATA_EXTRACT_SCRIPT = BASE_DIR / "data" / "data_extract.py"
+DEFAULT_SPLIT_INDEX = 140
 DEFAULT_CASES = [0, 1, 2, 3, 4]
 NX = 199
 NY = 449
@@ -225,6 +230,26 @@ def resolve_data_path(path: Path) -> Path:
     return data_path
 
 
+def generate_default_training_data(root: Path) -> Path:
+    subprocess.run(
+        [sys.executable, str(DATA_EXTRACT_SCRIPT), "--data-dir", str(DEFAULT_RAW_DATA_PATH.parent)],
+        check=True,
+        cwd=BASE_DIR,
+    )
+    raw = np.load(DEFAULT_RAW_DATA_PATH)["vor"]
+    if len(raw) <= DEFAULT_SPLIT_INDEX:
+        raise ValueError(
+            f"Vortex data needs more than {DEFAULT_SPLIT_INDEX} snapshots, got {len(raw)}"
+        )
+    state = raw[:DEFAULT_SPLIT_INDEX].reshape(DEFAULT_SPLIT_INDEX, -1)
+    time = np.arange(DEFAULT_SPLIT_INDEX)
+    data_path = root / "data" / "cylinder.npz"
+    data_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(data_path, x=state, t=time)
+    print(f"Generated vortex training data: {data_path}")
+    return data_path
+
+
 def train(selected, data_path: Path, config_path: Path):
     for idx in selected:
         mdl, model_class, trainer_class, opt = cfgs[idx]
@@ -294,7 +319,11 @@ def main():
         return 0
 
     selected = resolve_indices(args.case)
-    data_path = resolve_data_path(args.data_path.resolve())
+    requested_data_path = args.data_path.resolve()
+    if requested_data_path == DEFAULT_DATA_PATH.resolve() and not requested_data_path.exists():
+        data_path = generate_default_training_data(root)
+    else:
+        data_path = resolve_data_path(requested_data_path)
 
     if not args.no_train:
         train(selected, data_path, config_path)

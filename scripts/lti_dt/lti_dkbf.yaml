@@ -2,7 +2,7 @@ data:
   path: './data/lti.npz'
   n_samples: 128
   n_steps: 501
-  double_precision: false
+  double_precision: true
 
 transform_x:
   type: "identity"
@@ -43,4 +43,4 @@ training:
   chop_mode: "unfold"
   chop_step: 0.5
   sweep_lengths: [3, 5, 7]
-  sweep_epoch_step: 200
+  sweep_epoch_step: 1000

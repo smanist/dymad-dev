@@ -139,7 +139,7 @@ def generate_data(root: Path, seed: int | None = None):
     return out_path
 
 
-def train(selected, root: Path):
+def train(selected, root: Path, seed: int | None = None):
     mp.set_start_method("spawn", force=True)
     for idx in selected:
         Model = cases[idx]["model"]
@@ -147,7 +147,8 @@ def train(selected, root: Path):
         config_path = root / cases[idx]["config"]
         max_workers = cases[idx]["max_workers"]
 
-        trainer = Trainer(config_path, Model, max_workers=max_workers)
+        config_mod = {"seed": seed} if seed is not None else None
+        trainer = Trainer(config_path, Model, config_mod=config_mod, max_workers=max_workers)
         trainer.train()
 
 
@@ -202,7 +203,7 @@ def main():
     if args.workdir is not None and not data_path.exists():
         generate_data(root, args.seed)
     if not args.no_train:
-        train(selected, root)
+        train(selected, root, args.seed)
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:

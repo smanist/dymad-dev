@@ -125,11 +125,7 @@ def generate_data(root: Path, seed: int | None = None):
 def train(selected: list[int], root: Path, seed: int | None = None):
     for idx in selected:
         case = cases[idx]
-        config_mod = (
-            {"data": {"split_seed": seed}}
-            if seed is not None and case["trainer"] is not LinearTrainer
-            else None
-        )
+        config_mod = {"data": {"split_seed": seed}} if seed is not None else None
         trainer = case["trainer"](root / case["config"], case["model"], config_mod=config_mod)
         trainer.train()
 

@@ -1,6 +1,6 @@
 data:
   path: './data/lti_vlen.npz'
-  double_precision: false
+  double_precision: true
   # Leave n_steps unset so each trajectory keeps its own native horizon.
 
 transform_x:
