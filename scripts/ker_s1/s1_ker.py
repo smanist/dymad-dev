@@ -93,7 +93,7 @@ trn_ln = {
     "method": "raw",
 }
 trn_l1 = copy.deepcopy(trn_ln)
-trn_l1["kwargs"] = {"order": 1}
+trn_l1["linear_solver_kwargs"] = {"order": 1}
 
 smpl = {
     "x0": {"kind": "perturb", "params": {"bounds": [0, 0], "ref": _ref}}

@@ -36,4 +36,6 @@ training:
   learning_rate: 5e-3
   decay_rate: 0.999
   method: "full"
+  linear_solver_kwargs:
+    order: 4
   ode_method: "rk4"

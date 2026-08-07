@@ -1347,13 +1347,16 @@ class LinearRegressionPhase(BaseOptimizerPhase):
         model: torch.nn.Module,
         phase_context: PhaseContext,
     ) -> LSUpdater:
+        linear_solver_kwargs = copy.deepcopy(self.spec.config.get("linear_solver_kwargs", {}))
+        if not isinstance(linear_solver_kwargs, dict):
+            raise TypeError("linear_solver_kwargs must be a dictionary")
         train_md = _require_metadata(phase_context.train_md)
         return LSUpdater(
             method=self.spec.config.get("method", "full"),
             model=model,
             dt=train_md["dt_and_n_steps"][0][0],
             params=self.spec.config.get("params"),
-            **copy.deepcopy(self.spec.config.get("kwargs", {})),
+            **linear_solver_kwargs,
         )
 
     def _compute_losses(

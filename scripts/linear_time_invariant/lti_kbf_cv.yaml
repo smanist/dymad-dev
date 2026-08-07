@@ -4,6 +4,8 @@ data:
   n_steps: 501
   double_precision: true
 
+seed: 1000017
+
 transform_x:
   type: "identity"
 
@@ -26,7 +28,7 @@ model:
   activation: "none"
   weight_init: "xavier_uniform"
   input_order: "cubic"
-  linear_dynamics_init_scale: 0.1
+  linear_dynamics_init_scale: 0.55
 
 criterion:
   dynamics:
@@ -35,18 +37,18 @@ criterion:
     weight: 1.0
 
 training:
-  n_epochs: 300
+  n_epochs: 400
   save_interval: 10
   load_checkpoint: false
   learning_rate: 5e-3
   weak_form_params:
     N: 13
     dN: 2
-    ordpol: 2
-    ordint: 2
+    ordpol: 1
+    ordint: 4
 
 cv:
   param_grid:
     model.koopman_dimension: [3, 4, 5, 6]
-    training.weak_form_params.N: [9, 11, 13, 15, 17]
+    training.weak_form_params.N: [9, 13, 17]
   metric: "total"

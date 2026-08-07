@@ -77,7 +77,7 @@ trn_ln = {
     "method": "raw",
 }
 trn_l1 = copy.deepcopy(trn_ln)
-trn_l1["kwargs"] = {"order": 1}
+trn_l1["linear_solver_kwargs"] = {"order": 1}
 trn_dt = {
     "n_epochs": 5,
     "save_interval": 50,

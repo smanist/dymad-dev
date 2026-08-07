@@ -102,7 +102,7 @@ trn_ln = {
     "method": "raw",
 }
 trn_l1 = copy.deepcopy(trn_ln)
-trn_l1["kwargs"] = {"order": 1}
+trn_l1["linear_solver_kwargs"] = {"order": 1}
 
 config_path = "ker_model.yaml"
 

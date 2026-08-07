@@ -182,6 +182,38 @@ def test_fourth_order_continuous_target_is_exact_for_quartic_data():
     torch.testing.assert_close(derivative, expected, atol=1.0e-12, rtol=1.0e-12)
 
 
+def test_linear_optimizer_uses_named_solver_kwargs(monkeypatch):
+    captured = {}
+
+    def fake_ls_updater(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(phases_module, "LSUpdater", fake_ls_updater)
+    phase = build_phase(
+        OptimizerPhaseSpec(
+            name="linear",
+            trainer="Linear",
+            config={"method": "full", "linear_solver_kwargs": {"order": 4}},
+        ),
+        config={"model": {"name": "demo"}},
+        model_class=object,
+        dtype=torch.float64,
+        execution_services=ExecutionServices.from_config(
+            {"model": {"name": "demo"}}, default_device=torch.device("cpu")
+        ),
+    )
+
+    result = phase._create_ls_updater(
+        torch.nn.Linear(1, 1), PhaseContext(train_md={"dt_and_n_steps": [(0.1, 9)]})
+    )
+
+    assert result is not None
+    assert captured["method"] == "full"
+    assert captured["dt"] == pytest.approx(0.1)
+    assert captured["order"] == 4
+
+
 def test_normalize_phase_specs_expands_repeat_schedule():
     specs = normalize_phase_specs(
         {
