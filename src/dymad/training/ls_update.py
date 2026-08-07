@@ -75,8 +75,48 @@ def _ct_target(z: torch.Tensor, dt, order=2) -> torch.Tensor:
     elif order == 2:
         dz = np.gradient(z.detach().cpu().numpy(), dt, axis=-2, edge_order=2)
         return torch.tensor(dz, dtype=z.dtype, device=z.device)
+    elif order == 4:
+        if z.shape[-2] < 5:
+            raise ValueError("Fourth-order finite differences require at least 5 time steps.")
+        values = z.detach()
+        dz = torch.empty_like(values)
+        dz[..., 2:-2, :] = (
+            values[..., :-4, :]
+            - 8.0 * values[..., 1:-3, :]
+            + 8.0 * values[..., 3:-1, :]
+            - values[..., 4:, :]
+        ) / (12.0 * dt)
+        dz[..., 0, :] = (
+            -25.0 * values[..., 0, :]
+            + 48.0 * values[..., 1, :]
+            - 36.0 * values[..., 2, :]
+            + 16.0 * values[..., 3, :]
+            - 3.0 * values[..., 4, :]
+        ) / (12.0 * dt)
+        dz[..., 1, :] = (
+            -3.0 * values[..., 0, :]
+            - 10.0 * values[..., 1, :]
+            + 18.0 * values[..., 2, :]
+            - 6.0 * values[..., 3, :]
+            + values[..., 4, :]
+        ) / (12.0 * dt)
+        dz[..., -2, :] = (
+            -values[..., -5, :]
+            + 6.0 * values[..., -4, :]
+            - 18.0 * values[..., -3, :]
+            + 10.0 * values[..., -2, :]
+            + 3.0 * values[..., -1, :]
+        ) / (12.0 * dt)
+        dz[..., -1, :] = (
+            3.0 * values[..., -5, :]
+            - 16.0 * values[..., -4, :]
+            + 36.0 * values[..., -3, :]
+            - 48.0 * values[..., -2, :]
+            + 25.0 * values[..., -1, :]
+        ) / (12.0 * dt)
+        return dz
     else:
-        raise ValueError(f"Unsupported FD order: {order}. Only 1 and 2 are supported.")
+        raise ValueError(f"Unsupported FD order: {order}. Only 1, 2, and 4 are supported.")
 
 
 def _comp_linear_features_ct(

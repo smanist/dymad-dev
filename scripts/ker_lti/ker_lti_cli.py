@@ -235,6 +235,7 @@ def train(selected, seed: int | None = None):
         opt_local["model"]["name"] = f"ker_{mdl}"
         if seed is not None:
             opt_local.setdefault("data", {})["split_seed"] = seed
+            opt_local.setdefault("prediction_diagnostic", {})["sample_seed"] = seed
         trainer = Trainer(config_path, MDL, config_mod=opt_local)
         trainer.train()
 

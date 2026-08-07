@@ -948,11 +948,12 @@ class BaseOptimizerPhase(BasePhase):
         method: str,
         ode_args: dict[str, Any] | None = None,
         evaluate_all: bool = False,
+        rng: random.Random | None = None,
     ) -> float:
         if evaluate_all:
             samples = dataset
         else:
-            samples = [random.choice(dataset)]
+            samples = [(random if rng is None else rng).choice(dataset)]
         values = [
             self._evaluate_prediction_criterion_single(
                 model,
@@ -976,12 +977,25 @@ class BaseOptimizerPhase(BasePhase):
         ode_method: str,
         ode_args: dict[str, Any],
     ) -> None:
+        diagnostic_cfg = copy.deepcopy(self.config.get("prediction_diagnostic", {}))
+        diagnostic_cfg.update(copy.deepcopy(self.spec.config.get("prediction_diagnostic", {})))
+        sample_seed = diagnostic_cfg.get("sample_seed")
+        diagnostic_rng = None
+        if sample_seed is not None:
+            if not isinstance(sample_seed, int):
+                raise TypeError("prediction_diagnostic.sample_seed must be an integer")
+            diagnostic_rng = random.Random()
+            if history.prediction_rng_state is None:
+                diagnostic_rng.seed(sample_seed)
+            else:
+                diagnostic_rng.setstate(history.prediction_rng_state)
         train_crit = self._evaluate_prediction_criterion(
             model,
             optimizer_state,
             cast(list[TrainerBatch], phase_context.train_set or []),
             method=ode_method,
             ode_args=ode_args,
+            rng=diagnostic_rng,
         )
         valid_crit = self._evaluate_prediction_criterion(
             model,
@@ -989,7 +1003,10 @@ class BaseOptimizerPhase(BasePhase):
             cast(list[TrainerBatch], phase_context.valid_set or []),
             method=ode_method,
             ode_args=ode_args,
+            rng=diagnostic_rng,
         )
+        if diagnostic_rng is not None:
+            history.prediction_rng_state = diagnostic_rng.getstate()
         history.crit.append([epoch, train_crit, valid_crit])
 
     def _maybe_update_best(

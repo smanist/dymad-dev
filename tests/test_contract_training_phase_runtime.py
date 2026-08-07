@@ -1,5 +1,6 @@
 import json
 import logging
+import random
 from pathlib import Path
 
 import numpy as np
@@ -20,7 +21,7 @@ from dymad.training.helper import (
     nelder_mead_like_search_indices,
     select_best_cv_result,
 )
-from dymad.training.ls_update import _comp_linear_eval_ct, _comp_linear_eval_dt
+from dymad.training.ls_update import _comp_linear_eval_ct, _comp_linear_eval_dt, _ct_target
 from dymad.training.phase_runtime import (
     ArtifactRegistry,
     ModelArtifact,
@@ -126,6 +127,59 @@ def test_safe_plot_returns_false_when_plotting_fails(caplog):
 
     assert wrote_plot is False
     assert "Skipping history plot 'demo' due to plotting failure." in caplog.text
+
+
+def test_prediction_diagnostic_sampling_uses_persisted_local_rng(monkeypatch):
+    config = {
+        "model": {"name": "demo"},
+        "prediction_diagnostic": {"sample_seed": 12345},
+    }
+    execution_services = ExecutionServices.from_config(config, default_device=torch.device("cpu"))
+    phase = build_phase(
+        OptimizerPhaseSpec(name="node", trainer="NODE", config={}),
+        config=config,
+        model_class=object,
+        dtype=torch.float32,
+        execution_services=execution_services,
+    )
+    history = TrainingHistoryArtifact()
+    train_set = list(range(30))
+    valid_set = list(range(100, 110))
+    phase_context = PhaseContext(train_set=train_set, valid_set=valid_set)
+
+    monkeypatch.setattr(
+        phase,
+        "_evaluate_prediction_criterion_single",
+        lambda _model, _optimizer_state, sample, **_kwargs: float(sample),
+    )
+    for epoch in range(2):
+        random.seed(epoch)
+        phase._update_prediction_history(
+            object(),
+            object(),
+            phase_context,
+            history,
+            epoch=epoch,
+            ode_method="rk4",
+            ode_args={},
+        )
+
+    expected_rng = random.Random(12345)
+    expected = [
+        [0, expected_rng.choice(train_set), expected_rng.choice(valid_set)],
+        [1, expected_rng.choice(train_set), expected_rng.choice(valid_set)],
+    ]
+    assert history.crit == expected
+
+
+def test_fourth_order_continuous_target_is_exact_for_quartic_data():
+    time = torch.linspace(-1.0, 1.0, 9, dtype=torch.float64)
+    values = torch.stack((time**4, time**3), dim=-1).unsqueeze(0)
+
+    derivative = _ct_target(values, float(time[1] - time[0]), order=4)
+
+    expected = torch.stack((4.0 * time**3, 3.0 * time**2), dim=-1).unsqueeze(0)
+    torch.testing.assert_close(derivative, expected, atol=1.0e-12, rtol=1.0e-12)
 
 
 def test_normalize_phase_specs_expands_repeat_schedule():

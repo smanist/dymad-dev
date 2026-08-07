@@ -51,6 +51,7 @@ class TrainingHistoryArtifact:
     best_loss: dict[str, float] = field(default_factory=lambda: {"valid_total": float("inf")})
     best_model_state_dict: dict[str, Any] | None = None
     convergence_epoch: int | None = None
+    prediction_rng_state: tuple[Any, ...] | None = None
 
 
 @dataclass

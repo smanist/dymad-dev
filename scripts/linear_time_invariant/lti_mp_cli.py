@@ -147,7 +147,7 @@ def train(selected, root: Path, seed: int | None = None):
         config_path = root / cases[idx]["config"]
         max_workers = cases[idx]["max_workers"]
 
-        config_mod = {"seed": seed} if seed is not None else None
+        config_mod = {"data": {"split_seed": seed}} if seed is not None else None
         trainer = Trainer(config_path, Model, config_mod=config_mod, max_workers=max_workers)
         trainer.train()
 

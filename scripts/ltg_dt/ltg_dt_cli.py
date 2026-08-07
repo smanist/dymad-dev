@@ -169,12 +169,13 @@ def normalize_legacy_data(data_path: Path) -> bool:
     return True
 
 
-def train(selected, root: Path):
+def train(selected, root: Path, seed: int | None = None):
     for idx in selected:
         Model = cases[idx]["model"]
         Trainer = cases[idx]["trainer"]
         config_path = root / cases[idx]["config"]
-        trainer = Trainer(config_path, Model)
+        config_mod = {"prediction_diagnostic": {"sample_seed": seed}} if seed is not None else None
+        trainer = Trainer(config_path, Model, config_mod=config_mod)
         trainer.train()
 
 
@@ -235,7 +236,7 @@ def main():
         generate_data(root, args.seed)
     normalize_legacy_data(data_path)
     if not args.no_train:
-        train(selected, root)
+        train(selected, root, args.seed)
     if not args.no_plot:
         plot(selected)
     if not args.no_predict:
