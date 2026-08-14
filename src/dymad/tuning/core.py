@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from itertools import product
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from scipy.stats import qmc
@@ -1879,7 +1879,7 @@ def _sobol_unit_centers(dim: int, count: int, *, seed: int) -> list[np.ndarray]:
     except TypeError:
         # SciPy 1.14, the oldest supported release, still names this
         # argument ``seed``. Newer releases renamed it to ``rng``.
-        sampler = qmc.Sobol(d=dim, scramble=True, seed=seed)
+        sampler = cast(Any, qmc.Sobol)(d=dim, scramble=True, seed=seed)
     samples = sampler.random_base2(m=exponent)[:count]
     return [np.asarray(sample, dtype=float) for sample in samples]
 

@@ -102,7 +102,7 @@ class _ExternalForwardAutograd(torch.autograd.Function):
     def backward(ctx, grad_output: torch.Tensor):
         module: ExternalTransformModule = ctx.module
         ref, _output = ctx.saved_tensors
-        grad_input = module.forward_vjp(ref, grad_output)
+        grad_input = cast(torch.Tensor, module.forward_vjp(ref, grad_output))
         return None, grad_input.to(device=ref.device, dtype=ref.dtype)
 
 
@@ -118,7 +118,7 @@ class _ExternalInverseAutograd(torch.autograd.Function):
     def backward(ctx, grad_output: torch.Tensor):
         module: ExternalTransformModule = ctx.module
         ref, _output = ctx.saved_tensors
-        grad_input = module.inverse_vjp(ref, grad_output)
+        grad_input = cast(torch.Tensor, module.inverse_vjp(ref, grad_output))
         return None, grad_input.to(device=ref.device, dtype=ref.dtype)
 
 

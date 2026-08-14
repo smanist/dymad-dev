@@ -13,6 +13,7 @@ from dymad.numerics import (
     scaled_eig,
     truncated_svd,
 )
+from dymad.training.ls_update import _ls_full
 
 
 def cmp(sol, ref):
@@ -58,6 +59,17 @@ def test_svd():
     # Reference singular values:
     # [25.1554028   4.24122589  3.93344336  3.78680366  3.73375361]
     # [25.1554028   4.23772365  3.93123059  3.77921143  3.73049082]
+
+
+def test_full_least_squares_uses_source_dtype_rank_cutoff():
+    singular_values = np.array([1.0, 0.5, 1.0e-8], dtype=np.float32)
+    A = np.diag(singular_values)
+    b = np.array([[1.0], [0.5], [1.0e-8]], dtype=np.float32)
+
+    solution = _ls_full(A, b)
+
+    assert np.allclose(A @ solution, b, atol=2.0e-8)
+    assert np.linalg.norm(solution) < 1.5
 
 
 def test_scaled_eig_std():

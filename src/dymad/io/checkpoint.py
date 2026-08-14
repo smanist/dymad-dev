@@ -544,7 +544,12 @@ def _load_model_checkpoint(model_class, checkpoint_path):
         with torch.no_grad():
             effective_predict_kwargs = dict(prediction_defaults)
             effective_predict_kwargs.update(predict_kwargs)
-            pred = model.predict(_x0, _data, pred_t, **effective_predict_kwargs).cpu().numpy()
+            pred = (
+                cast(Any, model)
+                .predict(_x0, _data, pred_t, **effective_predict_kwargs)
+                .cpu()
+                .numpy()
+            )
 
         if _has_graph:
             # Some hacking to handle graph data

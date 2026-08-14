@@ -216,7 +216,11 @@ def get_batch_ct(dataloader, model, dt, **kwargs) -> tuple[np.ndarray, np.ndarra
 # ----------------
 def _ls_full(A: np.ndarray, b: np.ndarray, params=None) -> np.ndarray:
     """Full least squares solver."""
-    W = np.linalg.lstsq(A, b, rcond=None)[0]
+    # Some LAPACK implementations treat the default cutoff as double precision even
+    # for float32 inputs.  Use the source dtype explicitly so numerical null directions
+    # do not produce platform-dependent, very large coefficients.
+    rcond = float(np.finfo(A.dtype).eps)
+    W = np.linalg.lstsq(A, b, rcond=rcond)[0]
     return W
 
 

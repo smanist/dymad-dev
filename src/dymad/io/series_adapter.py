@@ -96,7 +96,7 @@ class SeriesAdapter:
             return FixedGraphSeries(
                 time=time_tensor,
                 node_state=node_state_tensor,
-                edge_index=edge_index_payload,
+                edge_index=cast(torch.Tensor, edge_index_payload),
                 control=control_tensor,
                 target=target_tensor,
                 params=params_tensor,
