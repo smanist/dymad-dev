@@ -170,3 +170,37 @@ def generate_weak_weights(
     D = P0 * w0 * w  # shape: (poly_order, N)
 
     return C, D
+
+
+def generate_discrete_weak_weights(
+    dt: float,
+    n_integration_points: int,
+    poly_order: int = 4,
+    int_rule_order: int = 4,
+    normalization: str = "l2",
+) -> np.ndarray:
+    """Generate discrete-time weak projection weights.
+
+    This reuses the non-derivative weak weights as the residual projection bank.
+    Rows can optionally be normalized with an L2 or L1 norm.
+    """
+    _, D = generate_weak_weights(
+        dt=dt,
+        n_integration_points=n_integration_points,
+        poly_order=poly_order,
+        int_rule_order=int_rule_order,
+    )
+    if normalization == "none":
+        return D
+    if normalization == "l2":
+        norms = np.linalg.norm(D, ord=2, axis=1, keepdims=True)
+    elif normalization == "l1":
+        norms = np.linalg.norm(D, ord=1, axis=1, keepdims=True)
+    else:
+        raise ValueError(
+            "Invalid discrete weak weight normalization "
+            f"'{normalization}'. Expected one of 'l2', 'l1', or 'none'."
+        )
+    if np.any(norms == 0.0):
+        raise ValueError("Discrete weak weights contain a zero-norm projection row.")
+    return D / norms

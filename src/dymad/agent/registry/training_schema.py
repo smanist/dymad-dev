@@ -104,8 +104,10 @@ TRANSLATION_GUIDANCE: tuple[str, ...] = (
     "Use overrides.cv.selection to control model choice policy (goal and tie_breakers).",
     "Supported optimizer trainer names are Linear, OneStep, Weak, and NODE.",
     "Prefer minimal legacy optimizer entries such as {'trainer': 'Linear'} or "
-    "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters; "
-    "matching trainer defaults from the selected profile are preserved unless overridden.",
+    "{'trainer': 'Weak'} unless the user asks for explicit phase-level hyperparameters. "
+    "Weak automatically uses continuous-time weak derivative matching for continuous models "
+    "and projected one-step residual matching for discrete models; matching trainer defaults "
+    "from the selected profile are preserved unless overridden.",
     "Add phase names only when they improve readability or reflect user-provided "
     "labels such as initialization or refinement.",
 )
@@ -115,6 +117,8 @@ CONSTRAINT_NOTES: tuple[str, ...] = (
     "When the user requests identity encoder/decoder behavior without naming the "
     "latent dimension, inspect the dataset and set the latent dimension to the "
     "dataset state dimension.",
+    "For discrete-time models, Weak uses a projected one-step residual objective in latent "
+    "space; it is not a discrete integration-by-parts formulation.",
 )
 
 
