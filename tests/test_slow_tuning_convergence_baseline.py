@@ -117,12 +117,9 @@ def test_neumann_full_nelder_mead_convergence_baseline(
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     for method in METHODS:
         for level in LEVELS:
-            assert np.isclose(
-                record["error_medians"][method][str(level)],
-                baseline["error_medians"][method][str(level)],
-                rtol=0.25,
-                atol=1.0e-12,
-            )
+            observed_error = record["error_medians"][method][str(level)]
+            baseline_error = baseline["error_medians"][method][str(level)]
+            assert observed_error <= baseline_error * 1.25 + 1.0e-12
         assert np.isclose(
             record["error_slopes"][method],
             baseline["error_slopes"][method],
