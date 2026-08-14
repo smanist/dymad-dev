@@ -25,6 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "ltg_dt_tv"
 BASELINE_PATH = Path(__file__).with_name("slow_ltg_dt_tv_cli_baselines.json")
 TEST_SEED = 12345
+# The CLI exports its best-validation checkpoint, not the terminal optimizer state.
+REGRESSION_METRICS = ("best_valid_total", "rmse")
 
 
 @dataclass(frozen=True)
@@ -105,4 +107,4 @@ def test_ltg_dt_tv_cli(case: Case, tmp_path: Path, request, baseline_store):
         return
     baseline = load_baseline_store(BASELINE_PATH)[case.model_name]
     assert_summary_against_baseline(summary, baseline)
-    compare_record_metrics(record, baseline)
+    compare_record_metrics(record, baseline, metric_names=REGRESSION_METRICS)

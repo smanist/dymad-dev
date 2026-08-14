@@ -103,6 +103,7 @@ def assert_summary_against_baseline(summary: dict, baseline: dict) -> None:
     }
     assert stable_signature == stable_baseline_signature
     assert signature["crit_epoch_count"] > 0
+    assert np.isfinite(np.asarray(summary["crits"], dtype=float)).all()
 
     total_training_time = float(summary["total_training_time"])
     avg_epoch_time = float(summary["avg_epoch_time"])
@@ -144,6 +145,13 @@ def extract_record(summary: dict, rmse: float) -> dict:
     }
 
 
-def compare_record_metrics(record: dict, baseline: dict) -> None:
-    for metric_name, baseline_value in baseline["metrics"].items():
+def compare_record_metrics(
+    record: dict,
+    baseline: dict,
+    *,
+    metric_names: tuple[str, ...] | None = None,
+) -> None:
+    names = baseline["metrics"] if metric_names is None else metric_names
+    for metric_name in names:
+        baseline_value = baseline["metrics"][metric_name]
         assert record["metrics"][metric_name] <= scaled_limit(metric_name, baseline_value)

@@ -20,16 +20,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPO_ROOT / "scripts" / "ltg_dt"
 BASELINE_PATH = Path(__file__).with_name("slow_ltg_dt_cli_baselines.json")
 SAFETY_FACTOR = 1.5
-DIAGNOSTIC_SAFETY_FACTORS = {
-    "crit_train_last": 10.0,
-    "crit_valid_last": 10.0,
-}
+# Training summaries describe the terminal optimizer state, while the exported
+# checkpoint is selected by best validation loss. Gate quality on that checkpoint.
+REGRESSION_METRICS = ("best_valid_total", "rmse")
 TEST_SEED = 12345
 ABS_TOLERANCES = {
     "best_valid_total": 1.0e-12,
-    "final_valid_loss": 1.0e-12,
-    "crit_train_last": 1.0e-12,
-    "crit_valid_last": 1.0e-12,
     "rmse": 1.0e-9,
 }
 
@@ -178,8 +174,10 @@ def _load_baselines() -> dict:
 
 
 def _scaled_limit(metric_name: str, baseline_value: float) -> float:
-    factor = DIAGNOSTIC_SAFETY_FACTORS.get(metric_name, SAFETY_FACTOR)
-    return max(baseline_value * factor, baseline_value + ABS_TOLERANCES[metric_name])
+    return max(
+        baseline_value * SAFETY_FACTOR,
+        baseline_value + ABS_TOLERANCES[metric_name],
+    )
 
 
 def _load_summary(summary_path: Path) -> dict:
@@ -231,6 +229,7 @@ def _assert_summary_against_baseline(summary: dict, baseline: dict) -> None:
     }
     assert stable_signature == stable_baseline_signature
     assert signature["crit_epoch_count"] > 0
+    assert np.isfinite(np.asarray(summary["crits"], dtype=float)).all()
 
     total_training_time = float(summary["total_training_time"])
     avg_epoch_time = float(summary["avg_epoch_time"])
@@ -313,5 +312,6 @@ def test_ltg_dt_cli_training_regression(
 
     baseline = _load_baselines()[case.model_name]
     _assert_summary_against_baseline(summary, baseline)
-    for metric_name, baseline_value in baseline["metrics"].items():
+    for metric_name in REGRESSION_METRICS:
+        baseline_value = baseline["metrics"][metric_name]
         assert record["metrics"][metric_name] <= _scaled_limit(metric_name, baseline_value)
