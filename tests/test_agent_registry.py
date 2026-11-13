@@ -157,6 +157,9 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
     phase_schemas = {entry.key: entry for entry in detail.phase_entry_schemas}
     assert "reset_optimizer" in phase_schemas["legacy_optimizer"].optional_fields
     assert "reset_optimizer" in phase_schemas["optimizer"].optional_fields
+    for key in ("legacy_optimizer", "optimizer"):
+        assert phase_schemas[key].enum_fields["optimizer"] == ("adam", "bfgs", "lbfgs")
+        assert "history_size" in phase_schemas[key].optional_fields
     assert detail.cv_schema.notes == (
         "This v1 user-mode CV surface runs the existing single-split parameter sweep; it is not "
         "true k-fold cross-validation.",
@@ -209,7 +212,14 @@ def test_describe_training_capability_exposes_phase_schema_and_override_contract
         "When the user requests identity encoder/decoder behavior without naming the "
         "latent dimension, inspect the dataset and set the latent dimension to the "
         "dataset state dimension.",
+        "Optimizer phases default to Adam. bfgs (full BFGS) and lbfgs currently support only "
+        "NODE and Weak on uniform regular trajectories, with no learning-rate decay and "
+        "mean-MSE training losses. NODE uses initial-time shooting and a fixed full horizon; "
+        "Weak uses fixed weak_form_params and a common uniform sampling interval.",
     )
+    bfgs_example = next(example for example in detail.examples if example.name == "adam_then_bfgs")
+    assert [phase["optimizer"] for phase in bfgs_example.overrides["phases"]] == ["adam", "bfgs"]
+    assert any("trainer=Weak" in note for note in bfgs_example.notes)
     assert "export_summary" in detail.auto_appended_phases
     assert detail.examples[0].name == "linear_then_node_from_plain_english"
     assert (

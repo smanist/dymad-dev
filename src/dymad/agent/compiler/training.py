@@ -33,6 +33,7 @@ from dymad.agent.registry.training_schema import (
     RUNTIME_OWNED_MODEL_KEYS,
     RUNTIME_OWNED_OVERRIDE_PATHS,
 )
+from dymad.training.optimizer_config import normalize_optimizer_config
 
 
 def _raise_invalid(message: str, *, field_path: tuple[str, ...]) -> Never:
@@ -465,6 +466,7 @@ def _normalize_phase_override_entry(
     entry: object,
     *,
     default_optimizer_phase_by_trainer: dict[str, dict[str, Any]],
+    field_path: tuple[str, ...],
 ) -> object:
     if not isinstance(entry, dict):
         return copy.deepcopy(entry)
@@ -480,8 +482,9 @@ def _normalize_phase_override_entry(
                 _normalize_phase_override_entry(
                     phase_entry,
                     default_optimizer_phase_by_trainer=default_optimizer_phase_by_trainer,
+                    field_path=field_path + ("repeat", "phases", str(index)),
                 )
-                for phase_entry in nested_phases
+                for index, phase_entry in enumerate(nested_phases)
             ]
         return normalized_entry
 
@@ -489,11 +492,19 @@ def _normalize_phase_override_entry(
     if trainer is None:
         return copy.deepcopy(entry)
 
+    # Apply explicit QN defaults before merging Adam profile defaults. Omitted
+    # optimizer keeps the historical profile merge unchanged.
+    normalized_entry = copy.deepcopy(entry)
+    if "optimizer" in entry:
+        try:
+            normalized_entry = normalize_optimizer_config(entry, trainer)
+        except ValueError as exc:
+            _raise_invalid(str(exc), field_path=field_path)
     default_phase = default_optimizer_phase_by_trainer.get(trainer)
     if default_phase is None:
-        return copy.deepcopy(entry)
+        return normalized_entry
 
-    return cast(dict[str, Any], exec_workflow._deep_merge(default_phase, entry))
+    return cast(dict[str, Any], exec_workflow._deep_merge(default_phase, normalized_entry))
 
 
 def _normalize_overrides_against_profile(
@@ -514,10 +525,52 @@ def _normalize_overrides_against_profile(
         _normalize_phase_override_entry(
             phase_entry,
             default_optimizer_phase_by_trainer=default_optimizer_phase_by_trainer,
+            field_path=("overrides", "phases", str(index)),
         )
-        for phase_entry in phases
+        for index, phase_entry in enumerate(phases)
     ]
     return normalized_overrides
+
+
+def _validate_phase_optimizers(
+    phases: object,
+    *,
+    criterion: object,
+    dataset_kind: DatasetKind,
+    field_path: tuple[str, ...] = ("overrides", "phases"),
+) -> None:
+    """Check effective NODE/Weak optimizer options, including nested repeat phases."""
+    if not isinstance(phases, list):
+        return
+    for index, entry in enumerate(phases):
+        if not isinstance(entry, dict):
+            continue
+        path = field_path + (str(index),)
+        repeat = entry.get("repeat")
+        if isinstance(repeat, dict):
+            _validate_phase_optimizers(
+                repeat.get("phases"),
+                criterion=criterion,
+                dataset_kind=dataset_kind,
+                field_path=path + ("repeat", "phases"),
+            )
+            continue
+        trainer = _optimizer_trainer_from_phase_entry(entry)
+        if trainer is None:
+            continue
+        config = copy.deepcopy(entry)
+        if config.get("optimizer", "adam") in ("bfgs", "lbfgs"):
+            if dataset_kind != "regular":
+                _raise_invalid("bfgs/lbfgs require regular trajectory data", field_path=path)
+            if not isinstance(criterion, dict) or not isinstance(config.get("criterion", {}), dict):
+                _raise_invalid("bfgs/lbfgs criterion must be a mapping", field_path=path)
+            combined_criterion = copy.deepcopy(criterion)
+            combined_criterion.update(config.get("criterion", {}))
+            config["criterion"] = combined_criterion
+        try:
+            normalize_optimizer_config(config, trainer)
+        except ValueError as exc:
+            _raise_invalid(str(exc), field_path=path)
 
 
 def _dataset_kind_from_record(dataset_record) -> DatasetKind:
@@ -675,6 +728,11 @@ def compile_training_request(
         reference_profile=normalized_request.reference_profile,
         user_config=overrides,
         run_name=effective_run_name,
+    )
+    _validate_phase_optimizers(
+        effective_config.get("phases"),
+        criterion=effective_config.get("criterion", {}),
+        dataset_kind=train_dataset_kind,
     )
     _validate_zero_layer_autoencoder_identity(
         dataset_record=train_dataset,

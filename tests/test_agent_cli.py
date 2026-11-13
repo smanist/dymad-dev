@@ -4,6 +4,7 @@ import json
 import time
 from pathlib import Path
 
+import pytest
 import yaml
 
 import dymad.io
@@ -84,6 +85,33 @@ def test_cli_validate_accepts_minimal_config_and_uses_user_compiler(tmp_path) ->
         dataset_path.resolve()
     )
     assert result["compiled_request"].effective_config["model"]["koopman_dimension"] == 6
+
+
+@pytest.mark.parametrize("trainer", ["NODE", "Weak"])
+def test_cli_yaml_accepts_adam_then_bfgs_and_rejects_invalid_lbfgs(tmp_path, trainer) -> None:
+    dataset_path = tmp_path / "train.npz"
+    config_path = tmp_path / "config.yaml"
+    _write_regular_dataset(dataset_path, with_control=False)
+    phases = [
+        {"trainer": trainer, "optimizer": "adam", "n_epochs": 2},
+        {"trainer": trainer, "optimizer": "bfgs", "n_epochs": 2},
+    ]
+    _write_cli_config(config_path, train_path=dataset_path, overrides={"phases": phases})
+    result = CLIWorkflowService().validate_config(config_path, run_dir=tmp_path / "runs" / "qn")
+    compiled_phases = result["compiled_request"].effective_config["phases"]
+    assert [phase["optimizer"] for phase in compiled_phases] == ["adam", "bfgs"]
+    assert compiled_phases[1]["learning_rate"] == 1.0
+    if trainer == "Weak":
+        assert compiled_phases[1]["weak_form_params"]["N"] == 13
+        assert compiled_phases[1]["decay_rate"] == 1.0
+    phases[1].update({"optimizer": "lbfgs", "history_size": 0})
+    _write_cli_config(config_path, train_path=dataset_path, overrides={"phases": phases})
+    try:
+        CLIWorkflowService().validate_config(config_path, run_dir=tmp_path / "runs" / "qn")
+    except Exception as exc:
+        assert "history_size must be a positive integer" in str(exc)
+    else:
+        raise AssertionError("invalid L-BFGS history was accepted")
 
 
 def test_cli_validate_rejects_bad_config_and_compiler_errors(tmp_path) -> None:

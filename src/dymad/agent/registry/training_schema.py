@@ -115,6 +115,10 @@ CONSTRAINT_NOTES: tuple[str, ...] = (
     "When the user requests identity encoder/decoder behavior without naming the "
     "latent dimension, inspect the dataset and set the latent dimension to the "
     "dataset state dimension.",
+    "Optimizer phases default to Adam. bfgs (full BFGS) and lbfgs currently support only "
+    "NODE and Weak on uniform regular trajectories, with no learning-rate decay and "
+    "mean-MSE training losses. NODE uses initial-time shooting and a fixed full horizon; "
+    "Weak uses fixed weak_form_params and a common uniform sampling interval.",
 )
 
 
@@ -126,12 +130,26 @@ def _phase_entry_schemas() -> tuple[TrainingPhaseEntrySchema, ...]:
             summary="Legacy shorthand for one optimizer phase.",
             accepted_shape='{"trainer": "NODE" | "Weak" | "Linear" | "OneStep", ...}',
             required_fields=("trainer",),
-            optional_fields=("name", "reset_optimizer"),
-            enum_fields={"trainer": ("NODE", "Weak", "Linear", "OneStep")},
+            optional_fields=(
+                "name",
+                "reset_optimizer",
+                "optimizer",
+                "learning_rate",
+                "max_eval",
+                "tolerance_grad",
+                "tolerance_change",
+                "curvature_floor",
+                "history_size",
+            ),
+            enum_fields={
+                "trainer": ("NODE", "Weak", "Linear", "OneStep"),
+                "optimizer": ("adam", "bfgs", "lbfgs"),
+            },
             allows_additional_keys=True,
             notes=(
                 "Any extra keys are treated as optimizer-phase config.",
                 "Legacy shorthand normalizes to an explicit optimizer phase.",
+                "optimizer defaults to adam; bfgs is full BFGS and lbfgs uses limited memory.",
             ),
             example={"trainer": "NODE", "name": "node", "n_epochs": 25},
         ),
@@ -140,10 +158,29 @@ def _phase_entry_schemas() -> tuple[TrainingPhaseEntrySchema, ...]:
             summary="Explicit optimizer phase.",
             accepted_shape='{"type": "optimizer", "trainer": "NODE" | "Weak" | "Linear" | "OneStep", ...}',
             required_fields=("type", "trainer"),
-            optional_fields=("name", "reset_optimizer"),
-            enum_fields={"trainer": ("NODE", "Weak", "Linear", "OneStep")},
+            optional_fields=(
+                "name",
+                "reset_optimizer",
+                "optimizer",
+                "learning_rate",
+                "max_eval",
+                "tolerance_grad",
+                "tolerance_change",
+                "curvature_floor",
+                "history_size",
+            ),
+            enum_fields={
+                "trainer": ("NODE", "Weak", "Linear", "OneStep"),
+                "optimizer": ("adam", "bfgs", "lbfgs"),
+            },
             allows_additional_keys=True,
-            notes=("Any extra keys are treated as optimizer-phase config.",),
+            notes=(
+                "Any extra keys are treated as optimizer-phase config.",
+                "optimizer defaults to adam; bfgs is full BFGS and lbfgs uses limited memory.",
+                "QN defaults: learning_rate=1, max_eval=25, tolerance_grad=1e-9, "
+                "tolerance_change=1e-12, curvature_floor=1e-10; lbfgs history_size=100.",
+                "BFGS/L-BFGS support NODE and Weak; Weak retains matching profile weak_form_params.",
+            ),
             example={"type": "optimizer", "name": "Refine", "trainer": "NODE", "n_epochs": 25},
         ),
         TrainingPhaseEntrySchema(
@@ -382,6 +419,23 @@ def _examples() -> tuple[TrainingCapabilityExample, ...]:
             notes=(
                 "Repeat blocks are useful when the user explicitly asks for a cyclic "
                 "schedule rather than a simple ordered list of trainers.",
+            ),
+        ),
+        TrainingCapabilityExample(
+            name="adam_then_bfgs",
+            user_request="Warm up NODE with Adam, then refine using full BFGS.",
+            overrides={
+                "phases": [
+                    {"trainer": "NODE", "optimizer": "adam", "n_epochs": 200},
+                    {"trainer": "NODE", "optimizer": "bfgs", "n_epochs": 100},
+                ]
+            },
+            notes=(
+                "bfgs selects full BFGS; use lbfgs with history_size=300 for limited memory.",
+                "QN uses a fixed full horizon and starts fresh curvature in each phase.",
+                "Supported for uniform regular trajectories and mean-MSE training losses.",
+                "Use trainer=Weak in both phases for weak-form refinement; matching profile "
+                "weak_form_params are preserved. Weak requires a common uniform sampling interval.",
             ),
         ),
     )

@@ -10,7 +10,173 @@ from dymad.agent.compiler import (
     TrainingRequest,
     compile_training_request,
 )
+from dymad.agent.compiler.training import _normalize_overrides_against_profile
 from dymad.agent.exec.context import build_default_context
+from dymad.training.optimizer_config import normalize_optimizer_config
+
+
+@pytest.mark.parametrize("optimizer", ["adam", "bfgs", "lbfgs"])
+@pytest.mark.parametrize("trainer", ["NODE", "Weak"])
+def test_compile_optimizer_choices_preserve_profile_objective(tmp_path, optimizer, trainer) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+    compiled = compile_training_request(
+        facade=context.facade,
+        request=TrainingRequest(
+            train_dataset_handle=train_handle,
+            model_key="kbf",
+            overrides={"phases": [{"trainer": trainer, "optimizer": optimizer, "n_epochs": 5}]},
+        ),
+    )
+    phase = compiled.effective_config["phases"][0]
+    assert phase["optimizer"] == optimizer
+    assert compiled.effective_config["criterion"]["recon"]["weight"] == 1.0
+    if optimizer != "adam":
+        assert phase["learning_rate"] == 1.0
+        assert phase["decay_rate"] == 1.0
+    if trainer == "NODE" and optimizer != "adam":
+        assert phase["sweep_lengths"] == [None]
+    if trainer == "Weak":
+        assert phase["weak_form_params"] == {"N": 13, "dN": 2, "ordpol": 2, "ordint": 2}
+        assert "sweep_lengths" not in phase
+        assert "sweep_tols" not in phase
+        assert "chop_mode" not in phase
+    if optimizer == "lbfgs":
+        assert phase["history_size"] == 100
+
+
+def test_quasi_newton_defaults_precede_profile_merge_and_keep_explicit_options() -> None:
+    profile = {
+        "phases": [
+            {
+                "trainer": "NODE",
+                "learning_rate": 0.003,
+                "decay_rate": 0.99,
+                "min_learning_rate": 1e-6,
+                "sweep_lengths": [5, None],
+                "sweep_tols": [0.1, 0.01],
+                "n_epochs": 20,
+            }
+        ]
+    }
+    overrides = {
+        "phases": [
+            {
+                "repeat": {
+                    "times": 2,
+                    "phases": [
+                        {
+                            "trainer": "NODE",
+                            "optimizer": "lbfgs",
+                            "learning_rate": 0.5,
+                            "history_size": 300,
+                        }
+                    ],
+                }
+            }
+        ]
+    }
+    normalized = _normalize_overrides_against_profile(overrides, profile_config=profile)
+    assert normalized is not None
+    phase = normalized["phases"][0]["repeat"]["phases"][0]
+    assert phase["learning_rate"] == 0.5
+    assert phase["history_size"] == 300
+    assert phase["decay_rate"] == 1.0
+    assert phase["min_learning_rate"] == 0.0
+    assert phase["sweep_lengths"] == [None]
+    assert phase["sweep_tols"] is None
+    assert phase["n_epochs"] == 20
+    assert profile["phases"][0]["learning_rate"] == 0.003
+    assert "decay_rate" not in overrides["phases"][0]["repeat"]["phases"][0]
+
+
+def test_optimizer_config_keeps_legacy_adam_payload_and_copies_nested_values() -> None:
+    config = {"learning_rate": 0.003, "criterion": {"dynamics": {"type": "l1"}}}
+    normalized = normalize_optimizer_config(config, "Weak")
+    assert normalized == config
+    normalized["criterion"]["dynamics"]["type"] = "mse"
+    assert config["criterion"]["dynamics"]["type"] == "l1"
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"optimizer": "full_bfgs"}, "optimizer must be one of"),
+        ({"trainer": "Linear"}, "require trainer NODE or Weak"),
+        ({"trainer": "OneStep"}, "require trainer NODE or Weak"),
+        ({"sweep_lengths": [3, None]}, "fixed full horizon"),
+        ({"sweep_tols": [0.01]}, "fixed full horizon"),
+        ({"chop_mode": "window"}, "initial-time shooting"),
+        ({"decay_rate": 0.9}, "decay_rate=1"),
+        ({"min_learning_rate": 1e-6}, "min_learning_rate=0"),
+        ({"learning_rate": float("nan")}, "finite positive"),
+        ({"learning_rate": True}, "finite positive"),
+        ({"max_eval": True}, "positive integer"),
+        ({"max_eval": 0}, "positive integer"),
+        ({"tolerance_grad": -1}, "finite nonnegative"),
+        ({"tolerance_change": float("inf")}, "finite nonnegative"),
+        ({"curvature_floor": -1}, "finite nonnegative"),
+        ({"optimizer": "lbfgs", "history_size": 0}, "positive integer"),
+        ({"optimizer": "lbfgs", "history_size": 1.5}, "positive integer"),
+        ({"history_size": 100}, "only supported by lbfgs"),
+        ({"criterion": {"dynamics": {"params": {"reduction": "sum"}}}}, "mean MSE"),
+        ({"criterion": {"dynamics": {"weight": 0}}}, "positive dynamics"),
+    ],
+)
+def test_compile_rejects_invalid_optimizer_options_in_repeat(tmp_path, options, message) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+    phase = {"trainer": "NODE", "optimizer": "bfgs", **options}
+    with pytest.raises(TrainingCompileValidationError, match=message) as exc_info:
+        compile_training_request(
+            facade=context.facade,
+            request=TrainingRequest(
+                train_dataset_handle=train_handle,
+                model_key="kbf",
+                overrides={"phases": [{"repeat": {"times": 2, "phases": [phase]}}]},
+            ),
+        )
+    assert exc_info.value.field_path == ("overrides", "phases", "0", "repeat", "phases", "0")
+
+
+def test_compile_rejects_effective_non_mse_objective_for_quasi_newton(tmp_path) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "train.npz"
+    _write_regular_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path)).handle
+    with pytest.raises(TrainingCompileValidationError, match="mean MSE"):
+        compile_training_request(
+            facade=context.facade,
+            request=TrainingRequest(
+                train_dataset_handle=train_handle,
+                model_key="kbf",
+                overrides={
+                    "criterion": {"recon": {"type": "l1"}},
+                    "phases": [{"trainer": "NODE", "optimizer": "bfgs"}],
+                },
+            ),
+        )
+
+
+@pytest.mark.parametrize("trainer", ["NODE", "Weak"])
+def test_compile_rejects_quasi_newton_graph_data(tmp_path, trainer) -> None:
+    context = build_default_context(artifact_root=tmp_path / "artifacts")
+    dataset_path = tmp_path / "graph.npz"
+    _write_graph_dataset(dataset_path)
+    train_handle = context.facade.register_dataset_file(path=str(dataset_path), kind="graph").handle
+    with pytest.raises(TrainingCompileValidationError, match="require regular trajectory data"):
+        compile_training_request(
+            facade=context.facade,
+            request=TrainingRequest(
+                train_dataset_handle=train_handle,
+                model_key="kbf",
+                overrides={"phases": [{"trainer": trainer, "optimizer": "bfgs"}]},
+            ),
+        )
 
 
 def _write_regular_dataset(path: Path) -> None:

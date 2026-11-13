@@ -172,6 +172,53 @@ Specifically, suppose the file is ``lti_weak.cli.yaml``, next to ``lti.npz``. Th
    dymad eval --run runs/lti_weak_baseline
    dymad report --run runs/lti_weak_baseline
 
+To warm up NODE with Adam and then refine with full BFGS, replace ``overrides.phases`` with:
+
+.. code-block:: yaml
+
+   phases:
+     - trainer: NODE
+       optimizer: adam
+       n_epochs: 200
+       learning_rate: 0.001
+     - trainer: NODE
+       optimizer: bfgs
+       n_epochs: 100
+
+``optimizer`` is optional and defaults to ``adam``. ``bfgs`` selects full BFGS; for limited
+memory, use ``optimizer: lbfgs`` and optionally ``history_size: 300`` (default 100). These
+choices use the existing phase schedule and YAML/compiler path. Each quasi-Newton phase starts
+fresh curvature state, including when it follows an Adam warm-up.
+Both implementations share a safeguarded strong-Wolfe line search and reuse accepted loss and
+gradient evaluations. L-BFGS uses a fixed identity base for its retained curvature pairs.
+
+Quasi-Newton training supports NODE and Weak on uniform regular trajectories with mean-MSE
+training losses, including reconstruction when configured. For weak-form training, change both
+``trainer`` values above to ``Weak``. Matching profile ``weak_form_params`` are retained unless
+overridden; they stay fixed within the phase. Weak requires a common positive, uniform sampling
+interval across the training and validation trajectories. Linear, OneStep, graph, and ragged
+quasi-Newton training remain unsupported.
+
+NODE quasi-Newton phases use initial-time shooting and the full horizon throughout:
+``sweep_lengths: [null]``, ``sweep_tols: null``, and ``chop_mode: initial``. Those settings are
+specific to NODE. Both NODE and Weak use ``decay_rate: 1`` and ``min_learning_rate: 0``.
+These defaults are applied before profile merging; incompatible explicit settings are rejected.
+Adam phases can retain their existing curriculum and learning-rate scheduling.
+
+Quasi-Newton defaults are ``learning_rate: 1``, ``max_eval: 25``, ``tolerance_grad: 1.e-9``,
+``tolerance_change: 1.e-12``, and ``curvature_floor: 1.e-10``. ``learning_rate`` is the initial
+line-search step scale. ``n_epochs`` counts optimizer updates; a line search can evaluate the
+full training objective several times per update. Dense BFGS stores a matrix quadratic in the
+trainable parameter count, so use it for suitably small models. These options expose algorithms;
+they do not guarantee an accuracy or speed improvement on a new problem.
+
+For a runnable comparison, see ``scripts/lti_dt/lti_dt_bfgs_train.py``. It compares Adam,
+full BFGS, and L-BFGS refinement following identical Adam warm-ups on discrete-time LTI
+rollouts using the NODE trainer and a fixed full horizon. Refinements receive the same maximum
+number of optimizer updates; their wall-clock costs can differ because line searches use
+multiple objective evaluations. The example plots losses against updates and training seconds,
+and compares predictions under unseen Gaussian inputs.
+
 Common commands:
 
 - ``dymad config schema`` prints the JSON Schema for CLI config files.

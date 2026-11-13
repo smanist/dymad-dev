@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import random
 import time
 import warnings
@@ -17,9 +18,11 @@ from dymad.core import GraphSeries, GraphTrainerBatch, RegularSeries, RegularTra
 from dymad.core.transform_builder import build_transform_module
 from dymad.losses import LOSS_MAP
 from dymad.numerics import denoise, denoising_metrics, generate_weak_weights
+from dymad.numerics.bfgs import BFGS, LBFGS
 from dymad.training.batch_adapter import RuntimeBatch, TrainerBatch, batch_to_runtime
 from dymad.training.execution_services import ExecutionServices
 from dymad.training.ls_update import LSUpdater, _comp_linear_eval_ct, _comp_linear_eval_dt
+from dymad.training.optimizer_config import normalize_optimizer_config
 from dymad.training.phase_runtime import (
     ArtifactRegistry,
     EvaluationArtifact,
@@ -734,18 +737,67 @@ class BasePhase:
 
 
 class BaseOptimizerPhase(BasePhase):
+    _qn_batches: dict[int, tuple[RegularTrainerBatch, ...]]
+    _qn_train_batches: tuple[RegularTrainerBatch, ...]
+    _qn_last_items: list[float] | None
+
+    @staticmethod
+    def _fixed_regular_batches(
+        dataset: Sequence[TrainerBatch] | None, batch_size: int, split: str
+    ) -> tuple[RegularTrainerBatch, ...]:
+        if not dataset or not all(isinstance(item, RegularSeries) for item in dataset):
+            raise PhaseSpecValidationError(
+                f"BFGS/L-BFGS requires a nonempty regular trajectory {split} set."
+            )
+        series = cast(Sequence[RegularSeries], dataset)
+        shape = series[0].state.shape
+        if len(shape) != 2 or any(
+            item.state.shape != shape or item.time.numel() != shape[0] for item in series
+        ):
+            raise PhaseSpecValidationError(
+                f"BFGS/L-BFGS requires uniform regular trajectories in the {split} set."
+            )
+        if batch_size <= 0:
+            raise PhaseSpecValidationError("BFGS/L-BFGS requires a positive batch size.")
+        return tuple(
+            RegularTrainerBatch.collate_series(series[start : start + batch_size])
+            for start in range(0, len(series), batch_size)
+        )
+
     def _build_optimizer_artifact(
         self,
         model: torch.nn.Module,
         artifacts: ArtifactRegistry,
     ) -> OptimizerStateArtifact:
         spec = cast(OptimizerPhaseSpec, self.spec)
-        phase_cfg = spec.config
+        phase_cfg = normalize_optimizer_config(spec.config, spec.trainer)
         lr = float(phase_cfg.get("learning_rate", 1e-3))
         gamma = float(phase_cfg.get("decay_rate", 0.999))
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        kind = phase_cfg.get("optimizer", "adam")
+        if kind == "adam":
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        else:
+            optimizer_class = BFGS if kind == "bfgs" else LBFGS
+            options = {
+                key: phase_cfg[key]
+                for key in ("max_eval", "tolerance_grad", "tolerance_change", "curvature_floor")
+            }
+            if kind == "lbfgs":
+                options["history_size"] = phase_cfg["history_size"]
+            optimizer = optimizer_class(
+                (parameter for parameter in model.parameters() if parameter.requires_grad),
+                lr=lr,
+                **options,
+            )
         prior = artifacts.get("optimizer_state")
-        if isinstance(prior, OptimizerStateArtifact) and not spec.reset_optimizer:
+        # Curvature and cached gradients belong to one fixed phase objective.
+        # Only the historical Adam-to-Adam moment reuse crosses phase boundaries.
+        if (
+            kind == "adam"
+            and isinstance(prior, OptimizerStateArtifact)
+            and type(prior.optimizer) is torch.optim.Adam
+            and not spec.reset_optimizer
+        ):
             try:
                 optimizer.load_state_dict(prior.optimizer.state_dict())
             except ValueError:
@@ -754,9 +806,11 @@ class BaseOptimizerPhase(BasePhase):
                 # Reuse moments/step counters while still honoring the new phase lr.
                 for param_group in optimizer.param_groups:
                     param_group["lr"] = lr
-        schedulers = [
-            make_scheduler(torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma))
-        ]
+        schedulers = (
+            [make_scheduler(torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma))]
+            if kind == "adam"
+            else []
+        )
         criteria, criteria_weights, criteria_names = self._build_criteria()
         artifact = OptimizerStateArtifact(
             optimizer=optimizer,
@@ -899,6 +953,37 @@ class BaseOptimizerPhase(BasePhase):
 
         return loss_list
 
+    def _full_objective(
+        self,
+        model: torch.nn.Module,
+        optimizer_state: OptimizerStateArtifact,
+        batches: tuple[RegularTrainerBatch, ...],
+        ode_method: str,
+        ode_args: dict[str, Any],
+        *,
+        backward: bool,
+    ) -> tuple[torch.Tensor, list[float]]:
+        """Fixed-partition trajectory mean with microbatched gradient accumulation."""
+        model.eval()  # Disables stochastic training layers throughout every closure.
+        if backward:
+            optimizer_state.optimizer.zero_grad(set_to_none=True)
+        total = next(model.parameters()).new_zeros(())
+        items = [0.0 for _ in optimizer_state.criteria_weights]
+        count = sum(len(batch) for batch in batches)
+        with torch.set_grad_enabled(backward):
+            for batch in batches:
+                weight = len(batch) / count
+                losses = self._compute_losses(model, optimizer_state, batch, ode_method, ode_args)
+                aggregate = self._aggregate_losses(losses, optimizer_state.criteria_weights)
+                total += weight * aggregate.detach()
+                items = [
+                    accumulated + weight * float(value.detach())
+                    for accumulated, value in zip(items, losses, strict=True)
+                ]
+                if backward:
+                    (weight * aggregate).backward()
+        return total, items
+
     def _evaluate_loader(
         self,
         model: torch.nn.Module,
@@ -907,6 +992,16 @@ class BaseOptimizerPhase(BasePhase):
         ode_method: str,
         ode_args: dict[str, Any],
     ) -> tuple[float, list[float]]:
+        if isinstance(optimizer_state.optimizer, (BFGS, LBFGS)):
+            total, items = self._full_objective(
+                model,
+                optimizer_state,
+                self._qn_batches[id(dataloader)],
+                ode_method,
+                ode_args,
+                backward=False,
+            )
+            return float(total), items
         model.eval()
         loader = _require_loader(cast(DataLoader[TrainerBatch] | None, dataloader))
         total = 0.0
@@ -1044,6 +1139,24 @@ class BaseOptimizerPhase(BasePhase):
         ode_args: dict[str, Any],
         phase_logger: logging.Logger,
     ) -> tuple[float, list[float], bool]:
+        optimizer = optimizer_state.optimizer
+        if isinstance(optimizer, (BFGS, LBFGS)):
+
+            def closure() -> torch.Tensor:
+                total, self._qn_last_items = self._full_objective(
+                    model,
+                    optimizer_state,
+                    self._qn_train_batches,
+                    ode_method,
+                    ode_args,
+                    backward=True,
+                )
+                return total
+
+            loss = optimizer.step(closure)
+            assert self._qn_last_items is not None
+            return float(loss), self._qn_last_items, optimizer.status == "converged"
+
         model.train()
         train_loader = _require_loader(phase_context.train_loader)
         total = 0.0
@@ -1083,6 +1196,7 @@ class BaseOptimizerPhase(BasePhase):
         logger: logging.Logger,
     ) -> PhaseResult:
         started_epoch = trainer_state.epoch
+        trainer_state.converged = False
         model_artifact = self._ensure_model_artifact(phase_context, artifacts)
         history = self._ensure_history_artifact(artifacts)
         optimizer_state = self._build_optimizer_artifact(model_artifact.model, artifacts)
@@ -1095,6 +1209,40 @@ class BaseOptimizerPhase(BasePhase):
         log_interval = int(self.spec.config.get("log_interval", save_interval))
         ode_method = self.spec.config.get("ode_method", "dopri5")
         ode_args = copy.deepcopy(self.spec.config.get("ode_args", {}))
+
+        if isinstance(optimizer_state.optimizer, (BFGS, LBFGS)):
+            # Scores from another phase objective may not be comparable. Re-score both
+            # saved best and terminal weights with the active full-data objective,
+            # but keep the terminal handoff as the optimizer's starting point.
+            terminal_state = copy.deepcopy(model_artifact.model.state_dict())
+            candidates = [terminal_state]
+            if history.best_model_state_dict is not None:
+                candidates.append(copy.deepcopy(history.best_model_state_dict))
+            trainer_state.best_loss = {"valid_total": float("inf")}
+            history.best_loss = copy.deepcopy(trainer_state.best_loss)
+            history.best_model_state_dict = None
+            try:
+                for candidate in candidates:
+                    model_artifact.model.load_state_dict(candidate)
+                    handoff_total, handoff_items = self._evaluate_loader(
+                        model_artifact.model,
+                        optimizer_state,
+                        _require_loader(phase_context.valid_loader),
+                        ode_method,
+                        ode_args,
+                    )
+                    baseline = {"epoch": [trainer_state.epoch - 1], "valid_total": [handoff_total]}
+                    baseline.update(
+                        {
+                            f"valid_{name}": [value]
+                            for name, value in zip(
+                                optimizer_state.criteria_names[:-1], handoff_items, strict=True
+                            )
+                        }
+                    )
+                    self._maybe_update_best(model_artifact.model, trainer_state, history, baseline)
+            finally:
+                model_artifact.model.load_state_dict(terminal_state)
 
         local_hist = {"epoch": []}
         local_hist.update({f"train_{name}": [] for name in optimizer_state.criteria_names[:-1]})
@@ -1203,7 +1351,54 @@ class BaseOptimizerPhase(BasePhase):
         phase_context: PhaseContext,
         phase_logger: logging.Logger,
     ) -> None:
-        return
+        if isinstance(optimizer_state.optimizer, (BFGS, LBFGS)):
+            active = []
+            for index, weight in enumerate(optimizer_state.criteria_weights):
+                criterion = optimizer_state.criteria[index]
+                if not math.isfinite(weight) or weight < 0:
+                    raise PhaseSpecValidationError(
+                        "BFGS/L-BFGS requires nonnegative finite weights."
+                    )
+                if weight == 0:
+                    continue
+                if type(criterion) is not torch.nn.MSELoss or criterion.reduction != "mean":
+                    raise PhaseSpecValidationError(
+                        "BFGS/L-BFGS supports only active mean-MSE objective criteria."
+                    )
+                active.append(index)
+            if not active or active[0] != 0:
+                raise PhaseSpecValidationError("BFGS/L-BFGS requires positive dynamics weight.")
+            optimizer_state.criteria = [optimizer_state.criteria[index] for index in active] + [
+                optimizer_state.criteria[-1]
+            ]
+            optimizer_state.criteria_names = [
+                optimizer_state.criteria_names[index] for index in active
+            ] + [optimizer_state.criteria_names[-1]]
+            optimizer_state.criteria_weights = [
+                optimizer_state.criteria_weights[index] for index in active
+            ]
+            if any(
+                isinstance(module, torch.nn.modules.batchnorm._BatchNorm)
+                for module in model.modules()
+            ):
+                raise PhaseSpecValidationError(
+                    "BFGS/L-BFGS does not support BatchNorm-dependent trajectory objectives."
+                )
+            train_loader, valid_loader = (
+                _require_loader(phase_context.train_loader),
+                _require_loader(phase_context.valid_loader),
+            )
+            fallback_size = int(self.config.get("dataloader", {}).get("batch_size", 1))
+            train_batches = self._fixed_regular_batches(
+                phase_context.train_set, train_loader.batch_size or fallback_size, "training"
+            )
+            valid_batches = self._fixed_regular_batches(
+                phase_context.valid_set, valid_loader.batch_size or fallback_size, "validation"
+            )
+            self._qn_batches = {id(train_loader): train_batches, id(valid_loader): valid_batches}
+            self._qn_train_batches = train_batches
+            self._qn_last_items = None
+            return
 
 
 class NodeOptimizerPhase(BaseOptimizerPhase):
@@ -1214,6 +1409,9 @@ class NodeOptimizerPhase(BaseOptimizerPhase):
         phase_context: PhaseContext,
         phase_logger: logging.Logger,
     ) -> None:
+        super()._customize_optimizer_artifact(optimizer_state, model, phase_context, phase_logger)
+        if isinstance(optimizer_state.optimizer, (BFGS, LBFGS)):
+            return
         sweep_lengths = self.spec.config.get("sweep_lengths", [None])
         epoch_step = self.spec.config.get("sweep_epoch_step", self.spec.config.get("n_epochs", 1))
         sweep_tols = self.spec.config.get("sweep_tols")
@@ -1237,7 +1435,11 @@ class NodeOptimizerPhase(BaseOptimizerPhase):
         ode_args: dict[str, Any],
     ) -> list[torch.Tensor]:
         batch_any = cast(Any, batch)
-        num_steps = optimizer_state.schedulers[1].get_length()
+        num_steps = (
+            None
+            if isinstance(optimizer_state.optimizer, (BFGS, LBFGS))
+            else optimizer_state.schedulers[1].get_length()
+        )
         if num_steps is None:
             runtime = cast(Any, batch_to_runtime(batch))
             num_steps = runtime.x.size(1)
@@ -1279,6 +1481,75 @@ class NodeOptimizerPhase(BaseOptimizerPhase):
 
 
 class WeakFormOptimizerPhase(BaseOptimizerPhase):
+    @staticmethod
+    def _validate_qn_time_grids(phase_context: PhaseContext, params: dict[str, Any]) -> None:
+        """One immutable quadrature must describe every training/validation window."""
+        for key in ("N", "dN", "ordpol", "ordint"):
+            value = params.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise PhaseSpecValidationError(
+                    f"Weak BFGS/L-BFGS requires a positive integer weak_form_params.{key}."
+                )
+        if params["N"] < 2 or params["ordint"] not in (1, 2, 3, 4):
+            raise PhaseSpecValidationError("Weak BFGS/L-BFGS requires N >= 2 and ordint in 1..4.")
+        if (params["N"] - 1) % params["ordint"]:
+            raise PhaseSpecValidationError("Weak BFGS/L-BFGS requires (N - 1) divisible by ordint.")
+
+        common_dt = None
+        for split, dataset, metadata in (
+            ("training", phase_context.train_set, phase_context.train_md),
+            ("validation", phase_context.valid_set, phase_context.valid_md),
+        ):
+            # Shared preparation has already checked regular, uniform, nonempty data.
+            series = cast(Sequence[RegularSeries], dataset)
+            n_steps = series[0].state.shape[0]
+            if n_steps < params["N"]:
+                raise PhaseSpecValidationError(
+                    f"Weak BFGS/L-BFGS requires at least N steps in the {split} set."
+                )
+            records = (metadata or {}).get("dt_and_n_steps")
+            if not isinstance(records, (list, tuple)) or not records:
+                raise PhaseSpecValidationError(
+                    f"Weak BFGS/L-BFGS requires dt_and_n_steps {split} metadata."
+                )
+            for record in records:
+                if not isinstance(record, (list, tuple)) or len(record) != 2:
+                    raise PhaseSpecValidationError(
+                        "Weak BFGS/L-BFGS requires (dt, steps) metadata."
+                    )
+                dt, steps = record
+                if (
+                    isinstance(dt, bool)
+                    or not isinstance(dt, (int, float, np.integer, np.floating))
+                    or not math.isfinite(dt)
+                    or dt <= 0
+                ):
+                    raise PhaseSpecValidationError("Weak BFGS/L-BFGS requires positive finite dt.")
+                common_dt = float(dt) if common_dt is None else common_dt
+                if steps != n_steps or not math.isclose(float(dt), common_dt, rel_tol=1e-5):
+                    raise PhaseSpecValidationError(
+                        "Weak BFGS/L-BFGS requires consistent time-grid metadata and a common dt."
+                    )
+            assert common_dt is not None
+            for item in series:
+                times = item.time.detach()
+                differences = torch.diff(times.to(dtype=torch.float64))
+                epsilon = torch.finfo(times.dtype).eps if times.is_floating_point() else 0.0
+                # Account for timestamp rounding without admitting uneven intervals
+                # when a large time origin leaves too little floating-point precision.
+                atol = min(8 * epsilon * max(1.0, float(times.abs().max())), 1e-4 * common_dt)
+                if (
+                    times.ndim != 1
+                    or not bool(torch.isfinite(times).all())
+                    or not bool((differences > 0).all())
+                    or not torch.allclose(
+                        differences, torch.full_like(differences, common_dt), rtol=1e-5, atol=atol
+                    )
+                ):
+                    raise PhaseSpecValidationError(
+                        f"Weak BFGS/L-BFGS requires a common uniform positive dt in {split} grids."
+                    )
+
     def _customize_optimizer_artifact(
         self,
         optimizer_state: OptimizerStateArtifact,
@@ -1286,7 +1557,10 @@ class WeakFormOptimizerPhase(BaseOptimizerPhase):
         phase_context: PhaseContext,
         phase_logger: logging.Logger,
     ) -> None:
+        super()._customize_optimizer_artifact(optimizer_state, model, phase_context, phase_logger)
         params = self.spec.config["weak_form_params"]
+        if isinstance(optimizer_state.optimizer, (BFGS, LBFGS)):
+            self._validate_qn_time_grids(phase_context, params)
         dtype = next(model.parameters()).dtype
         train_md = _require_metadata(phase_context.train_md)
         C, D = generate_weak_weights(

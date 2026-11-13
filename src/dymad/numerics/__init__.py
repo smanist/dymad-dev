@@ -1,3 +1,4 @@
+from dymad.numerics.bfgs import BFGS, LBFGS
 from dymad.numerics.complex import complex_grid, complex_map, complex_plot, disc2cont
 from dymad.numerics.denoising import denoise, denoising_metrics
 from dymad.numerics.dm import DM, DMF, VBDM
@@ -31,6 +32,8 @@ from dymad.numerics.time_int import fe_step, rk4_step
 from dymad.numerics.weak import generate_weak_weights
 
 __all__ = [
+    "BFGS",
+    "LBFGS",
     "central_diff",
     "check_direction",
     "check_orthogonality",

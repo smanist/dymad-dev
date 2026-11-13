@@ -196,6 +196,11 @@ Compilation resolves:
     choice
 - phase overrides normalized against matching profile defaults so trainer-specific phase config is
   preserved unless explicitly overridden
+- optimizer choice within an existing phase (`adam`, `bfgs`, or `lbfgs`), with shared defaults and
+  validation in `training/optimizer_config.py`; explicit quasi-Newton defaults are applied before
+  profile merging, while the compiler checks effective options and the runtime checks batch and
+  objective compatibility; NODE and Weak share a deterministic full-objective closure over
+  uniform regular trajectories, with NODE rollout and Weak quadrature setup kept in their phases
 - translation guidance and surfaced constraint notes for clients that map natural-language requests
   into structured overrides, including CV sweep requests
 - effective config
