@@ -123,6 +123,10 @@ class BFGS(Optimizer):
     accepted parameters and gradients. ``state_dict`` uses ordinary PyTorch
     parameter rebinding; load the matching model weights to resume curvature.
     External parameter changes automatically invalidate the coupled cache.
+    Convergence means either the gradient is within ``tolerance_grad``, or a
+    strong-Wolfe accepted update has both maximum absolute parameter change and
+    absolute loss change within ``tolerance_change``. Further steps reuse that
+    terminal evaluation until ``reset`` or an external parameter change.
     """
 
     _kind = "bfgs"
@@ -286,7 +290,10 @@ class BFGS(Optimizer):
                 state.update(x=x, loss=loss, grad=gradient, **self._curvature(x))
             loss, gradient = state["loss"], state["grad"]
             self._assign(params, gradient, gradient=True)
-            if float(gradient.abs().max()) <= group["tolerance_grad"]:
+            if (
+                state["status"] == "converged"
+                or float(gradient.abs().max()) <= group["tolerance_grad"]
+            ):
                 state["status"] = "converged"
                 return loss.clone()
             state["status"] = "running"
@@ -355,9 +362,14 @@ class BFGS(Optimizer):
             state["curvature_updates" if update else "curvature_skips"] += 1
             state.update(x=new_x, loss=new_loss, grad=new_gradient)
             state["n_iter"] += 1
+            small_accepted_change = (
+                float(s.abs().max()) <= group["tolerance_change"]
+                and float((new_loss - loss).abs()) <= group["tolerance_change"]
+            )
             state["status"] = (
                 "converged"
                 if float(new_gradient.abs().max()) <= group["tolerance_grad"]
+                or small_accepted_change
                 else "running"
             )
             self._assign(params, new_gradient, gradient=True)

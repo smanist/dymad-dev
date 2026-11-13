@@ -208,7 +208,9 @@ Adam phases can retain their existing curriculum and learning-rate scheduling.
 Quasi-Newton defaults are ``learning_rate: 1``, ``max_eval: 25``, ``tolerance_grad: 1.e-9``,
 ``tolerance_change: 1.e-12``, and ``curvature_floor: 1.e-10``. ``learning_rate`` is the initial
 line-search step scale. ``n_epochs`` counts optimizer updates; a line search can evaluate the
-full training objective several times per update. Dense BFGS stores a matrix quadratic in the
+full training objective several times per update. Convergence requires the gradient tolerance
+or both parameter and loss changes within ``tolerance_change`` after an accepted Wolfe step.
+Dense BFGS stores a matrix quadratic in the
 trainable parameter count, so use it for suitably small models. These options expose algorithms;
 they do not guarantee an accuracy or speed improvement on a new problem.
 

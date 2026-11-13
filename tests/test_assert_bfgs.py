@@ -59,6 +59,59 @@ def test_quadratic_steps_satisfy_wolfe_and_reuse_accepted_evaluations(optimizer_
     assert len(evaluations) == before
 
 
+@pytest.mark.parametrize("optimizer_type", [BFGS, LBFGS])
+def test_tiny_wolfe_accepted_change_converges_and_keeps_terminal_cache(optimizer_type):
+    parameter = torch.nn.Parameter(torch.tensor([2e-12], dtype=torch.float64))
+    optimizer = optimizer_type([parameter], lr=0.05, tolerance_grad=1e-14, tolerance_change=1.1e-12)
+    calls = []
+
+    def closure():
+        optimizer.zero_grad(set_to_none=True)
+        loss = 5 * parameter.square().sum()
+        loss.backward()
+        calls.append(float(loss.detach()))
+        return loss
+
+    start = parameter.detach().clone()
+    loss = optimizer.step(closure)
+    displacement = parameter.detach() - start
+    slope = (10 * start) @ displacement
+    assert loss <= 5 * start.square().sum() + 1e-4 * slope
+    assert abs(parameter.grad @ displacement) <= 0.9 * abs(slope)
+    assert float(parameter.grad.abs().max()) > optimizer.param_groups[0]["tolerance_grad"]
+    assert optimizer.status == "converged"
+    assert optimizer.state[parameter]["n_iter"] == 1
+    saved = parameter.detach().clone()
+    gradient = parameter.grad.clone()
+    before = len(calls)
+    optimizer.zero_grad(set_to_none=True)
+    repeated = optimizer.step(closure)
+    assert torch.equal(parameter, saved)
+    assert torch.equal(parameter.grad, gradient)
+    assert torch.equal(repeated, loss)
+    assert len(calls) == before
+    assert optimizer.status == "converged"
+
+
+@pytest.mark.parametrize("optimizer_type", [BFGS, LBFGS])
+def test_small_loss_change_alone_does_not_stop_a_meaningful_step(optimizer_type):
+    parameter = torch.nn.Parameter(torch.tensor([1.0], dtype=torch.float64))
+    optimizer = optimizer_type([parameter], lr=5e11, tolerance_grad=1e-15, tolerance_change=1e-12)
+
+    def closure():
+        optimizer.zero_grad(set_to_none=True)
+        loss = 0.5e-12 * parameter.square().sum()
+        loss.backward()
+        return loss
+
+    start = parameter.detach().clone()
+    loss = optimizer.step(closure)
+    assert abs(float(loss) - 0.5e-12) < optimizer.param_groups[0]["tolerance_change"]
+    assert float((parameter.detach() - start).abs().max()) > 0.1
+    assert float(parameter.grad.abs().max()) > optimizer.param_groups[0]["tolerance_grad"]
+    assert optimizer.status == "running"
+
+
 def test_full_and_untruncated_limited_follow_same_iterates():
     full = _problem(BFGS, tolerance_grad=1e-12)
     limited = _problem(LBFGS, tolerance_grad=1e-12, history_size=30)

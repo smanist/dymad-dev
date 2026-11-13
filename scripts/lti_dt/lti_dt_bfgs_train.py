@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import yaml
+from scipy.signal import cont2discrete
 
 from dymad.io import load_model
 from dymad.models import DKBF, DLDM
@@ -28,8 +29,8 @@ OUTPUT_ROOT = BASE_DIR / "runs" / "lti_dt_bfgs"
 B = 128
 N = 501
 SEED = 12345
-WARMUP = 100
-REFINE = 100
+WARMUP = 200
+REFINE = 800
 HISTORY_SIZE = 100
 t_grid = np.linspace(0, 5, N)
 cases = [("dldm", DLDM), ("dkbf", DKBF)]
@@ -40,6 +41,7 @@ ifdat, iftrn, ifplt, ifprd = 1, 1, 1, 1
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
 A = np.array([[0.0, 1.0], [-1.0, -0.1]])
+Ad, Bd, *_ = cont2discrete((A, np.ones((2, 1)), np.eye(2), np.zeros((2, 1))), t_grid[1] - t_grid[0])
 
 
 def f(t, x, u):
@@ -68,12 +70,21 @@ config_gau = {
     }
 }
 
-if ifdat:
+
+def sample(control, seed, batch):
     sampler = TrajectorySampler(
-        f, g, config=BASE_DIR / "lti_data.yaml", rng=SEED, config_mod=config_chr
+        f, g, config=BASE_DIR / "lti_data.yaml", rng=seed, config_mod=control
     )
-    ts, xs, us, ys = sampler.sample(t_grid, batch=B)
-    np.savez_compressed(OUTPUT_ROOT / "lti.npz", t=ts, x=ys, u=us)
+    ts, xs, us, _ = sampler.sample(t_grid, batch=batch)
+    # Exact sample-held teacher: the stored u[k] drives the entire k -> k+1 interval.
+    for k in range(N - 1):
+        xs[:, k + 1] = xs[:, k] @ Ad.T + us[:, k] @ Bd.T
+    return ts, xs, us
+
+
+if ifdat:
+    ts, xs, us = sample(config_chr, SEED, B)
+    np.savez_compressed(OUTPUT_ROOT / "lti.npz", t=ts, x=xs, u=us)
 
 for i in IDX:
     mdl, Model = cases[i]
@@ -82,7 +93,7 @@ for i in IDX:
     if iftrn:
         for optimizer, name in zip(optimizers, names, strict=True):
             config = yaml.safe_load((BASE_DIR / f"lti_{mdl}.yaml").read_text())
-            lr = config.pop("training")["learning_rate"]
+            config.pop("training")
             config["seed"] = SEED
             config["data"].update(
                 path=str(OUTPUT_ROOT / "lti.npz"),
@@ -92,12 +103,17 @@ for i in IDX:
                 split_seed=SEED,
             )
             config["model"]["name"] = name
+            # Small-time-step maps start near identity rather than erasing the state.
+            if mdl == "dldm":
+                config["model"].update(processor_type="res", gain=0.001)
+            else:
+                config["model"].update(autoencoder_type="cat", linear_dynamics_init_scale=1.0)
             config["dataloader"]["batch_size"] = B  # One optimizer update per epoch.
             warmup = {
                 "trainer": "NODE",
                 "optimizer": "adam",
                 "n_epochs": WARMUP,
-                "learning_rate": lr,
+                "learning_rate": 1e-3,
                 "decay_rate": 1.0,
                 "save_interval": WARMUP,
                 "chop_mode": "initial",
@@ -138,15 +154,12 @@ for i in IDX:
         fig.savefig(OUTPUT_ROOT / f"{mdl}_loss.png", dpi=150)
 
     if ifprd:
-        sampler = TrajectorySampler(
-            f, g, config=BASE_DIR / "lti_data.yaml", rng=SEED + 1, config_mod=config_gau
-        )
-        ts, xs, us, ys = sampler.sample(t_grid, batch=1)
-        res = [ys[0]]
+        ts, xs, us = sample(config_gau, SEED + 1, 1)
+        res = [xs[0]]
         for name in names:
             _, predict = load_model(Model, OUTPUT_ROOT / name / f"{name}.pt")
             with torch.no_grad():
-                res.append(predict(ys[0], ts[0], u=us[0]))
+                res.append(predict(xs[0], ts[0], u=us[0]))
         plot_trajectory(
             np.array(res),
             ts[0],
