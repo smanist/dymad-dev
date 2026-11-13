@@ -221,6 +221,22 @@ number of optimizer updates; their wall-clock costs can differ because line sear
 multiple objective evaluations. The example plots losses against updates and training seconds,
 and compares predictions under unseen Gaussian inputs.
 
+The CLI counterpart supports the same comparison without editing the inline example::
+
+   python scripts/lti_dt/lti_dt_bfgs_cli.py --workdir /tmp/lti-bfgs --no-show
+
+Use ``--case 0`` for DLDM or ``--case 1`` for DKBF; the default runs both, each with all
+three optimizer schedules. ``--trajectories``, ``--steps``, ``--duration``, ``--warmup``,
+``--refine``, and ``--history-size`` control the experiment size. Data are reused when
+present; ``--data`` regenerates them with the selected seed and size. ``--no-plot``
+suppresses comparison plots while retaining prediction arrays, and ``--no-predict`` skips prediction.
+The short workflow tests use two updates per phase. The slow regressions use the full
+200-update warmup and 800-update refinement cap, checking refinement validation MSE
+below ``1e-12`` and worst-trajectory relative rollout RMSE below 1% on 16 unseen inputs::
+
+   pytest --reruns 0 tests/test_workflow_lti_dt_bfgs.py
+   pytest --reruns 0 -m slow tests/test_slow_lti_dt_bfgs_cli.py
+
 Common commands:
 
 - ``dymad config schema`` prints the JSON Schema for CLI config files.
